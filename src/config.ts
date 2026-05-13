@@ -6,12 +6,14 @@ export interface ScannerConfig {
   confirmationDepth: bigint;
   pollMs: number;
   retryMs: number;
+  txReceiptConcurrency: number;
 }
 
 const DEFAULT_DB_PATH = "scanner.sqlite";
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
 const DEFAULT_POLL_MS = 12_000;
 const DEFAULT_RETRY_MS = 5_000;
+const DEFAULT_TX_RECEIPT_CONCURRENCY = 20;
 
 export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): ScannerConfig {
   const parsed = parseArgs(args);
@@ -50,6 +52,12 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
     retryMs: parseNumberOption(
       "--retry-ms",
       parsed.values["retry-ms"] ?? env.SCANNER_RETRY_MS ?? DEFAULT_RETRY_MS.toString(),
+    ),
+    txReceiptConcurrency: parsePositiveNumberOption(
+      "--tx-receipt-concurrency",
+      parsed.values["tx-receipt-concurrency"] ??
+        env.SCANNER_TX_RECEIPT_CONCURRENCY ??
+        DEFAULT_TX_RECEIPT_CONCURRENCY.toString(),
     ),
   };
 }
@@ -118,6 +126,15 @@ function parseNumberOption(name: string, value: string): number {
   return parsed;
 }
 
+function parsePositiveNumberOption(name: string, value: string): number {
+  const parsed = parseNumberOption(name, value);
+  if (parsed === 0) {
+    throw new Error(`${name} must be greater than zero`);
+  }
+
+  return parsed;
+}
+
 function usage(): string {
   return `Usage:
   SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan -- --from-block 19000000
@@ -129,5 +146,6 @@ Options:
   --confirmation-depth <number>  Blocks to stay behind latest head. Defaults to 3.
   --poll-ms <number>             Delay while waiting for new safe blocks. Defaults to 12000.
   --retry-ms <number>            Delay before retrying a failed block. Defaults to 5000.
+  --tx-receipt-concurrency <n>   Max receipt RPC calls in flight per block. Defaults to 20.
   --help                         Show this message.`;
 }
