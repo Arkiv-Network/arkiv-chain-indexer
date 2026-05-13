@@ -21,11 +21,19 @@ bun install
 
 ```sh
 SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
-  bun run scan -- --from-block 19000000 --to-block 19000002
+  bun run scan
 ```
 
-By default the scanner writes to `scanner.sqlite` in the current directory. If `--to-block` is omitted, it keeps
-running and waits for new safe blocks.
+By default the scanner writes to `scanner.sqlite` in the current directory. In continuous mode it stays near the
+top of the chain by scanning from the current safe head, spends 20 seconds backfilling older blocks, and then
+scans forward again through the latest safe head. The oldest block it will backfill to defaults to `25000000`.
+
+For a bounded historical scan, pass both `--from-block` and `--to-block`:
+
+```sh
+SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
+  bun run scan -- --from-block 19000000 --to-block 19000002
+```
 
 After each block is scanned and stored, the scanner prints a per-block summary:
 
@@ -51,8 +59,9 @@ Configuration can be passed through CLI flags or environment variables.
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
-| `--from-block` | `SCANNER_FROM_BLOCK` | required | First block to scan when the database has no progress yet. |
+| `--from-block` | `SCANNER_FROM_BLOCK` | unset | First block for bounded `--to-block` scans. |
 | `--to-block` | `SCANNER_TO_BLOCK` | unset | Optional inclusive block number to stop at. |
+| `--oldest-backfill-block` | `SCANNER_OLDEST_BACKFILL_BLOCK` | `25000000` | Oldest block the continuous scanner will backfill to. |
 | `--db` | `SCANNER_DB_PATH` | `scanner.sqlite` | SQLite database path. |
 | `--confirmation-depth` | `SCANNER_CONFIRMATION_DEPTH` | `3` | Number of blocks to stay behind the latest head. |
 | `--poll-ms` | `SCANNER_POLL_MS` | `12000` | Delay while waiting for new safe blocks. |
@@ -98,15 +107,23 @@ For empty blocks all averages are stored as `0`.
 
 ## Resume Behavior
 
-Progress is stored in the `scanner_state` table as `last_successful_block`.
+Forward progress is stored in the `scanner_state` table as `last_successful_block`. Continuous backfill progress
+is stored separately as `backfill_next_block`.
 
-On startup:
+For bounded scans:
 
 1. If progress exists, scanning resumes from `last_successful_block + 1`.
 2. If no progress exists, scanning starts from `--from-block`.
 3. A block and the progress update are committed in the same SQLite transaction.
 4. If reading, computing, or writing a block fails, progress is not advanced.
 5. The scanner retries the same block after `--retry-ms`.
+
+For continuous scans:
+
+1. The backfill cursor starts at the current safe head when no prior cursor exists.
+2. The scanner walks backward for 20 seconds of work, updating `backfill_next_block` only with the block row.
+3. It then scans forward through the latest safe head, updating `last_successful_block` only with the block row.
+4. The backward cursor stops at `--oldest-backfill-block`.
 
 This means failed block reads are not skipped.
 

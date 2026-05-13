@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { scanOneBlock } from "./scanner";
+import { backfillDownForSlice, scanForwardToSafeHead, scanOneBlock } from "./scanner";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
-import type { ScannerStorage } from "./storage";
+import type { BlockProgressUpdate, ScannerStorage } from "./storage";
 import type { BlockMetrics, Hex, RpcBlock, RpcReceipt } from "./types";
 
 describe("scanOneBlock", () => {
@@ -61,6 +61,122 @@ describe("scanOneBlock", () => {
 
     await expect(scanPromise).rejects.toThrow("receipt failed");
     expect(storage.savedMetrics).toHaveLength(0);
+  });
+});
+
+describe("backfillDownForSlice", () => {
+  test("seeds from safe head and advances the backfill cursor after a successful write", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime([0, 0, 20_000]);
+
+    const lowestBackfilled = await backfillDownForSlice(
+      100n,
+      config({ oldestBackfillBlock: 90n }),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      runtime,
+    );
+
+    expect(lowestBackfilled).toBe(100n);
+    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(storage.backfillNextBlock).toBe(99n);
+    expect(storage.lastSuccessfulBlock).toBeUndefined();
+  });
+
+  test("stops at the oldest backfill block", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime();
+
+    const lowestBackfilled = await backfillDownForSlice(
+      100n,
+      config({ oldestBackfillBlock: 99n }),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      runtime,
+    );
+
+    expect(lowestBackfilled).toBe(99n);
+    expect(rpc.requestedBlocks).toEqual([100n, 99n]);
+    expect(storage.backfillNextBlock).toBe(98n);
+  });
+
+  test("retries the same failed backfill block without advancing the cursor", async () => {
+    const rpc = new SimpleRpc(new Map([[100n, 1]]));
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime([0, 0, 20_000]);
+
+    await backfillDownForSlice(
+      100n,
+      config({ oldestBackfillBlock: 90n, retryMs: 7 }),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      runtime,
+    );
+
+    expect(rpc.requestedBlocks).toEqual([100n, 100n]);
+    expect(runtime.sleeps).toEqual([7]);
+    expect(storage.backfillNextBlock).toBe(99n);
+  });
+});
+
+describe("scanForwardToSafeHead", () => {
+  test("scans forward from the backfill lower bound when there is no forward progress", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+
+    const scanned = await scanForwardToSafeHead(
+      100n,
+      98n,
+      config(),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      new FakeRuntime(),
+    );
+
+    expect(scanned).toBe(true);
+    expect(rpc.requestedBlocks).toEqual([98n, 99n, 100n]);
+    expect(storage.lastSuccessfulBlock).toBe(100n);
+    expect(storage.backfillNextBlock).toBeUndefined();
+  });
+
+  test("continues forward from the existing last successful block", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    storage.lastSuccessfulBlock = 100n;
+
+    const scanned = await scanForwardToSafeHead(
+      102n,
+      95n,
+      config(),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      new FakeRuntime(),
+    );
+
+    expect(scanned).toBe(true);
+    expect(rpc.requestedBlocks).toEqual([101n, 102n]);
+    expect(storage.lastSuccessfulBlock).toBe(102n);
+  });
+
+  test("retries the same failed forward block without skipping it", async () => {
+    const rpc = new SimpleRpc(new Map([[99n, 1]]));
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime();
+
+    await scanForwardToSafeHead(
+      100n,
+      99n,
+      config({ retryMs: 11 }),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      runtime,
+    );
+
+    expect(rpc.requestedBlocks).toEqual([99n, 99n, 100n]);
+    expect(runtime.sleeps).toEqual([11]);
+    expect(storage.lastSuccessfulBlock).toBe(100n);
   });
 });
 
@@ -135,15 +251,83 @@ class ControlledReceiptRpc {
 
 class FakeStorage {
   savedMetrics: BlockMetrics[] = [];
+  lastSuccessfulBlock: bigint | undefined;
+  backfillNextBlock: bigint | undefined;
 
-  saveBlockMetrics(metrics: BlockMetrics): void {
+  getLastSuccessfulBlock(): bigint | undefined {
+    return this.lastSuccessfulBlock;
+  }
+
+  getBackfillNextBlock(): bigint | undefined {
+    return this.backfillNextBlock;
+  }
+
+  saveBlockMetrics(
+    metrics: BlockMetrics,
+    progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
+  ): void {
     this.savedMetrics.push(metrics);
+
+    switch (progressUpdate.kind) {
+      case "lastSuccessfulBlock":
+        this.lastSuccessfulBlock = metrics.blockNumber;
+        return;
+      case "backfillNextBlock":
+        this.backfillNextBlock = progressUpdate.nextBlock;
+        return;
+      case "none":
+        return;
+    }
   }
 }
 
-function blockWithTransactions(transactionCount: number): RpcBlock {
+class SimpleRpc {
+  requestedBlocks: bigint[] = [];
+
+  constructor(private readonly failuresByBlock = new Map<bigint, number>()) {}
+
+  getStatsSnapshot(): RpcStats {
+    return { calls: 0, requestBytes: 0, responseBytes: 0 };
+  }
+
+  getStatsSince(_snapshot: RpcStats): RpcStats {
+    return { calls: 0, requestBytes: 0, responseBytes: 0 };
+  }
+
+  async getBlockWithTransactions(blockNumber: bigint): Promise<RpcBlock> {
+    this.requestedBlocks.push(blockNumber);
+
+    const failuresRemaining = this.failuresByBlock.get(blockNumber) ?? 0;
+    if (failuresRemaining > 0) {
+      this.failuresByBlock.set(blockNumber, failuresRemaining - 1);
+      throw new Error(`block ${blockNumber.toString()} failed`);
+    }
+
+    return blockWithTransactions(0, blockNumber);
+  }
+
+  async getTransactionReceipt(hash: Hex): Promise<RpcReceipt> {
+    return receiptFor(hash);
+  }
+}
+
+class FakeRuntime {
+  sleeps: number[] = [];
+
+  constructor(private readonly nowValues: number[] = []) {}
+
+  now(): number {
+    return this.nowValues.shift() ?? 0;
+  }
+
+  async sleep(ms: number): Promise<void> {
+    this.sleeps.push(ms);
+  }
+}
+
+function blockWithTransactions(transactionCount: number, blockNumber = 1n): RpcBlock {
   return {
-    number: "0x1",
+    number: `0x${blockNumber.toString(16)}`,
     timestamp: "0x65a0bb80",
     baseFeePerGas: "0x1",
     gasUsed: "0x4",
@@ -164,6 +348,19 @@ function receiptFor(hash: Hex): RpcReceipt {
 
 function txHash(index: number): Hex {
   return `0x${index.toString(16).padStart(64, "0")}`;
+}
+
+function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> = {}): Parameters<typeof backfillDownForSlice>[1] {
+  return {
+    rpcUrl: "https://example.test",
+    dbPath: ":memory:",
+    oldestBackfillBlock: 0n,
+    confirmationDepth: 3n,
+    pollMs: 12_000,
+    retryMs: 5_000,
+    txReceiptConcurrency: 1,
+    ...overrides,
+  };
 }
 
 async function waitUntil(condition: () => boolean): Promise<void> {

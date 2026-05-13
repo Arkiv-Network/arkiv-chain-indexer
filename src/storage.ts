@@ -2,6 +2,12 @@ import { Database } from "bun:sqlite";
 import type { BlockMetrics } from "./types";
 
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
+const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
+
+export type BlockProgressUpdate =
+  | { kind: "lastSuccessfulBlock" }
+  | { kind: "backfillNextBlock"; nextBlock: bigint }
+  | { kind: "none" };
 
 export class ScannerStorage {
   private readonly insertBlock;
@@ -58,14 +64,25 @@ export class ScannerStorage {
   }
 
   getLastSuccessfulBlock(): bigint | undefined {
+    return this.getStateBigInt(LAST_SUCCESSFUL_BLOCK_KEY);
+  }
+
+  getBackfillNextBlock(): bigint | undefined {
+    return this.getStateBigInt(BACKFILL_NEXT_BLOCK_KEY);
+  }
+
+  private getStateBigInt(key: string): bigint | undefined {
     const row = this.db
       .query<{ value: string }, [string]>("SELECT value FROM scanner_state WHERE key = ?")
-      .get(LAST_SUCCESSFUL_BLOCK_KEY);
+      .get(key);
 
     return row ? BigInt(row.value) : undefined;
   }
 
-  saveBlockMetrics(metrics: BlockMetrics): void {
+  saveBlockMetrics(
+    metrics: BlockMetrics,
+    progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
+  ): void {
     if (metrics.blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new Error("SQLite block_number storage only supports JavaScript safe integers");
     }
@@ -83,11 +100,24 @@ export class ScannerStorage {
         metrics.averagePriorityFeeWeightedWei,
         metrics.averagePriorityFeeWei,
       );
-      this.upsertState.run(LAST_SUCCESSFUL_BLOCK_KEY, metrics.blockNumber.toString());
+      this.saveProgressUpdate(metrics, progressUpdate);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private saveProgressUpdate(metrics: BlockMetrics, progressUpdate: BlockProgressUpdate): void {
+    switch (progressUpdate.kind) {
+      case "lastSuccessfulBlock":
+        this.upsertState.run(LAST_SUCCESSFUL_BLOCK_KEY, metrics.blockNumber.toString());
+        return;
+      case "backfillNextBlock":
+        this.upsertState.run(BACKFILL_NEXT_BLOCK_KEY, progressUpdate.nextBlock.toString());
+        return;
+      case "none":
+        return;
     }
   }
 

@@ -1,8 +1,9 @@
 export interface ScannerConfig {
   rpcUrl: string;
   dbPath: string;
-  fromBlock: bigint;
+  fromBlock?: bigint;
   toBlock?: bigint;
+  oldestBackfillBlock: bigint;
   confirmationDepth: bigint;
   pollMs: number;
   retryMs: number;
@@ -11,6 +12,7 @@ export interface ScannerConfig {
 
 const DEFAULT_DB_PATH = "scanner.sqlite";
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
+const DEFAULT_OLDEST_BACKFILL_BLOCK = 25_000_000n;
 const DEFAULT_POLL_MS = 12_000;
 const DEFAULT_RETRY_MS = 5_000;
 const DEFAULT_TX_RECEIPT_CONCURRENCY = 20;
@@ -28,19 +30,24 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
   }
 
   const fromBlockRaw = parsed.values["from-block"] ?? parsed.values.from ?? env.SCANNER_FROM_BLOCK;
-  if (!fromBlockRaw) {
-    throw new Error("--from-block is required");
-  }
-
   const toBlockRaw = parsed.values["to-block"] ?? env.SCANNER_TO_BLOCK;
+  if (toBlockRaw && !fromBlockRaw) {
+    throw new Error("--from-block is required when --to-block is set");
+  }
 
   return {
     rpcUrl,
     dbPath: parsed.values.db ?? env.SCANNER_DB_PATH ?? DEFAULT_DB_PATH,
-    fromBlock: parseBigIntOption("--from-block", fromBlockRaw),
+    ...(fromBlockRaw ? { fromBlock: parseBigIntOption("--from-block", fromBlockRaw) } : {}),
     ...(toBlockRaw
       ? { toBlock: parseBigIntOption("--to-block", toBlockRaw) }
       : {}),
+    oldestBackfillBlock: parseBigIntOption(
+      "--oldest-backfill-block",
+      parsed.values["oldest-backfill-block"] ??
+        env.SCANNER_OLDEST_BACKFILL_BLOCK ??
+        DEFAULT_OLDEST_BACKFILL_BLOCK.toString(),
+    ),
     confirmationDepth: parseBigIntOption(
       "--confirmation-depth",
       parsed.values["confirmation-depth"] ?? env.SCANNER_CONFIRMATION_DEPTH ?? DEFAULT_CONFIRMATION_DEPTH.toString(),
@@ -137,15 +144,16 @@ function parsePositiveNumberOption(name: string, value: string): number {
 
 function usage(): string {
   return `Usage:
-  SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan -- --from-block 19000000
+  SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan
 
 Options:
-  --from-block <number>          First block to scan when no prior progress exists.
-  --to-block <number>            Optional inclusive block to stop at.
-  --db <path>                    SQLite database path. Defaults to scanner.sqlite.
-  --confirmation-depth <number>  Blocks to stay behind latest head. Defaults to 3.
-  --poll-ms <number>             Delay while waiting for new safe blocks. Defaults to 12000.
-  --retry-ms <number>            Delay before retrying a failed block. Defaults to 5000.
-  --tx-receipt-concurrency <n>   Max receipt RPC calls in flight per block. Defaults to 20.
-  --help                         Show this message.`;
+  --from-block <number>             First block for bounded --to-block scans.
+  --to-block <number>               Optional inclusive block to stop at.
+  --oldest-backfill-block <number>  Oldest block to backfill to. Defaults to 25000000.
+  --db <path>                       SQLite database path. Defaults to scanner.sqlite.
+  --confirmation-depth <number>     Blocks to stay behind latest head. Defaults to 3.
+  --poll-ms <number>                Delay while waiting for new safe blocks. Defaults to 12000.
+  --retry-ms <number>               Delay before retrying a failed block. Defaults to 5000.
+  --tx-receipt-concurrency <n>      Max receipt RPC calls in flight per block. Defaults to 20.
+  --help                            Show this message.`;
 }

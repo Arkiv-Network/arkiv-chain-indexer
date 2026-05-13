@@ -7,6 +7,46 @@ const baseEnv: NodeJS.ProcessEnv = {
 };
 
 describe("parseConfig", () => {
+  test("does not require from-block for continuous near-head scanning", () => {
+    expect(parseConfig([], { SCANNER_RPC_FULL_NODE: "https://example.test" }).fromBlock).toBeUndefined();
+  });
+
+  test("requires from-block when to-block is set", () => {
+    expect(() =>
+      parseConfig(["--to-block", "12"], { SCANNER_RPC_FULL_NODE: "https://example.test" }),
+    ).toThrow("--from-block is required when --to-block is set");
+  });
+
+  test("defaults oldest backfill block to 25000000", () => {
+    expect(parseConfig([], { SCANNER_RPC_FULL_NODE: "https://example.test" }).oldestBackfillBlock).toBe(
+      25_000_000n,
+    );
+  });
+
+  test("reads oldest backfill block from env", () => {
+    expect(
+      parseConfig([], {
+        ...baseEnv,
+        SCANNER_OLDEST_BACKFILL_BLOCK: "26000000",
+      }).oldestBackfillBlock,
+    ).toBe(26_000_000n);
+  });
+
+  test("lets the CLI oldest backfill block override env", () => {
+    expect(
+      parseConfig(["--oldest-backfill-block", "27000000"], {
+        ...baseEnv,
+        SCANNER_OLDEST_BACKFILL_BLOCK: "26000000",
+      }).oldestBackfillBlock,
+    ).toBe(27_000_000n);
+  });
+
+  test("rejects invalid oldest backfill block", () => {
+    expect(() =>
+      parseConfig(["--oldest-backfill-block", "nope"], baseEnv),
+    ).toThrow("--oldest-backfill-block must be a non-negative integer");
+  });
+
   test("defaults transaction receipt concurrency to 20", () => {
     expect(parseConfig([], baseEnv).txReceiptConcurrency).toBe(20);
   });
@@ -46,6 +86,15 @@ describe("parseConfig", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(HelpRequested);
       expect(String((error as Error).message)).toContain("--tx-receipt-concurrency <n>");
+    }
+  });
+
+  test("includes oldest backfill block in help", () => {
+    try {
+      parseConfig(["--help"], baseEnv);
+    } catch (error) {
+      expect(error).toBeInstanceOf(HelpRequested);
+      expect(String((error as Error).message)).toContain("--oldest-backfill-block <number>");
     }
   });
 });
