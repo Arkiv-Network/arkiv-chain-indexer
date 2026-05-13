@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import {
-  RANGE_SIZE,
+  DEFAULT_RANGE_SIZE,
+  assertSupportedRangeSize,
   computeBlockRange,
   rangeEndFor,
   type BlockRangeMetrics,
@@ -26,6 +27,7 @@ export interface BlockQueryFilter {
 }
 
 export interface BlockRangeQueryFilter {
+  rangeSize?: bigint;
   rangeStartGt?: bigint;
   rangeStartLt?: bigint;
   dateGt?: string;
@@ -45,6 +47,7 @@ export interface StoredBlock {
 }
 
 export interface StoredBlockRange {
+  rangeSize: number;
   rangeStart: number;
   rangeEnd: number;
   minBlockDate: string;
@@ -86,7 +89,8 @@ export class ScannerStorage {
       );
 
       CREATE TABLE IF NOT EXISTS block_ranges (
-        range_start INTEGER PRIMARY KEY,
+        range_size INTEGER NOT NULL,
+        range_start INTEGER NOT NULL,
         range_end INTEGER NOT NULL,
         min_block_date TEXT NOT NULL,
         max_block_date TEXT NOT NULL,
@@ -98,9 +102,12 @@ export class ScannerStorage {
         transaction_count INTEGER NOT NULL,
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
-        aggregated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        aggregated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (range_size, range_start)
       );
     `);
+
+    migrateBlockRangesSchema(this.db);
 
     this.insertBlock = this.db.prepare(`
       INSERT OR REPLACE INTO blocks (
@@ -127,6 +134,7 @@ export class ScannerStorage {
 
     this.insertBlockRange = this.db.prepare(`
       INSERT OR REPLACE INTO block_ranges (
+        range_size,
         range_start,
         range_end,
         min_block_date,
@@ -140,7 +148,7 @@ export class ScannerStorage {
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         aggregated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `);
   }
 
@@ -271,13 +279,14 @@ export class ScannerStorage {
     }));
   }
 
-  getBlocksForRange(rangeStart: bigint): StoredBlock[] {
-    if (rangeStart < 0n || rangeStart % RANGE_SIZE !== 0n) {
+  getBlocksForRange(rangeStart: bigint, rangeSize: bigint): StoredBlock[] {
+    assertSupportedRangeSize(rangeSize);
+    if (rangeStart < 0n || rangeStart % rangeSize !== 0n) {
       throw new Error(
-        `Range start ${rangeStart.toString()} must be a non-negative multiple of ${RANGE_SIZE}`,
+        `Range start ${rangeStart.toString()} must be a non-negative multiple of ${rangeSize.toString()}`,
       );
     }
-    const rangeEnd = rangeEndFor(rangeStart);
+    const rangeEnd = rangeEndFor(rangeStart, rangeSize);
     if (rangeEnd > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new Error("Range end exceeds the supported integer range");
     }
@@ -287,21 +296,27 @@ export class ScannerStorage {
     });
   }
 
-  aggregateRangeIfComplete(rangeStart: bigint): BlockRangeMetrics | undefined {
-    const blocks = this.getBlocksForRange(rangeStart);
-    if (BigInt(blocks.length) !== RANGE_SIZE) {
+  aggregateRangeIfComplete(
+    rangeStart: bigint,
+    rangeSize: bigint,
+  ): BlockRangeMetrics | undefined {
+    assertSupportedRangeSize(rangeSize);
+    const blocks = this.getBlocksForRange(rangeStart, rangeSize);
+    if (BigInt(blocks.length) !== rangeSize) {
       return undefined;
     }
-    const metrics = computeBlockRange(rangeStart, blocks);
+    const metrics = computeBlockRange(rangeStart, rangeSize, blocks);
     this.saveBlockRange(metrics);
     return metrics;
   }
 
   saveBlockRange(metrics: BlockRangeMetrics): void {
+    assertSupportedRangeSize(metrics.rangeSize);
     if (metrics.rangeEnd > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new Error("SQLite range storage only supports JavaScript safe integers");
     }
     this.insertBlockRange.run(
+      Number(metrics.rangeSize),
       Number(metrics.rangeStart),
       Number(metrics.rangeEnd),
       metrics.minBlockDate,
@@ -320,6 +335,11 @@ export class ScannerStorage {
   queryBlockRanges(filter: BlockRangeQueryFilter = {}): StoredBlockRange[] {
     const clauses: string[] = [];
     const params: Array<string | number> = [];
+
+    const rangeSize = filter.rangeSize ?? DEFAULT_RANGE_SIZE;
+    assertSupportedRangeSize(rangeSize);
+    clauses.push("range_size = ?");
+    params.push(Number(rangeSize));
 
     if (filter.rangeStartGt !== undefined) {
       if (filter.rangeStartGt > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -347,9 +367,10 @@ export class ScannerStorage {
       params.push(filter.dateLt);
     }
 
-    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const where = `WHERE ${clauses.join(" AND ")}`;
     const sql = `
       SELECT
+        range_size,
         range_start,
         range_end,
         min_block_date,
@@ -371,6 +392,7 @@ export class ScannerStorage {
     const rows = this.db
       .query<
         {
+          range_size: number;
           range_start: number;
           range_end: number;
           min_block_date: string;
@@ -389,6 +411,7 @@ export class ScannerStorage {
       .all(...params, MAX_RANGES_PER_QUERY);
 
     return rows.map((row) => ({
+      rangeSize: row.range_size,
       rangeStart: row.range_start,
       rangeEnd: row.range_end,
       minBlockDate: row.min_block_date,
@@ -402,6 +425,20 @@ export class ScannerStorage {
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
     }));
+  }
+
+  getMinStoredBlock(): bigint | undefined {
+    const row = this.db
+      .query<{ value: number | null }, []>("SELECT MIN(block_number) AS value FROM blocks")
+      .get();
+    return row?.value === null || row?.value === undefined ? undefined : BigInt(row.value);
+  }
+
+  getMaxStoredBlock(): bigint | undefined {
+    const row = this.db
+      .query<{ value: number | null }, []>("SELECT MAX(block_number) AS value FROM blocks")
+      .get();
+    return row?.value === null || row?.value === undefined ? undefined : BigInt(row.value);
   }
 
   private saveProgressUpdate(metrics: BlockMetrics, progressUpdate: BlockProgressUpdate): void {
@@ -419,5 +456,77 @@ export class ScannerStorage {
 
   close(): void {
     this.db.close();
+  }
+}
+
+function migrateBlockRangesSchema(db: Database): void {
+  const columns = db
+    .query<{ name: string }, []>("PRAGMA table_info(block_ranges)")
+    .all();
+  if (columns.some((column) => column.name === "range_size")) {
+    return;
+  }
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec("ALTER TABLE block_ranges RENAME TO block_ranges_legacy");
+    db.exec(`
+      CREATE TABLE block_ranges (
+        range_size INTEGER NOT NULL,
+        range_start INTEGER NOT NULL,
+        range_end INTEGER NOT NULL,
+        min_block_date TEXT NOT NULL,
+        max_block_date TEXT NOT NULL,
+        min_base_fee_wei TEXT NOT NULL,
+        max_base_fee_wei TEXT NOT NULL,
+        average_base_fee_wei TEXT NOT NULL,
+        total_gas_used TEXT NOT NULL,
+        total_max_gas TEXT NOT NULL,
+        transaction_count INTEGER NOT NULL,
+        average_priority_fee_weighted_wei TEXT NOT NULL,
+        average_priority_fee_wei TEXT NOT NULL,
+        aggregated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (range_size, range_start)
+      )
+    `);
+    db.exec(`
+      INSERT INTO block_ranges (
+        range_size,
+        range_start,
+        range_end,
+        min_block_date,
+        max_block_date,
+        min_base_fee_wei,
+        max_base_fee_wei,
+        average_base_fee_wei,
+        total_gas_used,
+        total_max_gas,
+        transaction_count,
+        average_priority_fee_weighted_wei,
+        average_priority_fee_wei,
+        aggregated_at
+      )
+      SELECT
+        100,
+        range_start,
+        range_end,
+        min_block_date,
+        max_block_date,
+        min_base_fee_wei,
+        max_base_fee_wei,
+        average_base_fee_wei,
+        total_gas_used,
+        total_max_gas,
+        transaction_count,
+        average_priority_fee_weighted_wei,
+        average_priority_fee_wei,
+        aggregated_at
+      FROM block_ranges_legacy
+    `);
+    db.exec("DROP TABLE block_ranges_legacy");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }

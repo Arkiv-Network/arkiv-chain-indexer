@@ -1,3 +1,4 @@
+import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
@@ -31,6 +32,7 @@ export interface RangesResponseBody {
   limit: number;
   truncated: boolean;
   filters: {
+    rangeSize: string;
     rangeStartGt: string | null;
     rangeStartLt: string | null;
     dateGt: string | null;
@@ -104,11 +106,13 @@ function handleGetRanges(url: URL, storage: ScannerStorage): Response {
 
   const ranges = storage.queryBlockRanges(filter);
 
+  const rangeSize = filter.rangeSize ?? DEFAULT_RANGE_SIZE;
   const body: RangesResponseBody = {
     count: ranges.length,
     limit: MAX_RANGES_PER_QUERY,
     truncated: ranges.length >= MAX_RANGES_PER_QUERY,
     filters: {
+      rangeSize: rangeSize.toString(),
       rangeStartGt: filter.rangeStartGt !== undefined ? filter.rangeStartGt.toString() : null,
       rangeStartLt: filter.rangeStartLt !== undefined ? filter.rangeStartLt.toString() : null,
       dateGt: filter.dateGt ?? null,
@@ -148,6 +152,17 @@ export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter 
 
 export function parseRangeFilterFromQuery(params: URLSearchParams): BlockRangeQueryFilter {
   const filter: BlockRangeQueryFilter = {};
+
+  const rangeSize = params.get("rangeSize");
+  if (rangeSize !== null) {
+    try {
+      filter.rangeSize = parseRangeSize(rangeSize);
+    } catch (error) {
+      throw new Error(
+        `rangeSize is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   const rangeStartGt = params.get("rangeStartGt");
   if (rangeStartGt !== null) {

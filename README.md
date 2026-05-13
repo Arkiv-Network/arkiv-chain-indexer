@@ -105,19 +105,38 @@ sum(priorityFee * transactionFee) / sum(transactionFee)
 
 For empty blocks all averages are stored as `0`.
 
-### 100-Block Range Aggregates
+### Range Aggregates
 
-In addition to the per-block `blocks` table, the scanner also writes a row to `block_ranges` for each
-completed 100-block window (`[k * 100, k * 100 + 99]`, e.g. `245600-245699`). A row is written only
-when all 100 blocks in that window are present in `blocks`; the aggregator runs after every block save,
-so backfill order does not matter.
+In addition to the per-block `blocks` table, completed fixed-size windows can be aggregated into the
+`block_ranges` table. Windows for a given size `M` are `[k * M, k * M + M - 1]` (for example
+`245600-245699` when `M = 100`).
+
+Supported range sizes:
+
+```
+2, 5, 10, 20, 50, 100, 200, 500, 1000
+```
+
+Aggregation runs as a separate command — the scanner no longer aggregates inline:
+
+```sh
+bun run aggregate -- --range 50
+```
+
+The aggregator walks every aligned window from `floor(min_stored_block / M) * M` up through the highest
+stored block, and writes a row only for windows where all `M` blocks are present in `blocks`. Incomplete
+windows are skipped (and can be re-aggregated later once the missing blocks are scanned).
+
+You can run the aggregator multiple times with different `--range` values; each size lives independently
+in `block_ranges` keyed by `(range_size, range_start)`.
 
 | Column | Meaning |
 | --- | --- |
+| `range_size` | Window size in blocks. |
 | `range_start`, `range_end` | First and last block numbers in the window. |
 | `min_block_date`, `max_block_date` | Earliest and latest block timestamp in the window. |
-| `min_base_fee_wei`, `max_base_fee_wei` | Min and max `base_block_fee_wei` across the 100 blocks. |
-| `average_base_fee_wei` | Unweighted mean of the 100 base fees (integer division in wei). |
+| `min_base_fee_wei`, `max_base_fee_wei` | Min and max `base_block_fee_wei` across the window. |
+| `average_base_fee_wei` | Unweighted mean of the window base fees (integer division in wei). |
 | `total_gas_used` | Sum of `total_gas_used` across the window. |
 | `total_max_gas` | Sum of `max_gas_in_block` across the window. |
 | `transaction_count` | Sum of `transaction_count` across the window. |
@@ -126,6 +145,15 @@ so backfill order does not matter.
 
 When `total_gas_used` or `transaction_count` for the window is `0` the corresponding weighted average
 is stored as `0`.
+
+#### Aggregator options
+
+| CLI flag | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--range` | `AGGREGATE_RANGE` | required | Window size. One of: 2, 5, 10, 20, 50, 100, 200, 500, 1000. |
+| `--db` | `SCANNER_DB_PATH` | `scanner.sqlite` | SQLite database path. Shared with the scanner. |
+| `--from-block` | `AGGREGATE_FROM_BLOCK` | unset | Optional lower bound on the windows to consider. |
+| `--to-block` | `AGGREGATE_TO_BLOCK` | unset | Optional upper bound on the windows to consider. |
 
 ## Resume Behavior
 
@@ -217,13 +245,16 @@ return `404`; non-`GET` requests return `405`.
 
 ### `GET /ranges`
 
-Returns aggregated 100-block windows ordered by `range_start` ascending. Each window covers
-`[k * 100, k * 100 + 99]` (for example `245600-245699`) and is written only after all 100 blocks in
-that window have been stored. Responses are capped at **10,000 ranges** (smallest matching `range_start`
-first). All four filters are optional and combine additively (AND).
+Returns aggregated fixed-size windows ordered by `range_start` ascending. Each request targets a single
+range size via the `rangeSize` query parameter (defaults to `100`). Each window covers
+`[k * rangeSize, k * rangeSize + rangeSize - 1]` and is written only after all blocks in that window
+have been stored and the aggregator has run for that size. Responses are capped at **10,000 ranges**
+(smallest matching `range_start` first). If no aggregates exist for the requested `rangeSize`, the
+response is `{ "count": 0, "ranges": [] }`.
 
 | Query parameter | Description | SQL applied |
 | --- | --- | --- |
+| `rangeSize` | Window size. One of: 2, 5, 10, 20, 50, 100, 200, 500, 1000. Defaults to `100`. | `range_size = ?` |
 | `rangeStartGt` | Only ranges with `range_start > rangeStartGt` | `range_start > ?` |
 | `rangeStartLt` | Only ranges with `range_start < rangeStartLt` | `range_start < ?` |
 | `dateGt` | ISO-8601 timestamp; only ranges whose `max_block_date` is newer than this | `max_block_date > ?` |
@@ -232,17 +263,18 @@ first). All four filters are optional and combine additively (AND).
 Example:
 
 ```sh
-curl 'http://localhost:3000/ranges?rangeStartGt=245500&rangeStartLt=245700'
+curl 'http://localhost:3000/ranges?rangeSize=50&rangeStartGt=245500&rangeStartLt=245700'
 ```
 
 Response shape:
 
 ```json
 {
-  "count": 1,
+  "count": 2,
   "limit": 10000,
   "truncated": false,
   "filters": {
+    "rangeSize": "50",
     "rangeStartGt": "245500",
     "rangeStartLt": "245700",
     "dateGt": null,
@@ -250,8 +282,9 @@ Response shape:
   },
   "ranges": [
     {
-      "rangeStart": 245600,
-      "rangeEnd": 245699,
+      "rangeSize": 50,
+      "rangeStart": 245550,
+      "rangeEnd": 245599,
       "minBlockDate": "...",
       "maxBlockDate": "...",
       "minBaseFeeWei": "...",
@@ -268,8 +301,8 @@ Response shape:
 ```
 
 `averagePriorityFeeWeightedWei` is weighted by per-block `total_gas_used`. `averagePriorityFeeWei` is
-weighted by per-block `transaction_count`. `averageBaseFeeWei` is the unweighted mean of the 100 block
-base fees (integer wei division).
+weighted by per-block `transaction_count`. `averageBaseFeeWei` is the unweighted mean of the window's
+block base fees (integer wei division).
 
 ### Server configuration
 

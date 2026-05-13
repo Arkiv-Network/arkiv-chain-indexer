@@ -1,31 +1,79 @@
 import { describe, expect, test } from "bun:test";
-import { RANGE_SIZE, computeBlockRange, rangeEndFor, rangeStartFor } from "./ranges";
+import {
+  SUPPORTED_RANGE_SIZES,
+  assertSupportedRangeSize,
+  computeBlockRange,
+  isSupportedRangeSize,
+  parseRangeSize,
+  rangeEndFor,
+  rangeStartFor,
+} from "./ranges";
 import type { StoredBlock } from "./storage";
 
+describe("SUPPORTED_RANGE_SIZES", () => {
+  test("matches the documented set", () => {
+    expect([...SUPPORTED_RANGE_SIZES]).toEqual([
+      2n,
+      5n,
+      10n,
+      20n,
+      50n,
+      100n,
+      200n,
+      500n,
+      1000n,
+    ]);
+  });
+
+  test("isSupportedRangeSize / assertSupportedRangeSize", () => {
+    expect(isSupportedRangeSize(100n)).toBe(true);
+    expect(isSupportedRangeSize(7n)).toBe(false);
+    expect(() => assertSupportedRangeSize(50n)).not.toThrow();
+    expect(() => assertSupportedRangeSize(7n)).toThrow();
+  });
+
+  test("parseRangeSize", () => {
+    expect(parseRangeSize("50")).toBe(50n);
+    expect(() => parseRangeSize("abc")).toThrow();
+    expect(() => parseRangeSize("7")).toThrow();
+    expect(() => parseRangeSize("-2")).toThrow();
+  });
+});
+
 describe("rangeStartFor", () => {
-  test("snaps down to the nearest multiple of RANGE_SIZE", () => {
-    expect(rangeStartFor(245_600n)).toBe(245_600n);
-    expect(rangeStartFor(245_650n)).toBe(245_600n);
-    expect(rangeStartFor(245_699n)).toBe(245_600n);
-    expect(rangeStartFor(245_700n)).toBe(245_700n);
-    expect(rangeStartFor(0n)).toBe(0n);
+  test("snaps down to the nearest multiple of rangeSize", () => {
+    expect(rangeStartFor(245_600n, 100n)).toBe(245_600n);
+    expect(rangeStartFor(245_650n, 100n)).toBe(245_600n);
+    expect(rangeStartFor(245_699n, 100n)).toBe(245_600n);
+    expect(rangeStartFor(245_700n, 100n)).toBe(245_700n);
+    expect(rangeStartFor(0n, 100n)).toBe(0n);
+    expect(rangeStartFor(53n, 50n)).toBe(50n);
+    expect(rangeStartFor(7n, 2n)).toBe(6n);
+    expect(rangeStartFor(2_345n, 1000n)).toBe(2000n);
   });
 
   test("rejects negative input", () => {
-    expect(() => rangeStartFor(-1n)).toThrow();
+    expect(() => rangeStartFor(-1n, 100n)).toThrow();
+  });
+
+  test("rejects unsupported range sizes", () => {
+    expect(() => rangeStartFor(0n, 7n)).toThrow();
   });
 });
 
 describe("rangeEndFor", () => {
-  test("returns rangeStart + 99", () => {
-    expect(rangeEndFor(245_600n)).toBe(245_699n);
-    expect(rangeEndFor(0n)).toBe(99n);
+  test("returns rangeStart + rangeSize - 1", () => {
+    expect(rangeEndFor(245_600n, 100n)).toBe(245_699n);
+    expect(rangeEndFor(0n, 100n)).toBe(99n);
+    expect(rangeEndFor(50n, 50n)).toBe(99n);
+    expect(rangeEndFor(2000n, 1000n)).toBe(2999n);
   });
 });
 
 describe("computeBlockRange", () => {
-  test("aggregates min/max/avg/sum metrics with bigint precision", () => {
-    const blocks = makeBlocks(245_600n, (offset) => ({
+  test("aggregates min/max/avg/sum metrics with bigint precision (size 100)", () => {
+    const rangeSize = 100n;
+    const blocks = makeBlocks(245_600n, rangeSize, (offset) => ({
       blockDate: new Date(Date.UTC(2024, 0, 1, 0, Number(offset))).toISOString(),
       baseBlockFeeWei: (100n + offset).toString(),
       totalGasUsed: (1_000n + offset).toString(),
@@ -36,8 +84,9 @@ describe("computeBlockRange", () => {
       averagePriorityFeeWei: (3n + offset).toString(),
     }));
 
-    const range = computeBlockRange(245_600n, blocks);
+    const range = computeBlockRange(245_600n, rangeSize, blocks);
 
+    expect(range.rangeSize).toBe(100n);
     expect(range.rangeStart).toBe(245_600n);
     expect(range.rangeEnd).toBe(245_699n);
     expect(range.minBlockDate).toBe(blocks[0]!.blockDate);
@@ -62,9 +111,9 @@ describe("computeBlockRange", () => {
       totalTransactions += 2n;
     }
 
-    expect(range.averageBaseFeeWei).toBe((baseFeeSum / RANGE_SIZE).toString());
+    expect(range.averageBaseFeeWei).toBe((baseFeeSum / rangeSize).toString());
     expect(range.totalGasUsed).toBe(totalGas.toString());
-    expect(range.totalMaxGas).toBe((30_000_000n * RANGE_SIZE).toString());
+    expect(range.totalMaxGas).toBe((30_000_000n * rangeSize).toString());
     expect(range.transactionCount).toBe(200);
     expect(range.averagePriorityFeeWeightedWei).toBe(
       (gasWeightedNumerator / totalGas).toString(),
@@ -74,8 +123,28 @@ describe("computeBlockRange", () => {
     );
   });
 
+  test("aggregates correctly for a non-100 size (50)", () => {
+    const rangeSize = 50n;
+    const blocks = makeBlocks(2_050n, rangeSize, (offset) => ({
+      baseBlockFeeWei: (200n + offset).toString(),
+      totalGasUsed: "1000",
+      maxGasInBlock: "30000000",
+      transactionCount: 1,
+      averagePriorityFeeWeightedWei: "10",
+      averagePriorityFeeWei: "8",
+    }));
+    const range = computeBlockRange(2_050n, rangeSize, blocks);
+    expect(range.rangeSize).toBe(50n);
+    expect(range.rangeStart).toBe(2_050n);
+    expect(range.rangeEnd).toBe(2_099n);
+    expect(range.transactionCount).toBe(50);
+    expect(range.totalGasUsed).toBe((1000n * 50n).toString());
+    expect(range.minBaseFeeWei).toBe("200");
+    expect(range.maxBaseFeeWei).toBe((200n + 49n).toString());
+  });
+
   test("uses zero averages when the range has zero gas and zero transactions", () => {
-    const blocks = makeBlocks(245_600n, () => ({
+    const blocks = makeBlocks(245_600n, 100n, () => ({
       baseBlockFeeWei: "100",
       totalGasUsed: "0",
       maxGasInBlock: "30000000",
@@ -85,36 +154,42 @@ describe("computeBlockRange", () => {
       averagePriorityFeeWei: "0",
     }));
 
-    const range = computeBlockRange(245_600n, blocks);
+    const range = computeBlockRange(245_600n, 100n, blocks);
     expect(range.averagePriorityFeeWeightedWei).toBe("0");
     expect(range.averagePriorityFeeWei).toBe("0");
     expect(range.totalGasUsed).toBe("0");
     expect(range.transactionCount).toBe(0);
   });
 
-  test("rejects ranges that are not aligned to RANGE_SIZE", () => {
-    const blocks = makeBlocks(245_650n, () => ({}));
-    expect(() => computeBlockRange(245_650n, blocks)).toThrow();
+  test("rejects ranges that are not aligned to rangeSize", () => {
+    const blocks = makeBlocks(245_650n, 100n, () => ({}));
+    expect(() => computeBlockRange(245_650n, 100n, blocks)).toThrow();
   });
 
   test("rejects ranges with the wrong block count", () => {
-    const blocks = makeBlocks(245_600n, () => ({})).slice(0, 99);
-    expect(() => computeBlockRange(245_600n, blocks)).toThrow();
+    const blocks = makeBlocks(245_600n, 100n, () => ({})).slice(0, 99);
+    expect(() => computeBlockRange(245_600n, 100n, blocks)).toThrow();
   });
 
   test("rejects ranges missing a block in the window", () => {
-    const blocks = makeBlocks(245_600n, () => ({}));
+    const blocks = makeBlocks(245_600n, 100n, () => ({}));
     blocks[42] = { ...blocks[42]!, blockNumber: 999_999 };
-    expect(() => computeBlockRange(245_600n, blocks)).toThrow(/missing blocks/);
+    expect(() => computeBlockRange(245_600n, 100n, blocks)).toThrow(/missing blocks/);
+  });
+
+  test("rejects unsupported range sizes", () => {
+    const blocks = makeBlocks(0n, 100n, () => ({}));
+    expect(() => computeBlockRange(0n, 7n, blocks)).toThrow();
   });
 });
 
 function makeBlocks(
   rangeStart: bigint,
+  rangeSize: bigint,
   override: (offset: bigint) => Partial<StoredBlock>,
 ): StoredBlock[] {
   const blocks: StoredBlock[] = [];
-  for (let offset = 0n; offset < RANGE_SIZE; offset += 1n) {
+  for (let offset = 0n; offset < rangeSize; offset += 1n) {
     const base: StoredBlock = {
       blockNumber: Number(rangeStart + offset),
       blockDate: "2024-01-01T00:00:00.000Z",

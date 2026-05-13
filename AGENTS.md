@@ -11,6 +11,7 @@ tracks scanner progress so restarts continue from the last successfully stored b
 bun install
 bun test
 SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan -- --from-block 19000000 --to-block 19000000
+bun run aggregate -- --range 50
 ```
 
 ## Important Invariants
@@ -39,10 +40,13 @@ SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan -
 - `src/scanner.ts` owns retry and resume behavior.
 - `src/metrics.ts` owns all block metric calculations.
 - `src/server.ts` exposes `GET /blocks` and `GET /ranges` (built on `Bun.serve`). `/blocks` serves stored
-  rows with filters `blockGt`, `blockLt`, `dateGt`, `dateLt`; `/ranges` serves aggregated 100-block
-  windows with filters `rangeStartGt`, `rangeStartLt`, `dateGt`, `dateLt`. All filters combine
-  additively; results are always capped at the smallest 10,000 matching rows. Entry point:
-  `src/serve.ts` (`bun run serve`).
-- `src/ranges.ts` owns the per-100-block aggregation math. Range boundaries are fixed at
-  `[k * 100, k * 100 + 99]`. The scanner calls `storage.aggregateRangeIfComplete(rangeStart)` after
-  each block save; the row is written only when all 100 blocks in the window are stored.
+  rows with filters `blockGt`, `blockLt`, `dateGt`, `dateLt`; `/ranges` serves aggregated range windows
+  with filters `rangeSize` (defaults to `100`), `rangeStartGt`, `rangeStartLt`, `dateGt`, `dateLt`. All
+  filters combine additively; results are always capped at the smallest 10,000 matching rows. Entry
+  point: `src/serve.ts` (`bun run serve`).
+- `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
+  `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
+- `src/aggregator.ts` and `src/aggregate.ts` host the standalone aggregator entry point
+  (`bun run aggregate -- --range N`). The scanner does NOT aggregate inline; aggregation only happens
+  when this command is invoked.
+- `block_ranges` rows are keyed by `(range_size, range_start)` so multiple range sizes can coexist.
