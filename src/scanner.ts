@@ -1,5 +1,7 @@
+import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format";
 import { computeBlockMetrics } from "./metrics";
-import type { EthereumRpcClient } from "./rpc";
+import type { BlockMetrics, RpcReceipt } from "./types";
+import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { ScannerConfig } from "./config";
 import type { ScannerStorage } from "./storage";
 
@@ -58,8 +60,10 @@ async function scanOneBlock(
   rpc: EthereumRpcClient,
   storage: ScannerStorage,
 ): Promise<void> {
+  const startedAt = performance.now();
+  const rpcStatsBefore = rpc.getStatsSnapshot();
   const block = await rpc.getBlockWithTransactions(blockNumber);
-  const receipts = [];
+  const receipts: RpcReceipt[] = [];
 
   for (const transaction of block.transactions) {
     receipts.push(await rpc.getTransactionReceipt(transaction.hash));
@@ -67,9 +71,30 @@ async function scanOneBlock(
 
   const metrics = computeBlockMetrics(block, receipts);
   storage.saveBlockMetrics(metrics);
-  console.log(`Stored block ${metrics.blockNumber.toString()} (${metrics.transactionCount} txs)`);
+  const elapsedMs = performance.now() - startedAt;
+  const rpcStats = rpc.getStatsSince(rpcStatsBefore);
+  console.log(formatBlockSummary(metrics, elapsedMs, rpcStats));
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatBlockSummary(metrics: BlockMetrics, elapsedMs: number, rpcStats: RpcStats): string {
+  const totalRpcBytes = rpcStats.requestBytes + rpcStats.responseBytes;
+
+  return [
+    `Block ${metrics.blockNumber.toString()} scanned and stored`,
+    `  Date: ${metrics.blockDate}`,
+    `  Duration: ${formatDurationMs(elapsedMs)}`,
+    `  Transactions: ${metrics.transactionCount.toString()}`,
+    `  Gas used: ${formatKGas(metrics.totalGasUsed)} / ${formatKGas(metrics.maxGasInBlock)}`,
+    `  Base fee: ${formatGwei(metrics.baseBlockFeeWei)}`,
+    `  Avg priority fee: ${formatGwei(metrics.averagePriorityFeeWei)}`,
+    `  Weighted avg priority fee: ${formatGwei(metrics.averagePriorityFeeWeightedWei)}`,
+    `  Avg transaction fee: ${formatGwei(metrics.averageTransactionFeeWei)}`,
+    `  RPC: ${rpcStats.calls.toString()} calls, ${formatBytes(rpcStats.requestBytes)} sent, ${formatBytes(
+      rpcStats.responseBytes,
+    )} received (${formatBytes(totalRpcBytes)} total)`,
+  ].join("\n");
 }

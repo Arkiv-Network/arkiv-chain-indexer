@@ -27,6 +27,24 @@ SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
 By default the scanner writes to `scanner.sqlite` in the current directory. If `--to-block` is omitted, it keeps
 running and waits for new safe blocks.
 
+After each block is scanned and stored, the scanner prints a per-block summary:
+
+```txt
+Block 19000000 scanned and stored
+  Date: 2024-01-14T08:56:23.000Z
+  Duration: 1.27s
+  Transactions: 144
+  Gas used: 29999.781 kGas / 30000 kGas
+  Base fee: 11.143964487 Gwei
+  Avg priority fee: 1.275 Gwei
+  Weighted avg priority fee: 1.418 Gwei
+  Avg transaction fee: 314727.209 Gwei
+  RPC: 145 calls, 12.64 KiB sent, 3.41 MiB received (3.42 MiB total)
+```
+
+RPC call and byte counts are measured from the JSON-RPC requests made during that block scan: the block fetch and
+the sequential transaction receipt fetches. Scanner head polling is outside this per-block summary.
+
 ## Configuration
 
 Configuration can be passed through CLI flags or environment variables.
