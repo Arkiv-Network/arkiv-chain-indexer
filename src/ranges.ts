@@ -1,8 +1,21 @@
 import type { StoredBlock } from "./storage";
 
-export const RANGE_SIZE = 100n;
+export const SUPPORTED_RANGE_SIZES: readonly bigint[] = [
+  2n,
+  5n,
+  10n,
+  20n,
+  50n,
+  100n,
+  200n,
+  500n,
+  1000n,
+];
+
+export const DEFAULT_RANGE_SIZE = 100n;
 
 export interface BlockRangeMetrics {
+  rangeSize: bigint;
   rangeStart: bigint;
   rangeEnd: bigint;
   minBlockDate: string;
@@ -17,28 +30,60 @@ export interface BlockRangeMetrics {
   averagePriorityFeeWei: string;
 }
 
-export function rangeStartFor(blockNumber: bigint): bigint {
+export function isSupportedRangeSize(rangeSize: bigint): boolean {
+  return SUPPORTED_RANGE_SIZES.includes(rangeSize);
+}
+
+export function assertSupportedRangeSize(rangeSize: bigint): void {
+  if (!isSupportedRangeSize(rangeSize)) {
+    throw new Error(
+      `Range size ${rangeSize.toString()} is not supported. Supported sizes: ${SUPPORTED_RANGE_SIZES.map(
+        (value) => value.toString(),
+      ).join(", ")}`,
+    );
+  }
+}
+
+export function parseRangeSize(value: string): bigint {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`Range size must be a positive integer, got "${value}"`);
+  }
+  const parsed = BigInt(value);
+  assertSupportedRangeSize(parsed);
+  return parsed;
+}
+
+export function rangeStartFor(blockNumber: bigint, rangeSize: bigint): bigint {
   if (blockNumber < 0n) {
     throw new Error("Block number cannot be negative");
   }
-  return blockNumber - (blockNumber % RANGE_SIZE);
+  assertSupportedRangeSize(rangeSize);
+  return blockNumber - (blockNumber % rangeSize);
 }
 
-export function rangeEndFor(rangeStart: bigint): bigint {
-  return rangeStart + RANGE_SIZE - 1n;
+export function rangeEndFor(rangeStart: bigint, rangeSize: bigint): bigint {
+  assertSupportedRangeSize(rangeSize);
+  return rangeStart + rangeSize - 1n;
 }
 
-export function computeBlockRange(rangeStart: bigint, blocks: StoredBlock[]): BlockRangeMetrics {
-  if (rangeStart < 0n || rangeStart % RANGE_SIZE !== 0n) {
-    throw new Error(`Range start ${rangeStart.toString()} must be a non-negative multiple of ${RANGE_SIZE}`);
-  }
-  if (BigInt(blocks.length) !== RANGE_SIZE) {
+export function computeBlockRange(
+  rangeStart: bigint,
+  rangeSize: bigint,
+  blocks: StoredBlock[],
+): BlockRangeMetrics {
+  assertSupportedRangeSize(rangeSize);
+  if (rangeStart < 0n || rangeStart % rangeSize !== 0n) {
     throw new Error(
-      `Range ${rangeStart.toString()} requires ${RANGE_SIZE.toString()} blocks, got ${blocks.length}`,
+      `Range start ${rangeStart.toString()} must be a non-negative multiple of ${rangeSize.toString()}`,
+    );
+  }
+  if (BigInt(blocks.length) !== rangeSize) {
+    throw new Error(
+      `Range ${rangeStart.toString()} requires ${rangeSize.toString()} blocks, got ${blocks.length}`,
     );
   }
 
-  const rangeEnd = rangeEndFor(rangeStart);
+  const rangeEnd = rangeEndFor(rangeStart, rangeSize);
   const expectedNumbers = new Set<bigint>();
   for (let block = rangeStart; block <= rangeEnd; block += 1n) {
     expectedNumbers.add(block);
@@ -88,7 +133,7 @@ export function computeBlockRange(rangeStart: bigint, blocks: StoredBlock[]): Bl
       BigInt(block.averagePriorityFeeWei) * BigInt(block.transactionCount);
   }
 
-  const averageBaseFee = baseFeeSum / RANGE_SIZE;
+  const averageBaseFee = baseFeeSum / rangeSize;
   const averagePriorityFeeWeighted =
     totalGasUsed === 0n ? 0n : gasWeightedPriorityFeeNumerator / totalGasUsed;
   const averagePriorityFee =
@@ -97,6 +142,7 @@ export function computeBlockRange(rangeStart: bigint, blocks: StoredBlock[]): Bl
       : txWeightedPriorityFeeNumerator / BigInt(transactionCount);
 
   return {
+    rangeSize,
     rangeStart,
     rangeEnd,
     minBlockDate,

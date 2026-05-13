@@ -7,8 +7,10 @@ import {
   MAX_RANGES_PER_QUERY,
   ScannerStorage,
 } from "./storage";
-import { RANGE_SIZE } from "./ranges";
+import { DEFAULT_RANGE_SIZE } from "./ranges";
 import type { BlockMetrics } from "./types";
+
+const RANGE_SIZE = DEFAULT_RANGE_SIZE;
 
 const tempDirs: string[] = [];
 
@@ -231,7 +233,7 @@ describe("ScannerStorage block ranges", () => {
     for (let offset = 0n; offset < 50n; offset += 1n) {
       storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 245_600n + offset }));
     }
-    expect(storage.aggregateRangeIfComplete(245_600n)).toBeUndefined();
+    expect(storage.aggregateRangeIfComplete(245_600n, 100n)).toBeUndefined();
     expect(storage.queryBlockRanges()).toEqual([]);
     storage.close();
   });
@@ -253,14 +255,16 @@ describe("ScannerStorage block ranges", () => {
       );
     }
 
-    const result = storage.aggregateRangeIfComplete(245_600n);
+    const result = storage.aggregateRangeIfComplete(245_600n, 100n);
     expect(result).toBeDefined();
     expect(result?.rangeStart).toBe(245_600n);
     expect(result?.rangeEnd).toBe(245_699n);
+    expect(result?.rangeSize).toBe(100n);
 
     const stored = storage.queryBlockRanges();
     expect(stored.length).toBe(1);
     expect(stored[0]).toEqual({
+      rangeSize: 100,
       rangeStart: 245_600,
       rangeEnd: 245_699,
       minBlockDate: "2024-01-01T00:00:00.000Z",
@@ -291,19 +295,126 @@ describe("ScannerStorage block ranges", () => {
   test("queryBlockRanges caps results at MAX_RANGES_PER_QUERY", () => {
     expect(MAX_RANGES_PER_QUERY).toBe(10_000);
   });
+
+  test("aggregates and isolates rows for multiple range sizes", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    for (let blockNumber = 0n; blockNumber < 200n; blockNumber += 1n) {
+      storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+    }
+
+    expect(storage.aggregateRangeIfComplete(0n, 50n)?.rangeSize).toBe(50n);
+    expect(storage.aggregateRangeIfComplete(50n, 50n)?.rangeSize).toBe(50n);
+    expect(storage.aggregateRangeIfComplete(100n, 50n)?.rangeSize).toBe(50n);
+    expect(storage.aggregateRangeIfComplete(0n, 100n)?.rangeSize).toBe(100n);
+    expect(storage.aggregateRangeIfComplete(100n, 100n)?.rangeSize).toBe(100n);
+
+    const fifties = storage.queryBlockRanges({ rangeSize: 50n });
+    expect(fifties.map((row) => row.rangeStart)).toEqual([0, 50, 100]);
+    expect(fifties.every((row) => row.rangeSize === 50)).toBe(true);
+
+    const hundreds = storage.queryBlockRanges({ rangeSize: 100n });
+    expect(hundreds.map((row) => row.rangeStart)).toEqual([0, 100]);
+    expect(hundreds.every((row) => row.rangeSize === 100)).toBe(true);
+
+    const twos = storage.queryBlockRanges({ rangeSize: 2n });
+    expect(twos).toEqual([]);
+
+    storage.close();
+  });
+
+  test("rejects unsupported range sizes in storage helpers", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    expect(() => storage.aggregateRangeIfComplete(0n, 7n)).toThrow();
+    expect(() => storage.getBlocksForRange(0n, 7n)).toThrow();
+    storage.close();
+  });
+
+  test("getMinStoredBlock / getMaxStoredBlock reflect stored blocks", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    expect(storage.getMinStoredBlock()).toBeUndefined();
+    expect(storage.getMaxStoredBlock()).toBeUndefined();
+    for (const blockNumber of [5n, 10n, 7n]) {
+      storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+    }
+    expect(storage.getMinStoredBlock()).toBe(5n);
+    expect(storage.getMaxStoredBlock()).toBe(10n);
+    storage.close();
+  });
+});
+
+describe("ScannerStorage legacy block_ranges migration", () => {
+  test("migrates a pre-rangeSize block_ranges table into the new schema", async () => {
+    const dbPath = tempDbPath();
+    const { Database } = await import("bun:sqlite");
+    const db = new Database(dbPath, { create: true });
+    db.exec(`
+      CREATE TABLE block_ranges (
+        range_start INTEGER PRIMARY KEY,
+        range_end INTEGER NOT NULL,
+        min_block_date TEXT NOT NULL,
+        max_block_date TEXT NOT NULL,
+        min_base_fee_wei TEXT NOT NULL,
+        max_base_fee_wei TEXT NOT NULL,
+        average_base_fee_wei TEXT NOT NULL,
+        total_gas_used TEXT NOT NULL,
+        total_max_gas TEXT NOT NULL,
+        transaction_count INTEGER NOT NULL,
+        average_priority_fee_weighted_wei TEXT NOT NULL,
+        average_priority_fee_wei TEXT NOT NULL,
+        aggregated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO block_ranges (
+        range_start, range_end,
+        min_block_date, max_block_date,
+        min_base_fee_wei, max_base_fee_wei, average_base_fee_wei,
+        total_gas_used, total_max_gas, transaction_count,
+        average_priority_fee_weighted_wei, average_priority_fee_wei,
+        aggregated_at
+      ) VALUES (
+        0, 99,
+        '2024-01-01T00:00:00.000Z', '2024-01-01T01:39:00.000Z',
+        '100', '199', '149',
+        '100000', '3000000000', 200,
+        '7', '5',
+        '2024-01-01T00:00:00.000Z'
+      );
+    `);
+    db.close();
+
+    const storage = ScannerStorage.open(dbPath);
+    const rows = storage.queryBlockRanges({ rangeSize: 100n });
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toEqual({
+      rangeSize: 100,
+      rangeStart: 0,
+      rangeEnd: 99,
+      minBlockDate: "2024-01-01T00:00:00.000Z",
+      maxBlockDate: "2024-01-01T01:39:00.000Z",
+      minBaseFeeWei: "100",
+      maxBaseFeeWei: "199",
+      averageBaseFeeWei: "149",
+      totalGasUsed: "100000",
+      totalMaxGas: "3000000000",
+      transactionCount: 200,
+      averagePriorityFeeWeightedWei: "7",
+      averagePriorityFeeWei: "5",
+    });
+    storage.close();
+  });
 });
 
 function saveCompleteRange(
   storage: ScannerStorage,
   rangeStart: bigint,
   blockDate: string,
+  rangeSize: bigint = RANGE_SIZE,
 ): void {
-  for (let offset = 0n; offset < RANGE_SIZE; offset += 1n) {
+  for (let offset = 0n; offset < rangeSize; offset += 1n) {
     storage.saveBlockMetrics(
       blockMetricsFixture({ blockNumber: rangeStart + offset, blockDate }),
     );
   }
-  storage.aggregateRangeIfComplete(rangeStart);
+  storage.aggregateRangeIfComplete(rangeStart, rangeSize);
 }
 
 function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetrics {

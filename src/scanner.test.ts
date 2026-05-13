@@ -36,7 +36,7 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics[0]?.transactionCount).toBe(4);
   });
 
-  test("triggers range aggregation for the block's 100-block window after storing", async () => {
+  test("does not aggregate ranges inline after storing a block", async () => {
     const rpc = new SimpleRpc();
     const storage = new FakeStorage();
 
@@ -47,7 +47,8 @@ describe("scanOneBlock", () => {
       1,
     );
 
-    expect(storage.aggregatedRanges).toEqual([245_600n]);
+    expect(storage.aggregatedRanges).toEqual([]);
+    expect(storage.savedMetrics.map((entry) => entry.blockNumber)).toEqual([245_650n]);
   });
 
   test("waits for all receipt jobs to settle before failing the block", async () => {
@@ -295,10 +296,6 @@ class FakeStorage {
     }
   }
 
-  aggregateRangeIfComplete(rangeStart: bigint): undefined {
-    this.aggregatedRanges.push(rangeStart);
-    return undefined;
-  }
 }
 
 class SimpleRpc {

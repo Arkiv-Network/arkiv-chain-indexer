@@ -1,6 +1,5 @@
 import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format";
 import { computeBlockMetrics } from "./metrics";
-import { rangeStartFor } from "./ranges";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { ScannerConfig } from "./config";
@@ -240,16 +239,9 @@ export async function scanOneBlock(
 
   const metrics = computeBlockMetrics(block, receipts);
   storage.saveBlockMetrics(metrics, progressUpdate);
-  const rangeStart = rangeStartFor(metrics.blockNumber);
-  const aggregated = storage.aggregateRangeIfComplete(rangeStart);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats));
-  if (aggregated) {
-    console.log(
-      `Range ${aggregated.rangeStart.toString()}-${aggregated.rangeEnd.toString()} aggregated`,
-    );
-  }
 }
 
 function computeSafeHead(latestBlock: bigint, confirmationDepth: bigint): bigint {
