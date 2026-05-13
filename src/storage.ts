@@ -4,10 +4,31 @@ import type { BlockMetrics } from "./types";
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
 const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
 
+export const MAX_BLOCKS_PER_QUERY = 10_000;
+
 export type BlockProgressUpdate =
   | { kind: "lastSuccessfulBlock" }
   | { kind: "backfillNextBlock"; nextBlock: bigint }
   | { kind: "none" };
+
+export interface BlockQueryFilter {
+  blockGt?: bigint;
+  blockLt?: bigint;
+  dateGt?: string;
+  dateLt?: string;
+}
+
+export interface StoredBlock {
+  blockNumber: number;
+  blockDate: string;
+  baseBlockFeeWei: string;
+  totalGasUsed: string;
+  maxGasInBlock: string;
+  transactionCount: number;
+  averageTransactionFeeWei: string;
+  averagePriorityFeeWeightedWei: string;
+  averagePriorityFeeWei: string;
+}
 
 export class ScannerStorage {
   private readonly insertBlock;
@@ -106,6 +127,84 @@ export class ScannerStorage {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  queryBlocks(filter: BlockQueryFilter = {}): StoredBlock[] {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filter.blockGt !== undefined) {
+      if (filter.blockGt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("blockGt exceeds the supported integer range");
+      }
+      clauses.push("block_number > ?");
+      params.push(Number(filter.blockGt));
+    }
+
+    if (filter.blockLt !== undefined) {
+      if (filter.blockLt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("blockLt exceeds the supported integer range");
+      }
+      clauses.push("block_number < ?");
+      params.push(Number(filter.blockLt));
+    }
+
+    if (filter.dateGt !== undefined) {
+      clauses.push("block_date > ?");
+      params.push(filter.dateGt);
+    }
+
+    if (filter.dateLt !== undefined) {
+      clauses.push("block_date < ?");
+      params.push(filter.dateLt);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const sql = `
+      SELECT
+        block_number,
+        block_date,
+        base_block_fee_wei,
+        total_gas_used,
+        max_gas_in_block,
+        transaction_count,
+        average_transaction_fee_wei,
+        average_priority_fee_weighted_wei,
+        average_priority_fee_wei
+      FROM blocks
+      ${where}
+      ORDER BY block_number ASC
+      LIMIT ?
+    `;
+
+    const rows = this.db
+      .query<
+        {
+          block_number: number;
+          block_date: string;
+          base_block_fee_wei: string;
+          total_gas_used: string;
+          max_gas_in_block: string;
+          transaction_count: number;
+          average_transaction_fee_wei: string;
+          average_priority_fee_weighted_wei: string;
+          average_priority_fee_wei: string;
+        },
+        Array<string | number>
+      >(sql)
+      .all(...params, MAX_BLOCKS_PER_QUERY);
+
+    return rows.map((row) => ({
+      blockNumber: row.block_number,
+      blockDate: row.block_date,
+      baseBlockFeeWei: row.base_block_fee_wei,
+      totalGasUsed: row.total_gas_used,
+      maxGasInBlock: row.max_gas_in_block,
+      transactionCount: row.transaction_count,
+      averageTransactionFeeWei: row.average_transaction_fee_wei,
+      averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
+      averagePriorityFeeWei: row.average_priority_fee_wei,
+    }));
   }
 
   private saveProgressUpdate(metrics: BlockMetrics, progressUpdate: BlockProgressUpdate): void {

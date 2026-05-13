@@ -127,6 +127,84 @@ For continuous scans:
 
 This means failed block reads are not skipped.
 
+## HTTP Server
+
+A read-only HTTP server is included that serves stored block rows from the same SQLite database. Run it
+alongside the scanner (or against an existing database):
+
+```sh
+SCANNER_DB_PATH=./scanner.sqlite bun run serve
+# or
+bun run serve -- --db ./scanner.sqlite --port 3000
+```
+
+By default the server listens on port `3000` and reads from `scanner.sqlite`.
+
+### `GET /blocks`
+
+Returns stored block rows ordered by `block_number` ascending. The response is always capped at **10,000
+rows** (smallest matching blocks first). All four filters below are optional and combine additively (AND).
+With no filters the smallest 10,000 stored blocks are returned.
+
+| Query parameter | Description | SQL applied |
+| --- | --- | --- |
+| `blockGt` | Only blocks with `block_number > blockGt` | `block_number > ?` |
+| `blockLt` | Only blocks with `block_number < blockLt` | `block_number < ?` |
+| `dateGt` | ISO-8601 timestamp; only blocks newer than this | `block_date > ?` |
+| `dateLt` | ISO-8601 timestamp; only blocks older than this | `block_date < ?` |
+
+Example:
+
+```sh
+curl 'http://localhost:3000/blocks?blockGt=19000000&blockLt=19000005'
+```
+
+Response shape:
+
+```json
+{
+  "count": 4,
+  "limit": 10000,
+  "truncated": false,
+  "filters": {
+    "blockGt": "19000000",
+    "blockLt": "19000005",
+    "dateGt": null,
+    "dateLt": null
+  },
+  "blocks": [
+    {
+      "blockNumber": 19000001,
+      "blockDate": "2024-01-14T08:56:35.000Z",
+      "baseBlockFeeWei": "...",
+      "totalGasUsed": "...",
+      "maxGasInBlock": "...",
+      "transactionCount": 144,
+      "averageTransactionFeeWei": "...",
+      "averagePriorityFeeWeightedWei": "...",
+      "averagePriorityFeeWei": "..."
+    }
+  ]
+}
+```
+
+`truncated` is `true` when the 10,000-row cap was hit and the matching range may contain more rows.
+
+Validation errors (invalid integers, invalid dates) return `400` with `{ "error": "..." }`. Unknown paths
+return `404`; non-`GET` requests return `405`.
+
+### Server configuration
+
+| CLI flag | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--db` | `SCANNER_DB_PATH` | `scanner.sqlite` | SQLite database path. Shared with the scanner. |
+| `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
+| `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
+
+```sh
+bun run serve -- --help
+```
+
 ## Tests
 
 Run unit tests:

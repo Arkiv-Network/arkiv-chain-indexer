@@ -38,3 +38,6 @@ SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan -
 - `src/storage.ts` uses Bun's built-in `bun:sqlite`.
 - `src/scanner.ts` owns retry and resume behavior.
 - `src/metrics.ts` owns all block metric calculations.
+- `src/server.ts` exposes `GET /blocks` (built on `Bun.serve`) and serves stored rows. Range filters
+  `blockGt`, `blockLt`, `dateGt`, `dateLt` combine additively; results are always capped at the smallest
+  10,000 matching rows. Entry point: `src/serve.ts` (`bun run serve`).
