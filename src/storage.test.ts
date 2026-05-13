@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { MAX_BLOCKS_PER_QUERY, ScannerStorage } from "./storage";
+import {
+  MAX_BLOCKS_PER_QUERY,
+  MAX_RANGES_PER_QUERY,
+  ScannerStorage,
+} from "./storage";
+import { RANGE_SIZE } from "./ranges";
 import type { BlockMetrics } from "./types";
 
 const tempDirs: string[] = [];
@@ -219,6 +224,87 @@ describe("ScannerStorage.queryBlocks", () => {
     storage.close();
   });
 });
+
+describe("ScannerStorage block ranges", () => {
+  test("aggregateRangeIfComplete returns undefined for incomplete windows", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    for (let offset = 0n; offset < 50n; offset += 1n) {
+      storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 245_600n + offset }));
+    }
+    expect(storage.aggregateRangeIfComplete(245_600n)).toBeUndefined();
+    expect(storage.queryBlockRanges()).toEqual([]);
+    storage.close();
+  });
+
+  test("aggregateRangeIfComplete writes a row once all 100 blocks are stored", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    for (let offset = 0n; offset < RANGE_SIZE; offset += 1n) {
+      storage.saveBlockMetrics(
+        blockMetricsFixture({
+          blockNumber: 245_600n + offset,
+          blockDate: new Date(Date.UTC(2024, 0, 1, 0, Number(offset))).toISOString(),
+          baseBlockFeeWei: (100n + offset).toString(),
+          totalGasUsed: "1000",
+          maxGasInBlock: "30000000",
+          transactionCount: 2,
+          averagePriorityFeeWeightedWei: "7",
+          averagePriorityFeeWei: "5",
+        }),
+      );
+    }
+
+    const result = storage.aggregateRangeIfComplete(245_600n);
+    expect(result).toBeDefined();
+    expect(result?.rangeStart).toBe(245_600n);
+    expect(result?.rangeEnd).toBe(245_699n);
+
+    const stored = storage.queryBlockRanges();
+    expect(stored.length).toBe(1);
+    expect(stored[0]).toEqual({
+      rangeStart: 245_600,
+      rangeEnd: 245_699,
+      minBlockDate: "2024-01-01T00:00:00.000Z",
+      maxBlockDate: "2024-01-01T01:39:00.000Z",
+      minBaseFeeWei: "100",
+      maxBaseFeeWei: "199",
+      averageBaseFeeWei: "149",
+      totalGasUsed: "100000",
+      totalMaxGas: "3000000000",
+      transactionCount: 200,
+      averagePriorityFeeWeightedWei: "7",
+      averagePriorityFeeWei: "5",
+    });
+    storage.close();
+  });
+
+  test("queryBlockRanges filters by range start and dates", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    for (const rangeStart of [0n, 100n, 200n, 300n]) {
+      saveCompleteRange(storage, rangeStart, "2024-01-01T00:00:00.000Z");
+    }
+
+    const result = storage.queryBlockRanges({ rangeStartGt: 0n, rangeStartLt: 300n });
+    expect(result.map((row) => row.rangeStart)).toEqual([100, 200]);
+    storage.close();
+  });
+
+  test("queryBlockRanges caps results at MAX_RANGES_PER_QUERY", () => {
+    expect(MAX_RANGES_PER_QUERY).toBe(10_000);
+  });
+});
+
+function saveCompleteRange(
+  storage: ScannerStorage,
+  rangeStart: bigint,
+  blockDate: string,
+): void {
+  for (let offset = 0n; offset < RANGE_SIZE; offset += 1n) {
+    storage.saveBlockMetrics(
+      blockMetricsFixture({ blockNumber: rangeStart + offset, blockDate }),
+    );
+  }
+  storage.aggregateRangeIfComplete(rangeStart);
+}
 
 function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetrics {
   return {

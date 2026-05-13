@@ -105,6 +105,28 @@ sum(priorityFee * transactionFee) / sum(transactionFee)
 
 For empty blocks all averages are stored as `0`.
 
+### 100-Block Range Aggregates
+
+In addition to the per-block `blocks` table, the scanner also writes a row to `block_ranges` for each
+completed 100-block window (`[k * 100, k * 100 + 99]`, e.g. `245600-245699`). A row is written only
+when all 100 blocks in that window are present in `blocks`; the aggregator runs after every block save,
+so backfill order does not matter.
+
+| Column | Meaning |
+| --- | --- |
+| `range_start`, `range_end` | First and last block numbers in the window. |
+| `min_block_date`, `max_block_date` | Earliest and latest block timestamp in the window. |
+| `min_base_fee_wei`, `max_base_fee_wei` | Min and max `base_block_fee_wei` across the 100 blocks. |
+| `average_base_fee_wei` | Unweighted mean of the 100 base fees (integer division in wei). |
+| `total_gas_used` | Sum of `total_gas_used` across the window. |
+| `total_max_gas` | Sum of `max_gas_in_block` across the window. |
+| `transaction_count` | Sum of `transaction_count` across the window. |
+| `average_priority_fee_weighted_wei` | `sum(block.average_priority_fee_weighted_wei * block.total_gas_used) / sum(block.total_gas_used)`. |
+| `average_priority_fee_wei` | `sum(block.average_priority_fee_wei * block.transaction_count) / sum(block.transaction_count)`. |
+
+When `total_gas_used` or `transaction_count` for the window is `0` the corresponding weighted average
+is stored as `0`.
+
 ## Resume Behavior
 
 Forward progress is stored in the `scanner_state` table as `last_successful_block`. Continuous backfill progress
@@ -192,6 +214,62 @@ Response shape:
 
 Validation errors (invalid integers, invalid dates) return `400` with `{ "error": "..." }`. Unknown paths
 return `404`; non-`GET` requests return `405`.
+
+### `GET /ranges`
+
+Returns aggregated 100-block windows ordered by `range_start` ascending. Each window covers
+`[k * 100, k * 100 + 99]` (for example `245600-245699`) and is written only after all 100 blocks in
+that window have been stored. Responses are capped at **10,000 ranges** (smallest matching `range_start`
+first). All four filters are optional and combine additively (AND).
+
+| Query parameter | Description | SQL applied |
+| --- | --- | --- |
+| `rangeStartGt` | Only ranges with `range_start > rangeStartGt` | `range_start > ?` |
+| `rangeStartLt` | Only ranges with `range_start < rangeStartLt` | `range_start < ?` |
+| `dateGt` | ISO-8601 timestamp; only ranges whose `max_block_date` is newer than this | `max_block_date > ?` |
+| `dateLt` | ISO-8601 timestamp; only ranges whose `min_block_date` is older than this | `min_block_date < ?` |
+
+Example:
+
+```sh
+curl 'http://localhost:3000/ranges?rangeStartGt=245500&rangeStartLt=245700'
+```
+
+Response shape:
+
+```json
+{
+  "count": 1,
+  "limit": 10000,
+  "truncated": false,
+  "filters": {
+    "rangeStartGt": "245500",
+    "rangeStartLt": "245700",
+    "dateGt": null,
+    "dateLt": null
+  },
+  "ranges": [
+    {
+      "rangeStart": 245600,
+      "rangeEnd": 245699,
+      "minBlockDate": "...",
+      "maxBlockDate": "...",
+      "minBaseFeeWei": "...",
+      "maxBaseFeeWei": "...",
+      "averageBaseFeeWei": "...",
+      "totalGasUsed": "...",
+      "totalMaxGas": "...",
+      "transactionCount": 12345,
+      "averagePriorityFeeWeightedWei": "...",
+      "averagePriorityFeeWei": "..."
+    }
+  ]
+}
+```
+
+`averagePriorityFeeWeightedWei` is weighted by per-block `total_gas_used`. `averagePriorityFeeWei` is
+weighted by per-block `transaction_count`. `averageBaseFeeWei` is the unweighted mean of the 100 block
+base fees (integer wei division).
 
 ### Server configuration
 
