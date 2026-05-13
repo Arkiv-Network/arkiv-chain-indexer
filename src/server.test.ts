@@ -2,8 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createBlockServer, parseFilterFromQuery, type BlocksResponseBody } from "./server";
+import {
+  createBlockServer,
+  parseFilterFromQuery,
+  parseRangeFilterFromQuery,
+  type BlocksResponseBody,
+  type RangesResponseBody,
+} from "./server";
 import { ScannerStorage } from "./storage";
+import { RANGE_SIZE } from "./ranges";
 import type { BlockMetrics } from "./types";
 
 const tempDirs: string[] = [];
@@ -125,6 +132,80 @@ describe("createBlockServer", () => {
     storage.close();
   });
 });
+
+describe("parseRangeFilterFromQuery", () => {
+  test("parses range start and date filters", () => {
+    const filter = parseRangeFilterFromQuery(
+      new URLSearchParams(
+        "rangeStartGt=100&rangeStartLt=500&dateGt=2024-01-01T00:00:00Z&dateLt=2024-12-31T00:00:00Z",
+      ),
+    );
+    expect(filter.rangeStartGt).toBe(100n);
+    expect(filter.rangeStartLt).toBe(500n);
+    expect(filter.dateGt).toBe("2024-01-01T00:00:00.000Z");
+    expect(filter.dateLt).toBe("2024-12-31T00:00:00.000Z");
+  });
+
+  test("rejects non-numeric range params", () => {
+    expect(() =>
+      parseRangeFilterFromQuery(new URLSearchParams("rangeStartGt=abc")),
+    ).toThrow(/rangeStartGt must be a non-negative integer/);
+  });
+});
+
+describe("GET /ranges", () => {
+  test("returns aggregated ranges with filters echoed back", async () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    saveCompleteRange(storage, 0n);
+    saveCompleteRange(storage, 100n);
+    saveCompleteRange(storage, 200n);
+
+    await withServer(storage, async (url) => {
+      const response = await fetch(`${url}/ranges?rangeStartGt=0&rangeStartLt=200`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as RangesResponseBody;
+      expect(body.count).toBe(1);
+      expect(body.limit).toBe(10_000);
+      expect(body.truncated).toBe(false);
+      expect(body.ranges.map((row) => row.rangeStart)).toEqual([100]);
+      expect(body.filters).toEqual({
+        rangeStartGt: "0",
+        rangeStartLt: "200",
+        dateGt: null,
+        dateLt: null,
+      });
+    });
+    storage.close();
+  });
+
+  test("returns 400 on invalid rangeStartGt", async () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    await withServer(storage, async (url) => {
+      const response = await fetch(`${url}/ranges?rangeStartGt=abc`);
+      expect(response.status).toBe(400);
+    });
+    storage.close();
+  });
+
+  test("returns empty list when no ranges match", async () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    await withServer(storage, async (url) => {
+      const response = await fetch(`${url}/ranges`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as RangesResponseBody;
+      expect(body.count).toBe(0);
+      expect(body.ranges).toEqual([]);
+    });
+    storage.close();
+  });
+});
+
+function saveCompleteRange(storage: ScannerStorage, rangeStart: bigint): void {
+  for (let offset = 0n; offset < RANGE_SIZE; offset += 1n) {
+    storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: rangeStart + offset }));
+  }
+  storage.aggregateRangeIfComplete(rangeStart);
+}
 
 async function withServer(
   storage: ScannerStorage,

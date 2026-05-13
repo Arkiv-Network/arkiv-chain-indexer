@@ -1,10 +1,17 @@
 import { Database } from "bun:sqlite";
+import {
+  RANGE_SIZE,
+  computeBlockRange,
+  rangeEndFor,
+  type BlockRangeMetrics,
+} from "./ranges";
 import type { BlockMetrics } from "./types";
 
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
 const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
 
 export const MAX_BLOCKS_PER_QUERY = 10_000;
+export const MAX_RANGES_PER_QUERY = 10_000;
 
 export type BlockProgressUpdate =
   | { kind: "lastSuccessfulBlock" }
@@ -14,6 +21,13 @@ export type BlockProgressUpdate =
 export interface BlockQueryFilter {
   blockGt?: bigint;
   blockLt?: bigint;
+  dateGt?: string;
+  dateLt?: string;
+}
+
+export interface BlockRangeQueryFilter {
+  rangeStartGt?: bigint;
+  rangeStartLt?: bigint;
   dateGt?: string;
   dateLt?: string;
 }
@@ -30,9 +44,25 @@ export interface StoredBlock {
   averagePriorityFeeWei: string;
 }
 
+export interface StoredBlockRange {
+  rangeStart: number;
+  rangeEnd: number;
+  minBlockDate: string;
+  maxBlockDate: string;
+  minBaseFeeWei: string;
+  maxBaseFeeWei: string;
+  averageBaseFeeWei: string;
+  totalGasUsed: string;
+  totalMaxGas: string;
+  transactionCount: number;
+  averagePriorityFeeWeightedWei: string;
+  averagePriorityFeeWei: string;
+}
+
 export class ScannerStorage {
   private readonly insertBlock;
   private readonly upsertState;
+  private readonly insertBlockRange;
 
   constructor(private readonly db: Database) {
     this.db.exec(`
@@ -53,6 +83,22 @@ export class ScannerStorage {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS block_ranges (
+        range_start INTEGER PRIMARY KEY,
+        range_end INTEGER NOT NULL,
+        min_block_date TEXT NOT NULL,
+        max_block_date TEXT NOT NULL,
+        min_base_fee_wei TEXT NOT NULL,
+        max_base_fee_wei TEXT NOT NULL,
+        average_base_fee_wei TEXT NOT NULL,
+        total_gas_used TEXT NOT NULL,
+        total_max_gas TEXT NOT NULL,
+        transaction_count INTEGER NOT NULL,
+        average_priority_fee_weighted_wei TEXT NOT NULL,
+        average_priority_fee_wei TEXT NOT NULL,
+        aggregated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
@@ -77,6 +123,24 @@ export class ScannerStorage {
       ON CONFLICT(key) DO UPDATE SET
         value = excluded.value,
         updated_at = CURRENT_TIMESTAMP
+    `);
+
+    this.insertBlockRange = this.db.prepare(`
+      INSERT OR REPLACE INTO block_ranges (
+        range_start,
+        range_end,
+        min_block_date,
+        max_block_date,
+        min_base_fee_wei,
+        max_base_fee_wei,
+        average_base_fee_wei,
+        total_gas_used,
+        total_max_gas,
+        transaction_count,
+        average_priority_fee_weighted_wei,
+        average_priority_fee_wei,
+        aggregated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `);
   }
 
@@ -202,6 +266,139 @@ export class ScannerStorage {
       maxGasInBlock: row.max_gas_in_block,
       transactionCount: row.transaction_count,
       averageTransactionFeeWei: row.average_transaction_fee_wei,
+      averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
+      averagePriorityFeeWei: row.average_priority_fee_wei,
+    }));
+  }
+
+  getBlocksForRange(rangeStart: bigint): StoredBlock[] {
+    if (rangeStart < 0n || rangeStart % RANGE_SIZE !== 0n) {
+      throw new Error(
+        `Range start ${rangeStart.toString()} must be a non-negative multiple of ${RANGE_SIZE}`,
+      );
+    }
+    const rangeEnd = rangeEndFor(rangeStart);
+    if (rangeEnd > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("Range end exceeds the supported integer range");
+    }
+    return this.queryBlocks({
+      blockGt: rangeStart - 1n,
+      blockLt: rangeEnd + 1n,
+    });
+  }
+
+  aggregateRangeIfComplete(rangeStart: bigint): BlockRangeMetrics | undefined {
+    const blocks = this.getBlocksForRange(rangeStart);
+    if (BigInt(blocks.length) !== RANGE_SIZE) {
+      return undefined;
+    }
+    const metrics = computeBlockRange(rangeStart, blocks);
+    this.saveBlockRange(metrics);
+    return metrics;
+  }
+
+  saveBlockRange(metrics: BlockRangeMetrics): void {
+    if (metrics.rangeEnd > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("SQLite range storage only supports JavaScript safe integers");
+    }
+    this.insertBlockRange.run(
+      Number(metrics.rangeStart),
+      Number(metrics.rangeEnd),
+      metrics.minBlockDate,
+      metrics.maxBlockDate,
+      metrics.minBaseFeeWei,
+      metrics.maxBaseFeeWei,
+      metrics.averageBaseFeeWei,
+      metrics.totalGasUsed,
+      metrics.totalMaxGas,
+      metrics.transactionCount,
+      metrics.averagePriorityFeeWeightedWei,
+      metrics.averagePriorityFeeWei,
+    );
+  }
+
+  queryBlockRanges(filter: BlockRangeQueryFilter = {}): StoredBlockRange[] {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filter.rangeStartGt !== undefined) {
+      if (filter.rangeStartGt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("rangeStartGt exceeds the supported integer range");
+      }
+      clauses.push("range_start > ?");
+      params.push(Number(filter.rangeStartGt));
+    }
+
+    if (filter.rangeStartLt !== undefined) {
+      if (filter.rangeStartLt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("rangeStartLt exceeds the supported integer range");
+      }
+      clauses.push("range_start < ?");
+      params.push(Number(filter.rangeStartLt));
+    }
+
+    if (filter.dateGt !== undefined) {
+      clauses.push("max_block_date > ?");
+      params.push(filter.dateGt);
+    }
+
+    if (filter.dateLt !== undefined) {
+      clauses.push("min_block_date < ?");
+      params.push(filter.dateLt);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const sql = `
+      SELECT
+        range_start,
+        range_end,
+        min_block_date,
+        max_block_date,
+        min_base_fee_wei,
+        max_base_fee_wei,
+        average_base_fee_wei,
+        total_gas_used,
+        total_max_gas,
+        transaction_count,
+        average_priority_fee_weighted_wei,
+        average_priority_fee_wei
+      FROM block_ranges
+      ${where}
+      ORDER BY range_start ASC
+      LIMIT ?
+    `;
+
+    const rows = this.db
+      .query<
+        {
+          range_start: number;
+          range_end: number;
+          min_block_date: string;
+          max_block_date: string;
+          min_base_fee_wei: string;
+          max_base_fee_wei: string;
+          average_base_fee_wei: string;
+          total_gas_used: string;
+          total_max_gas: string;
+          transaction_count: number;
+          average_priority_fee_weighted_wei: string;
+          average_priority_fee_wei: string;
+        },
+        Array<string | number>
+      >(sql)
+      .all(...params, MAX_RANGES_PER_QUERY);
+
+    return rows.map((row) => ({
+      rangeStart: row.range_start,
+      rangeEnd: row.range_end,
+      minBlockDate: row.min_block_date,
+      maxBlockDate: row.max_block_date,
+      minBaseFeeWei: row.min_base_fee_wei,
+      maxBaseFeeWei: row.max_base_fee_wei,
+      averageBaseFeeWei: row.average_base_fee_wei,
+      totalGasUsed: row.total_gas_used,
+      totalMaxGas: row.total_max_gas,
+      transactionCount: row.transaction_count,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
     }));

@@ -38,6 +38,11 @@ SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan -
 - `src/storage.ts` uses Bun's built-in `bun:sqlite`.
 - `src/scanner.ts` owns retry and resume behavior.
 - `src/metrics.ts` owns all block metric calculations.
-- `src/server.ts` exposes `GET /blocks` (built on `Bun.serve`) and serves stored rows. Range filters
-  `blockGt`, `blockLt`, `dateGt`, `dateLt` combine additively; results are always capped at the smallest
-  10,000 matching rows. Entry point: `src/serve.ts` (`bun run serve`).
+- `src/server.ts` exposes `GET /blocks` and `GET /ranges` (built on `Bun.serve`). `/blocks` serves stored
+  rows with filters `blockGt`, `blockLt`, `dateGt`, `dateLt`; `/ranges` serves aggregated 100-block
+  windows with filters `rangeStartGt`, `rangeStartLt`, `dateGt`, `dateLt`. All filters combine
+  additively; results are always capped at the smallest 10,000 matching rows. Entry point:
+  `src/serve.ts` (`bun run serve`).
+- `src/ranges.ts` owns the per-100-block aggregation math. Range boundaries are fixed at
+  `[k * 100, k * 100 + 99]`. The scanner calls `storage.aggregateRangeIfComplete(rangeStart)` after
+  each block save; the row is written only when all 100 blocks in the window are stored.

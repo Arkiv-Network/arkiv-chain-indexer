@@ -36,6 +36,20 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics[0]?.transactionCount).toBe(4);
   });
 
+  test("triggers range aggregation for the block's 100-block window after storing", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+
+    await scanOneBlock(
+      245_650n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+    );
+
+    expect(storage.aggregatedRanges).toEqual([245_600n]);
+  });
+
   test("waits for all receipt jobs to settle before failing the block", async () => {
     const rpc = new ControlledReceiptRpc(blockWithTransactions(3));
     const storage = new FakeStorage();
@@ -251,6 +265,7 @@ class ControlledReceiptRpc {
 
 class FakeStorage {
   savedMetrics: BlockMetrics[] = [];
+  aggregatedRanges: bigint[] = [];
   lastSuccessfulBlock: bigint | undefined;
   backfillNextBlock: bigint | undefined;
 
@@ -278,6 +293,11 @@ class FakeStorage {
       case "none":
         return;
     }
+  }
+
+  aggregateRangeIfComplete(rangeStart: bigint): undefined {
+    this.aggregatedRanges.push(rangeStart);
+    return undefined;
   }
 }
 
