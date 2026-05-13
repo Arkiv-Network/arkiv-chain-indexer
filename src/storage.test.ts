@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ScannerStorage } from "./storage";
+import { MAX_BLOCKS_PER_QUERY, ScannerStorage } from "./storage";
+import type { BlockMetrics } from "./types";
 
 const tempDirs: string[] = [];
 
@@ -101,6 +102,138 @@ describe("ScannerStorage", () => {
     reopened.close();
   });
 });
+
+describe("ScannerStorage.queryBlocks", () => {
+  test("returns blocks ordered ascending by block number", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    for (const blockNumber of [3n, 1n, 2n]) {
+      storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+    }
+
+    const result = storage.queryBlocks();
+    expect(result.map((row) => row.blockNumber)).toEqual([1, 2, 3]);
+    storage.close();
+  });
+
+  test("returns all stored fields in camelCase", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    storage.saveBlockMetrics(
+      blockMetricsFixture({
+        blockNumber: 7n,
+        blockDate: "2024-02-01T00:00:00.000Z",
+        baseBlockFeeWei: "12345",
+        totalGasUsed: "21000",
+        maxGasInBlock: "30000000",
+        transactionCount: 5,
+        averageTransactionFeeWei: "42",
+        averagePriorityFeeWeightedWei: "11",
+        averagePriorityFeeWei: "7",
+      }),
+    );
+
+    const [row] = storage.queryBlocks();
+    expect(row).toEqual({
+      blockNumber: 7,
+      blockDate: "2024-02-01T00:00:00.000Z",
+      baseBlockFeeWei: "12345",
+      totalGasUsed: "21000",
+      maxGasInBlock: "30000000",
+      transactionCount: 5,
+      averageTransactionFeeWei: "42",
+      averagePriorityFeeWeightedWei: "11",
+      averagePriorityFeeWei: "7",
+    });
+    storage.close();
+  });
+
+  test("filters by blockGt and blockLt exclusively and combines them additively", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    for (let blockNumber = 10n; blockNumber <= 20n; blockNumber += 1n) {
+      storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+    }
+
+    const result = storage.queryBlocks({ blockGt: 12n, blockLt: 16n });
+    expect(result.map((row) => row.blockNumber)).toEqual([13, 14, 15]);
+    storage.close();
+  });
+
+  test("filters by dateGt and dateLt exclusively", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    const samples = [
+      { blockNumber: 1n, blockDate: "2024-01-01T00:00:00.000Z" },
+      { blockNumber: 2n, blockDate: "2024-01-02T00:00:00.000Z" },
+      { blockNumber: 3n, blockDate: "2024-01-03T00:00:00.000Z" },
+      { blockNumber: 4n, blockDate: "2024-01-04T00:00:00.000Z" },
+    ];
+    for (const sample of samples) {
+      storage.saveBlockMetrics(blockMetricsFixture(sample));
+    }
+
+    const result = storage.queryBlocks({
+      dateGt: "2024-01-01T00:00:00.000Z",
+      dateLt: "2024-01-04T00:00:00.000Z",
+    });
+    expect(result.map((row) => row.blockNumber)).toEqual([2, 3]);
+    storage.close();
+  });
+
+  test("treats date and block filters additively", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    const samples = [
+      { blockNumber: 1n, blockDate: "2024-01-01T00:00:00.000Z" },
+      { blockNumber: 2n, blockDate: "2024-01-02T00:00:00.000Z" },
+      { blockNumber: 3n, blockDate: "2024-01-03T00:00:00.000Z" },
+      { blockNumber: 4n, blockDate: "2024-01-04T00:00:00.000Z" },
+    ];
+    for (const sample of samples) {
+      storage.saveBlockMetrics(blockMetricsFixture(sample));
+    }
+
+    const result = storage.queryBlocks({
+      blockGt: 1n,
+      dateLt: "2024-01-04T00:00:00.000Z",
+    });
+    expect(result.map((row) => row.blockNumber)).toEqual([2, 3]);
+    storage.close();
+  });
+
+  test("truncates to the smallest MAX_BLOCKS_PER_QUERY blocks", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    const total = MAX_BLOCKS_PER_QUERY + 5;
+    for (let i = 1; i <= total; i += 1) {
+      storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: BigInt(i) }));
+    }
+
+    const result = storage.queryBlocks();
+    expect(result.length).toBe(MAX_BLOCKS_PER_QUERY);
+    expect(result[0]?.blockNumber).toBe(1);
+    expect(result[result.length - 1]?.blockNumber).toBe(MAX_BLOCKS_PER_QUERY);
+    storage.close();
+  });
+
+  test("returns empty array when no blocks match", () => {
+    const storage = ScannerStorage.open(tempDbPath());
+    storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 1n }));
+
+    expect(storage.queryBlocks({ blockGt: 1000n })).toEqual([]);
+    storage.close();
+  });
+});
+
+function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetrics {
+  return {
+    blockDate: "2024-01-01T00:00:00.000Z",
+    blockNumber: 1n,
+    baseBlockFeeWei: "100",
+    totalGasUsed: "21000",
+    maxGasInBlock: "30000000",
+    transactionCount: 1,
+    averageTransactionFeeWei: "2310000",
+    averagePriorityFeeWeightedWei: "10",
+    averagePriorityFeeWei: "10",
+    ...overrides,
+  };
+}
 
 function tempDbPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "gas-price-tracker-"));

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "scan": "bun run src/index.ts",
+    "serve": "bun run src/serve.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
