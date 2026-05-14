@@ -80,6 +80,20 @@ const RANGE_COLUMNS: Column<StoredBlockRange>[] = [
     render: (row) => fmtDate(row.maxBlockDate),
   },
   {
+    key: "minBaseFeeWei",
+    label: "Min base fee (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.minBaseFeeWei),
+  },
+  {
+    key: "maxBaseFeeWei",
+    label: "Max base fee (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.maxBaseFeeWei),
+  },
+  {
     key: "averageBaseFeeWei",
     label: "Avg base fee (gwei)",
     className: "num",
@@ -148,6 +162,20 @@ const RANGE_COLUMNS: Column<StoredBlockRange>[] = [
     className: "num",
     width: "7rem",
     render: (row) => row.transactionCount,
+  },
+  {
+    key: "minMaxGasInBlock",
+    label: "Min block gas limit",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtInteger(row.minMaxGasInBlock),
+  },
+  {
+    key: "maxMaxGasInBlock",
+    label: "Max block gas limit",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtInteger(row.maxMaxGasInBlock),
   },
   {
     key: "gasUsed",

@@ -25,6 +25,8 @@ export interface BlockRangeMetrics {
   averageBaseFeeWei: string;
   totalGasUsed: string;
   totalMaxGas: string;
+  minMaxGasInBlock: string;
+  maxMaxGasInBlock: string;
   transactionCount: number;
   totalBlockRewardWei: string;
   totalBurntFeesWei: string;
@@ -114,6 +116,8 @@ export function computeBlockRange(
   let baseFeeSum = 0n;
   let totalGasUsed = 0n;
   let totalMaxGas = 0n;
+  let minMaxGasInBlock = BigInt(blocks[0]!.maxGasInBlock);
+  let maxMaxGasInBlock = minMaxGasInBlock;
   let totalBlockReward = 0n;
   let totalBurntFees = 0n;
   let transactionCount = 0;
@@ -135,6 +139,8 @@ export function computeBlockRange(
     const maxGas = BigInt(block.maxGasInBlock);
     totalGasUsed += gasUsed;
     totalMaxGas += maxGas;
+    if (maxGas < minMaxGasInBlock) minMaxGasInBlock = maxGas;
+    if (maxGas > maxMaxGasInBlock) maxMaxGasInBlock = maxGas;
 
     transactionCount += block.transactionCount;
     const gasWeight = priorityFeeGasWeightFor(block);
@@ -179,6 +185,8 @@ export function computeBlockRange(
     averageBaseFeeWei: averageBaseFee.toString(),
     totalGasUsed: totalGasUsed.toString(),
     totalMaxGas: totalMaxGas.toString(),
+    minMaxGasInBlock: minMaxGasInBlock.toString(),
+    maxMaxGasInBlock: maxMaxGasInBlock.toString(),
     transactionCount,
     totalBlockRewardWei: totalBlockReward.toString(),
     totalBurntFeesWei: totalBurntFees.toString(),
