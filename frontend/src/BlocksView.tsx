@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { fetchBlocks, type BlocksResponse } from "./api";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
@@ -33,6 +33,72 @@ const EMPTY: Filters = {
   dateLt: "",
   limit: "1000",
 };
+
+interface Column<T> {
+  key: string;
+  label: string;
+  className?: string;
+  width: string;
+  render: (row: T) => ReactNode;
+}
+
+const BLOCK_COLUMNS: Column<StoredBlock>[] = [
+  {
+    key: "block",
+    label: "Block",
+    className: "num",
+    width: "7.5rem",
+    render: (row) => row.blockNumber,
+  },
+  {
+    key: "date",
+    label: "Date",
+    width: "12.5rem",
+    render: (row) => fmtDate(row.blockDate),
+  },
+  {
+    key: "transactionCount",
+    label: "Tx count",
+    className: "num",
+    width: "6rem",
+    render: (row) => row.transactionCount,
+  },
+  {
+    key: "baseBlockFeeWei",
+    label: "Base fee (gwei)",
+    className: "num",
+    width: "9rem",
+    render: (row) => fmtGwei(row.baseBlockFeeWei),
+  },
+  {
+    key: "averagePriorityFeeWei",
+    label: "Avg priority fee (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.averagePriorityFeeWei),
+  },
+  {
+    key: "averagePriorityFeeWeightedWei",
+    label: "Weighted avg priority (gwei)",
+    className: "num",
+    width: "13rem",
+    render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
+  },
+  {
+    key: "averageTransactionFeeWei",
+    label: "Avg tx fee (gwei)",
+    className: "num",
+    width: "10rem",
+    render: (row) => fmtGwei(row.averageTransactionFeeWei),
+  },
+  {
+    key: "gasUsed",
+    label: "Gas used / limit",
+    className: "num",
+    width: "15rem",
+    render: (row) => fmtRatio(row.totalGasUsed, row.maxGasInBlock),
+  },
+];
 
 function buildParams(filters: Filters): URLSearchParams {
   const params = new URLSearchParams();
@@ -156,30 +222,29 @@ export function BlocksView({ locationSearch, onLocationChange }: BlocksViewProps
         {copyStatus ? <span>{copyStatus}</span> : null}
       </div>
       <div className="table-wrap">
-        <table>
+        <table className="data-table">
+          <colgroup>
+            {BLOCK_COLUMNS.map((column) => (
+              <col key={column.key} style={{ width: column.width }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
-              <th>Block</th>
-              <th>Date</th>
-              <th>Tx count</th>
-              <th>Base fee (gwei)</th>
-              <th>Avg priority fee (gwei)</th>
-              <th>Weighted avg priority (gwei)</th>
-              <th>Avg tx fee (gwei)</th>
-              <th>Gas used / limit</th>
+              {BLOCK_COLUMNS.map((column) => (
+                <th key={column.key} scope="col" className={column.className}>
+                  {column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {sorted.map((row) => (
               <tr key={row.blockNumber}>
-                <td className="num">{row.blockNumber}</td>
-                <td>{fmtDate(row.blockDate)}</td>
-                <td className="num">{row.transactionCount}</td>
-                <td className="num">{fmtGwei(row.baseBlockFeeWei)}</td>
-                <td className="num">{fmtGwei(row.averagePriorityFeeWei)}</td>
-                <td className="num">{fmtGwei(row.averagePriorityFeeWeightedWei)}</td>
-                <td className="num">{fmtGwei(row.averageTransactionFeeWei)}</td>
-                <td className="num">{fmtRatio(row.totalGasUsed, row.maxGasInBlock)}</td>
+                {BLOCK_COLUMNS.map((column) => (
+                  <td key={column.key} className={column.className} data-label={column.label}>
+                    {column.render(row)}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>

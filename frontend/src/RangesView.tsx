@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { fetchRanges, type RangesResponse } from "./api";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { fetchRanges, type RangesResponse, type StoredBlockRange } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
@@ -36,6 +36,85 @@ const EMPTY: Filters = {
   dateLt: "",
   limit: "1000",
 };
+
+interface Column<T> {
+  key: string;
+  label: string;
+  className?: string;
+  width: string;
+  render: (row: T) => ReactNode;
+}
+
+const RANGE_COLUMNS: Column<StoredBlockRange>[] = [
+  {
+    key: "rangeSize",
+    label: "Range size",
+    className: "num",
+    width: "7rem",
+    render: (row) => row.rangeSize,
+  },
+  {
+    key: "rangeStart",
+    label: "Start",
+    className: "num",
+    width: "7.5rem",
+    render: (row) => row.rangeStart,
+  },
+  {
+    key: "rangeEnd",
+    label: "End",
+    className: "num",
+    width: "7.5rem",
+    render: (row) => row.rangeEnd,
+  },
+  {
+    key: "minBlockDate",
+    label: "Min date",
+    width: "12.5rem",
+    render: (row) => fmtDate(row.minBlockDate),
+  },
+  {
+    key: "maxBlockDate",
+    label: "Max date",
+    width: "12.5rem",
+    render: (row) => fmtDate(row.maxBlockDate),
+  },
+  {
+    key: "averageBaseFeeWei",
+    label: "Avg base fee (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.averageBaseFeeWei),
+  },
+  {
+    key: "averagePriorityFeeWei",
+    label: "Avg priority fee (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.averagePriorityFeeWei),
+  },
+  {
+    key: "averagePriorityFeeWeightedWei",
+    label: "Weighted avg priority (gwei)",
+    className: "num",
+    width: "13rem",
+    render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
+  },
+  {
+    key: "transactionCount",
+    label: "Tx count",
+    className: "num",
+    width: "7rem",
+    render: (row) => row.transactionCount,
+  },
+  {
+    key: "gasUsed",
+    label: "Gas used / total max",
+    className: "num",
+    width: "16rem",
+    render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
+  },
+];
 
 function buildParams(filters: Filters): URLSearchParams {
   const params = new URLSearchParams();
@@ -189,34 +268,29 @@ export function RangesView({ locationSearch, onLocationChange }: RangesViewProps
         {copyStatus ? <span>{copyStatus}</span> : null}
       </div>
       <div className="table-wrap">
-        <table>
+        <table className="data-table">
+          <colgroup>
+            {RANGE_COLUMNS.map((column) => (
+              <col key={column.key} style={{ width: column.width }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
-              <th>Range size</th>
-              <th>Start</th>
-              <th>End</th>
-              <th>Min date</th>
-              <th>Max date</th>
-              <th>Avg base fee (gwei)</th>
-              <th>Avg priority fee (gwei)</th>
-              <th>Weighted avg priority (gwei)</th>
-              <th>Tx count</th>
-              <th>Gas used / total max</th>
+              {RANGE_COLUMNS.map((column) => (
+                <th key={column.key} scope="col" className={column.className}>
+                  {column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {sorted.map((row) => (
               <tr key={`${row.rangeSize}-${row.rangeStart}`}>
-                <td className="num">{row.rangeSize}</td>
-                <td className="num">{row.rangeStart}</td>
-                <td className="num">{row.rangeEnd}</td>
-                <td>{fmtDate(row.minBlockDate)}</td>
-                <td>{fmtDate(row.maxBlockDate)}</td>
-                <td className="num">{fmtGwei(row.averageBaseFeeWei)}</td>
-                <td className="num">{fmtGwei(row.averagePriorityFeeWei)}</td>
-                <td className="num">{fmtGwei(row.averagePriorityFeeWeightedWei)}</td>
-                <td className="num">{row.transactionCount}</td>
-                <td className="num">{fmtRatio(row.totalGasUsed, row.totalMaxGas)}</td>
+                {RANGE_COLUMNS.map((column) => (
+                  <td key={column.key} className={column.className} data-label={column.label}>
+                    {column.render(row)}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
