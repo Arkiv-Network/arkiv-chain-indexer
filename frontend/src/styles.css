@@ -63,24 +63,8 @@ nav button.active {
   color: var(--accent);
 }
 
-.connection {
-  margin-left: auto;
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.connection input {
-  width: 24rem;
-  max-width: 50vw;
-}
-
 main {
   padding: 1.5rem;
-}
-
-.view.hidden {
-  display: none;
 }
 
 form {

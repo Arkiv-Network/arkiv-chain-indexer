@@ -23,9 +23,11 @@ docker compose up --build
 
 Open:
 
-- Frontend: <http://localhost:8080>
-- Backend API: <http://localhost:3000/blocks> and <http://localhost:3000/ranges>
+- Frontend: <http://localhost:23560> (the React app talks to the backend through the same origin at `/api/*`)
+- Backend API (direct): <http://localhost:3000/blocks> and <http://localhost:3000/ranges>
 - Postgres: `postgres://gas:gas@localhost:5432/gas`
+
+The frontend container is a tiny Node `server.js` that serves the Vite-built React app from `dist/` and reverse-proxies any request starting with `/api/` to the `backend` service (the `/api` prefix is stripped). This means you don't need to expose the backend publicly — only port `23560` on the host is required for end users.
 
 The aggregator container runs `bun run aggregate-all` which walks every supported range size and sleeps for one
 minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
@@ -276,12 +278,46 @@ bun run serve -- --help
 
 ## Frontend
 
-A minimal static frontend lives in `frontend/`. It is served by the compose stack via nginx on port `8080` and
-talks to the backend at `http://localhost:3000` by default. Use the **Backend** input at the top of the page to
-point it at a different host. Two views are provided:
+A Vite + React + TypeScript app lives in `frontend/`. It is served in production by `frontend/server.js`, a tiny
+dependency-free Node HTTP server that:
+
+1. Serves the Vite build output (`frontend/dist/`) as static files on port `23560`.
+2. Reverse-proxies any request whose path starts with `/api/` to the `backend` service (stripping the `/api`
+   prefix). For example a browser request to `/api/blocks?blockGt=1` is forwarded to `http://backend:3000/blocks?blockGt=1`.
+3. Falls back to `index.html` for any other unknown path (SPA routing).
+
+Two views are provided:
 
 - **Blocks** — paged table of stored blocks with `blockGt`, `blockLt`, `dateGt`, `dateLt` filters.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
+
+### Frontend configuration
+
+The frontend container reads these env vars:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `23560` | TCP port the frontend HTTP server listens on. |
+| `HOST` | `0.0.0.0` | Interface to bind. |
+| `BACKEND_HOST` | `backend` | Hostname (compose service name) of the backend. |
+| `BACKEND_PORT` | `3000` | Backend TCP port. |
+
+### Developing the frontend locally
+
+```sh
+cd frontend
+npm install
+npm run dev   # vite dev server on http://localhost:5173, proxies /api -> http://localhost:3000
+```
+
+Or build + run the production server locally:
+
+```sh
+cd frontend
+npm install
+npm run build
+BACKEND_HOST=localhost BACKEND_PORT=3000 PORT=23560 node server.js
+```
 
 ## Tests
 
