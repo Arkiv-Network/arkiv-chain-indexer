@@ -1,5 +1,4 @@
 node_modules/
-scanner.sqlite
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
+.env
+.env.local
+.env.*.local

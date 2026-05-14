@@ -1,0 +1,12 @@
+node_modules
+.git
+.gitignore
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+README.md
+AGENTS.md
+.env
+.env.local
+.env.*.local
+frontend

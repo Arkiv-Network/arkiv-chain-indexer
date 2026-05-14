@@ -1,38 +1,61 @@
 # gas-price-tracker
 
-A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block in SQLite.
+A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block in **PostgreSQL**.
 
 The scanner reads blocks sequentially, fetches every transaction receipt in each block, stores one completed
 block at a time, and resumes from the last successfully stored block after restart or failure. Failed block reads
 are retried and never skipped.
 
-## Requirements
+A standalone aggregator computes fixed-size window aggregates (2 / 5 / 10 / 20 / 50 / 100 / 200 / 500 / 1000
+blocks). The HTTP backend serves both per-block rows and aggregated ranges, and a small static frontend lets you
+browse them in a browser.
 
-- [Bun](https://bun.sh/)
-- An Ethereum JSON-RPC full node endpoint
+## Quick start with Docker Compose
 
-Install dependencies:
+The supplied compose stack spins up Postgres, the scanner, the aggregator loop, the backend, and the static
+frontend.
+
+```sh
+cp .env.example .env
+# edit .env and set SCANNER_RPC_FULL_NODE to your JSON-RPC endpoint
+docker compose up --build
+```
+
+Open:
+
+- Frontend: <http://localhost:8080>
+- Backend API: <http://localhost:3000/blocks> and <http://localhost:3000/ranges>
+- Postgres: `postgres://gas:gas@localhost:5432/gas`
+
+The aggregator container runs `bun run aggregate-all` which walks every supported range size and sleeps for one
+minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
+
+To do a quick bounded backfill instead of continuous near-head scanning, set `SCANNER_FROM_BLOCK` and
+`SCANNER_TO_BLOCK` in `.env`.
+
+## Running locally without Docker
+
+Requirements:
+
+- [Bun](https://bun.sh/) 1.3 or newer
+- A PostgreSQL 13+ instance reachable via `DATABASE_URL`
+- An Ethereum JSON-RPC full-node endpoint
 
 ```sh
 bun install
+export DATABASE_URL=postgres://gas:gas@localhost:5432/gas
+export SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/
+bun run scan
 ```
 
-## Quick Start
-
-```sh
-SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
-  bun run scan
-```
-
-By default the scanner writes to `scanner.sqlite` in the current directory. In continuous mode it stays near the
-top of the chain by scanning from the current safe head, spends 20 seconds backfilling older blocks, and then
-scans forward again through the latest safe head. The oldest block it will backfill to defaults to `25000000`.
+In continuous mode the scanner stays near the top of the chain by scanning from the current safe head, spends 20
+seconds backfilling older blocks, and then scans forward again through the latest safe head. The oldest block it
+will backfill to defaults to `25000000`.
 
 For a bounded historical scan, pass both `--from-block` and `--to-block`:
 
 ```sh
-SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
-  bun run scan -- --from-block 19000000 --to-block 19000002
+bun run scan -- --from-block 19000000 --to-block 19000002
 ```
 
 After each block is scanned and stored, the scanner prints a per-block summary:
@@ -50,23 +73,21 @@ Block 19000000 scanned and stored
   RPC: 145 calls, 12.64 KiB sent, 3.41 MiB received (3.42 MiB total)
 ```
 
-RPC call and byte counts are measured from the JSON-RPC requests made during that block scan: the block fetch and
-the sequential transaction receipt fetches. Scanner head polling is outside this per-block summary.
-
 ## Configuration
 
 Configuration can be passed through CLI flags or environment variables.
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
+| `--database-url` | `DATABASE_URL` | **required** | PostgreSQL connection string. |
 | `--from-block` | `SCANNER_FROM_BLOCK` | unset | First block for bounded `--to-block` scans. |
 | `--to-block` | `SCANNER_TO_BLOCK` | unset | Optional inclusive block number to stop at. |
 | `--oldest-backfill-block` | `SCANNER_OLDEST_BACKFILL_BLOCK` | `25000000` | Oldest block the continuous scanner will backfill to. |
-| `--db` | `SCANNER_DB_PATH` | `scanner.sqlite` | SQLite database path. |
 | `--confirmation-depth` | `SCANNER_CONFIRMATION_DEPTH` | `3` | Number of blocks to stay behind the latest head. |
 | `--poll-ms` | `SCANNER_POLL_MS` | `12000` | Delay while waiting for new safe blocks. |
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
-| n/a | `SCANNER_RPC_FULL_NODE` | required | Ethereum JSON-RPC endpoint. |
+| `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Max receipt RPC calls in flight per block. |
+| n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Show help:
 
@@ -82,7 +103,7 @@ lose precision.
 | Column | Meaning |
 | --- | --- |
 | `block_date` | Block timestamp as an ISO-8601 UTC string. |
-| `block_number` | Ethereum block number. |
+| `block_number` | Ethereum block number (PostgreSQL `BIGINT`). |
 | `base_block_fee_wei` | Block `baseFeePerGas` in wei. Legacy networks without a base fee store `0`. |
 | `total_gas_used` | Block `gasUsed`. |
 | `max_gas_in_block` | Block `gasLimit`; this is the maximum possible gas for that block and can vary by network. |
@@ -117,18 +138,27 @@ Supported range sizes:
 2, 5, 10, 20, 50, 100, 200, 500, 1000
 ```
 
-Aggregation runs as a separate command — the scanner no longer aggregates inline:
+Two aggregation runners are available:
 
-```sh
-bun run aggregate -- --range 50
-```
+- **One-shot, single size**:
 
-The aggregator walks every aligned window from `floor(min_stored_block / M) * M` up through the highest
-stored block, and writes a row only for windows where all `M` blocks are present in `blocks`. Incomplete
-windows are skipped (and can be re-aggregated later once the missing blocks are scanned).
+  ```sh
+  bun run aggregate -- --range 50
+  ```
 
-You can run the aggregator multiple times with different `--range` values; each size lives independently
-in `block_ranges` keyed by `(range_size, range_start)`.
+- **Periodic, every supported size** (used by the compose `aggregator` service):
+
+  ```sh
+  bun run aggregate-all
+  # or, in a one-shot sweep:
+  bun run aggregate-all -- --once
+  ```
+
+Each aggregator run walks every aligned window from `floor(min_stored_block / M) * M` up through the highest
+stored block, and writes a row only for windows where all `M` blocks are present in `blocks`. Incomplete windows
+are skipped (and can be re-aggregated later once the missing blocks are scanned).
+
+Each size lives independently in `block_ranges` keyed by `(range_size, range_start)`.
 
 | Column | Meaning |
 | --- | --- |
@@ -143,17 +173,19 @@ in `block_ranges` keyed by `(range_size, range_start)`.
 | `average_priority_fee_weighted_wei` | `sum(block.average_priority_fee_weighted_wei * block.total_gas_used) / sum(block.total_gas_used)`. |
 | `average_priority_fee_wei` | `sum(block.average_priority_fee_wei * block.transaction_count) / sum(block.transaction_count)`. |
 
-When `total_gas_used` or `transaction_count` for the window is `0` the corresponding weighted average
-is stored as `0`.
+When `total_gas_used` or `transaction_count` for the window is `0` the corresponding weighted average is stored
+as `0`.
 
 #### Aggregator options
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
-| `--range` | `AGGREGATE_RANGE` | required | Window size. One of: 2, 5, 10, 20, 50, 100, 200, 500, 1000. |
-| `--db` | `SCANNER_DB_PATH` | `scanner.sqlite` | SQLite database path. Shared with the scanner. |
+| `--range` | `AGGREGATE_RANGE` | required (single-range) | Window size. One of: 2, 5, 10, 20, 50, 100, 200, 500, 1000. |
+| `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--from-block` | `AGGREGATE_FROM_BLOCK` | unset | Optional lower bound on the windows to consider. |
 | `--to-block` | `AGGREGATE_TO_BLOCK` | unset | Optional upper bound on the windows to consider. |
+| `--interval-ms` | `AGGREGATE_INTERVAL_MS` | `60000` | (aggregate-all) sleep between full sweeps. |
+| `--once` | n/a | unset | (aggregate-all) run one sweep then exit. |
 
 ## Resume Behavior
 
@@ -164,7 +196,7 @@ For bounded scans:
 
 1. If progress exists, scanning resumes from `last_successful_block + 1`.
 2. If no progress exists, scanning starts from `--from-block`.
-3. A block and the progress update are committed in the same SQLite transaction.
+3. A block and the progress update are committed in the same PostgreSQL transaction.
 4. If reading, computing, or writing a block fails, progress is not advanced.
 5. The scanner retries the same block after `--retry-ms`.
 
@@ -179,16 +211,17 @@ This means failed block reads are not skipped.
 
 ## HTTP Server
 
-A read-only HTTP server is included that serves stored block rows from the same SQLite database. Run it
+A read-only HTTP server is included that serves stored block rows from the same PostgreSQL database. Run it
 alongside the scanner (or against an existing database):
 
 ```sh
-SCANNER_DB_PATH=./scanner.sqlite bun run serve
+DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run serve
 # or
-bun run serve -- --db ./scanner.sqlite --port 3000
+bun run serve -- --database-url postgres://gas:gas@localhost:5432/gas --port 3000
 ```
 
-By default the server listens on port `3000` and reads from `scanner.sqlite`.
+By default the server listens on port `3000`. CORS headers are set on every response so the static frontend can
+fetch from a different origin.
 
 ### `GET /blocks`
 
@@ -196,12 +229,12 @@ Returns stored block rows ordered by `block_number` ascending. The response is a
 rows** (smallest matching blocks first). All four filters below are optional and combine additively (AND).
 With no filters the smallest 10,000 stored blocks are returned.
 
-| Query parameter | Description | SQL applied |
-| --- | --- | --- |
-| `blockGt` | Only blocks with `block_number > blockGt` | `block_number > ?` |
-| `blockLt` | Only blocks with `block_number < blockLt` | `block_number < ?` |
-| `dateGt` | ISO-8601 timestamp; only blocks newer than this | `block_date > ?` |
-| `dateLt` | ISO-8601 timestamp; only blocks older than this | `block_date < ?` |
+| Query parameter | Description |
+| --- | --- |
+| `blockGt` | Only blocks with `block_number > blockGt`. |
+| `blockLt` | Only blocks with `block_number < blockLt`. |
+| `dateGt` | ISO-8601 timestamp; only blocks newer than this. |
+| `dateLt` | ISO-8601 timestamp; only blocks older than this. |
 
 Example:
 
@@ -209,56 +242,19 @@ Example:
 curl 'http://localhost:3000/blocks?blockGt=19000000&blockLt=19000005'
 ```
 
-Response shape:
-
-```json
-{
-  "count": 4,
-  "limit": 10000,
-  "truncated": false,
-  "filters": {
-    "blockGt": "19000000",
-    "blockLt": "19000005",
-    "dateGt": null,
-    "dateLt": null
-  },
-  "blocks": [
-    {
-      "blockNumber": 19000001,
-      "blockDate": "2024-01-14T08:56:35.000Z",
-      "baseBlockFeeWei": "...",
-      "totalGasUsed": "...",
-      "maxGasInBlock": "...",
-      "transactionCount": 144,
-      "averageTransactionFeeWei": "...",
-      "averagePriorityFeeWeightedWei": "...",
-      "averagePriorityFeeWei": "..."
-    }
-  ]
-}
-```
-
-`truncated` is `true` when the 10,000-row cap was hit and the matching range may contain more rows.
-
-Validation errors (invalid integers, invalid dates) return `400` with `{ "error": "..." }`. Unknown paths
-return `404`; non-`GET` requests return `405`.
-
 ### `GET /ranges`
 
 Returns aggregated fixed-size windows ordered by `range_start` ascending. Each request targets a single
-range size via the `rangeSize` query parameter (defaults to `100`). Each window covers
-`[k * rangeSize, k * rangeSize + rangeSize - 1]` and is written only after all blocks in that window
-have been stored and the aggregator has run for that size. Responses are capped at **10,000 ranges**
-(smallest matching `range_start` first). If no aggregates exist for the requested `rangeSize`, the
-response is `{ "count": 0, "ranges": [] }`.
+range size via the `rangeSize` query parameter (defaults to `100`). Responses are capped at **10,000 ranges**.
+If no aggregates exist for the requested `rangeSize`, the response is `{ "count": 0, "ranges": [] }`.
 
-| Query parameter | Description | SQL applied |
-| --- | --- | --- |
-| `rangeSize` | Window size. One of: 2, 5, 10, 20, 50, 100, 200, 500, 1000. Defaults to `100`. | `range_size = ?` |
-| `rangeStartGt` | Only ranges with `range_start > rangeStartGt` | `range_start > ?` |
-| `rangeStartLt` | Only ranges with `range_start < rangeStartLt` | `range_start < ?` |
-| `dateGt` | ISO-8601 timestamp; only ranges whose `max_block_date` is newer than this | `max_block_date > ?` |
-| `dateLt` | ISO-8601 timestamp; only ranges whose `min_block_date` is older than this | `min_block_date < ?` |
+| Query parameter | Description |
+| --- | --- |
+| `rangeSize` | Window size. One of: 2, 5, 10, 20, 50, 100, 200, 500, 1000. Defaults to `100`. |
+| `rangeStartGt` | Only ranges with `range_start > rangeStartGt`. |
+| `rangeStartLt` | Only ranges with `range_start < rangeStartLt`. |
+| `dateGt` | ISO-8601 timestamp; only ranges whose `max_block_date` is newer than this. |
+| `dateLt` | ISO-8601 timestamp; only ranges whose `min_block_date` is older than this. |
 
 Example:
 
@@ -266,55 +262,26 @@ Example:
 curl 'http://localhost:3000/ranges?rangeSize=50&rangeStartGt=245500&rangeStartLt=245700'
 ```
 
-Response shape:
-
-```json
-{
-  "count": 2,
-  "limit": 10000,
-  "truncated": false,
-  "filters": {
-    "rangeSize": "50",
-    "rangeStartGt": "245500",
-    "rangeStartLt": "245700",
-    "dateGt": null,
-    "dateLt": null
-  },
-  "ranges": [
-    {
-      "rangeSize": 50,
-      "rangeStart": 245550,
-      "rangeEnd": 245599,
-      "minBlockDate": "...",
-      "maxBlockDate": "...",
-      "minBaseFeeWei": "...",
-      "maxBaseFeeWei": "...",
-      "averageBaseFeeWei": "...",
-      "totalGasUsed": "...",
-      "totalMaxGas": "...",
-      "transactionCount": 12345,
-      "averagePriorityFeeWeightedWei": "...",
-      "averagePriorityFeeWei": "..."
-    }
-  ]
-}
-```
-
-`averagePriorityFeeWeightedWei` is weighted by per-block `total_gas_used`. `averagePriorityFeeWei` is
-weighted by per-block `transaction_count`. `averageBaseFeeWei` is the unweighted mean of the window's
-block base fees (integer wei division).
-
 ### Server configuration
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
-| `--db` | `SCANNER_DB_PATH` | `scanner.sqlite` | SQLite database path. Shared with the scanner. |
+| `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
 
 ```sh
 bun run serve -- --help
 ```
+
+## Frontend
+
+A minimal static frontend lives in `frontend/`. It is served by the compose stack via nginx on port `8080` and
+talks to the backend at `http://localhost:3000` by default. Use the **Backend** input at the top of the page to
+point it at a different host. Two views are provided:
+
+- **Blocks** — paged table of stored blocks with `blockGt`, `blockLt`, `dateGt`, `dateLt` filters.
+- **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
 
 ## Tests
 
@@ -324,17 +291,28 @@ Run unit tests:
 bun test
 ```
 
+Pure-logic tests run without any external services. The storage / aggregator / server integration tests skip
+themselves unless you provide a real PostgreSQL instance via `TEST_DATABASE_URL`:
+
+```sh
+TEST_DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun test
+```
+
+Each integration test runs against its own randomly-named schema and drops it on cleanup, so tests can share a
+database without interfering with each other.
+
 Run a short manual smoke scan against the public endpoint:
 
 ```sh
-rm -f scanner.sqlite
-SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
+docker compose up -d postgres
+DATABASE_URL=postgres://gas:gas@localhost:5432/gas \
+  SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
   bun run scan -- --from-block 19000000 --to-block 19000000
 ```
 
 Inspect stored rows:
 
 ```sh
-sqlite3 scanner.sqlite 'select * from blocks limit 1;'
-sqlite3 scanner.sqlite 'select * from scanner_state;'
+docker compose exec postgres psql -U gas -d gas -c 'select * from blocks limit 1;'
+docker compose exec postgres psql -U gas -d gas -c 'select * from scanner_state;'
 ```
