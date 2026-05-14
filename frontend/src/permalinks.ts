@@ -1,0 +1,60 @@
+export type View = "blocks" | "ranges";
+
+const VIEW_PARAM = "view";
+
+export function getCurrentSearch(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.search;
+}
+
+export function readViewFromSearch(search: string): View {
+  const params = new URLSearchParams(search);
+  return params.get(VIEW_PARAM) === "ranges" ? "ranges" : "blocks";
+}
+
+export function readFiltersFromSearch<T extends Record<string, string>>(
+  search: string,
+  keys: readonly (keyof T & string)[],
+  fallback: T,
+): T {
+  const params = new URLSearchParams(search);
+  const next: Record<string, string> = { ...fallback };
+  for (const key of keys) {
+    const value = params.get(key);
+    if (value !== null) next[key] = value;
+  }
+  return next as T;
+}
+
+export function filtersEqual<T extends Record<string, string>>(
+  left: T,
+  right: T,
+  keys: readonly (keyof T & string)[],
+): boolean {
+  return keys.every((key) => left[key] === right[key]);
+}
+
+export function buildPermalinkHref(view: View, filters: Record<string, string>): string {
+  if (typeof window === "undefined") return "";
+
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set(VIEW_PARAM, view);
+
+  for (const [key, value] of Object.entries(filters)) {
+    const trimmed = value.trim();
+    if (trimmed) url.searchParams.set(key, trimmed);
+  }
+
+  return url.toString();
+}
+
+export function writePermalink(view: View, filters: Record<string, string>): boolean {
+  if (typeof window === "undefined") return false;
+
+  const href = buildPermalinkHref(view, filters);
+  if (href === window.location.href) return false;
+
+  window.history.pushState(null, "", href);
+  return true;
+}
