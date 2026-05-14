@@ -7,13 +7,13 @@ async function main(): Promise<void> {
 
   try {
     const config = parseAggregateConfig(process.argv.slice(2));
-    storage = ScannerStorage.open(config.dbPath);
+    storage = await ScannerStorage.open(config.databaseUrl);
 
     console.log(
-      `Aggregating ranges of size ${config.rangeSize.toString()} from ${config.dbPath}`,
+      `Aggregating ranges of size ${config.rangeSize.toString()}`,
     );
 
-    const result = aggregateRanges(storage, {
+    const result = await aggregateRanges(storage, {
       rangeSize: config.rangeSize,
       ...(config.fromBlock !== undefined ? { fromBlock: config.fromBlock } : {}),
       ...(config.toBlock !== undefined ? { toBlock: config.toBlock } : {}),
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     console.error(error);
     process.exitCode = 1;
   } finally {
-    storage?.close();
+    await storage?.close();
   }
 }
 

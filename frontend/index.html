@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gas price tracker</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Gas price tracker</h1>
+      <nav>
+        <button data-view="blocks" class="active">Blocks</button>
+        <button data-view="ranges">Ranges</button>
+      </nav>
+      <div class="connection">
+        <label for="backend">Backend:</label>
+        <input id="backend" type="text" />
+        <button id="reload">Reload</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="view-blocks" class="view">
+        <h2>Latest blocks</h2>
+        <form id="blocks-filter">
+          <label>
+            blockGt
+            <input type="text" name="blockGt" inputmode="numeric" />
+          </label>
+          <label>
+            blockLt
+            <input type="text" name="blockLt" inputmode="numeric" />
+          </label>
+          <label>
+            dateGt (ISO)
+            <input type="text" name="dateGt" placeholder="2024-01-01T00:00:00Z" />
+          </label>
+          <label>
+            dateLt (ISO)
+            <input type="text" name="dateLt" placeholder="2024-12-31T00:00:00Z" />
+          </label>
+          <button type="submit">Search</button>
+        </form>
+        <p id="blocks-summary" class="summary">Loading…</p>
+        <div class="table-wrap">
+          <table id="blocks-table">
+            <thead>
+              <tr>
+                <th>Block</th>
+                <th>Date</th>
+                <th>Tx count</th>
+                <th>Base fee (gwei)</th>
+                <th>Avg priority fee (gwei)</th>
+                <th>Weighted avg priority (gwei)</th>
+                <th>Avg tx fee (gwei)</th>
+                <th>Gas used / limit</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-ranges" class="view hidden">
+        <h2>Aggregated ranges</h2>
+        <form id="ranges-filter">
+          <label>
+            rangeSize
+            <select name="rangeSize">
+              <option>2</option>
+              <option>5</option>
+              <option>10</option>
+              <option>20</option>
+              <option>50</option>
+              <option selected>100</option>
+              <option>200</option>
+              <option>500</option>
+              <option>1000</option>
+            </select>
+          </label>
+          <label>
+            rangeStartGt
+            <input type="text" name="rangeStartGt" inputmode="numeric" />
+          </label>
+          <label>
+            rangeStartLt
+            <input type="text" name="rangeStartLt" inputmode="numeric" />
+          </label>
+          <label>
+            dateGt (ISO)
+            <input type="text" name="dateGt" placeholder="2024-01-01T00:00:00Z" />
+          </label>
+          <label>
+            dateLt (ISO)
+            <input type="text" name="dateLt" placeholder="2024-12-31T00:00:00Z" />
+          </label>
+          <button type="submit">Search</button>
+        </form>
+        <p id="ranges-summary" class="summary">Loading…</p>
+        <div class="table-wrap">
+          <table id="ranges-table">
+            <thead>
+              <tr>
+                <th>Range size</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Min date</th>
+                <th>Max date</th>
+                <th>Avg base fee (gwei)</th>
+                <th>Avg priority fee (gwei)</th>
+                <th>Weighted avg priority (gwei)</th>
+                <th>Tx count</th>
+                <th>Gas used / total max</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

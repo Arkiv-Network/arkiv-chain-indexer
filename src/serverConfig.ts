@@ -1,10 +1,9 @@
 export interface ServerConfig {
-  dbPath: string;
+  databaseUrl: string;
   port: number;
   hostname?: string;
 }
 
-const DEFAULT_DB_PATH = "scanner.sqlite";
 const DEFAULT_PORT = 3000;
 
 export class ServerHelpRequested extends Error {}
@@ -16,13 +15,17 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     throw new ServerHelpRequested(usage());
   }
 
-  const dbPath = parsed.values.db ?? env.SCANNER_DB_PATH ?? DEFAULT_DB_PATH;
+  const databaseUrl =
+    parsed.values["database-url"] ?? env.DATABASE_URL ?? env.SCANNER_DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL (or --database-url) is required");
+  }
   const portRaw = parsed.values.port ?? env.SERVER_PORT ?? DEFAULT_PORT.toString();
   const port = parsePortOption("--port", portRaw);
   const hostnameRaw = parsed.values.host ?? env.SERVER_HOSTNAME;
 
   return {
-    dbPath,
+    databaseUrl,
     port,
     ...(hostnameRaw ? { hostname: hostnameRaw } : {}),
   };
@@ -81,11 +84,11 @@ function parsePortOption(name: string, value: string): number {
 
 function usage(): string {
   return `Usage:
-  bun run serve
+  DATABASE_URL=postgres://user:pass@host:5432/db bun run serve
 
 Options:
-  --db <path>     SQLite database path. Defaults to scanner.sqlite (or SCANNER_DB_PATH).
-  --port <port>   TCP port to listen on. Defaults to 3000 (or SERVER_PORT). Use 0 to pick any free port.
-  --host <host>   Hostname/interface to bind. Defaults to Bun's default (all interfaces).
-  --help          Show this message.`;
+  --database-url <url>  PostgreSQL connection string (or DATABASE_URL env).
+  --port <port>         TCP port to listen on. Defaults to 3000 (or SERVER_PORT). Use 0 to pick any free port.
+  --host <host>         Hostname/interface to bind. Defaults to Bun's default (all interfaces).
+  --help                Show this message.`;
 }

@@ -1,7 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   createBlockServer,
   parseFilterFromQuery,
@@ -9,18 +6,34 @@ import {
   type BlocksResponseBody,
   type RangesResponseBody,
 } from "./server";
-import { ScannerStorage } from "./storage";
+import { type ScannerStorage } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
+import {
+  closeTestPools,
+  createIsolatedStorage,
+  hasPostgresForTests,
+} from "./testPostgres";
 import type { BlockMetrics } from "./types";
 
 const RANGE_SIZE = DEFAULT_RANGE_SIZE;
 
-const tempDirs: string[] = [];
+const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+async function withStorage(): Promise<ScannerStorage> {
+  const { storage, cleanup } = await createIsolatedStorage("server");
+  cleanups.push(cleanup);
+  return storage;
+}
+
+afterEach(async () => {
+  const pending = cleanups.splice(0);
+  for (const cleanup of pending) {
+    await cleanup();
   }
+});
+
+afterAll(async () => {
+  await closeTestPools();
 });
 
 describe("parseFilterFromQuery", () => {
@@ -50,88 +63,6 @@ describe("parseFilterFromQuery", () => {
     expect(() => parseFilterFromQuery(new URLSearchParams("dateGt=not-a-date"))).toThrow(
       /dateGt must be a valid ISO-8601 date string/,
     );
-  });
-});
-
-describe("createBlockServer", () => {
-  test("returns smallest stored blocks when no filters are supplied", async () => {
-    const storage = openStorageWithBlocks([1n, 2n, 3n]);
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/blocks`);
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as BlocksResponseBody;
-      expect(body.count).toBe(3);
-      expect(body.limit).toBe(10_000);
-      expect(body.truncated).toBe(false);
-      expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2, 3]);
-      expect(body.filters).toEqual({ blockGt: null, blockLt: null, dateGt: null, dateLt: null });
-    });
-    storage.close();
-  });
-
-  test("combines block and date filters additively", async () => {
-    const storage = ScannerStorage.open(tempDbPath());
-    const samples = [
-      { blockNumber: 10n, blockDate: "2024-01-10T00:00:00.000Z" },
-      { blockNumber: 11n, blockDate: "2024-01-11T00:00:00.000Z" },
-      { blockNumber: 12n, blockDate: "2024-01-12T00:00:00.000Z" },
-      { blockNumber: 13n, blockDate: "2024-01-13T00:00:00.000Z" },
-    ];
-    for (const sample of samples) storage.saveBlockMetrics(blockMetricsFixture(sample));
-
-    await withServer(storage, async (url) => {
-      const response = await fetch(
-        `${url}/blocks?blockGt=10&blockLt=13&dateGt=2024-01-10T00:00:00Z`,
-      );
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as BlocksResponseBody;
-      expect(body.blocks.map((row) => row.blockNumber)).toEqual([11, 12]);
-      expect(body.filters).toEqual({
-        blockGt: "10",
-        blockLt: "13",
-        dateGt: "2024-01-10T00:00:00.000Z",
-        dateLt: null,
-      });
-    });
-    storage.close();
-  });
-
-  test("returns 400 for invalid blockGt", async () => {
-    const storage = openStorageWithBlocks([1n]);
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/blocks?blockGt=abc`);
-      expect(response.status).toBe(400);
-      const body = (await response.json()) as { error: string };
-      expect(body.error).toMatch(/blockGt/);
-    });
-    storage.close();
-  });
-
-  test("returns 400 for invalid dateLt", async () => {
-    const storage = openStorageWithBlocks([1n]);
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/blocks?dateLt=not-a-date`);
-      expect(response.status).toBe(400);
-    });
-    storage.close();
-  });
-
-  test("returns 404 for unknown paths", async () => {
-    const storage = openStorageWithBlocks([1n]);
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/unknown`);
-      expect(response.status).toBe(404);
-    });
-    storage.close();
-  });
-
-  test("returns 405 for non-GET methods", async () => {
-    const storage = openStorageWithBlocks([1n]);
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/blocks`, { method: "POST" });
-      expect(response.status).toBe(405);
-    });
-    storage.close();
   });
 });
 
@@ -167,109 +98,187 @@ describe("parseRangeFilterFromQuery", () => {
   });
 });
 
-describe("GET /ranges", () => {
-  test("returns aggregated ranges with filters echoed back", async () => {
-    const storage = ScannerStorage.open(tempDbPath());
-    saveCompleteRange(storage, 0n);
-    saveCompleteRange(storage, 100n);
-    saveCompleteRange(storage, 200n);
-
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/ranges?rangeStartGt=0&rangeStartLt=200`);
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as RangesResponseBody;
-      expect(body.count).toBe(1);
-      expect(body.limit).toBe(10_000);
-      expect(body.truncated).toBe(false);
-      expect(body.ranges.map((row) => row.rangeStart)).toEqual([100]);
-      expect(body.filters).toEqual({
-        rangeSize: "100",
-        rangeStartGt: "0",
-        rangeStartLt: "200",
-        dateGt: null,
-        dateLt: null,
+if (!hasPostgresForTests()) {
+  describe.skip("createBlockServer (skipped: set TEST_DATABASE_URL to run)", () => {
+    test("placeholder", () => {
+      expect(true).toBe(true);
+    });
+  });
+} else {
+  describe("createBlockServer", () => {
+    test("returns smallest stored blocks when no filters are supplied", async () => {
+      const storage = await openStorageWithBlocks([1n, 2n, 3n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/blocks`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as BlocksResponseBody;
+        expect(body.count).toBe(3);
+        expect(body.limit).toBe(10_000);
+        expect(body.truncated).toBe(false);
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2, 3]);
+        expect(body.filters).toEqual({ blockGt: null, blockLt: null, dateGt: null, dateLt: null });
       });
     });
-    storage.close();
-  });
 
-  test("filters by rangeSize and isolates rows of other sizes", async () => {
-    const storage = ScannerStorage.open(tempDbPath());
-    for (let blockNumber = 0n; blockNumber < 200n; blockNumber += 1n) {
-      storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
-    }
-    storage.aggregateRangeIfComplete(0n, 50n);
-    storage.aggregateRangeIfComplete(50n, 50n);
-    storage.aggregateRangeIfComplete(100n, 50n);
-    storage.aggregateRangeIfComplete(0n, 100n);
-    storage.aggregateRangeIfComplete(100n, 100n);
+    test("combines block and date filters additively", async () => {
+      const storage = await withStorage();
+      const samples = [
+        { blockNumber: 10n, blockDate: "2024-01-10T00:00:00.000Z" },
+        { blockNumber: 11n, blockDate: "2024-01-11T00:00:00.000Z" },
+        { blockNumber: 12n, blockDate: "2024-01-12T00:00:00.000Z" },
+        { blockNumber: 13n, blockDate: "2024-01-13T00:00:00.000Z" },
+      ];
+      for (const sample of samples) await storage.saveBlockMetrics(blockMetricsFixture(sample));
 
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/ranges?rangeSize=50`);
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as RangesResponseBody;
-      expect(body.ranges.map((row) => row.rangeStart)).toEqual([0, 50, 100]);
-      expect(body.ranges.every((row) => row.rangeSize === 50)).toBe(true);
-      expect(body.filters.rangeSize).toBe("50");
+      await withServer(storage, async (url) => {
+        const response = await fetch(
+          `${url}/blocks?blockGt=10&blockLt=13&dateGt=2024-01-10T00:00:00Z`,
+        );
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as BlocksResponseBody;
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([11, 12]);
+        expect(body.filters).toEqual({
+          blockGt: "10",
+          blockLt: "13",
+          dateGt: "2024-01-10T00:00:00.000Z",
+          dateLt: null,
+        });
+      });
     });
-    storage.close();
-  });
 
-  test("returns empty list when no aggregates exist for the requested rangeSize", async () => {
-    const storage = ScannerStorage.open(tempDbPath());
-    saveCompleteRange(storage, 0n, 100n);
-
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/ranges?rangeSize=500`);
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as RangesResponseBody;
-      expect(body.count).toBe(0);
-      expect(body.ranges).toEqual([]);
-      expect(body.filters.rangeSize).toBe("500");
+    test("returns 400 for invalid blockGt", async () => {
+      const storage = await openStorageWithBlocks([1n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/blocks?blockGt=abc`);
+        expect(response.status).toBe(400);
+        const body = (await response.json()) as { error: string };
+        expect(body.error).toMatch(/blockGt/);
+      });
     });
-    storage.close();
-  });
 
-  test("returns 400 for unsupported rangeSize values", async () => {
-    const storage = ScannerStorage.open(tempDbPath());
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/ranges?rangeSize=7`);
-      expect(response.status).toBe(400);
+    test("returns 400 for invalid dateLt", async () => {
+      const storage = await openStorageWithBlocks([1n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/blocks?dateLt=not-a-date`);
+        expect(response.status).toBe(400);
+      });
     });
-    storage.close();
-  });
 
-  test("returns 400 on invalid rangeStartGt", async () => {
-    const storage = ScannerStorage.open(tempDbPath());
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/ranges?rangeStartGt=abc`);
-      expect(response.status).toBe(400);
+    test("returns 404 for unknown paths", async () => {
+      const storage = await openStorageWithBlocks([1n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/unknown`);
+        expect(response.status).toBe(404);
+      });
     });
-    storage.close();
-  });
 
-  test("returns empty list when no ranges match", async () => {
-    const storage = ScannerStorage.open(tempDbPath());
-    await withServer(storage, async (url) => {
-      const response = await fetch(`${url}/ranges`);
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as RangesResponseBody;
-      expect(body.count).toBe(0);
-      expect(body.ranges).toEqual([]);
+    test("returns 405 for non-GET methods", async () => {
+      const storage = await openStorageWithBlocks([1n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/blocks`, { method: "POST" });
+        expect(response.status).toBe(405);
+      });
     });
-    storage.close();
   });
-});
 
-function saveCompleteRange(
+  describe("GET /ranges", () => {
+    test("returns aggregated ranges with filters echoed back", async () => {
+      const storage = await withStorage();
+      await saveCompleteRange(storage, 0n);
+      await saveCompleteRange(storage, 100n);
+      await saveCompleteRange(storage, 200n);
+
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/ranges?rangeStartGt=0&rangeStartLt=200`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as RangesResponseBody;
+        expect(body.count).toBe(1);
+        expect(body.limit).toBe(10_000);
+        expect(body.truncated).toBe(false);
+        expect(body.ranges.map((row) => row.rangeStart)).toEqual([100]);
+        expect(body.filters).toEqual({
+          rangeSize: "100",
+          rangeStartGt: "0",
+          rangeStartLt: "200",
+          dateGt: null,
+          dateLt: null,
+        });
+      });
+    });
+
+    test("filters by rangeSize and isolates rows of other sizes", async () => {
+      const storage = await withStorage();
+      for (let blockNumber = 0n; blockNumber < 200n; blockNumber += 1n) {
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+      }
+      await storage.aggregateRangeIfComplete(0n, 50n);
+      await storage.aggregateRangeIfComplete(50n, 50n);
+      await storage.aggregateRangeIfComplete(100n, 50n);
+      await storage.aggregateRangeIfComplete(0n, 100n);
+      await storage.aggregateRangeIfComplete(100n, 100n);
+
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/ranges?rangeSize=50`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as RangesResponseBody;
+        expect(body.ranges.map((row) => row.rangeStart)).toEqual([0, 50, 100]);
+        expect(body.ranges.every((row) => row.rangeSize === 50)).toBe(true);
+        expect(body.filters.rangeSize).toBe("50");
+      });
+    });
+
+    test("returns empty list when no aggregates exist for the requested rangeSize", async () => {
+      const storage = await withStorage();
+      await saveCompleteRange(storage, 0n, 100n);
+
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/ranges?rangeSize=500`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as RangesResponseBody;
+        expect(body.count).toBe(0);
+        expect(body.ranges).toEqual([]);
+        expect(body.filters.rangeSize).toBe("500");
+      });
+    });
+
+    test("returns 400 for unsupported rangeSize values", async () => {
+      const storage = await withStorage();
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/ranges?rangeSize=7`);
+        expect(response.status).toBe(400);
+      });
+    });
+
+    test("returns 400 on invalid rangeStartGt", async () => {
+      const storage = await withStorage();
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/ranges?rangeStartGt=abc`);
+        expect(response.status).toBe(400);
+      });
+    });
+
+    test("returns empty list when no ranges match", async () => {
+      const storage = await withStorage();
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/ranges`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as RangesResponseBody;
+        expect(body.count).toBe(0);
+        expect(body.ranges).toEqual([]);
+      });
+    });
+  });
+}
+
+async function saveCompleteRange(
   storage: ScannerStorage,
   rangeStart: bigint,
   rangeSize: bigint = RANGE_SIZE,
-): void {
+): Promise<void> {
   for (let offset = 0n; offset < rangeSize; offset += 1n) {
-    storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: rangeStart + offset }));
+    await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: rangeStart + offset }));
   }
-  storage.aggregateRangeIfComplete(rangeStart, rangeSize);
+  await storage.aggregateRangeIfComplete(rangeStart, rangeSize);
 }
 
 async function withServer(
@@ -284,10 +293,10 @@ async function withServer(
   }
 }
 
-function openStorageWithBlocks(blockNumbers: bigint[]): ScannerStorage {
-  const storage = ScannerStorage.open(tempDbPath());
+async function openStorageWithBlocks(blockNumbers: bigint[]): Promise<ScannerStorage> {
+  const storage = await withStorage();
   for (const blockNumber of blockNumbers) {
-    storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+    await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
   }
   return storage;
 }
@@ -305,10 +314,4 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     averagePriorityFeeWei: "10",
     ...overrides,
   };
-}
-
-function tempDbPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "gas-price-tracker-server-"));
-  tempDirs.push(dir);
-  return join(dir, "scanner.sqlite");
 }

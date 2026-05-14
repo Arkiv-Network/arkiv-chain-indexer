@@ -9,7 +9,7 @@ async function main(): Promise<void> {
   try {
     const config = parseConfig(process.argv.slice(2));
     const rpc = new EthereumRpcClient(config.rpcUrl);
-    storage = ScannerStorage.open(config.dbPath);
+    storage = await ScannerStorage.open(config.databaseUrl);
     await runScanner(config, rpc, storage);
   } catch (error) {
     if (error instanceof HelpRequested) {
@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     console.error(error);
     process.exitCode = 1;
   } finally {
-    storage?.close();
+    await storage?.close();
   }
 }
 

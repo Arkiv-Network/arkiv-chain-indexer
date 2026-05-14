@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import pg from "pg";
 import {
   DEFAULT_RANGE_SIZE,
   assertSupportedRangeSize,
@@ -7,6 +7,10 @@ import {
   type BlockRangeMetrics,
 } from "./ranges";
 import type { BlockMetrics } from "./types";
+
+const { Pool, types } = pg;
+
+types.setTypeParser(20, (value: string) => value);
 
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
 const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
@@ -62,15 +66,52 @@ export interface StoredBlockRange {
   averagePriorityFeeWei: string;
 }
 
-export class ScannerStorage {
-  private readonly insertBlock;
-  private readonly upsertState;
-  private readonly insertBlockRange;
+export interface ScannerStorageOptions {
+  schema?: string;
+}
 
-  constructor(private readonly db: Database) {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS blocks (
-        block_number INTEGER PRIMARY KEY,
+export class ScannerStorage {
+  private readonly schema: string;
+  private readonly qBlocks: string;
+  private readonly qScannerState: string;
+  private readonly qBlockRanges: string;
+
+  private constructor(
+    private readonly pool: pg.Pool,
+    options: ScannerStorageOptions = {},
+  ) {
+    this.schema = options.schema ?? "public";
+    this.qBlocks = `${quoteIdent(this.schema)}.blocks`;
+    this.qScannerState = `${quoteIdent(this.schema)}.scanner_state`;
+    this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
+  }
+
+  static async open(
+    connectionString: string,
+    options: ScannerStorageOptions = {},
+  ): Promise<ScannerStorage> {
+    const pool = new Pool({ connectionString });
+    const storage = new ScannerStorage(pool, options);
+    await storage.initSchema();
+    return storage;
+  }
+
+  static async fromPool(
+    pool: pg.Pool,
+    options: ScannerStorageOptions = {},
+  ): Promise<ScannerStorage> {
+    const storage = new ScannerStorage(pool, options);
+    await storage.initSchema();
+    return storage;
+  }
+
+  private async initSchema(): Promise<void> {
+    if (this.schema !== "public") {
+      await this.pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(this.schema)}`);
+    }
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qBlocks} (
+        block_number BIGINT PRIMARY KEY,
         block_date TEXT NOT NULL,
         base_block_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
@@ -79,19 +120,21 @@ export class ScannerStorage {
         average_transaction_fee_wei TEXT NOT NULL,
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
-        scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS scanner_state (
+        scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qScannerState} (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS block_ranges (
-        range_size INTEGER NOT NULL,
-        range_start INTEGER NOT NULL,
-        range_end INTEGER NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qBlockRanges} (
+        range_size BIGINT NOT NULL,
+        range_start BIGINT NOT NULL,
+        range_end BIGINT NOT NULL,
         min_block_date TEXT NOT NULL,
         max_block_date TEXT NOT NULL,
         min_base_fee_wei TEXT NOT NULL,
@@ -102,15 +145,109 @@ export class ScannerStorage {
         transaction_count INTEGER NOT NULL,
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
-        aggregated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        aggregated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (range_size, range_start)
-      );
+      )
     `);
+  }
 
-    migrateBlockRangesSchema(this.db);
+  async getLastSuccessfulBlock(): Promise<bigint | undefined> {
+    return this.getStateBigInt(LAST_SUCCESSFUL_BLOCK_KEY);
+  }
 
-    this.insertBlock = this.db.prepare(`
-      INSERT OR REPLACE INTO blocks (
+  async getBackfillNextBlock(): Promise<bigint | undefined> {
+    return this.getStateBigInt(BACKFILL_NEXT_BLOCK_KEY);
+  }
+
+  private async getStateBigInt(key: string): Promise<bigint | undefined> {
+    const result = await this.pool.query<{ value: string }>(
+      `SELECT value FROM ${this.qScannerState} WHERE key = $1`,
+      [key],
+    );
+    const row = result.rows[0];
+    return row ? BigInt(row.value) : undefined;
+  }
+
+  async saveBlockMetrics(
+    metrics: BlockMetrics,
+    progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO ${this.qBlocks} (
+          block_number,
+          block_date,
+          base_block_fee_wei,
+          total_gas_used,
+          max_gas_in_block,
+          transaction_count,
+          average_transaction_fee_wei,
+          average_priority_fee_weighted_wei,
+          average_priority_fee_wei,
+          scanned_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        ON CONFLICT (block_number) DO UPDATE SET
+          block_date = EXCLUDED.block_date,
+          base_block_fee_wei = EXCLUDED.base_block_fee_wei,
+          total_gas_used = EXCLUDED.total_gas_used,
+          max_gas_in_block = EXCLUDED.max_gas_in_block,
+          transaction_count = EXCLUDED.transaction_count,
+          average_transaction_fee_wei = EXCLUDED.average_transaction_fee_wei,
+          average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
+          average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
+          scanned_at = NOW()`,
+        [
+          metrics.blockNumber.toString(),
+          metrics.blockDate,
+          metrics.baseBlockFeeWei,
+          metrics.totalGasUsed,
+          metrics.maxGasInBlock,
+          metrics.transactionCount,
+          metrics.averageTransactionFeeWei,
+          metrics.averagePriorityFeeWeightedWei,
+          metrics.averagePriorityFeeWei,
+        ],
+      );
+      await this.applyProgressUpdate(client, metrics, progressUpdate);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async queryBlocks(filter: BlockQueryFilter = {}): Promise<StoredBlock[]> {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filter.blockGt !== undefined) {
+      params.push(filter.blockGt.toString());
+      clauses.push(`block_number > $${params.length}`);
+    }
+
+    if (filter.blockLt !== undefined) {
+      params.push(filter.blockLt.toString());
+      clauses.push(`block_number < $${params.length}`);
+    }
+
+    if (filter.dateGt !== undefined) {
+      params.push(filter.dateGt);
+      clauses.push(`block_date > $${params.length}`);
+    }
+
+    if (filter.dateLt !== undefined) {
+      params.push(filter.dateLt);
+      clauses.push(`block_date < $${params.length}`);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    params.push(MAX_BLOCKS_PER_QUERY);
+    const sql = `
+      SELECT
         block_number,
         block_date,
         base_block_fee_wei,
@@ -119,21 +256,70 @@ export class ScannerStorage {
         transaction_count,
         average_transaction_fee_wei,
         average_priority_fee_weighted_wei,
-        average_priority_fee_wei,
-        scanned_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `);
+        average_priority_fee_wei
+      FROM ${this.qBlocks}
+      ${where}
+      ORDER BY block_number ASC
+      LIMIT $${params.length}
+    `;
 
-    this.upsertState = this.db.prepare(`
-      INSERT INTO scanner_state (key, value, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(key) DO UPDATE SET
-        value = excluded.value,
-        updated_at = CURRENT_TIMESTAMP
-    `);
+    const result = await this.pool.query<{
+      block_number: string;
+      block_date: string;
+      base_block_fee_wei: string;
+      total_gas_used: string;
+      max_gas_in_block: string;
+      transaction_count: number;
+      average_transaction_fee_wei: string;
+      average_priority_fee_weighted_wei: string;
+      average_priority_fee_wei: string;
+    }>(sql, params);
 
-    this.insertBlockRange = this.db.prepare(`
-      INSERT OR REPLACE INTO block_ranges (
+    return result.rows.map((row) => ({
+      blockNumber: Number(row.block_number),
+      blockDate: row.block_date,
+      baseBlockFeeWei: row.base_block_fee_wei,
+      totalGasUsed: row.total_gas_used,
+      maxGasInBlock: row.max_gas_in_block,
+      transactionCount: row.transaction_count,
+      averageTransactionFeeWei: row.average_transaction_fee_wei,
+      averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
+      averagePriorityFeeWei: row.average_priority_fee_wei,
+    }));
+  }
+
+  async getBlocksForRange(rangeStart: bigint, rangeSize: bigint): Promise<StoredBlock[]> {
+    assertSupportedRangeSize(rangeSize);
+    if (rangeStart < 0n || rangeStart % rangeSize !== 0n) {
+      throw new Error(
+        `Range start ${rangeStart.toString()} must be a non-negative multiple of ${rangeSize.toString()}`,
+      );
+    }
+    const rangeEnd = rangeEndFor(rangeStart, rangeSize);
+    return this.queryBlocks({
+      blockGt: rangeStart - 1n,
+      blockLt: rangeEnd + 1n,
+    });
+  }
+
+  async aggregateRangeIfComplete(
+    rangeStart: bigint,
+    rangeSize: bigint,
+  ): Promise<BlockRangeMetrics | undefined> {
+    assertSupportedRangeSize(rangeSize);
+    const blocks = await this.getBlocksForRange(rangeStart, rangeSize);
+    if (BigInt(blocks.length) !== rangeSize) {
+      return undefined;
+    }
+    const metrics = computeBlockRange(rangeStart, rangeSize, blocks);
+    await this.saveBlockRange(metrics);
+    return metrics;
+  }
+
+  async saveBlockRange(metrics: BlockRangeMetrics): Promise<void> {
+    assertSupportedRangeSize(metrics.rangeSize);
+    await this.pool.query(
+      `INSERT INTO ${this.qBlockRanges} (
         range_size,
         range_start,
         range_end,
@@ -148,226 +334,69 @@ export class ScannerStorage {
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         aggregated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `);
-  }
-
-  static open(path: string): ScannerStorage {
-    return new ScannerStorage(new Database(path, { create: true }));
-  }
-
-  getLastSuccessfulBlock(): bigint | undefined {
-    return this.getStateBigInt(LAST_SUCCESSFUL_BLOCK_KEY);
-  }
-
-  getBackfillNextBlock(): bigint | undefined {
-    return this.getStateBigInt(BACKFILL_NEXT_BLOCK_KEY);
-  }
-
-  private getStateBigInt(key: string): bigint | undefined {
-    const row = this.db
-      .query<{ value: string }, [string]>("SELECT value FROM scanner_state WHERE key = ?")
-      .get(key);
-
-    return row ? BigInt(row.value) : undefined;
-  }
-
-  saveBlockMetrics(
-    metrics: BlockMetrics,
-    progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
-  ): void {
-    if (metrics.blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new Error("SQLite block_number storage only supports JavaScript safe integers");
-    }
-
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.insertBlock.run(
-        Number(metrics.blockNumber),
-        metrics.blockDate,
-        metrics.baseBlockFeeWei,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      ON CONFLICT (range_size, range_start) DO UPDATE SET
+        range_end = EXCLUDED.range_end,
+        min_block_date = EXCLUDED.min_block_date,
+        max_block_date = EXCLUDED.max_block_date,
+        min_base_fee_wei = EXCLUDED.min_base_fee_wei,
+        max_base_fee_wei = EXCLUDED.max_base_fee_wei,
+        average_base_fee_wei = EXCLUDED.average_base_fee_wei,
+        total_gas_used = EXCLUDED.total_gas_used,
+        total_max_gas = EXCLUDED.total_max_gas,
+        transaction_count = EXCLUDED.transaction_count,
+        average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
+        average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
+        aggregated_at = NOW()`,
+      [
+        metrics.rangeSize.toString(),
+        metrics.rangeStart.toString(),
+        metrics.rangeEnd.toString(),
+        metrics.minBlockDate,
+        metrics.maxBlockDate,
+        metrics.minBaseFeeWei,
+        metrics.maxBaseFeeWei,
+        metrics.averageBaseFeeWei,
         metrics.totalGasUsed,
-        metrics.maxGasInBlock,
+        metrics.totalMaxGas,
         metrics.transactionCount,
-        metrics.averageTransactionFeeWei,
         metrics.averagePriorityFeeWeightedWei,
         metrics.averagePriorityFeeWei,
-      );
-      this.saveProgressUpdate(metrics, progressUpdate);
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  queryBlocks(filter: BlockQueryFilter = {}): StoredBlock[] {
-    const clauses: string[] = [];
-    const params: Array<string | number> = [];
-
-    if (filter.blockGt !== undefined) {
-      if (filter.blockGt > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error("blockGt exceeds the supported integer range");
-      }
-      clauses.push("block_number > ?");
-      params.push(Number(filter.blockGt));
-    }
-
-    if (filter.blockLt !== undefined) {
-      if (filter.blockLt > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error("blockLt exceeds the supported integer range");
-      }
-      clauses.push("block_number < ?");
-      params.push(Number(filter.blockLt));
-    }
-
-    if (filter.dateGt !== undefined) {
-      clauses.push("block_date > ?");
-      params.push(filter.dateGt);
-    }
-
-    if (filter.dateLt !== undefined) {
-      clauses.push("block_date < ?");
-      params.push(filter.dateLt);
-    }
-
-    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    const sql = `
-      SELECT
-        block_number,
-        block_date,
-        base_block_fee_wei,
-        total_gas_used,
-        max_gas_in_block,
-        transaction_count,
-        average_transaction_fee_wei,
-        average_priority_fee_weighted_wei,
-        average_priority_fee_wei
-      FROM blocks
-      ${where}
-      ORDER BY block_number ASC
-      LIMIT ?
-    `;
-
-    const rows = this.db
-      .query<
-        {
-          block_number: number;
-          block_date: string;
-          base_block_fee_wei: string;
-          total_gas_used: string;
-          max_gas_in_block: string;
-          transaction_count: number;
-          average_transaction_fee_wei: string;
-          average_priority_fee_weighted_wei: string;
-          average_priority_fee_wei: string;
-        },
-        Array<string | number>
-      >(sql)
-      .all(...params, MAX_BLOCKS_PER_QUERY);
-
-    return rows.map((row) => ({
-      blockNumber: row.block_number,
-      blockDate: row.block_date,
-      baseBlockFeeWei: row.base_block_fee_wei,
-      totalGasUsed: row.total_gas_used,
-      maxGasInBlock: row.max_gas_in_block,
-      transactionCount: row.transaction_count,
-      averageTransactionFeeWei: row.average_transaction_fee_wei,
-      averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
-      averagePriorityFeeWei: row.average_priority_fee_wei,
-    }));
-  }
-
-  getBlocksForRange(rangeStart: bigint, rangeSize: bigint): StoredBlock[] {
-    assertSupportedRangeSize(rangeSize);
-    if (rangeStart < 0n || rangeStart % rangeSize !== 0n) {
-      throw new Error(
-        `Range start ${rangeStart.toString()} must be a non-negative multiple of ${rangeSize.toString()}`,
-      );
-    }
-    const rangeEnd = rangeEndFor(rangeStart, rangeSize);
-    if (rangeEnd > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new Error("Range end exceeds the supported integer range");
-    }
-    return this.queryBlocks({
-      blockGt: rangeStart - 1n,
-      blockLt: rangeEnd + 1n,
-    });
-  }
-
-  aggregateRangeIfComplete(
-    rangeStart: bigint,
-    rangeSize: bigint,
-  ): BlockRangeMetrics | undefined {
-    assertSupportedRangeSize(rangeSize);
-    const blocks = this.getBlocksForRange(rangeStart, rangeSize);
-    if (BigInt(blocks.length) !== rangeSize) {
-      return undefined;
-    }
-    const metrics = computeBlockRange(rangeStart, rangeSize, blocks);
-    this.saveBlockRange(metrics);
-    return metrics;
-  }
-
-  saveBlockRange(metrics: BlockRangeMetrics): void {
-    assertSupportedRangeSize(metrics.rangeSize);
-    if (metrics.rangeEnd > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new Error("SQLite range storage only supports JavaScript safe integers");
-    }
-    this.insertBlockRange.run(
-      Number(metrics.rangeSize),
-      Number(metrics.rangeStart),
-      Number(metrics.rangeEnd),
-      metrics.minBlockDate,
-      metrics.maxBlockDate,
-      metrics.minBaseFeeWei,
-      metrics.maxBaseFeeWei,
-      metrics.averageBaseFeeWei,
-      metrics.totalGasUsed,
-      metrics.totalMaxGas,
-      metrics.transactionCount,
-      metrics.averagePriorityFeeWeightedWei,
-      metrics.averagePriorityFeeWei,
+      ],
     );
   }
 
-  queryBlockRanges(filter: BlockRangeQueryFilter = {}): StoredBlockRange[] {
+  async queryBlockRanges(filter: BlockRangeQueryFilter = {}): Promise<StoredBlockRange[]> {
     const clauses: string[] = [];
     const params: Array<string | number> = [];
 
     const rangeSize = filter.rangeSize ?? DEFAULT_RANGE_SIZE;
     assertSupportedRangeSize(rangeSize);
-    clauses.push("range_size = ?");
-    params.push(Number(rangeSize));
+    params.push(rangeSize.toString());
+    clauses.push(`range_size = $${params.length}`);
 
     if (filter.rangeStartGt !== undefined) {
-      if (filter.rangeStartGt > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error("rangeStartGt exceeds the supported integer range");
-      }
-      clauses.push("range_start > ?");
-      params.push(Number(filter.rangeStartGt));
+      params.push(filter.rangeStartGt.toString());
+      clauses.push(`range_start > $${params.length}`);
     }
 
     if (filter.rangeStartLt !== undefined) {
-      if (filter.rangeStartLt > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error("rangeStartLt exceeds the supported integer range");
-      }
-      clauses.push("range_start < ?");
-      params.push(Number(filter.rangeStartLt));
+      params.push(filter.rangeStartLt.toString());
+      clauses.push(`range_start < $${params.length}`);
     }
 
     if (filter.dateGt !== undefined) {
-      clauses.push("max_block_date > ?");
       params.push(filter.dateGt);
+      clauses.push(`max_block_date > $${params.length}`);
     }
 
     if (filter.dateLt !== undefined) {
-      clauses.push("min_block_date < ?");
       params.push(filter.dateLt);
+      clauses.push(`min_block_date < $${params.length}`);
     }
 
-    const where = `WHERE ${clauses.join(" AND ")}`;
+    params.push(MAX_RANGES_PER_QUERY);
+
     const sql = `
       SELECT
         range_size,
@@ -383,37 +412,32 @@ export class ScannerStorage {
         transaction_count,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei
-      FROM block_ranges
-      ${where}
+      FROM ${this.qBlockRanges}
+      WHERE ${clauses.join(" AND ")}
       ORDER BY range_start ASC
-      LIMIT ?
+      LIMIT $${params.length}
     `;
 
-    const rows = this.db
-      .query<
-        {
-          range_size: number;
-          range_start: number;
-          range_end: number;
-          min_block_date: string;
-          max_block_date: string;
-          min_base_fee_wei: string;
-          max_base_fee_wei: string;
-          average_base_fee_wei: string;
-          total_gas_used: string;
-          total_max_gas: string;
-          transaction_count: number;
-          average_priority_fee_weighted_wei: string;
-          average_priority_fee_wei: string;
-        },
-        Array<string | number>
-      >(sql)
-      .all(...params, MAX_RANGES_PER_QUERY);
+    const result = await this.pool.query<{
+      range_size: string;
+      range_start: string;
+      range_end: string;
+      min_block_date: string;
+      max_block_date: string;
+      min_base_fee_wei: string;
+      max_base_fee_wei: string;
+      average_base_fee_wei: string;
+      total_gas_used: string;
+      total_max_gas: string;
+      transaction_count: number;
+      average_priority_fee_weighted_wei: string;
+      average_priority_fee_wei: string;
+    }>(sql, params);
 
-    return rows.map((row) => ({
-      rangeSize: row.range_size,
-      rangeStart: row.range_start,
-      rangeEnd: row.range_end,
+    return result.rows.map((row) => ({
+      rangeSize: Number(row.range_size),
+      rangeStart: Number(row.range_start),
+      rangeEnd: Number(row.range_end),
       minBlockDate: row.min_block_date,
       maxBlockDate: row.max_block_date,
       minBaseFeeWei: row.min_base_fee_wei,
@@ -427,106 +451,57 @@ export class ScannerStorage {
     }));
   }
 
-  getMinStoredBlock(): bigint | undefined {
-    const row = this.db
-      .query<{ value: number | null }, []>("SELECT MIN(block_number) AS value FROM blocks")
-      .get();
-    return row?.value === null || row?.value === undefined ? undefined : BigInt(row.value);
+  async getMinStoredBlock(): Promise<bigint | undefined> {
+    const result = await this.pool.query<{ value: string | null }>(
+      `SELECT MIN(block_number)::text AS value FROM ${this.qBlocks}`,
+    );
+    const row = result.rows[0];
+    return row && row.value !== null ? BigInt(row.value) : undefined;
   }
 
-  getMaxStoredBlock(): bigint | undefined {
-    const row = this.db
-      .query<{ value: number | null }, []>("SELECT MAX(block_number) AS value FROM blocks")
-      .get();
-    return row?.value === null || row?.value === undefined ? undefined : BigInt(row.value);
+  async getMaxStoredBlock(): Promise<bigint | undefined> {
+    const result = await this.pool.query<{ value: string | null }>(
+      `SELECT MAX(block_number)::text AS value FROM ${this.qBlocks}`,
+    );
+    const row = result.rows[0];
+    return row && row.value !== null ? BigInt(row.value) : undefined;
   }
 
-  private saveProgressUpdate(metrics: BlockMetrics, progressUpdate: BlockProgressUpdate): void {
+  private async applyProgressUpdate(
+    client: pg.PoolClient,
+    metrics: BlockMetrics,
+    progressUpdate: BlockProgressUpdate,
+  ): Promise<void> {
     switch (progressUpdate.kind) {
       case "lastSuccessfulBlock":
-        this.upsertState.run(LAST_SUCCESSFUL_BLOCK_KEY, metrics.blockNumber.toString());
+        await client.query(
+          `INSERT INTO ${this.qScannerState} (key, value, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+          [LAST_SUCCESSFUL_BLOCK_KEY, metrics.blockNumber.toString()],
+        );
         return;
       case "backfillNextBlock":
-        this.upsertState.run(BACKFILL_NEXT_BLOCK_KEY, progressUpdate.nextBlock.toString());
+        await client.query(
+          `INSERT INTO ${this.qScannerState} (key, value, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+          [BACKFILL_NEXT_BLOCK_KEY, progressUpdate.nextBlock.toString()],
+        );
         return;
       case "none":
         return;
     }
   }
 
-  close(): void {
-    this.db.close();
+  async close(): Promise<void> {
+    await this.pool.end();
   }
 }
 
-function migrateBlockRangesSchema(db: Database): void {
-  const columns = db
-    .query<{ name: string }, []>("PRAGMA table_info(block_ranges)")
-    .all();
-  if (columns.some((column) => column.name === "range_size")) {
-    return;
+function quoteIdent(name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`Invalid identifier: ${name}`);
   }
-
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    db.exec("ALTER TABLE block_ranges RENAME TO block_ranges_legacy");
-    db.exec(`
-      CREATE TABLE block_ranges (
-        range_size INTEGER NOT NULL,
-        range_start INTEGER NOT NULL,
-        range_end INTEGER NOT NULL,
-        min_block_date TEXT NOT NULL,
-        max_block_date TEXT NOT NULL,
-        min_base_fee_wei TEXT NOT NULL,
-        max_base_fee_wei TEXT NOT NULL,
-        average_base_fee_wei TEXT NOT NULL,
-        total_gas_used TEXT NOT NULL,
-        total_max_gas TEXT NOT NULL,
-        transaction_count INTEGER NOT NULL,
-        average_priority_fee_weighted_wei TEXT NOT NULL,
-        average_priority_fee_wei TEXT NOT NULL,
-        aggregated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (range_size, range_start)
-      )
-    `);
-    db.exec(`
-      INSERT INTO block_ranges (
-        range_size,
-        range_start,
-        range_end,
-        min_block_date,
-        max_block_date,
-        min_base_fee_wei,
-        max_base_fee_wei,
-        average_base_fee_wei,
-        total_gas_used,
-        total_max_gas,
-        transaction_count,
-        average_priority_fee_weighted_wei,
-        average_priority_fee_wei,
-        aggregated_at
-      )
-      SELECT
-        100,
-        range_start,
-        range_end,
-        min_block_date,
-        max_block_date,
-        min_base_fee_wei,
-        max_base_fee_wei,
-        average_base_fee_wei,
-        total_gas_used,
-        total_max_gas,
-        transaction_count,
-        average_priority_fee_weighted_wei,
-        average_priority_fee_wei,
-        aggregated_at
-      FROM block_ranges_legacy
-    `);
-    db.exec("DROP TABLE block_ranges_legacy");
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  return `"${name}"`;
 }

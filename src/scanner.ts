@@ -41,7 +41,7 @@ async function runBoundedForwardScanner(
     throw new Error("--from-block is required when --to-block is set");
   }
 
-  const lastSuccessfulBlock = storage.getLastSuccessfulBlock();
+  const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
   let nextBlock = lastSuccessfulBlock === undefined ? config.fromBlock : lastSuccessfulBlock + 1n;
 
   console.log(`Starting scanner at block ${nextBlock.toString()}`);
@@ -145,7 +145,7 @@ export async function backfillDownForSlice(
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
 ): Promise<bigint | undefined> {
-  let nextBackfillBlock = storage.getBackfillNextBlock();
+  let nextBackfillBlock = await storage.getBackfillNextBlock();
   if (nextBackfillBlock === undefined || nextBackfillBlock > safeHead) {
     nextBackfillBlock = safeHead;
   }
@@ -180,7 +180,7 @@ export async function scanForwardToSafeHead(
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
 ): Promise<boolean> {
-  const lastSuccessfulBlock = storage.getLastSuccessfulBlock();
+  const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
   let nextBlock = lastSuccessfulBlock === undefined ? initialLowerBound : lastSuccessfulBlock + 1n;
   let scanned = false;
 
@@ -238,7 +238,7 @@ export async function scanOneBlock(
   const receipts = await getTransactionReceipts(block, rpc, txReceiptConcurrency);
 
   const metrics = computeBlockMetrics(block, receipts);
-  storage.saveBlockMetrics(metrics, progressUpdate);
+  await storage.saveBlockMetrics(metrics, progressUpdate);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats));

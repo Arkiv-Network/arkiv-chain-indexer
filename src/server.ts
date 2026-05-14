@@ -41,6 +41,13 @@ export interface RangesResponseBody {
   ranges: StoredBlockRange[];
 }
 
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
@@ -55,8 +62,16 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
 export async function handleRequest(request: Request, storage: ScannerStorage): Promise<Response> {
   const url = new URL(request.url);
 
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   if (request.method !== "GET") {
     return jsonError(405, `Method ${request.method} is not allowed`);
+  }
+
+  if (url.pathname === "/health") {
+    return jsonResponse({ ok: true });
   }
 
   if (url.pathname === "/blocks") {
@@ -70,7 +85,7 @@ export async function handleRequest(request: Request, storage: ScannerStorage): 
   return jsonError(404, `Not found: ${url.pathname}`);
 }
 
-function handleGetBlocks(url: URL, storage: ScannerStorage): Response {
+async function handleGetBlocks(url: URL, storage: ScannerStorage): Promise<Response> {
   let filter: BlockQueryFilter;
   try {
     filter = parseFilterFromQuery(url.searchParams);
@@ -78,7 +93,7 @@ function handleGetBlocks(url: URL, storage: ScannerStorage): Response {
     return jsonError(400, error instanceof Error ? error.message : String(error));
   }
 
-  const blocks = storage.queryBlocks(filter);
+  const blocks = await storage.queryBlocks(filter);
 
   const body: BlocksResponseBody = {
     count: blocks.length,
@@ -93,10 +108,10 @@ function handleGetBlocks(url: URL, storage: ScannerStorage): Response {
     blocks,
   };
 
-  return Response.json(body);
+  return jsonResponse(body);
 }
 
-function handleGetRanges(url: URL, storage: ScannerStorage): Response {
+async function handleGetRanges(url: URL, storage: ScannerStorage): Promise<Response> {
   let filter: BlockRangeQueryFilter;
   try {
     filter = parseRangeFilterFromQuery(url.searchParams);
@@ -104,7 +119,7 @@ function handleGetRanges(url: URL, storage: ScannerStorage): Response {
     return jsonError(400, error instanceof Error ? error.message : String(error));
   }
 
-  const ranges = storage.queryBlockRanges(filter);
+  const ranges = await storage.queryBlockRanges(filter);
 
   const rangeSize = filter.rangeSize ?? DEFAULT_RANGE_SIZE;
   const body: RangesResponseBody = {
@@ -121,7 +136,7 @@ function handleGetRanges(url: URL, storage: ScannerStorage): Response {
     ranges,
   };
 
-  return Response.json(body);
+  return jsonResponse(body);
 }
 
 export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter {
@@ -202,6 +217,10 @@ function parseDateParam(name: string, value: string): string {
   return parsed.toISOString();
 }
 
+function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+  return Response.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init.headers ?? {}) } });
+}
+
 function jsonError(status: number, message: string): Response {
-  return Response.json({ error: message }, { status });
+  return jsonResponse({ error: message }, { status });
 }

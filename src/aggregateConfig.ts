@@ -1,13 +1,11 @@
 import { SUPPORTED_RANGE_SIZES, parseRangeSize } from "./ranges";
 
 export interface AggregateConfig {
-  dbPath: string;
+  databaseUrl: string;
   rangeSize: bigint;
   fromBlock?: bigint;
   toBlock?: bigint;
 }
-
-const DEFAULT_DB_PATH = "scanner.sqlite";
 
 export class AggregateHelpRequested extends Error {}
 
@@ -28,13 +26,17 @@ export function parseAggregateConfig(
   }
   const rangeSize = parseRangeSize(rangeRaw);
 
-  const dbPath = parsed.values.db ?? env.SCANNER_DB_PATH ?? DEFAULT_DB_PATH;
+  const databaseUrl =
+    parsed.values["database-url"] ?? env.DATABASE_URL ?? env.SCANNER_DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL (or --database-url) is required");
+  }
 
   const fromBlockRaw = parsed.values["from-block"] ?? env.AGGREGATE_FROM_BLOCK;
   const toBlockRaw = parsed.values["to-block"] ?? env.AGGREGATE_TO_BLOCK;
 
   return {
-    dbPath,
+    databaseUrl,
     rangeSize,
     ...(fromBlockRaw ? { fromBlock: parseBigIntOption("--from-block", fromBlockRaw) } : {}),
     ...(toBlockRaw ? { toBlock: parseBigIntOption("--to-block", toBlockRaw) } : {}),
@@ -89,7 +91,7 @@ function parseBigIntOption(name: string, value: string): bigint {
 function usage(): string {
   const sizes = SUPPORTED_RANGE_SIZES.map((value) => value.toString()).join(", ");
   return `Usage:
-  bun run aggregate -- --range <size>
+  DATABASE_URL=postgres://user:pass@host:5432/db bun run aggregate -- --range <size>
 
 Aggregates already-scanned blocks into fixed-size windows and writes them to the
 block_ranges table. Windows are [k*M, k*M + M - 1] where M is the range size.
@@ -97,7 +99,7 @@ Only windows whose blocks are all present in the blocks table are written.
 
 Options:
   --range <size>            Window size. One of: ${sizes}.
-  --db <path>               SQLite database path. Defaults to scanner.sqlite (or SCANNER_DB_PATH).
+  --database-url <url>      PostgreSQL connection string (or DATABASE_URL env).
   --from-block <number>     Optional lower bound. Only windows whose end >= from-block are considered.
   --to-block <number>       Optional upper bound. Only windows whose start <= to-block are considered.
   --help                    Show this message.`;

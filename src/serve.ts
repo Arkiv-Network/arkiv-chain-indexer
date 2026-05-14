@@ -7,17 +7,16 @@ async function main(): Promise<void> {
 
   try {
     const config = parseServerConfig(process.argv.slice(2));
-    storage = ScannerStorage.open(config.dbPath);
+    storage = await ScannerStorage.open(config.databaseUrl);
     const server = createBlockServer(storage, {
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
-    console.log(`Reading blocks from ${config.dbPath}`);
 
     const shutdown = async () => {
       await server.stop();
-      storage?.close();
+      await storage?.close();
       process.exit(0);
     };
 
@@ -30,7 +29,7 @@ async function main(): Promise<void> {
     }
 
     console.error(error);
-    storage?.close();
+    await storage?.close();
     process.exitCode = 1;
   }
 }

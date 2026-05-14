@@ -15,15 +15,15 @@ export interface AggregateRangesResult {
   lastRangeStart?: bigint;
 }
 
-export function aggregateRanges(
+export async function aggregateRanges(
   storage: ScannerStorage,
   options: AggregateRangesOptions,
-): AggregateRangesResult {
+): Promise<AggregateRangesResult> {
   const { rangeSize, fromBlock, toBlock, onWindow } = options;
   assertSupportedRangeSize(rangeSize);
 
-  const minBlock = storage.getMinStoredBlock();
-  const maxBlock = storage.getMaxStoredBlock();
+  const minBlock = await storage.getMinStoredBlock();
+  const maxBlock = await storage.getMaxStoredBlock();
   if (minBlock === undefined || maxBlock === undefined) {
     return { written: 0, incomplete: 0 };
   }
@@ -45,7 +45,7 @@ export function aggregateRanges(
     rangeStart <= lastRangeStart;
     rangeStart += rangeSize
   ) {
-    const result = storage.aggregateRangeIfComplete(rangeStart, rangeSize);
+    const result = await storage.aggregateRangeIfComplete(rangeStart, rangeSize);
     if (result) {
       written += 1;
       onWindow?.(rangeStart, "written");
