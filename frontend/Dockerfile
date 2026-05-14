@@ -1,6 +1,21 @@
-FROM nginx:1.27-alpine
+FROM node:22-alpine AS build
+WORKDIR /app
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY index.html styles.css app.js /usr/share/nginx/html/
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
-EXPOSE 80
+COPY tsconfig.json vite.config.ts index.html ./
+COPY src ./src
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+
+COPY --from=build /app/dist ./dist
+COPY server.js ./
+
+ENV NODE_ENV=production
+ENV PORT=23560
+EXPOSE 23560
+
+CMD ["node", "server.js"]
