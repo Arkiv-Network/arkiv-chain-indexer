@@ -8,7 +8,7 @@ describe("computeBlockMetrics", () => {
       number: "0x7b",
       timestamp: "0x65a0bb80",
       baseFeePerGas: "0x64",
-      gasUsed: "0x5",
+      gasUsed: "0xa",
       gasLimit: "0x1c9c380",
       transactions: [
         { hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
@@ -19,12 +19,12 @@ describe("computeBlockMetrics", () => {
       {
         transactionHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         gasUsed: "0x2",
-        effectiveGasPrice: "0x6e",
+        effectiveGasPrice: "0xc8",
       },
       {
         transactionHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        gasUsed: "0x3",
-        effectiveGasPrice: "0x82",
+        gasUsed: "0x8",
+        effectiveGasPrice: "0x6e",
       },
     ];
 
@@ -32,14 +32,19 @@ describe("computeBlockMetrics", () => {
       blockDate: "2024-01-12T04:09:36.000Z",
       blockNumber: 123n,
       baseBlockFeeWei: "100",
-      totalGasUsed: "5",
+      totalGasUsed: "10",
       maxGasInBlock: "30000000",
       transactionCount: 2,
-      totalTransactionFeeWei: "610",
-      priorityFeeWeightedNumeratorWei: "13900",
-      averageTransactionFeeWei: "305",
-      averagePriorityFeeWeightedWei: "22",
-      averagePriorityFeeWei: "20",
+      totalTransactionFeeWei: "1280",
+      feePriceSumWei: "310",
+      priorityFeeSumWei: "110",
+      priorityFeeWeightedNumeratorWei: "48800",
+      priorityFeeGasWeightedNumeratorWei: "280",
+      averageFeePriceWei: "155",
+      averageTransactionFeeWei: "640",
+      averageTransactionGasUsed: "5",
+      averagePriorityFeeWeightedWei: "28",
+      averagePriorityFeeWei: "55",
     });
   });
 
@@ -56,8 +61,13 @@ describe("computeBlockMetrics", () => {
     expect(computeBlockMetrics(block, [])).toMatchObject({
       transactionCount: 0,
       totalTransactionFeeWei: "0",
+      feePriceSumWei: "0",
+      priorityFeeSumWei: "0",
       priorityFeeWeightedNumeratorWei: "0",
+      priorityFeeGasWeightedNumeratorWei: "0",
+      averageFeePriceWei: "0",
       averageTransactionFeeWei: "0",
+      averageTransactionGasUsed: "0",
       averagePriorityFeeWeightedWei: "0",
       averagePriorityFeeWei: "0",
     });

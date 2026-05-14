@@ -5,9 +5,14 @@ export interface StoredBlock {
   baseBlockFeeWei: string;
   averagePriorityFeeWei: string;
   averagePriorityFeeWeightedWei: string;
+  averageFeePriceWei: string;
   totalTransactionFeeWei?: string;
+  feePriceSumWei?: string;
+  priorityFeeSumWei?: string;
   priorityFeeWeightedNumeratorWei?: string;
+  priorityFeeGasWeightedNumeratorWei?: string;
   averageTransactionFeeWei: string;
+  averageTransactionGasUsed: string;
   totalGasUsed: string;
   maxGasInBlock: string;
 }
@@ -19,8 +24,10 @@ export interface StoredBlockRange {
   minBlockDate: string;
   maxBlockDate: string;
   averageBaseFeeWei: string;
+  averageFeePriceWei: string;
   averagePriorityFeeWei: string;
   averagePriorityFeeWeightedWei: string;
+  averageTransactionGasUsed: string;
   transactionCount: number;
   totalGasUsed: string;
   totalMaxGas: string;
