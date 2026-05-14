@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchRanges, type RangesResponse } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
-import { buildPermalinkHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
+import {
+  buildPermalinkHref,
+  filtersEqual,
+  hasAnyFilterParam,
+  readFiltersFromSearch,
+  writePermalink,
+} from "./permalinks";
 import { loadFromStorage, usePersistentState } from "./persistentState";
 
 interface RangesViewProps {
@@ -42,7 +48,8 @@ function buildParams(filters: Filters): URLSearchParams {
 
 function loadFilters(locationSearch: string): Filters {
   const stored = loadFromStorage<Filters>(STORAGE_KEY, EMPTY);
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
+  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
 }
 
 export function RangesView({ locationSearch, onLocationChange }: RangesViewProps) {

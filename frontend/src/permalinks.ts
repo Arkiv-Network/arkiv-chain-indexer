@@ -26,6 +26,14 @@ export function readFiltersFromSearch<T extends Record<string, string>>(
   return next as T;
 }
 
+export function hasAnyFilterParam<T extends Record<string, string>>(
+  search: string,
+  keys: readonly (keyof T & string)[],
+): boolean {
+  const params = new URLSearchParams(search);
+  return keys.some((key) => params.has(key));
+}
+
 export function filtersEqual<T extends Record<string, string>>(
   left: T,
   right: T,

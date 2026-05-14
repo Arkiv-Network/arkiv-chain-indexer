@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchBlocks, type BlocksResponse } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
-import { buildPermalinkHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
+import {
+  buildPermalinkHref,
+  filtersEqual,
+  hasAnyFilterParam,
+  readFiltersFromSearch,
+  writePermalink,
+} from "./permalinks";
 import { loadFromStorage, usePersistentState } from "./persistentState";
 
 interface BlocksViewProps {
@@ -39,7 +45,8 @@ function buildParams(filters: Filters): URLSearchParams {
 
 function loadFilters(locationSearch: string): Filters {
   const stored = loadFromStorage<Filters>(STORAGE_KEY, EMPTY);
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
+  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
 }
 
 export function BlocksView({ locationSearch, onLocationChange }: BlocksViewProps) {
