@@ -64,6 +64,29 @@ describe("parseFilterFromQuery", () => {
       /dateGt must be a valid ISO-8601 date string/,
     );
   });
+
+  test("parses a valid limit", () => {
+    const filter = parseFilterFromQuery(new URLSearchParams("limit=250"));
+    expect(filter.limit).toBe(250);
+  });
+
+  test("rejects a non-numeric limit", () => {
+    expect(() => parseFilterFromQuery(new URLSearchParams("limit=abc"))).toThrow(
+      /limit must be a positive integer/,
+    );
+  });
+
+  test("rejects zero limit", () => {
+    expect(() => parseFilterFromQuery(new URLSearchParams("limit=0"))).toThrow(
+      /limit must be a positive integer/,
+    );
+  });
+
+  test("rejects a limit greater than the hard cap", () => {
+    expect(() => parseFilterFromQuery(new URLSearchParams("limit=10001"))).toThrow(
+      /limit must be at most 10000/,
+    );
+  });
 });
 
 describe("parseRangeFilterFromQuery", () => {
@@ -96,6 +119,17 @@ describe("parseRangeFilterFromQuery", () => {
       parseRangeFilterFromQuery(new URLSearchParams("rangeSize=7")),
     ).toThrow(/rangeSize/);
   });
+
+  test("parses a valid limit", () => {
+    const filter = parseRangeFilterFromQuery(new URLSearchParams("limit=42"));
+    expect(filter.limit).toBe(42);
+  });
+
+  test("rejects a limit greater than the hard cap", () => {
+    expect(() =>
+      parseRangeFilterFromQuery(new URLSearchParams("limit=10001")),
+    ).toThrow(/limit must be at most 10000/);
+  });
 });
 
 if (!hasPostgresForTests()) {
@@ -117,6 +151,27 @@ if (!hasPostgresForTests()) {
         expect(body.truncated).toBe(false);
         expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2, 3]);
         expect(body.filters).toEqual({ blockGt: null, blockLt: null, dateGt: null, dateLt: null });
+      });
+    });
+
+    test("honors the limit query parameter and reports truncation", async () => {
+      const storage = await openStorageWithBlocks([1n, 2n, 3n, 4n, 5n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/blocks?limit=2`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as BlocksResponseBody;
+        expect(body.count).toBe(2);
+        expect(body.limit).toBe(2);
+        expect(body.truncated).toBe(true);
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2]);
+      });
+    });
+
+    test("returns 400 for a limit above the hard cap", async () => {
+      const storage = await openStorageWithBlocks([1n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/blocks?limit=10001`);
+        expect(response.status).toBe(400);
       });
     });
 

@@ -94,11 +94,12 @@ async function handleGetBlocks(url: URL, storage: ScannerStorage): Promise<Respo
   }
 
   const blocks = await storage.queryBlocks(filter);
+  const effectiveLimit = Math.min(filter.limit ?? MAX_BLOCKS_PER_QUERY, MAX_BLOCKS_PER_QUERY);
 
   const body: BlocksResponseBody = {
     count: blocks.length,
-    limit: MAX_BLOCKS_PER_QUERY,
-    truncated: blocks.length >= MAX_BLOCKS_PER_QUERY,
+    limit: effectiveLimit,
+    truncated: blocks.length >= effectiveLimit,
     filters: {
       blockGt: filter.blockGt !== undefined ? filter.blockGt.toString() : null,
       blockLt: filter.blockLt !== undefined ? filter.blockLt.toString() : null,
@@ -120,12 +121,13 @@ async function handleGetRanges(url: URL, storage: ScannerStorage): Promise<Respo
   }
 
   const ranges = await storage.queryBlockRanges(filter);
+  const effectiveLimit = Math.min(filter.limit ?? MAX_RANGES_PER_QUERY, MAX_RANGES_PER_QUERY);
 
   const rangeSize = filter.rangeSize ?? DEFAULT_RANGE_SIZE;
   const body: RangesResponseBody = {
     count: ranges.length,
-    limit: MAX_RANGES_PER_QUERY,
-    truncated: ranges.length >= MAX_RANGES_PER_QUERY,
+    limit: effectiveLimit,
+    truncated: ranges.length >= effectiveLimit,
     filters: {
       rangeSize: rangeSize.toString(),
       rangeStartGt: filter.rangeStartGt !== undefined ? filter.rangeStartGt.toString() : null,
@@ -160,6 +162,11 @@ export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter 
   const dateLt = params.get("dateLt");
   if (dateLt !== null) {
     filter.dateLt = parseDateParam("dateLt", dateLt);
+  }
+
+  const limit = params.get("limit");
+  if (limit !== null) {
+    filter.limit = parseLimitParam(limit, MAX_BLOCKS_PER_QUERY);
   }
 
   return filter;
@@ -199,7 +206,26 @@ export function parseRangeFilterFromQuery(params: URLSearchParams): BlockRangeQu
     filter.dateLt = parseDateParam("dateLt", dateLt);
   }
 
+  const limit = params.get("limit");
+  if (limit !== null) {
+    filter.limit = parseLimitParam(limit, MAX_RANGES_PER_QUERY);
+  }
+
   return filter;
+}
+
+function parseLimitParam(value: string, hardMax: number): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`limit must be a positive integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(`limit must be a positive integer`);
+  }
+  if (parsed > hardMax) {
+    throw new Error(`limit must be at most ${hardMax}`);
+  }
+  return parsed;
 }
 
 function parseBlockParam(name: string, value: string): bigint {
