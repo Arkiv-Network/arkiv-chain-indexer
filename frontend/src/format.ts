@@ -25,6 +25,15 @@ export function fmtRatio(usedStr: string | null | undefined, limitStr: string | 
   }
 }
 
+export function fmtInteger(value: string | number | null | undefined): string {
+  if (value === undefined || value === null) return "—";
+  try {
+    return BigInt(value).toString();
+  } catch {
+    return String(value);
+  }
+}
+
 export function fmtDate(value: string | null | undefined): string {
   if (!value) return "—";
   try {

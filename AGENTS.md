@@ -38,7 +38,9 @@ docker compose up --build
 - `max_gas_in_block` is block `gasLimit`.
 - Transaction fee size is `receipt.gasUsed * receipt.effectiveGasPrice`.
 - Priority fee is `max(effectiveGasPrice - baseFeePerGas, 0)`.
-- Weighted priority fee is weighted by actual transaction fee size.
+- Weighted priority fee is weighted by receipt gas used.
+- Average fee price is the simple per-transaction average of `effectiveGasPrice`.
+- Average transaction size is the simple per-transaction average of `receipt.gasUsed`.
 - Empty blocks store `0` for average values.
 
 ## Implementation Notes

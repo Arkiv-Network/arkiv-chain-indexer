@@ -28,8 +28,13 @@ export interface BlockMetrics {
   maxGasInBlock: string;
   transactionCount: number;
   totalTransactionFeeWei: string;
+  feePriceSumWei: string;
+  priorityFeeSumWei: string;
   priorityFeeWeightedNumeratorWei: string;
+  priorityFeeGasWeightedNumeratorWei: string;
+  averageFeePriceWei: string;
   averageTransactionFeeWei: string;
+  averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
 }

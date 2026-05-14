@@ -48,8 +48,13 @@ export interface StoredBlock {
   maxGasInBlock: string;
   transactionCount: number;
   totalTransactionFeeWei?: string;
+  feePriceSumWei?: string;
+  priorityFeeSumWei?: string;
   priorityFeeWeightedNumeratorWei?: string;
+  priorityFeeGasWeightedNumeratorWei?: string;
+  averageFeePriceWei: string;
   averageTransactionFeeWei: string;
+  averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
 }
@@ -66,6 +71,8 @@ export interface StoredBlockRange {
   totalGasUsed: string;
   totalMaxGas: string;
   transactionCount: number;
+  averageFeePriceWei: string;
+  averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
 }
@@ -122,8 +129,13 @@ export class ScannerStorage {
         max_gas_in_block TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
         total_transaction_fee_wei TEXT NOT NULL DEFAULT '0',
+        fee_price_sum_wei TEXT NOT NULL DEFAULT '0',
+        priority_fee_sum_wei TEXT NOT NULL DEFAULT '0',
         priority_fee_weighted_numerator_wei TEXT NOT NULL DEFAULT '0',
+        priority_fee_gas_weighted_numerator_wei TEXT NOT NULL DEFAULT '0',
+        average_fee_price_wei TEXT NOT NULL DEFAULT '0',
         average_transaction_fee_wei TEXT NOT NULL,
+        average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -135,7 +147,27 @@ export class ScannerStorage {
     );
     await this.pool.query(
       `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS fee_price_sum_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS priority_fee_sum_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS priority_fee_weighted_numerator_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS priority_fee_gas_weighted_numerator_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS average_fee_price_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
     );
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qScannerState} (
@@ -157,12 +189,22 @@ export class ScannerStorage {
         total_gas_used TEXT NOT NULL,
         total_max_gas TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
+        average_fee_price_wei TEXT NOT NULL DEFAULT '0',
+        average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
         aggregated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (range_size, range_start)
       )
     `);
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS average_fee_price_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
+    );
   }
 
   async getLastSuccessfulBlock(): Promise<bigint | undefined> {
@@ -198,12 +240,17 @@ export class ScannerStorage {
           max_gas_in_block,
           transaction_count,
           total_transaction_fee_wei,
+          fee_price_sum_wei,
+          priority_fee_sum_wei,
           priority_fee_weighted_numerator_wei,
+          priority_fee_gas_weighted_numerator_wei,
+          average_fee_price_wei,
           average_transaction_fee_wei,
+          average_transaction_gas_used,
           average_priority_fee_weighted_wei,
           average_priority_fee_wei,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
           base_block_fee_wei = EXCLUDED.base_block_fee_wei,
@@ -211,8 +258,13 @@ export class ScannerStorage {
           max_gas_in_block = EXCLUDED.max_gas_in_block,
           transaction_count = EXCLUDED.transaction_count,
           total_transaction_fee_wei = EXCLUDED.total_transaction_fee_wei,
+          fee_price_sum_wei = EXCLUDED.fee_price_sum_wei,
+          priority_fee_sum_wei = EXCLUDED.priority_fee_sum_wei,
           priority_fee_weighted_numerator_wei = EXCLUDED.priority_fee_weighted_numerator_wei,
+          priority_fee_gas_weighted_numerator_wei = EXCLUDED.priority_fee_gas_weighted_numerator_wei,
+          average_fee_price_wei = EXCLUDED.average_fee_price_wei,
           average_transaction_fee_wei = EXCLUDED.average_transaction_fee_wei,
+          average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
           average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
           average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
           scanned_at = NOW()`,
@@ -224,8 +276,13 @@ export class ScannerStorage {
           metrics.maxGasInBlock,
           metrics.transactionCount,
           metrics.totalTransactionFeeWei,
+          metrics.feePriceSumWei,
+          metrics.priorityFeeSumWei,
           metrics.priorityFeeWeightedNumeratorWei,
+          metrics.priorityFeeGasWeightedNumeratorWei,
+          metrics.averageFeePriceWei,
           metrics.averageTransactionFeeWei,
+          metrics.averageTransactionGasUsed,
           metrics.averagePriorityFeeWeightedWei,
           metrics.averagePriorityFeeWei,
         ],
@@ -275,8 +332,13 @@ export class ScannerStorage {
         max_gas_in_block,
         transaction_count,
         total_transaction_fee_wei,
+        fee_price_sum_wei,
+        priority_fee_sum_wei,
         priority_fee_weighted_numerator_wei,
+        priority_fee_gas_weighted_numerator_wei,
+        average_fee_price_wei,
         average_transaction_fee_wei,
+        average_transaction_gas_used,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei
       FROM ${this.qBlocks}
@@ -293,8 +355,13 @@ export class ScannerStorage {
       max_gas_in_block: string;
       transaction_count: number;
       total_transaction_fee_wei: string;
+      fee_price_sum_wei: string;
+      priority_fee_sum_wei: string;
       priority_fee_weighted_numerator_wei: string;
+      priority_fee_gas_weighted_numerator_wei: string;
+      average_fee_price_wei: string;
       average_transaction_fee_wei: string;
+      average_transaction_gas_used: string;
       average_priority_fee_weighted_wei: string;
       average_priority_fee_wei: string;
     }>(sql, params);
@@ -307,8 +374,13 @@ export class ScannerStorage {
       maxGasInBlock: row.max_gas_in_block,
       transactionCount: row.transaction_count,
       totalTransactionFeeWei: row.total_transaction_fee_wei,
+      feePriceSumWei: row.fee_price_sum_wei,
+      priorityFeeSumWei: row.priority_fee_sum_wei,
       priorityFeeWeightedNumeratorWei: row.priority_fee_weighted_numerator_wei,
+      priorityFeeGasWeightedNumeratorWei: row.priority_fee_gas_weighted_numerator_wei,
+      averageFeePriceWei: row.average_fee_price_wei,
       averageTransactionFeeWei: row.average_transaction_fee_wei,
+      averageTransactionGasUsed: row.average_transaction_gas_used,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
     }));
@@ -357,10 +429,12 @@ export class ScannerStorage {
         total_gas_used,
         total_max_gas,
         transaction_count,
+        average_fee_price_wei,
+        average_transaction_gas_used,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -371,6 +445,8 @@ export class ScannerStorage {
         total_gas_used = EXCLUDED.total_gas_used,
         total_max_gas = EXCLUDED.total_max_gas,
         transaction_count = EXCLUDED.transaction_count,
+        average_fee_price_wei = EXCLUDED.average_fee_price_wei,
+        average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
         average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
         average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
         aggregated_at = NOW()`,
@@ -386,6 +462,8 @@ export class ScannerStorage {
         metrics.totalGasUsed,
         metrics.totalMaxGas,
         metrics.transactionCount,
+        metrics.averageFeePriceWei,
+        metrics.averageTransactionGasUsed,
         metrics.averagePriorityFeeWeightedWei,
         metrics.averagePriorityFeeWei,
       ],
@@ -436,6 +514,8 @@ export class ScannerStorage {
         total_gas_used,
         total_max_gas,
         transaction_count,
+        average_fee_price_wei,
+        average_transaction_gas_used,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei
       FROM ${this.qBlockRanges}
@@ -456,6 +536,8 @@ export class ScannerStorage {
       total_gas_used: string;
       total_max_gas: string;
       transaction_count: number;
+      average_fee_price_wei: string;
+      average_transaction_gas_used: string;
       average_priority_fee_weighted_wei: string;
       average_priority_fee_wei: string;
     }>(sql, params);
@@ -472,6 +554,8 @@ export class ScannerStorage {
       totalGasUsed: row.total_gas_used,
       totalMaxGas: row.total_max_gas,
       transactionCount: row.transaction_count,
+      averageFeePriceWei: row.average_fee_price_wei,
+      averageTransactionGasUsed: row.average_transaction_gas_used,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
     }));

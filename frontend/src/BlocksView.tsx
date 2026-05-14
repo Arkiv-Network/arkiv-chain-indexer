@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
-import { fmtDate, fmtGwei, fmtRatio } from "./format";
+import { fmtDate, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -71,6 +71,20 @@ const BLOCK_COLUMNS: Column<StoredBlock>[] = [
     render: (row) => fmtGwei(row.baseBlockFeeWei),
   },
   {
+    key: "averageFeePriceWei",
+    label: "Avg fee price (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.averageFeePriceWei),
+  },
+  {
+    key: "averagePriorityFeeWeightedWei",
+    label: "Gas-weighted priority (gwei)",
+    className: "num",
+    width: "14rem",
+    render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
+  },
+  {
     key: "averagePriorityFeeWei",
     label: "Avg priority fee (gwei)",
     className: "num",
@@ -78,18 +92,11 @@ const BLOCK_COLUMNS: Column<StoredBlock>[] = [
     render: (row) => fmtGwei(row.averagePriorityFeeWei),
   },
   {
-    key: "averagePriorityFeeWeightedWei",
-    label: "Weighted avg priority (gwei)",
-    className: "num",
-    width: "13rem",
-    render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
-  },
-  {
-    key: "averageTransactionFeeWei",
-    label: "Avg tx fee (gwei)",
+    key: "averageTransactionGasUsed",
+    label: "Avg tx gas",
     className: "num",
     width: "10rem",
-    render: (row) => fmtGwei(row.averageTransactionFeeWei),
+    render: (row) => fmtInteger(row.averageTransactionGasUsed),
   },
   {
     key: "gasUsed",

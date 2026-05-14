@@ -2,9 +2,8 @@
 
 ## Scope
 
-This report reviews how the scanner computes and aggregates the fields that are shown as average transaction fee,
-average priority fee, and weighted average priority fee. The code does not currently store an "average gas price"
-field directly; the closest stored gas-price-like values are priority fees and the average transaction fee.
+This report reviews how the scanner computes and aggregates the fields that are shown as average fee price,
+average priority fee, gas-weighted average priority fee, and average transaction gas used.
 
 ## Block-Level Metrics
 
@@ -13,9 +12,11 @@ Block metrics are computed in `src/metrics.ts` from a block and its transaction 
 | Field | Formula | Notes |
 | --- | --- | --- |
 | `base_block_fee_wei` | `block.baseFeePerGas ?? 0` | Legacy networks without `baseFeePerGas` store `0`. |
+| `average_fee_price_wei` | `sum(effectiveGasPrice) / transaction_count` | Simple average gas price set/paid per transaction. |
 | `average_transaction_fee_wei` | `sum(receipt.gasUsed * effectiveGasPrice) / transaction_count` | This is an average fee paid per transaction, not an average gas price. |
+| `average_transaction_gas_used` | `sum(receipt.gasUsed) / transaction_count` | Simple average transaction size in gas used. |
 | `average_priority_fee_wei` | `sum(max(effectiveGasPrice - baseFeePerGas, 0)) / transaction_count` | Simple per-transaction average. |
-| `average_priority_fee_weighted_wei` | `sum(priorityFee * transactionFee) / sum(transactionFee)` | Weighted by actual transaction fee size, where `transactionFee = receipt.gasUsed * effectiveGasPrice`. |
+| `average_priority_fee_weighted_wei` | `sum(priorityFee * receipt.gasUsed) / sum(receipt.gasUsed)` | Weighted by gas used so multiplying by total gas spend reconstructs total priority fees. |
 
 All arithmetic is done with `bigint` and integer division truncates fractional wei. Empty blocks store `0` for all
 average values.
@@ -25,50 +26,49 @@ average values.
 `src/storage.ts` writes the block row and scanner progress in one PostgreSQL transaction. Wei-sized values are
 stored as decimal strings in `TEXT` columns so JavaScript number precision is not used for fee math.
 
-This change adds two exact block-level helper columns:
+The storage layer keeps exact helper columns for range aggregation:
 
 | Column | Purpose |
 | --- | --- |
 | `total_transaction_fee_wei` | Exact denominator for transaction-fee-weighted priority calculations. |
-| `priority_fee_weighted_numerator_wei` | Exact numerator for transaction-fee-weighted priority calculations. |
+| `priority_fee_weighted_numerator_wei` | Legacy exact numerator for transaction-fee-weighted priority calculations. |
+| `priority_fee_gas_weighted_numerator_wei` | Exact numerator for gas-weighted priority calculations. |
+| `average_fee_price_wei` | Exact block-level simple average fee price. |
+| `average_transaction_gas_used` | Exact block-level average transaction gas used. |
 
-The displayed `average_priority_fee_weighted_wei` value is still stored as before, but range aggregation now has
-the exact numerator and denominator available for newly scanned blocks.
+The displayed `average_priority_fee_weighted_wei` value is now gas-weighted, and range aggregation uses the
+gas-weighted numerator plus `total_gas_used` for newly scanned blocks.
 
 ## Range Aggregation
 
-Before this change, `src/ranges.ts` aggregated range-level `average_priority_fee_weighted_wei` as:
+Range-level `average_fee_price_wei`, `average_priority_fee_wei`, and `average_transaction_gas_used` are weighted
+by transaction count:
+
+```txt
+sum(block.average_* * block.transaction_count) / sum(block.transaction_count)
+```
+
+Range-level `average_priority_fee_weighted_wei` is weighted by gas used:
+
+```txt
+sum(block.priority_fee_gas_weighted_numerator_wei) / sum(block.total_gas_used)
+```
+
+For older rows that do not have the exact gas-weighted helper value, the aggregator falls back to the best value
+recoverable from existing data:
 
 ```txt
 sum(block.average_priority_fee_weighted_wei * block.total_gas_used) / sum(block.total_gas_used)
 ```
 
-That was not the same weighting rule as the block-level metric. It weighted by gas used per block, not actual
-transaction fee spend. Blocks with the same gas usage but very different effective gas prices could be weighted
-incorrectly.
-
-Range aggregation now uses:
-
-```txt
-sum(block.priority_fee_weighted_numerator_wei) / sum(block.total_transaction_fee_wei)
-```
-
-For older rows that do not have exact helper values, the aggregator falls back to the best value recoverable from
-existing data:
-
-```txt
-sum(block.average_priority_fee_weighted_wei * block.average_transaction_fee_wei * block.transaction_count)
-/ sum(block.average_transaction_fee_wei * block.transaction_count)
-```
-
-That fallback is approximate because the old rows only retained already-divided averages. Rescanning old blocks is
-required if exact historical range aggregation is needed.
+That fallback is approximate if the old rows used different block-level weighting semantics. Rescanning old blocks
+is required for exact historical values.
 
 ## Verdict
 
 | Area | Result |
 | --- | --- |
-| Block-level weighted priority fee | Correct: weighted by actual transaction fee size. |
-| Block-level average transaction fee | Correctly computed, but it is a transaction fee average, not a gas price average. |
-| Previous range-level weighted priority fee | Incorrect for the stated convention because it reweighted by gas used. |
-| Current range-level weighted priority fee | Correct for newly scanned blocks; approximate fallback for legacy rows. |
+| Block-level average fee price | Correct: simple per-transaction average of effective gas price. |
+| Block-level gas-weighted priority fee | Correct: weighted by receipt gas used. |
+| Range-level average fee price and transaction gas | Correct: weighted by transaction count. |
+| Range-level weighted priority fee | Correct for newly scanned blocks; approximate fallback for legacy rows. |

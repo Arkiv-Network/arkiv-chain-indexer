@@ -310,9 +310,10 @@ function formatBlockSummary(metrics: BlockMetrics, elapsedMs: number, rpcStats: 
     `  Transactions: ${metrics.transactionCount.toString()}`,
     `  Gas used: ${formatKGas(metrics.totalGasUsed)} / ${formatKGas(metrics.maxGasInBlock)}`,
     `  Base fee: ${formatGwei(metrics.baseBlockFeeWei)}`,
+    `  Avg fee price: ${formatGwei(metrics.averageFeePriceWei)}`,
     `  Avg priority fee: ${formatGwei(metrics.averagePriorityFeeWei)}`,
-    `  Weighted avg priority fee: ${formatGwei(metrics.averagePriorityFeeWeightedWei)}`,
-    `  Avg transaction fee: ${formatGwei(metrics.averageTransactionFeeWei)}`,
+    `  Gas-weighted avg priority fee: ${formatGwei(metrics.averagePriorityFeeWeightedWei)}`,
+    `  Avg transaction gas: ${metrics.averageTransactionGasUsed}`,
     `  RPC: ${rpcStats.calls.toString()} calls, ${formatBytes(rpcStats.requestBytes)} sent, ${formatBytes(
       rpcStats.responseBytes,
     )} received (${formatBytes(totalRpcBytes)} total)`,

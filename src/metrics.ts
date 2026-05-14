@@ -17,8 +17,13 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
   const blockTimestampSeconds = hexToBigInt(block.timestamp);
   const baseFee = hexToBigInt(block.baseFeePerGas);
   const priorityFees: bigint[] = [];
+  const feePrices: bigint[] = [];
   let totalTransactionFee = 0n;
+  let feePriceSum = 0n;
+  let priorityFeeSum = 0n;
   let weightedPriorityFeeNumerator = 0n;
+  let gasWeightedPriorityFeeNumerator = 0n;
+  let totalReceiptGasUsed = 0n;
 
   for (const transaction of block.transactions) {
     const receipt = receiptsByHash.get(transaction.hash.toLowerCase());
@@ -31,16 +36,23 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     const transactionFee = gasUsed * effectiveGasPrice;
     const priorityFee = effectiveGasPrice > baseFee ? effectiveGasPrice - baseFee : 0n;
 
+    feePrices.push(effectiveGasPrice);
     priorityFees.push(priorityFee);
     totalTransactionFee += transactionFee;
+    feePriceSum += effectiveGasPrice;
+    priorityFeeSum += priorityFee;
     weightedPriorityFeeNumerator += priorityFee * transactionFee;
+    gasWeightedPriorityFeeNumerator += priorityFee * gasUsed;
+    totalReceiptGasUsed += gasUsed;
   }
 
   const weightedPriorityFee =
-    totalTransactionFee === 0n ? 0n : weightedPriorityFeeNumerator / totalTransactionFee;
+    totalReceiptGasUsed === 0n ? 0n : gasWeightedPriorityFeeNumerator / totalReceiptGasUsed;
   const transactionCount = block.transactions.length;
   const averageTransactionFee =
     transactionCount === 0 ? 0n : totalTransactionFee / BigInt(transactionCount);
+  const averageTransactionGasUsed =
+    transactionCount === 0 ? 0n : totalReceiptGasUsed / BigInt(transactionCount);
 
   return {
     blockDate: new Date(Number(blockTimestampSeconds) * 1000).toISOString(),
@@ -50,8 +62,13 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     maxGasInBlock: hexToBigInt(block.gasLimit).toString(),
     transactionCount,
     totalTransactionFeeWei: totalTransactionFee.toString(),
+    feePriceSumWei: feePriceSum.toString(),
+    priorityFeeSumWei: priorityFeeSum.toString(),
     priorityFeeWeightedNumeratorWei: weightedPriorityFeeNumerator.toString(),
+    priorityFeeGasWeightedNumeratorWei: gasWeightedPriorityFeeNumerator.toString(),
+    averageFeePriceWei: average(feePrices).toString(),
     averageTransactionFeeWei: averageTransactionFee.toString(),
+    averageTransactionGasUsed: averageTransactionGasUsed.toString(),
     averagePriorityFeeWeightedWei: weightedPriorityFee.toString(),
     averagePriorityFeeWei: average(priorityFees).toString(),
   };

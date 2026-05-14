@@ -26,6 +26,8 @@ export interface BlockRangeMetrics {
   totalGasUsed: string;
   totalMaxGas: string;
   transactionCount: number;
+  averageFeePriceWei: string;
+  averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
 }
@@ -109,8 +111,9 @@ export function computeBlockRange(
   let totalGasUsed = 0n;
   let totalMaxGas = 0n;
   let transactionCount = 0;
-  let totalTransactionFee = 0n;
-  let feeWeightedPriorityFeeNumerator = 0n;
+  let gasWeightedPriorityFeeNumerator = 0n;
+  let feePriceNumerator = 0n;
+  let transactionGasNumerator = 0n;
   let txWeightedPriorityFeeNumerator = 0n;
 
   for (const block of blocks) {
@@ -128,18 +131,30 @@ export function computeBlockRange(
     totalMaxGas += maxGas;
 
     transactionCount += block.transactionCount;
-    const feeWeight = priorityFeeWeightFor(block);
-    totalTransactionFee += feeWeight.totalTransactionFee;
-    feeWeightedPriorityFeeNumerator += feeWeight.weightedPriorityFeeNumerator;
-    txWeightedPriorityFeeNumerator +=
-      BigInt(block.averagePriorityFeeWei) * BigInt(block.transactionCount);
+    const gasWeight = priorityFeeGasWeightFor(block);
+    gasWeightedPriorityFeeNumerator += gasWeight.weightedPriorityFeeNumerator;
+    feePriceNumerator += exactOrAverageSum(
+      block.feePriceSumWei,
+      block.averageFeePriceWei,
+      block.transactionCount,
+    );
+    transactionGasNumerator += gasUsed;
+    txWeightedPriorityFeeNumerator += exactOrAverageSum(
+      block.priorityFeeSumWei,
+      block.averagePriorityFeeWei,
+      block.transactionCount,
+    );
   }
 
   const averageBaseFee = baseFeeSum / rangeSize;
   const averagePriorityFeeWeighted =
-    totalTransactionFee === 0n
+    totalGasUsed === 0n
       ? 0n
-      : feeWeightedPriorityFeeNumerator / totalTransactionFee;
+      : gasWeightedPriorityFeeNumerator / totalGasUsed;
+  const averageFeePrice =
+    transactionCount === 0 ? 0n : feePriceNumerator / BigInt(transactionCount);
+  const averageTransactionGasUsed =
+    transactionCount === 0 ? 0n : transactionGasNumerator / BigInt(transactionCount);
   const averagePriorityFee =
     transactionCount === 0
       ? 0n
@@ -157,29 +172,35 @@ export function computeBlockRange(
     totalGasUsed: totalGasUsed.toString(),
     totalMaxGas: totalMaxGas.toString(),
     transactionCount,
+    averageFeePriceWei: averageFeePrice.toString(),
+    averageTransactionGasUsed: averageTransactionGasUsed.toString(),
     averagePriorityFeeWeightedWei: averagePriorityFeeWeighted.toString(),
     averagePriorityFeeWei: averagePriorityFee.toString(),
   };
 }
 
-function priorityFeeWeightFor(block: StoredBlock): {
-  totalTransactionFee: bigint;
+function priorityFeeGasWeightFor(block: StoredBlock): {
   weightedPriorityFeeNumerator: bigint;
 } {
-  const storedTotalTransactionFee = BigInt(block.totalTransactionFeeWei ?? "0");
-  const storedNumerator = BigInt(block.priorityFeeWeightedNumeratorWei ?? "0");
-  if (storedTotalTransactionFee > 0n || storedNumerator > 0n || block.transactionCount === 0) {
+  const storedNumerator = BigInt(block.priorityFeeGasWeightedNumeratorWei ?? "0");
+  if (storedNumerator > 0n || block.transactionCount === 0) {
     return {
-      totalTransactionFee: storedTotalTransactionFee,
       weightedPriorityFeeNumerator: storedNumerator,
     };
   }
 
-  const reconstructedTotalTransactionFee =
-    BigInt(block.averageTransactionFeeWei) * BigInt(block.transactionCount);
   return {
-    totalTransactionFee: reconstructedTotalTransactionFee,
     weightedPriorityFeeNumerator:
-      BigInt(block.averagePriorityFeeWeightedWei) * reconstructedTotalTransactionFee,
+      BigInt(block.averagePriorityFeeWeightedWei) * BigInt(block.totalGasUsed),
   };
+}
+
+function exactOrAverageSum(
+  exactSum: string | undefined,
+  averageValue: string,
+  count: number,
+): bigint {
+  const stored = BigInt(exactSum ?? "0");
+  if (stored > 0n || count === 0) return stored;
+  return BigInt(averageValue) * BigInt(count);
 }

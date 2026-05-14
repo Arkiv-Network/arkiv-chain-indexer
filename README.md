@@ -69,9 +69,10 @@ Block 19000000 scanned and stored
   Transactions: 144
   Gas used: 29999.781 kGas / 30000 kGas
   Base fee: 11.143964487 Gwei
+  Avg fee price: 12.562964487 Gwei
   Avg priority fee: 1.275 Gwei
-  Weighted avg priority fee: 1.418 Gwei
-  Avg transaction fee: 314727.209 Gwei
+  Gas-weighted avg priority fee: 1.418 Gwei
+  Avg transaction gas: 208331
   RPC: 145 calls, 12.64 KiB sent, 3.41 MiB received (3.42 MiB total)
 ```
 
@@ -111,9 +112,14 @@ lose precision.
 | `max_gas_in_block` | Block `gasLimit`; this is the maximum possible gas for that block and can vary by network. |
 | `transaction_count` | Number of transactions in the block. |
 | `total_transaction_fee_wei` | Sum of actual transaction fees: `sum(receipt.gasUsed * effectiveGasPrice)`. |
-| `priority_fee_weighted_numerator_wei` | Exact numerator for the weighted priority-fee calculation: `sum(priorityFee * transactionFee)`. |
+| `fee_price_sum_wei` | Exact sum of transaction fee prices: `sum(effectiveGasPrice)`. |
+| `priority_fee_sum_wei` | Exact sum of transaction priority fee prices: `sum(priorityFee)`. |
+| `priority_fee_weighted_numerator_wei` | Legacy exact numerator for transaction-fee-weighted priority fee: `sum(priorityFee * transactionFee)`. |
+| `priority_fee_gas_weighted_numerator_wei` | Exact numerator for the gas-weighted priority-fee calculation: `sum(priorityFee * receipt.gasUsed)`. |
+| `average_fee_price_wei` | Simple average effective gas price across transactions: `sum(effectiveGasPrice) / transaction_count`. |
 | `average_transaction_fee_wei` | Average actual transaction fee, computed as `gasUsed * effectiveGasPrice` per transaction. |
-| `average_priority_fee_weighted_wei` | Average priority fee weighted by actual transaction fee size. |
+| `average_transaction_gas_used` | Average transaction gas used: `sum(receipt.gasUsed) / transaction_count`. |
+| `average_priority_fee_weighted_wei` | Average priority fee weighted by transaction gas used. |
 | `average_priority_fee_wei` | Simple average priority fee across transactions. |
 
 Priority fee is computed as:
@@ -125,7 +131,7 @@ max(effectiveGasPrice - baseFeePerGas, 0)
 The weighted priority fee is computed as:
 
 ```txt
-sum(priorityFee * transactionFee) / sum(transactionFee)
+sum(priorityFee * receipt.gasUsed) / sum(receipt.gasUsed)
 ```
 
 For empty blocks all averages are stored as `0`.
@@ -174,11 +180,12 @@ Each size lives independently in `block_ranges` keyed by `(range_size, range_sta
 | `total_gas_used` | Sum of `total_gas_used` across the window. |
 | `total_max_gas` | Sum of `max_gas_in_block` across the window. |
 | `transaction_count` | Sum of `transaction_count` across the window. |
-| `average_priority_fee_weighted_wei` | `sum(block.priority_fee_weighted_numerator_wei) / sum(block.total_transaction_fee_wei)`. Legacy block rows without those exact fields fall back to `sum(block.average_priority_fee_weighted_wei * block.average_transaction_fee_wei * block.transaction_count) / sum(block.average_transaction_fee_wei * block.transaction_count)`. |
+| `average_fee_price_wei` | `sum(block.average_fee_price_wei * block.transaction_count) / sum(block.transaction_count)`. |
+| `average_transaction_gas_used` | `sum(block.average_transaction_gas_used * block.transaction_count) / sum(block.transaction_count)`. |
+| `average_priority_fee_weighted_wei` | `sum(block.priority_fee_gas_weighted_numerator_wei) / sum(block.total_gas_used)`. Legacy block rows without that exact field fall back to `sum(block.average_priority_fee_weighted_wei * block.total_gas_used) / sum(block.total_gas_used)`. |
 | `average_priority_fee_wei` | `sum(block.average_priority_fee_wei * block.transaction_count) / sum(block.transaction_count)`. |
 
-When `total_transaction_fee_wei` or `transaction_count` for the window is `0` the corresponding weighted average
-is stored as `0`.
+When `total_gas_used` or `transaction_count` for the window is `0` the corresponding average is stored as `0`.
 
 #### Aggregator options
 
