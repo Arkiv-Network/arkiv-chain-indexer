@@ -1,12 +1,11 @@
+const MAX_DISPLAY_FRACTION_DIGITS = 4;
+const GWEI_IN_WEI = 1_000_000_000n;
+const ETH_IN_WEI = 1_000_000_000_000_000_000n;
+
 export function fmtGwei(weiStr: string | null | undefined): string {
   if (weiStr === undefined || weiStr === null) return "—";
   try {
-    const wei = BigInt(weiStr);
-    const whole = wei / 1_000_000_000n;
-    const frac = wei % 1_000_000_000n;
-    if (frac === 0n) return whole.toString();
-    const fracStr = frac.toString().padStart(9, "0").replace(/0+$/, "");
-    return `${whole.toString()}.${fracStr}`;
+    return formatBigIntDecimal(BigInt(weiStr), GWEI_IN_WEI, MAX_DISPLAY_FRACTION_DIGITS);
   } catch {
     return String(weiStr);
   }
@@ -15,12 +14,7 @@ export function fmtGwei(weiStr: string | null | undefined): string {
 export function fmtEth(weiStr: string | null | undefined): string {
   if (weiStr === undefined || weiStr === null) return "—";
   try {
-    const wei = BigInt(weiStr);
-    const whole = wei / 1_000_000_000_000_000_000n;
-    const frac = wei % 1_000_000_000_000_000_000n;
-    if (frac === 0n) return whole.toString();
-    const fracStr = frac.toString().padStart(18, "0").replace(/0+$/, "");
-    return `${whole.toString()}.${fracStr}`;
+    return formatBigIntDecimal(BigInt(weiStr), ETH_IN_WEI, MAX_DISPLAY_FRACTION_DIGITS);
   } catch {
     return String(weiStr);
   }
@@ -37,6 +31,26 @@ export function fmtRatio(usedStr: string | null | undefined, limitStr: string | 
   } catch {
     return `${usedStr} / ${limitStr}`;
   }
+}
+
+function formatBigIntDecimal(value: bigint, divisor: bigint, maxFractionDigits: number): string {
+  const sign = value < 0n ? "-" : "";
+  const absoluteValue = value < 0n ? -value : value;
+  const whole = absoluteValue / divisor;
+  const remainder = absoluteValue % divisor;
+
+  if (remainder === 0n || maxFractionDigits === 0) {
+    return `${sign}${whole.toString()}`;
+  }
+
+  const scale = 10n ** BigInt(maxFractionDigits);
+  const fraction = (remainder * scale) / divisor;
+  if (fraction === 0n) {
+    return `${sign}${whole.toString()}`;
+  }
+
+  const fractionStr = fraction.toString().padStart(maxFractionDigits, "0").replace(/0+$/, "");
+  return `${sign}${whole.toString()}.${fractionStr}`;
 }
 
 export function fmtInteger(value: string | number | null | undefined): string {

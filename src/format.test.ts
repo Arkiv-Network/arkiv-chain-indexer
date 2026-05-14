@@ -5,8 +5,9 @@ describe("format helpers", () => {
   test("formats wei values as Gwei", () => {
     expect(formatGwei("0")).toBe("0 Gwei");
     expect(formatGwei("1000000000")).toBe("1 Gwei");
-    expect(formatGwei("1234567890")).toBe("1.23456789 Gwei");
-    expect(formatGwei(42_000_000_001n)).toBe("42.000000001 Gwei");
+    expect(formatGwei("1234567890")).toBe("1.2345 Gwei");
+    expect(formatGwei("1234000000")).toBe("1.234 Gwei");
+    expect(formatGwei(42_000_000_001n)).toBe("42 Gwei");
   });
 
   test("formats gas values as kGas", () => {
