@@ -179,6 +179,7 @@ Each size lives independently in `block_ranges` keyed by `(range_size, range_sta
 | `average_base_fee_wei` | Unweighted mean of the window base fees (integer division in wei). |
 | `total_gas_used` | Sum of `total_gas_used` across the window. |
 | `total_max_gas` | Sum of `max_gas_in_block` across the window. |
+| `min_max_gas_in_block`, `max_max_gas_in_block` | Min and max block gas limit (`max_gas_in_block`) across the window. |
 | `transaction_count` | Sum of `transaction_count` across the window. |
 | `average_fee_price_wei` | `sum(block.average_fee_price_wei * block.transaction_count) / sum(block.transaction_count)`. |
 | `average_transaction_gas_used` | `sum(block.average_transaction_gas_used * block.transaction_count) / sum(block.transaction_count)`. |

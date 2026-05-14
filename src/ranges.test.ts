@@ -77,7 +77,7 @@ describe("computeBlockRange", () => {
       blockDate: new Date(Date.UTC(2024, 0, 1, 0, Number(offset))).toISOString(),
       baseBlockFeeWei: (100n + offset).toString(),
       totalGasUsed: (1_000n + offset).toString(),
-      maxGasInBlock: "30000000",
+      maxGasInBlock: (30_000_000n + offset * 1_000n).toString(),
       transactionCount: 2,
       blockRewardWei: ((5n + offset) * (1_000n + offset)).toString(),
       burntFeesWei: ((100n + offset) * (1_000n + offset)).toString(),
@@ -105,6 +105,7 @@ describe("computeBlockRange", () => {
 
     let baseFeeSum = 0n;
     let totalGas = 0n;
+    let totalMaxGas = 0n;
     let totalBlockReward = 0n;
     let totalBurntFees = 0n;
     let gasWeightedNumerator = 0n;
@@ -115,11 +116,13 @@ describe("computeBlockRange", () => {
     for (let offset = 0n; offset < 100n; offset += 1n) {
       const baseFee = 100n + offset;
       const gas = 1_000n + offset;
+      const maxGas = 30_000_000n + offset * 1_000n;
       const gwPriority = 5n + offset;
       const feePrice = 100n + offset;
       const txPriority = 3n + offset;
       baseFeeSum += baseFee;
       totalGas += gas;
+      totalMaxGas += maxGas;
       totalBlockReward += gwPriority * gas;
       totalBurntFees += baseFee * gas;
       gasWeightedNumerator += gwPriority * gas;
@@ -131,7 +134,9 @@ describe("computeBlockRange", () => {
 
     expect(range.averageBaseFeeWei).toBe((baseFeeSum / rangeSize).toString());
     expect(range.totalGasUsed).toBe(totalGas.toString());
-    expect(range.totalMaxGas).toBe((30_000_000n * rangeSize).toString());
+    expect(range.totalMaxGas).toBe(totalMaxGas.toString());
+    expect(range.minMaxGasInBlock).toBe("30000000");
+    expect(range.maxMaxGasInBlock).toBe("30099000");
     expect(range.transactionCount).toBe(200);
     expect(range.totalBlockRewardWei).toBe(totalBlockReward.toString());
     expect(range.totalBurntFeesWei).toBe(totalBurntFees.toString());

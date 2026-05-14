@@ -72,6 +72,8 @@ export interface StoredBlockRange {
   averageBaseFeeWei: string;
   totalGasUsed: string;
   totalMaxGas: string;
+  minMaxGasInBlock: string;
+  maxMaxGasInBlock: string;
   transactionCount: number;
   totalBlockRewardWei: string;
   totalBurntFeesWei: string;
@@ -204,6 +206,8 @@ export class ScannerStorage {
         average_base_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
         total_max_gas TEXT NOT NULL,
+        min_max_gas_in_block TEXT NOT NULL,
+        max_max_gas_in_block TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
         total_block_reward_wei TEXT NOT NULL DEFAULT '0',
         total_burnt_fees_wei TEXT NOT NULL DEFAULT '0',
@@ -476,6 +480,8 @@ export class ScannerStorage {
         average_base_fee_wei,
         total_gas_used,
         total_max_gas,
+        min_max_gas_in_block,
+        max_max_gas_in_block,
         transaction_count,
         total_block_reward_wei,
         total_burnt_fees_wei,
@@ -486,7 +492,7 @@ export class ScannerStorage {
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -496,6 +502,8 @@ export class ScannerStorage {
         average_base_fee_wei = EXCLUDED.average_base_fee_wei,
         total_gas_used = EXCLUDED.total_gas_used,
         total_max_gas = EXCLUDED.total_max_gas,
+        min_max_gas_in_block = EXCLUDED.min_max_gas_in_block,
+        max_max_gas_in_block = EXCLUDED.max_max_gas_in_block,
         transaction_count = EXCLUDED.transaction_count,
         total_block_reward_wei = EXCLUDED.total_block_reward_wei,
         total_burnt_fees_wei = EXCLUDED.total_burnt_fees_wei,
@@ -517,6 +525,8 @@ export class ScannerStorage {
         metrics.averageBaseFeeWei,
         metrics.totalGasUsed,
         metrics.totalMaxGas,
+        metrics.minMaxGasInBlock,
+        metrics.maxMaxGasInBlock,
         metrics.transactionCount,
         metrics.totalBlockRewardWei,
         metrics.totalBurntFeesWei,
@@ -573,6 +583,8 @@ export class ScannerStorage {
         average_base_fee_wei,
         total_gas_used,
         total_max_gas,
+        min_max_gas_in_block,
+        max_max_gas_in_block,
         transaction_count,
         total_block_reward_wei,
         total_burnt_fees_wei,
@@ -599,6 +611,8 @@ export class ScannerStorage {
       average_base_fee_wei: string;
       total_gas_used: string;
       total_max_gas: string;
+      min_max_gas_in_block: string;
+      max_max_gas_in_block: string;
       transaction_count: number;
       total_block_reward_wei: string;
       total_burnt_fees_wei: string;
@@ -621,6 +635,8 @@ export class ScannerStorage {
       averageBaseFeeWei: row.average_base_fee_wei,
       totalGasUsed: row.total_gas_used,
       totalMaxGas: row.total_max_gas,
+      minMaxGasInBlock: row.min_max_gas_in_block,
+      maxMaxGasInBlock: row.max_max_gas_in_block,
       transactionCount: row.transaction_count,
       totalBlockRewardWei: row.total_block_reward_wei,
       totalBurntFeesWei: row.total_burnt_fees_wei,

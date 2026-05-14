@@ -251,6 +251,12 @@ if (!hasPostgresForTests()) {
         expect(body.limit).toBe(10_000);
         expect(body.truncated).toBe(false);
         expect(body.ranges.map((row) => row.rangeStart)).toEqual([100]);
+        expect(body.ranges[0]).toMatchObject({
+          minBaseFeeWei: "100",
+          maxBaseFeeWei: "100",
+          minMaxGasInBlock: "30000000",
+          maxMaxGasInBlock: "30000000",
+        });
         expect(body.filters).toEqual({
           rangeSize: "100",
           rangeStartGt: "0",
