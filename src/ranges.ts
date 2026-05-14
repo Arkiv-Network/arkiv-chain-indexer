@@ -26,6 +26,10 @@ export interface BlockRangeMetrics {
   totalGasUsed: string;
   totalMaxGas: string;
   transactionCount: number;
+  totalBlockRewardWei: string;
+  totalBurntFeesWei: string;
+  averageBlockRewardWei: string;
+  averageBurntFeesWei: string;
   averageFeePriceWei: string;
   averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
@@ -110,6 +114,8 @@ export function computeBlockRange(
   let baseFeeSum = 0n;
   let totalGasUsed = 0n;
   let totalMaxGas = 0n;
+  let totalBlockReward = 0n;
+  let totalBurntFees = 0n;
   let transactionCount = 0;
   let gasWeightedPriorityFeeNumerator = 0n;
   let feePriceNumerator = 0n;
@@ -132,6 +138,8 @@ export function computeBlockRange(
 
     transactionCount += block.transactionCount;
     const gasWeight = priorityFeeGasWeightFor(block);
+    totalBlockReward += blockRewardFor(block);
+    totalBurntFees += burntFeesFor(block);
     gasWeightedPriorityFeeNumerator += gasWeight.weightedPriorityFeeNumerator;
     feePriceNumerator += exactOrAverageSum(
       block.feePriceSumWei,
@@ -172,11 +180,27 @@ export function computeBlockRange(
     totalGasUsed: totalGasUsed.toString(),
     totalMaxGas: totalMaxGas.toString(),
     transactionCount,
+    totalBlockRewardWei: totalBlockReward.toString(),
+    totalBurntFeesWei: totalBurntFees.toString(),
+    averageBlockRewardWei: (totalBlockReward / rangeSize).toString(),
+    averageBurntFeesWei: (totalBurntFees / rangeSize).toString(),
     averageFeePriceWei: averageFeePrice.toString(),
     averageTransactionGasUsed: averageTransactionGasUsed.toString(),
     averagePriorityFeeWeightedWei: averagePriorityFeeWeighted.toString(),
     averagePriorityFeeWei: averagePriorityFee.toString(),
   };
+}
+
+function blockRewardFor(block: StoredBlock): bigint {
+  const stored = BigInt(block.blockRewardWei ?? "0");
+  if (stored > 0n || block.transactionCount === 0) return stored;
+  return BigInt(block.priorityFeeGasWeightedNumeratorWei ?? "0");
+}
+
+function burntFeesFor(block: StoredBlock): bigint {
+  const stored = BigInt(block.burntFeesWei ?? "0");
+  if (stored > 0n) return stored;
+  return BigInt(block.baseBlockFeeWei) * BigInt(block.totalGasUsed);
 }
 
 function priorityFeeGasWeightFor(block: StoredBlock): {

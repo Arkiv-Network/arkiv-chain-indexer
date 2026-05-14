@@ -12,6 +12,20 @@ export function fmtGwei(weiStr: string | null | undefined): string {
   }
 }
 
+export function fmtEth(weiStr: string | null | undefined): string {
+  if (weiStr === undefined || weiStr === null) return "—";
+  try {
+    const wei = BigInt(weiStr);
+    const whole = wei / 1_000_000_000_000_000_000n;
+    const frac = wei % 1_000_000_000_000_000_000n;
+    if (frac === 0n) return whole.toString();
+    const fracStr = frac.toString().padStart(18, "0").replace(/0+$/, "");
+    return `${whole.toString()}.${fracStr}`;
+  } catch {
+    return String(weiStr);
+  }
+}
+
 export function fmtRatio(usedStr: string | null | undefined, limitStr: string | null | undefined): string {
   if (!usedStr || !limitStr) return "—";
   try {

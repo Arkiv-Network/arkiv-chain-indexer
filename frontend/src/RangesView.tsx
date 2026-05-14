@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { fetchRanges, type RangesResponse, type StoredBlockRange } from "./api";
-import { fmtDate, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -85,6 +85,34 @@ const RANGE_COLUMNS: Column<StoredBlockRange>[] = [
     className: "num",
     width: "11rem",
     render: (row) => fmtGwei(row.averageBaseFeeWei),
+  },
+  {
+    key: "totalBlockRewardWei",
+    label: "Total rewards (ETH)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtEth(row.totalBlockRewardWei),
+  },
+  {
+    key: "totalBurntFeesWei",
+    label: "Total burnt (ETH)",
+    className: "num",
+    width: "10rem",
+    render: (row) => fmtEth(row.totalBurntFeesWei),
+  },
+  {
+    key: "averageBlockRewardWei",
+    label: "Avg reward/block (ETH)",
+    className: "num",
+    width: "13rem",
+    render: (row) => fmtEth(row.averageBlockRewardWei),
+  },
+  {
+    key: "averageBurntFeesWei",
+    label: "Avg burnt/block (ETH)",
+    className: "num",
+    width: "13rem",
+    render: (row) => fmtEth(row.averageBurntFeesWei),
   },
   {
     key: "averageFeePriceWei",

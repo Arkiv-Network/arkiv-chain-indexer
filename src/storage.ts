@@ -47,6 +47,8 @@ export interface StoredBlock {
   totalGasUsed: string;
   maxGasInBlock: string;
   transactionCount: number;
+  blockRewardWei?: string;
+  burntFeesWei?: string;
   totalTransactionFeeWei?: string;
   feePriceSumWei?: string;
   priorityFeeSumWei?: string;
@@ -71,6 +73,10 @@ export interface StoredBlockRange {
   totalGasUsed: string;
   totalMaxGas: string;
   transactionCount: number;
+  totalBlockRewardWei: string;
+  totalBurntFeesWei: string;
+  averageBlockRewardWei: string;
+  averageBurntFeesWei: string;
   averageFeePriceWei: string;
   averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
@@ -128,6 +134,8 @@ export class ScannerStorage {
         total_gas_used TEXT NOT NULL,
         max_gas_in_block TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
+        block_reward_wei TEXT NOT NULL DEFAULT '0',
+        burnt_fees_wei TEXT NOT NULL DEFAULT '0',
         total_transaction_fee_wei TEXT NOT NULL DEFAULT '0',
         fee_price_sum_wei TEXT NOT NULL DEFAULT '0',
         priority_fee_sum_wei TEXT NOT NULL DEFAULT '0',
@@ -141,6 +149,14 @@ export class ScannerStorage {
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS block_reward_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
+    );
     await this.pool.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS total_transaction_fee_wei TEXT NOT NULL DEFAULT '0'`,
@@ -189,6 +205,10 @@ export class ScannerStorage {
         total_gas_used TEXT NOT NULL,
         total_max_gas TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
+        total_block_reward_wei TEXT NOT NULL DEFAULT '0',
+        total_burnt_fees_wei TEXT NOT NULL DEFAULT '0',
+        average_block_reward_wei TEXT NOT NULL DEFAULT '0',
+        average_burnt_fees_wei TEXT NOT NULL DEFAULT '0',
         average_fee_price_wei TEXT NOT NULL DEFAULT '0',
         average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
         average_priority_fee_weighted_wei TEXT NOT NULL,
@@ -197,6 +217,22 @@ export class ScannerStorage {
         PRIMARY KEY (range_size, range_start)
       )
     `);
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS total_block_reward_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS total_burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS average_block_reward_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS average_burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
+    );
     await this.pool.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS average_fee_price_wei TEXT NOT NULL DEFAULT '0'`,
@@ -239,6 +275,8 @@ export class ScannerStorage {
           total_gas_used,
           max_gas_in_block,
           transaction_count,
+          block_reward_wei,
+          burnt_fees_wei,
           total_transaction_fee_wei,
           fee_price_sum_wei,
           priority_fee_sum_wei,
@@ -250,13 +288,15 @@ export class ScannerStorage {
           average_priority_fee_weighted_wei,
           average_priority_fee_wei,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
           base_block_fee_wei = EXCLUDED.base_block_fee_wei,
           total_gas_used = EXCLUDED.total_gas_used,
           max_gas_in_block = EXCLUDED.max_gas_in_block,
           transaction_count = EXCLUDED.transaction_count,
+          block_reward_wei = EXCLUDED.block_reward_wei,
+          burnt_fees_wei = EXCLUDED.burnt_fees_wei,
           total_transaction_fee_wei = EXCLUDED.total_transaction_fee_wei,
           fee_price_sum_wei = EXCLUDED.fee_price_sum_wei,
           priority_fee_sum_wei = EXCLUDED.priority_fee_sum_wei,
@@ -275,6 +315,8 @@ export class ScannerStorage {
           metrics.totalGasUsed,
           metrics.maxGasInBlock,
           metrics.transactionCount,
+          metrics.blockRewardWei,
+          metrics.burntFeesWei,
           metrics.totalTransactionFeeWei,
           metrics.feePriceSumWei,
           metrics.priorityFeeSumWei,
@@ -331,6 +373,8 @@ export class ScannerStorage {
         total_gas_used,
         max_gas_in_block,
         transaction_count,
+        block_reward_wei,
+        burnt_fees_wei,
         total_transaction_fee_wei,
         fee_price_sum_wei,
         priority_fee_sum_wei,
@@ -354,6 +398,8 @@ export class ScannerStorage {
       total_gas_used: string;
       max_gas_in_block: string;
       transaction_count: number;
+      block_reward_wei: string;
+      burnt_fees_wei: string;
       total_transaction_fee_wei: string;
       fee_price_sum_wei: string;
       priority_fee_sum_wei: string;
@@ -373,6 +419,8 @@ export class ScannerStorage {
       totalGasUsed: row.total_gas_used,
       maxGasInBlock: row.max_gas_in_block,
       transactionCount: row.transaction_count,
+      blockRewardWei: row.block_reward_wei,
+      burntFeesWei: row.burnt_fees_wei,
       totalTransactionFeeWei: row.total_transaction_fee_wei,
       feePriceSumWei: row.fee_price_sum_wei,
       priorityFeeSumWei: row.priority_fee_sum_wei,
@@ -429,12 +477,16 @@ export class ScannerStorage {
         total_gas_used,
         total_max_gas,
         transaction_count,
+        total_block_reward_wei,
+        total_burnt_fees_wei,
+        average_block_reward_wei,
+        average_burnt_fees_wei,
         average_fee_price_wei,
         average_transaction_gas_used,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -445,6 +497,10 @@ export class ScannerStorage {
         total_gas_used = EXCLUDED.total_gas_used,
         total_max_gas = EXCLUDED.total_max_gas,
         transaction_count = EXCLUDED.transaction_count,
+        total_block_reward_wei = EXCLUDED.total_block_reward_wei,
+        total_burnt_fees_wei = EXCLUDED.total_burnt_fees_wei,
+        average_block_reward_wei = EXCLUDED.average_block_reward_wei,
+        average_burnt_fees_wei = EXCLUDED.average_burnt_fees_wei,
         average_fee_price_wei = EXCLUDED.average_fee_price_wei,
         average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
         average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
@@ -462,6 +518,10 @@ export class ScannerStorage {
         metrics.totalGasUsed,
         metrics.totalMaxGas,
         metrics.transactionCount,
+        metrics.totalBlockRewardWei,
+        metrics.totalBurntFeesWei,
+        metrics.averageBlockRewardWei,
+        metrics.averageBurntFeesWei,
         metrics.averageFeePriceWei,
         metrics.averageTransactionGasUsed,
         metrics.averagePriorityFeeWeightedWei,
@@ -514,6 +574,10 @@ export class ScannerStorage {
         total_gas_used,
         total_max_gas,
         transaction_count,
+        total_block_reward_wei,
+        total_burnt_fees_wei,
+        average_block_reward_wei,
+        average_burnt_fees_wei,
         average_fee_price_wei,
         average_transaction_gas_used,
         average_priority_fee_weighted_wei,
@@ -536,6 +600,10 @@ export class ScannerStorage {
       total_gas_used: string;
       total_max_gas: string;
       transaction_count: number;
+      total_block_reward_wei: string;
+      total_burnt_fees_wei: string;
+      average_block_reward_wei: string;
+      average_burnt_fees_wei: string;
       average_fee_price_wei: string;
       average_transaction_gas_used: string;
       average_priority_fee_weighted_wei: string;
@@ -554,6 +622,10 @@ export class ScannerStorage {
       totalGasUsed: row.total_gas_used,
       totalMaxGas: row.total_max_gas,
       transactionCount: row.transaction_count,
+      totalBlockRewardWei: row.total_block_reward_wei,
+      totalBurntFeesWei: row.total_burnt_fees_wei,
+      averageBlockRewardWei: row.average_block_reward_wei,
+      averageBurntFeesWei: row.average_burnt_fees_wei,
       averageFeePriceWei: row.average_fee_price_wei,
       averageTransactionGasUsed: row.average_transaction_gas_used,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,

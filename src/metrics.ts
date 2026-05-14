@@ -16,6 +16,7 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
   const blockNumber = hexToBigInt(block.number);
   const blockTimestampSeconds = hexToBigInt(block.timestamp);
   const baseFee = hexToBigInt(block.baseFeePerGas);
+  const totalGasUsed = hexToBigInt(block.gasUsed);
   const priorityFees: bigint[] = [];
   const feePrices: bigint[] = [];
   let totalTransactionFee = 0n;
@@ -58,9 +59,11 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     blockDate: new Date(Number(blockTimestampSeconds) * 1000).toISOString(),
     blockNumber,
     baseBlockFeeWei: baseFee.toString(),
-    totalGasUsed: hexToBigInt(block.gasUsed).toString(),
+    totalGasUsed: totalGasUsed.toString(),
     maxGasInBlock: hexToBigInt(block.gasLimit).toString(),
     transactionCount,
+    blockRewardWei: gasWeightedPriorityFeeNumerator.toString(),
+    burntFeesWei: (baseFee * totalGasUsed).toString(),
     totalTransactionFeeWei: totalTransactionFee.toString(),
     feePriceSumWei: feePriceSum.toString(),
     priorityFeeSumWei: priorityFeeSum.toString(),

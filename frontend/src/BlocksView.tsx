@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
-import { fmtDate, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -69,6 +69,20 @@ const BLOCK_COLUMNS: Column<StoredBlock>[] = [
     className: "num",
     width: "9rem",
     render: (row) => fmtGwei(row.baseBlockFeeWei),
+  },
+  {
+    key: "blockRewardWei",
+    label: "Block reward (ETH)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtEth(row.blockRewardWei ?? "0"),
+  },
+  {
+    key: "burntFeesWei",
+    label: "Burnt fees (ETH)",
+    className: "num",
+    width: "10rem",
+    render: (row) => fmtEth(row.burntFeesWei ?? "0"),
   },
   {
     key: "averageFeePriceWei",

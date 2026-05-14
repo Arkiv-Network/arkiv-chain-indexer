@@ -8,5 +8,6 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true
-  }
+  },
+  "include": ["src/**/*.ts"]
 }

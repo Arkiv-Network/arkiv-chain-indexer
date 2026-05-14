@@ -35,6 +35,8 @@ describe("computeBlockMetrics", () => {
       totalGasUsed: "10",
       maxGasInBlock: "30000000",
       transactionCount: 2,
+      blockRewardWei: "280",
+      burntFeesWei: "1000",
       totalTransactionFeeWei: "1280",
       feePriceSumWei: "310",
       priorityFeeSumWei: "110",
@@ -60,6 +62,8 @@ describe("computeBlockMetrics", () => {
 
     expect(computeBlockMetrics(block, [])).toMatchObject({
       transactionCount: 0,
+      blockRewardWei: "0",
+      burntFeesWei: "0",
       totalTransactionFeeWei: "0",
       feePriceSumWei: "0",
       priorityFeeSumWei: "0",
