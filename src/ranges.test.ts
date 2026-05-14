@@ -79,6 +79,8 @@ describe("computeBlockRange", () => {
       totalGasUsed: (1_000n + offset).toString(),
       maxGasInBlock: "30000000",
       transactionCount: 2,
+      blockRewardWei: ((5n + offset) * (1_000n + offset)).toString(),
+      burntFeesWei: ((100n + offset) * (1_000n + offset)).toString(),
       totalTransactionFeeWei: (2_000n + offset).toString(),
       feePriceSumWei: ((100n + offset) * 2n).toString(),
       priorityFeeSumWei: ((3n + offset) * 2n).toString(),
@@ -103,6 +105,8 @@ describe("computeBlockRange", () => {
 
     let baseFeeSum = 0n;
     let totalGas = 0n;
+    let totalBlockReward = 0n;
+    let totalBurntFees = 0n;
     let gasWeightedNumerator = 0n;
     let feePriceNumerator = 0n;
     let transactionGasNumerator = 0n;
@@ -116,6 +120,8 @@ describe("computeBlockRange", () => {
       const txPriority = 3n + offset;
       baseFeeSum += baseFee;
       totalGas += gas;
+      totalBlockReward += gwPriority * gas;
+      totalBurntFees += baseFee * gas;
       gasWeightedNumerator += gwPriority * gas;
       feePriceNumerator += feePrice * 2n;
       transactionGasNumerator += gas;
@@ -127,6 +133,10 @@ describe("computeBlockRange", () => {
     expect(range.totalGasUsed).toBe(totalGas.toString());
     expect(range.totalMaxGas).toBe((30_000_000n * rangeSize).toString());
     expect(range.transactionCount).toBe(200);
+    expect(range.totalBlockRewardWei).toBe(totalBlockReward.toString());
+    expect(range.totalBurntFeesWei).toBe(totalBurntFees.toString());
+    expect(range.averageBlockRewardWei).toBe((totalBlockReward / rangeSize).toString());
+    expect(range.averageBurntFeesWei).toBe((totalBurntFees / rangeSize).toString());
     expect(range.averagePriorityFeeWeightedWei).toBe(
       (gasWeightedNumerator / totalGas).toString(),
     );
@@ -148,6 +158,8 @@ describe("computeBlockRange", () => {
       totalGasUsed: "1000",
       maxGasInBlock: "30000000",
       transactionCount: 1,
+      blockRewardWei: "10000",
+      burntFeesWei: ((200n + offset) * 1000n).toString(),
       totalTransactionFeeWei: "2000",
       feePriceSumWei: "20",
       priorityFeeSumWei: "8",

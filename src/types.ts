@@ -27,6 +27,8 @@ export interface BlockMetrics {
   totalGasUsed: string;
   maxGasInBlock: string;
   transactionCount: number;
+  blockRewardWei: string;
+  burntFeesWei: string;
   totalTransactionFeeWei: string;
   feePriceSumWei: string;
   priorityFeeSumWei: string;
