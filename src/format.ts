@@ -1,13 +1,14 @@
 const GWEI_IN_WEI = 1_000_000_000n;
 const GAS_IN_KGAS = 1_000n;
 const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
+const MAX_DISPLAY_FRACTION_DIGITS = 4;
 
 export function formatGwei(wei: string | bigint): string {
-  return `${formatBigIntDecimal(BigInt(wei), GWEI_IN_WEI, 9)} Gwei`;
+  return `${formatBigIntDecimal(BigInt(wei), GWEI_IN_WEI, MAX_DISPLAY_FRACTION_DIGITS)} Gwei`;
 }
 
 export function formatKGas(gas: string | bigint): string {
-  return `${formatBigIntDecimal(BigInt(gas), GAS_IN_KGAS, 3)} kGas`;
+  return `${formatBigIntDecimal(BigInt(gas), GAS_IN_KGAS, MAX_DISPLAY_FRACTION_DIGITS)} kGas`;
 }
 
 export function formatBytes(bytes: number): string {
