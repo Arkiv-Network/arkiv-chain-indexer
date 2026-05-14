@@ -47,6 +47,8 @@ export interface StoredBlock {
   totalGasUsed: string;
   maxGasInBlock: string;
   transactionCount: number;
+  totalTransactionFeeWei?: string;
+  priorityFeeWeightedNumeratorWei?: string;
   averageTransactionFeeWei: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
@@ -119,12 +121,22 @@ export class ScannerStorage {
         total_gas_used TEXT NOT NULL,
         max_gas_in_block TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
+        total_transaction_fee_wei TEXT NOT NULL DEFAULT '0',
+        priority_fee_weighted_numerator_wei TEXT NOT NULL DEFAULT '0',
         average_transaction_fee_wei TEXT NOT NULL,
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS total_transaction_fee_wei TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS priority_fee_weighted_numerator_wei TEXT NOT NULL DEFAULT '0'`,
+    );
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qScannerState} (
         key TEXT PRIMARY KEY,
@@ -185,17 +197,21 @@ export class ScannerStorage {
           total_gas_used,
           max_gas_in_block,
           transaction_count,
+          total_transaction_fee_wei,
+          priority_fee_weighted_numerator_wei,
           average_transaction_fee_wei,
           average_priority_fee_weighted_wei,
           average_priority_fee_wei,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
           base_block_fee_wei = EXCLUDED.base_block_fee_wei,
           total_gas_used = EXCLUDED.total_gas_used,
           max_gas_in_block = EXCLUDED.max_gas_in_block,
           transaction_count = EXCLUDED.transaction_count,
+          total_transaction_fee_wei = EXCLUDED.total_transaction_fee_wei,
+          priority_fee_weighted_numerator_wei = EXCLUDED.priority_fee_weighted_numerator_wei,
           average_transaction_fee_wei = EXCLUDED.average_transaction_fee_wei,
           average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
           average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
@@ -207,6 +223,8 @@ export class ScannerStorage {
           metrics.totalGasUsed,
           metrics.maxGasInBlock,
           metrics.transactionCount,
+          metrics.totalTransactionFeeWei,
+          metrics.priorityFeeWeightedNumeratorWei,
           metrics.averageTransactionFeeWei,
           metrics.averagePriorityFeeWeightedWei,
           metrics.averagePriorityFeeWei,
@@ -256,6 +274,8 @@ export class ScannerStorage {
         total_gas_used,
         max_gas_in_block,
         transaction_count,
+        total_transaction_fee_wei,
+        priority_fee_weighted_numerator_wei,
         average_transaction_fee_wei,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei
@@ -272,6 +292,8 @@ export class ScannerStorage {
       total_gas_used: string;
       max_gas_in_block: string;
       transaction_count: number;
+      total_transaction_fee_wei: string;
+      priority_fee_weighted_numerator_wei: string;
       average_transaction_fee_wei: string;
       average_priority_fee_weighted_wei: string;
       average_priority_fee_wei: string;
@@ -284,6 +306,8 @@ export class ScannerStorage {
       totalGasUsed: row.total_gas_used,
       maxGasInBlock: row.max_gas_in_block,
       transactionCount: row.transaction_count,
+      totalTransactionFeeWei: row.total_transaction_fee_wei,
+      priorityFeeWeightedNumeratorWei: row.priority_fee_weighted_numerator_wei,
       averageTransactionFeeWei: row.average_transaction_fee_wei,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,

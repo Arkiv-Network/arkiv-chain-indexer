@@ -5,6 +5,8 @@ export interface StoredBlock {
   baseBlockFeeWei: string;
   averagePriorityFeeWei: string;
   averagePriorityFeeWeightedWei: string;
+  totalTransactionFeeWei?: string;
+  priorityFeeWeightedNumeratorWei?: string;
   averageTransactionFeeWei: string;
   totalGasUsed: string;
   maxGasInBlock: string;

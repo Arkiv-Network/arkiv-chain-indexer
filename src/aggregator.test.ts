@@ -116,6 +116,8 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     totalGasUsed: "21000",
     maxGasInBlock: "30000000",
     transactionCount: 1,
+    totalTransactionFeeWei: "2310000",
+    priorityFeeWeightedNumeratorWei: "23100000",
     averageTransactionFeeWei: "2310000",
     averagePriorityFeeWeightedWei: "10",
     averagePriorityFeeWei: "10",
