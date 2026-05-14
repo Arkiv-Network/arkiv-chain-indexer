@@ -1,6 +1,6 @@
 export interface ScannerConfig {
   rpcUrl: string;
-  dbPath: string;
+  databaseUrl: string;
   fromBlock?: bigint;
   toBlock?: bigint;
   oldestBackfillBlock: bigint;
@@ -10,7 +10,6 @@ export interface ScannerConfig {
   txReceiptConcurrency: number;
 }
 
-const DEFAULT_DB_PATH = "scanner.sqlite";
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
 const DEFAULT_OLDEST_BACKFILL_BLOCK = 25_000_000n;
 const DEFAULT_POLL_MS = 12_000;
@@ -29,6 +28,12 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
     throw new Error("SCANNER_RPC_FULL_NODE is required");
   }
 
+  const databaseUrl =
+    parsed.values["database-url"] ?? env.DATABASE_URL ?? env.SCANNER_DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL (or --database-url) is required");
+  }
+
   const fromBlockRaw = parsed.values["from-block"] ?? parsed.values.from ?? env.SCANNER_FROM_BLOCK;
   const toBlockRaw = parsed.values["to-block"] ?? env.SCANNER_TO_BLOCK;
   if (toBlockRaw && !fromBlockRaw) {
@@ -37,7 +42,7 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
 
   return {
     rpcUrl,
-    dbPath: parsed.values.db ?? env.SCANNER_DB_PATH ?? DEFAULT_DB_PATH,
+    databaseUrl,
     ...(fromBlockRaw ? { fromBlock: parseBigIntOption("--from-block", fromBlockRaw) } : {}),
     ...(toBlockRaw
       ? { toBlock: parseBigIntOption("--to-block", toBlockRaw) }
@@ -144,13 +149,15 @@ function parsePositiveNumberOption(name: string, value: string): number {
 
 function usage(): string {
   return `Usage:
-  SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ bun run scan
+  SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \\
+    DATABASE_URL=postgres://user:pass@host:5432/db \\
+    bun run scan
 
 Options:
+  --database-url <url>              PostgreSQL connection string (or DATABASE_URL env).
   --from-block <number>             First block for bounded --to-block scans.
   --to-block <number>               Optional inclusive block to stop at.
   --oldest-backfill-block <number>  Oldest block to backfill to. Defaults to 25000000.
-  --db <path>                       SQLite database path. Defaults to scanner.sqlite.
   --confirmation-depth <number>     Blocks to stay behind latest head. Defaults to 3.
   --poll-ms <number>                Delay while waiting for new safe blocks. Defaults to 12000.
   --retry-ms <number>               Delay before retrying a failed block. Defaults to 5000.

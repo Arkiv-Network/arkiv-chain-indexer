@@ -270,18 +270,18 @@ class FakeStorage {
   lastSuccessfulBlock: bigint | undefined;
   backfillNextBlock: bigint | undefined;
 
-  getLastSuccessfulBlock(): bigint | undefined {
+  async getLastSuccessfulBlock(): Promise<bigint | undefined> {
     return this.lastSuccessfulBlock;
   }
 
-  getBackfillNextBlock(): bigint | undefined {
+  async getBackfillNextBlock(): Promise<bigint | undefined> {
     return this.backfillNextBlock;
   }
 
-  saveBlockMetrics(
+  async saveBlockMetrics(
     metrics: BlockMetrics,
     progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
-  ): void {
+  ): Promise<void> {
     this.savedMetrics.push(metrics);
 
     switch (progressUpdate.kind) {
@@ -370,7 +370,7 @@ function txHash(index: number): Hex {
 function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> = {}): Parameters<typeof backfillDownForSlice>[1] {
   return {
     rpcUrl: "https://example.test",
-    dbPath: ":memory:",
+    databaseUrl: "postgres://localhost/test",
     oldestBackfillBlock: 0n,
     confirmationDepth: 3n,
     pollMs: 12_000,

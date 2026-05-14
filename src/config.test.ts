@@ -3,24 +3,42 @@ import { HelpRequested, parseConfig } from "./config";
 
 const baseEnv: NodeJS.ProcessEnv = {
   SCANNER_RPC_FULL_NODE: "https://example.test",
+  DATABASE_URL: "postgres://user:pass@localhost:5432/test",
   SCANNER_FROM_BLOCK: "10",
 };
 
 describe("parseConfig", () => {
   test("does not require from-block for continuous near-head scanning", () => {
-    expect(parseConfig([], { SCANNER_RPC_FULL_NODE: "https://example.test" }).fromBlock).toBeUndefined();
+    expect(
+      parseConfig([], {
+        SCANNER_RPC_FULL_NODE: "https://example.test",
+        DATABASE_URL: "postgres://user:pass@localhost:5432/test",
+      }).fromBlock,
+    ).toBeUndefined();
   });
 
   test("requires from-block when to-block is set", () => {
     expect(() =>
-      parseConfig(["--to-block", "12"], { SCANNER_RPC_FULL_NODE: "https://example.test" }),
+      parseConfig(["--to-block", "12"], {
+        SCANNER_RPC_FULL_NODE: "https://example.test",
+        DATABASE_URL: "postgres://user:pass@localhost:5432/test",
+      }),
     ).toThrow("--from-block is required when --to-block is set");
   });
 
-  test("defaults oldest backfill block to 25000000", () => {
-    expect(parseConfig([], { SCANNER_RPC_FULL_NODE: "https://example.test" }).oldestBackfillBlock).toBe(
-      25_000_000n,
+  test("requires DATABASE_URL", () => {
+    expect(() => parseConfig([], { SCANNER_RPC_FULL_NODE: "https://example.test" })).toThrow(
+      "DATABASE_URL (or --database-url) is required",
     );
+  });
+
+  test("defaults oldest backfill block to 25000000", () => {
+    expect(
+      parseConfig([], {
+        SCANNER_RPC_FULL_NODE: "https://example.test",
+        DATABASE_URL: "postgres://user:pass@localhost:5432/test",
+      }).oldestBackfillBlock,
+    ).toBe(25_000_000n);
   });
 
   test("reads oldest backfill block from env", () => {
