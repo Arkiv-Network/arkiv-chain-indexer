@@ -28,6 +28,7 @@ export interface BlockQueryFilter {
   blockLt?: bigint;
   dateGt?: string;
   dateLt?: string;
+  limit?: number;
 }
 
 export interface BlockRangeQueryFilter {
@@ -36,6 +37,7 @@ export interface BlockRangeQueryFilter {
   rangeStartLt?: bigint;
   dateGt?: string;
   dateLt?: string;
+  limit?: number;
 }
 
 export interface StoredBlock {
@@ -245,7 +247,7 @@ export class ScannerStorage {
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    params.push(MAX_BLOCKS_PER_QUERY);
+    params.push(resolveLimit(filter.limit, MAX_BLOCKS_PER_QUERY));
     const sql = `
       SELECT
         block_number,
@@ -395,7 +397,7 @@ export class ScannerStorage {
       clauses.push(`min_block_date < $${params.length}`);
     }
 
-    params.push(MAX_RANGES_PER_QUERY);
+    params.push(resolveLimit(filter.limit, MAX_RANGES_PER_QUERY));
 
     const sql = `
       SELECT
@@ -497,6 +499,12 @@ export class ScannerStorage {
   async close(): Promise<void> {
     await this.pool.end();
   }
+}
+
+function resolveLimit(requested: number | undefined, hardMax: number): number {
+  if (requested === undefined) return hardMax;
+  if (!Number.isFinite(requested) || requested < 1) return 1;
+  return Math.min(Math.floor(requested), hardMax);
 }
 
 function quoteIdent(name: string): string {

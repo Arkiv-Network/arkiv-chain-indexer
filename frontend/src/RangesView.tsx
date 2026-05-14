@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchRanges, type RangesResponse } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
+import { usePersistentState } from "./persistentState";
 
 interface Filters {
   rangeSize: string;
@@ -8,15 +9,19 @@ interface Filters {
   rangeStartLt: string;
   dateGt: string;
   dateLt: string;
+  limit: string;
 }
 
 const RANGE_SIZES = ["2", "5", "10", "20", "50", "100", "200", "500", "1000"];
+const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
+const STORAGE_KEY = "gas-tracker.filters.ranges";
 const EMPTY: Filters = {
   rangeSize: "100",
   rangeStartGt: "",
   rangeStartLt: "",
   dateGt: "",
   dateLt: "",
+  limit: "1000",
 };
 
 function buildParams(filters: Filters): URLSearchParams {
@@ -29,8 +34,8 @@ function buildParams(filters: Filters): URLSearchParams {
 }
 
 export function RangesView() {
-  const [filters, setFilters] = useState<Filters>(EMPTY);
-  const [applied, setApplied] = useState<Filters>(EMPTY);
+  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, EMPTY);
+  const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<RangesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -57,8 +62,8 @@ export function RangesView() {
     setFilters((prev) => ({ ...prev, [key]: e.target.value }));
   };
 
-  const onSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters((prev) => ({ ...prev, rangeSize: e.target.value }));
+  const onSelectChange = (key: keyof Filters) => (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters((prev) => ({ ...prev, [key]: e.target.value }));
   };
 
   const sorted = data
@@ -71,7 +76,7 @@ export function RangesView() {
       <form onSubmit={onSubmit}>
         <label>
           rangeSize
-          <select value={filters.rangeSize} onChange={onSelectChange}>
+          <select value={filters.rangeSize} onChange={onSelectChange("rangeSize")}>
             {RANGE_SIZES.map((s) => (
               <option key={s} value={s}>
                 {s}
@@ -115,6 +120,16 @@ export function RangesView() {
             onChange={onTextChange("dateLt")}
           />
         </label>
+        <label>
+          limit
+          <select value={filters.limit} onChange={onSelectChange("limit")}>
+            {LIMIT_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="submit">Search</button>
       </form>
       <p className={`summary${error ? " error" : ""}`}>
@@ -123,7 +138,7 @@ export function RangesView() {
           : error
             ? `Failed to load ranges: ${error}`
             : data
-              ? `${data.count} ranges${data.truncated ? " (truncated to 10 000)" : ""}`
+              ? `${data.count} ranges${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
       <div className="table-wrap">

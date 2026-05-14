@@ -26,12 +26,14 @@ export interface StoredBlockRange {
 
 export interface BlocksResponse {
   count: number;
+  limit: number;
   truncated: boolean;
   blocks: StoredBlock[];
 }
 
 export interface RangesResponse {
   count: number;
+  limit: number;
   truncated: boolean;
   ranges: StoredBlockRange[];
 }

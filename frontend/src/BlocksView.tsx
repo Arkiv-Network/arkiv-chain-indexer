@@ -1,15 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchBlocks, type BlocksResponse } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
+import { usePersistentState } from "./persistentState";
 
 interface Filters {
   blockGt: string;
   blockLt: string;
   dateGt: string;
   dateLt: string;
+  limit: string;
 }
 
-const EMPTY: Filters = { blockGt: "", blockLt: "", dateGt: "", dateLt: "" };
+const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
+const STORAGE_KEY = "gas-tracker.filters.blocks";
+const EMPTY: Filters = {
+  blockGt: "",
+  blockLt: "",
+  dateGt: "",
+  dateLt: "",
+  limit: "1000",
+};
 
 function buildParams(filters: Filters): URLSearchParams {
   const params = new URLSearchParams();
@@ -21,8 +31,8 @@ function buildParams(filters: Filters): URLSearchParams {
 }
 
 export function BlocksView() {
-  const [filters, setFilters] = useState<Filters>(EMPTY);
-  const [applied, setApplied] = useState<Filters>(EMPTY);
+  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, EMPTY);
+  const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<BlocksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -49,6 +59,10 @@ export function BlocksView() {
     setFilters((prev) => ({ ...prev, [key]: e.target.value }));
   };
 
+  const onLimitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters((prev) => ({ ...prev, limit: e.target.value }));
+  };
+
   const sorted = data
     ? data.blocks.slice().sort((a, b) => b.blockNumber - a.blockNumber)
     : [];
@@ -73,6 +87,16 @@ export function BlocksView() {
           dateLt (ISO)
           <input type="text" placeholder="2024-12-31T00:00:00Z" value={filters.dateLt} onChange={onChange("dateLt")} />
         </label>
+        <label>
+          limit
+          <select value={filters.limit} onChange={onLimitChange}>
+            {LIMIT_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="submit">Search</button>
       </form>
       <p className={`summary${error ? " error" : ""}`}>
@@ -81,7 +105,7 @@ export function BlocksView() {
           : error
             ? `Failed to load blocks: ${error}`
             : data
-              ? `${data.count} blocks${data.truncated ? " (truncated to 10 000)" : ""}`
+              ? `${data.count} blocks${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
       <div className="table-wrap">
