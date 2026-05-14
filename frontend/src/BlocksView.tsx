@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchBlocks, type BlocksResponse } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
-import { usePersistentState } from "./persistentState";
+import {
+  buildPermalinkHref,
+  filtersEqual,
+  hasAnyFilterParam,
+  readFiltersFromSearch,
+  writePermalink,
+} from "./permalinks";
+import { loadFromStorage, usePersistentState } from "./persistentState";
 
-interface Filters {
+interface BlocksViewProps {
+  locationSearch: string;
+  onLocationChange: () => void;
+}
+
+interface Filters extends Record<string, string> {
   blockGt: string;
   blockLt: string;
   dateGt: string;
@@ -13,6 +25,7 @@ interface Filters {
 
 const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
 const STORAGE_KEY = "gas-tracker.filters.blocks";
+const FILTER_KEYS = ["blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
 const EMPTY: Filters = {
   blockGt: "",
   blockLt: "",
@@ -30,12 +43,19 @@ function buildParams(filters: Filters): URLSearchParams {
   return params;
 }
 
-export function BlocksView() {
-  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, EMPTY);
+function loadFilters(locationSearch: string): Filters {
+  const stored = loadFromStorage<Filters>(STORAGE_KEY, EMPTY);
+  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+}
+
+export function BlocksView({ locationSearch, onLocationChange }: BlocksViewProps) {
+  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<BlocksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const load = useCallback((f: Filters) => {
     setLoading(true);
@@ -50,9 +70,30 @@ export function BlocksView() {
     load(applied);
   }, [applied, load]);
 
+  useEffect(() => {
+    const next = loadFilters(locationSearch);
+    setFilters((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
+    setApplied((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
+    setCopyStatus("");
+  }, [locationSearch, setFilters]);
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setApplied(filters);
+    if (writePermalink("blocks", filters)) {
+      onLocationChange();
+    } else {
+      setApplied(filters);
+    }
+  };
+
+  const copyPermalink = async () => {
+    const href = buildPermalinkHref("blocks", applied);
+    try {
+      await navigator.clipboard.writeText(href);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus(href);
+    }
   };
 
   const onChange = (key: keyof Filters) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,6 +149,12 @@ export function BlocksView() {
               ? `${data.count} blocks${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
+      <div className="permalink-row">
+        <button type="button" className="secondary" onClick={copyPermalink}>
+          Copy link
+        </button>
+        {copyStatus ? <span>{copyStatus}</span> : null}
+      </div>
       <div className="table-wrap">
         <table>
           <thead>

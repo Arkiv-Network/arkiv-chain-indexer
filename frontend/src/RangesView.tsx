@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchRanges, type RangesResponse } from "./api";
 import { fmtDate, fmtGwei, fmtRatio } from "./format";
-import { usePersistentState } from "./persistentState";
+import {
+  buildPermalinkHref,
+  filtersEqual,
+  hasAnyFilterParam,
+  readFiltersFromSearch,
+  writePermalink,
+} from "./permalinks";
+import { loadFromStorage, usePersistentState } from "./persistentState";
 
-interface Filters {
+interface RangesViewProps {
+  locationSearch: string;
+  onLocationChange: () => void;
+}
+
+interface Filters extends Record<string, string> {
   rangeSize: string;
   rangeStartGt: string;
   rangeStartLt: string;
@@ -15,6 +27,7 @@ interface Filters {
 const RANGE_SIZES = ["2", "5", "10", "20", "50", "100", "200", "500", "1000"];
 const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
 const STORAGE_KEY = "gas-tracker.filters.ranges";
+const FILTER_KEYS = ["rangeSize", "rangeStartGt", "rangeStartLt", "dateGt", "dateLt", "limit"] as const;
 const EMPTY: Filters = {
   rangeSize: "100",
   rangeStartGt: "",
@@ -33,12 +46,19 @@ function buildParams(filters: Filters): URLSearchParams {
   return params;
 }
 
-export function RangesView() {
-  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, EMPTY);
+function loadFilters(locationSearch: string): Filters {
+  const stored = loadFromStorage<Filters>(STORAGE_KEY, EMPTY);
+  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+}
+
+export function RangesView({ locationSearch, onLocationChange }: RangesViewProps) {
+  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<RangesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const load = useCallback((f: Filters) => {
     setLoading(true);
@@ -53,9 +73,30 @@ export function RangesView() {
     load(applied);
   }, [applied, load]);
 
+  useEffect(() => {
+    const next = loadFilters(locationSearch);
+    setFilters((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
+    setApplied((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
+    setCopyStatus("");
+  }, [locationSearch, setFilters]);
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setApplied(filters);
+    if (writePermalink("ranges", filters)) {
+      onLocationChange();
+    } else {
+      setApplied(filters);
+    }
+  };
+
+  const copyPermalink = async () => {
+    const href = buildPermalinkHref("ranges", applied);
+    try {
+      await navigator.clipboard.writeText(href);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus(href);
+    }
   };
 
   const onTextChange = (key: keyof Filters) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,6 +182,12 @@ export function RangesView() {
               ? `${data.count} ranges${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
+      <div className="permalink-row">
+        <button type="button" className="secondary" onClick={copyPermalink}>
+          Copy link
+        </button>
+        {copyStatus ? <span>{copyStatus}</span> : null}
+      </div>
       <div className="table-wrap">
         <table>
           <thead>

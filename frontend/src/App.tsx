@@ -1,11 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BlocksView } from "./BlocksView";
+import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
 
-type View = "blocks" | "ranges";
-
 export function App() {
-  const [view, setView] = useState<View>("blocks");
+  const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
+  const view = readViewFromSearch(locationSearch);
+
+  useEffect(() => {
+    const onPopState = () => setLocationSearch(getCurrentSearch());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const refreshFromLocation = () => setLocationSearch(getCurrentSearch());
+
+  const setView = (nextView: typeof view) => {
+    if (writePermalink(nextView, {})) {
+      refreshFromLocation();
+    }
+  };
 
   return (
     <>
@@ -28,7 +42,13 @@ export function App() {
           </button>
         </nav>
       </header>
-      <main>{view === "blocks" ? <BlocksView /> : <RangesView />}</main>
+      <main>
+        {view === "blocks" ? (
+          <BlocksView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
+        ) : (
+          <RangesView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
+        )}
+      </main>
     </>
   );
 }
