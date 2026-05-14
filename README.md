@@ -110,6 +110,8 @@ lose precision.
 | `total_gas_used` | Block `gasUsed`. |
 | `max_gas_in_block` | Block `gasLimit`; this is the maximum possible gas for that block and can vary by network. |
 | `transaction_count` | Number of transactions in the block. |
+| `total_transaction_fee_wei` | Sum of actual transaction fees: `sum(receipt.gasUsed * effectiveGasPrice)`. |
+| `priority_fee_weighted_numerator_wei` | Exact numerator for the weighted priority-fee calculation: `sum(priorityFee * transactionFee)`. |
 | `average_transaction_fee_wei` | Average actual transaction fee, computed as `gasUsed * effectiveGasPrice` per transaction. |
 | `average_priority_fee_weighted_wei` | Average priority fee weighted by actual transaction fee size. |
 | `average_priority_fee_wei` | Simple average priority fee across transactions. |
@@ -172,11 +174,11 @@ Each size lives independently in `block_ranges` keyed by `(range_size, range_sta
 | `total_gas_used` | Sum of `total_gas_used` across the window. |
 | `total_max_gas` | Sum of `max_gas_in_block` across the window. |
 | `transaction_count` | Sum of `transaction_count` across the window. |
-| `average_priority_fee_weighted_wei` | `sum(block.average_priority_fee_weighted_wei * block.total_gas_used) / sum(block.total_gas_used)`. |
+| `average_priority_fee_weighted_wei` | `sum(block.priority_fee_weighted_numerator_wei) / sum(block.total_transaction_fee_wei)`. Legacy block rows without those exact fields fall back to `sum(block.average_priority_fee_weighted_wei * block.average_transaction_fee_wei * block.transaction_count) / sum(block.average_transaction_fee_wei * block.transaction_count)`. |
 | `average_priority_fee_wei` | `sum(block.average_priority_fee_wei * block.transaction_count) / sum(block.transaction_count)`. |
 
-When `total_gas_used` or `transaction_count` for the window is `0` the corresponding weighted average is stored
-as `0`.
+When `total_transaction_fee_wei` or `transaction_count` for the window is `0` the corresponding weighted average
+is stored as `0`.
 
 #### Aggregator options
 

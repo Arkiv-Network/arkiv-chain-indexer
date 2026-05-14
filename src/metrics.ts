@@ -49,6 +49,8 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     totalGasUsed: hexToBigInt(block.gasUsed).toString(),
     maxGasInBlock: hexToBigInt(block.gasLimit).toString(),
     transactionCount,
+    totalTransactionFeeWei: totalTransactionFee.toString(),
+    priorityFeeWeightedNumeratorWei: weightedPriorityFeeNumerator.toString(),
     averageTransactionFeeWei: averageTransactionFee.toString(),
     averagePriorityFeeWeightedWei: weightedPriorityFee.toString(),
     averagePriorityFeeWei: average(priorityFees).toString(),

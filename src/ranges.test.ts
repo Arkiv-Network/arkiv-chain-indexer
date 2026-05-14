@@ -79,7 +79,9 @@ describe("computeBlockRange", () => {
       totalGasUsed: (1_000n + offset).toString(),
       maxGasInBlock: "30000000",
       transactionCount: 2,
-      averageTransactionFeeWei: "0",
+      totalTransactionFeeWei: (2_000n + offset).toString(),
+      priorityFeeWeightedNumeratorWei: ((5n + offset) * (2_000n + offset)).toString(),
+      averageTransactionFeeWei: ((2_000n + offset) / 2n).toString(),
       averagePriorityFeeWeightedWei: (5n + offset).toString(),
       averagePriorityFeeWei: (3n + offset).toString(),
     }));
@@ -96,17 +98,20 @@ describe("computeBlockRange", () => {
 
     let baseFeeSum = 0n;
     let totalGas = 0n;
-    let gasWeightedNumerator = 0n;
+    let totalTransactionFee = 0n;
+    let feeWeightedNumerator = 0n;
     let txWeightedNumerator = 0n;
     let totalTransactions = 0n;
     for (let offset = 0n; offset < 100n; offset += 1n) {
       const baseFee = 100n + offset;
       const gas = 1_000n + offset;
+      const transactionFee = 2_000n + offset;
       const gwPriority = 5n + offset;
       const txPriority = 3n + offset;
       baseFeeSum += baseFee;
       totalGas += gas;
-      gasWeightedNumerator += gwPriority * gas;
+      totalTransactionFee += transactionFee;
+      feeWeightedNumerator += gwPriority * transactionFee;
       txWeightedNumerator += txPriority * 2n;
       totalTransactions += 2n;
     }
@@ -116,7 +121,7 @@ describe("computeBlockRange", () => {
     expect(range.totalMaxGas).toBe((30_000_000n * rangeSize).toString());
     expect(range.transactionCount).toBe(200);
     expect(range.averagePriorityFeeWeightedWei).toBe(
-      (gasWeightedNumerator / totalGas).toString(),
+      (feeWeightedNumerator / totalTransactionFee).toString(),
     );
     expect(range.averagePriorityFeeWei).toBe(
       (txWeightedNumerator / totalTransactions).toString(),
@@ -130,6 +135,8 @@ describe("computeBlockRange", () => {
       totalGasUsed: "1000",
       maxGasInBlock: "30000000",
       transactionCount: 1,
+      totalTransactionFeeWei: "2000",
+      priorityFeeWeightedNumeratorWei: "20000",
       averagePriorityFeeWeightedWei: "10",
       averagePriorityFeeWei: "8",
     }));
@@ -141,6 +148,58 @@ describe("computeBlockRange", () => {
     expect(range.totalGasUsed).toBe((1000n * 50n).toString());
     expect(range.minBaseFeeWei).toBe("200");
     expect(range.maxBaseFeeWei).toBe((200n + 49n).toString());
+  });
+
+  test("weights range priority averages by transaction fee size, not gas used", () => {
+    const blocks = makeBlocks(0n, 2n, (offset) =>
+      offset === 0n
+        ? {
+            totalGasUsed: "1",
+            transactionCount: 1,
+            totalTransactionFeeWei: "1000",
+            priorityFeeWeightedNumeratorWei: "100000",
+            averageTransactionFeeWei: "1000",
+            averagePriorityFeeWeightedWei: "100",
+            averagePriorityFeeWei: "100",
+          }
+        : {
+            totalGasUsed: "1000",
+            transactionCount: 1,
+            totalTransactionFeeWei: "1000",
+            priorityFeeWeightedNumeratorWei: "1000",
+            averageTransactionFeeWei: "1000",
+            averagePriorityFeeWeightedWei: "1",
+            averagePriorityFeeWei: "1",
+          },
+    );
+
+    const range = computeBlockRange(0n, 2n, blocks);
+
+    expect(range.averagePriorityFeeWeightedWei).toBe("50");
+  });
+
+  test("falls back to reconstructed transaction-fee weights for legacy block rows", () => {
+    const blocks = makeBlocks(0n, 2n, (offset) =>
+      offset === 0n
+        ? {
+            totalGasUsed: "1",
+            transactionCount: 1,
+            averageTransactionFeeWei: "1000",
+            averagePriorityFeeWeightedWei: "100",
+            averagePriorityFeeWei: "100",
+          }
+        : {
+            totalGasUsed: "1000",
+            transactionCount: 1,
+            averageTransactionFeeWei: "1000",
+            averagePriorityFeeWeightedWei: "1",
+            averagePriorityFeeWei: "1",
+          },
+    );
+
+    const range = computeBlockRange(0n, 2n, blocks);
+
+    expect(range.averagePriorityFeeWeightedWei).toBe("50");
   });
 
   test("uses zero averages when the range has zero gas and zero transactions", () => {

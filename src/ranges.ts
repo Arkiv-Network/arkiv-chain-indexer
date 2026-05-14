@@ -109,7 +109,8 @@ export function computeBlockRange(
   let totalGasUsed = 0n;
   let totalMaxGas = 0n;
   let transactionCount = 0;
-  let gasWeightedPriorityFeeNumerator = 0n;
+  let totalTransactionFee = 0n;
+  let feeWeightedPriorityFeeNumerator = 0n;
   let txWeightedPriorityFeeNumerator = 0n;
 
   for (const block of blocks) {
@@ -127,15 +128,18 @@ export function computeBlockRange(
     totalMaxGas += maxGas;
 
     transactionCount += block.transactionCount;
-    gasWeightedPriorityFeeNumerator +=
-      BigInt(block.averagePriorityFeeWeightedWei) * gasUsed;
+    const feeWeight = priorityFeeWeightFor(block);
+    totalTransactionFee += feeWeight.totalTransactionFee;
+    feeWeightedPriorityFeeNumerator += feeWeight.weightedPriorityFeeNumerator;
     txWeightedPriorityFeeNumerator +=
       BigInt(block.averagePriorityFeeWei) * BigInt(block.transactionCount);
   }
 
   const averageBaseFee = baseFeeSum / rangeSize;
   const averagePriorityFeeWeighted =
-    totalGasUsed === 0n ? 0n : gasWeightedPriorityFeeNumerator / totalGasUsed;
+    totalTransactionFee === 0n
+      ? 0n
+      : feeWeightedPriorityFeeNumerator / totalTransactionFee;
   const averagePriorityFee =
     transactionCount === 0
       ? 0n
@@ -155,5 +159,27 @@ export function computeBlockRange(
     transactionCount,
     averagePriorityFeeWeightedWei: averagePriorityFeeWeighted.toString(),
     averagePriorityFeeWei: averagePriorityFee.toString(),
+  };
+}
+
+function priorityFeeWeightFor(block: StoredBlock): {
+  totalTransactionFee: bigint;
+  weightedPriorityFeeNumerator: bigint;
+} {
+  const storedTotalTransactionFee = BigInt(block.totalTransactionFeeWei ?? "0");
+  const storedNumerator = BigInt(block.priorityFeeWeightedNumeratorWei ?? "0");
+  if (storedTotalTransactionFee > 0n || storedNumerator > 0n || block.transactionCount === 0) {
+    return {
+      totalTransactionFee: storedTotalTransactionFee,
+      weightedPriorityFeeNumerator: storedNumerator,
+    };
+  }
+
+  const reconstructedTotalTransactionFee =
+    BigInt(block.averageTransactionFeeWei) * BigInt(block.transactionCount);
+  return {
+    totalTransactionFee: reconstructedTotalTransactionFee,
+    weightedPriorityFeeNumerator:
+      BigInt(block.averagePriorityFeeWeightedWei) * reconstructedTotalTransactionFee,
   };
 }

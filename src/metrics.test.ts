@@ -35,6 +35,8 @@ describe("computeBlockMetrics", () => {
       totalGasUsed: "5",
       maxGasInBlock: "30000000",
       transactionCount: 2,
+      totalTransactionFeeWei: "610",
+      priorityFeeWeightedNumeratorWei: "13900",
       averageTransactionFeeWei: "305",
       averagePriorityFeeWeightedWei: "22",
       averagePriorityFeeWei: "20",
@@ -53,6 +55,8 @@ describe("computeBlockMetrics", () => {
 
     expect(computeBlockMetrics(block, [])).toMatchObject({
       transactionCount: 0,
+      totalTransactionFeeWei: "0",
+      priorityFeeWeightedNumeratorWei: "0",
       averageTransactionFeeWei: "0",
       averagePriorityFeeWeightedWei: "0",
       averagePriorityFeeWei: "0",
