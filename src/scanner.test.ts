@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { backfillDownForSlice, scanForwardToSafeHead, scanOneBlock } from "./scanner";
+import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { BlockProgressUpdate, ScannerStorage } from "./storage";
 import type { InspectedTransaction } from "./blockInspector";
@@ -79,6 +80,37 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics[0]?.transactionCount).toBe(2);
     expect(storage.savedTransactions).toHaveLength(0);
     expect(storage.lastSuccessfulBlock).toBe(1n);
+  });
+
+  test("skips receipts and stored rows for transactions from the configured dead sender address", async () => {
+    const block = blockWithTransactions(3);
+    block.transactions[1] = {
+      ...block.transactions[1]!,
+      from: IGNORED_TRANSACTION_FROM_ADDRESS.toLowerCase() as Hex,
+    };
+    const rpc = new ControlledReceiptRpc(block);
+    const storage = new FakeStorage();
+
+    const scanPromise = scanOneBlock(
+      1n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+    );
+
+    await waitUntil(() => rpc.pending.length === 1);
+    expect(rpc.requestedReceipts).toEqual([txHash(0)]);
+
+    rpc.resolveNext();
+    await waitUntil(() => rpc.requestedReceipts.length === 2);
+    expect(rpc.requestedReceipts).toEqual([txHash(0), txHash(2)]);
+
+    rpc.resolveNext();
+    await scanPromise;
+
+    expect(storage.savedMetrics[0]?.transactionCount).toBe(2);
+    expect(storage.savedTransactions[0]?.map((entry) => entry.hash)).toEqual([txHash(0), txHash(2)]);
+    expect(storage.savedTransactions[0]?.map((entry) => entry.position)).toEqual([0, 2]);
   });
 
   test("does not store metrics or transactions when a receipt read fails", async () => {

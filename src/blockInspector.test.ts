@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { inspectBlockFromRpc } from "./blockInspector";
-import type { RpcBlock, RpcReceipt } from "./types";
+import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
+import type { Hex, RpcBlock, RpcReceipt } from "./types";
 
 describe("inspectBlockFromRpc", () => {
   test("computes transaction inspection fields from block and receipts", () => {
@@ -42,6 +43,26 @@ describe("inspectBlockFromRpc", () => {
     expect(() => inspectBlockFromRpc(blockFixture(), receiptsFixture().slice(0, 1))).toThrow(
       /Receipt count/,
     );
+  });
+
+  test("omits inspected transactions from the configured dead sender address", () => {
+    const block = blockFixture();
+    block.transactions.splice(1, 0, {
+      hash: "0xdead",
+      from: IGNORED_TRANSACTION_FROM_ADDRESS.toLowerCase() as Hex,
+      to: "0x555",
+      type: "0x2",
+      nonce: "0x3",
+      value: "0x0",
+      gas: "0x5208",
+      gasPrice: "0x96",
+    });
+
+    const inspected = inspectBlockFromRpc(block, receiptsFixture());
+
+    expect(inspected.transactionCount).toBe(2);
+    expect(inspected.transactions.map((transaction) => transaction.hash)).toEqual(["0xaaa", "0xbbb"]);
+    expect(inspected.transactions.map((transaction) => transaction.position)).toEqual([0, 2]);
   });
 });
 

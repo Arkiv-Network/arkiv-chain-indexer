@@ -1,4 +1,5 @@
 import { average, hexToBigInt } from "./math";
+import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 
 export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): BlockMetrics {
@@ -6,9 +7,11 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     throw new Error("Cannot store metrics for a pending block");
   }
 
-  if (receipts.length !== block.transactions.length) {
+  const includedTransactions = block.transactions.filter((transaction) => !shouldIgnoreTransaction(transaction));
+
+  if (receipts.length < includedTransactions.length) {
     throw new Error(
-      `Receipt count (${receipts.length}) does not match transaction count (${block.transactions.length})`,
+      `Receipt count (${receipts.length}) is less than included transaction count (${includedTransactions.length})`,
     );
   }
 
@@ -26,7 +29,7 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
   let gasWeightedPriorityFeeNumerator = 0n;
   let totalReceiptGasUsed = 0n;
 
-  for (const transaction of block.transactions) {
+  for (const transaction of includedTransactions) {
     const receipt = receiptsByHash.get(transaction.hash.toLowerCase());
     if (!receipt) {
       throw new Error(`Missing receipt for transaction ${transaction.hash}`);
@@ -49,7 +52,7 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
 
   const weightedPriorityFee =
     totalReceiptGasUsed === 0n ? 0n : gasWeightedPriorityFeeNumerator / totalReceiptGasUsed;
-  const transactionCount = block.transactions.length;
+  const transactionCount = includedTransactions.length;
   const averageTransactionFee =
     transactionCount === 0 ? 0n : totalTransactionFee / BigInt(transactionCount);
   const averageTransactionGasUsed =

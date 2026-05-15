@@ -1,4 +1,5 @@
 import { hexToBigInt } from "./math";
+import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { Hex, RpcBlock, RpcReceipt, RpcTransaction } from "./types";
 
 export interface InspectedTransaction {
@@ -42,9 +43,13 @@ export function inspectBlockFromRpc(block: RpcBlock, receipts: RpcReceipt[]): In
   if (block.number === null) {
     throw new Error("Cannot inspect a pending block");
   }
-  if (receipts.length !== block.transactions.length) {
+  const transactions = block.transactions
+    .map((transaction, index) => ({ transaction, index }))
+    .filter(({ transaction }) => !shouldIgnoreTransaction(transaction));
+
+  if (receipts.length < transactions.length) {
     throw new Error(
-      `Receipt count (${receipts.length}) does not match transaction count (${block.transactions.length})`,
+      `Receipt count (${receipts.length}) is less than included transaction count (${transactions.length})`,
     );
   }
 
@@ -60,8 +65,8 @@ export function inspectBlockFromRpc(block: RpcBlock, receipts: RpcReceipt[]): In
     baseBlockFeeWei: baseFee.toString(),
     totalGasUsed: hexToBigInt(block.gasUsed).toString(),
     maxGasInBlock: hexToBigInt(block.gasLimit).toString(),
-    transactionCount: block.transactions.length,
-    transactions: block.transactions.map((transaction, index) =>
+    transactionCount: transactions.length,
+    transactions: transactions.map(({ transaction, index }) =>
       inspectTransaction(transaction, receiptsByHash, index, baseFee),
     ),
   };
