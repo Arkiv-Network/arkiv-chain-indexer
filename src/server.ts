@@ -8,6 +8,7 @@ import {
   ScannerStorage,
   type BlockQueryFilter,
   type BlockRangeQueryFilter,
+  type DatabaseStats,
   type QueryOrder,
   type StoredBlock,
   type StoredBlockRange,
@@ -80,6 +81,7 @@ export interface HealthResponseBody {
     headLagBlocks: string | null;
     safeHeadLagBlocks: string | null;
   };
+  database: DatabaseStats;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -140,7 +142,10 @@ export async function handleRequest(
 
 async function handleGetHealth(storage: ScannerStorage): Promise<Response> {
   const now = new Date();
-  const progress = await storage.getScannerProgress();
+  const [progress, database] = await Promise.all([
+    storage.getScannerProgress(),
+    storage.getDatabaseStats(),
+  ]);
   const lastBlockAgeSeconds = secondsBetween(now, progress.lastSuccessfulBlockDate);
   const latestObservationAgeSeconds = secondsBetween(now, progress.latestObservedAt);
   const headLagBlocks =
@@ -169,6 +174,7 @@ async function handleGetHealth(storage: ScannerStorage): Promise<Response> {
       headLagBlocks,
       safeHeadLagBlocks,
     },
+    database,
   };
 
   return jsonResponse(body);

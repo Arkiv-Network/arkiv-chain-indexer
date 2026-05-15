@@ -128,6 +128,36 @@ if (!hasPostgresForTests()) {
       });
       expect(await storage.getLastSuccessfulBlock()).toBe(bigBlock);
     });
+
+    test("reports database and application table sizes", async () => {
+      const storage = await withStorage();
+      await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 0n }), { kind: "lastSuccessfulBlock" }, [
+        transactionFixture({ position: 0, hash: "0xaaa" }),
+        transactionFixture({ position: 1, hash: "0xbbb" }),
+      ]);
+      await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 1n }));
+      await storage.aggregateRangeIfComplete(0n, 2n);
+
+      const stats = await storage.getDatabaseStats();
+      const byName = new Map(stats.tables.map((table) => [table.tableName, table]));
+
+      expect(BigInt(stats.totalSizeBytes)).toBeGreaterThan(0n);
+      expect(stats.tables.map((table) => table.tableName)).toEqual([
+        "blocks",
+        "transactions",
+        "block_ranges",
+        "scanner_state",
+      ]);
+      expect(byName.get("blocks")?.rowCount).toBe("2");
+      expect(byName.get("transactions")?.rowCount).toBe("2");
+      expect(byName.get("block_ranges")?.rowCount).toBe("1");
+      expect(byName.get("scanner_state")?.rowCount).toBe("1");
+      for (const table of stats.tables) {
+        expect(BigInt(table.tableSizeBytes)).toBeGreaterThanOrEqual(0n);
+        expect(BigInt(table.indexesSizeBytes)).toBeGreaterThanOrEqual(0n);
+        expect(BigInt(table.totalSizeBytes)).toBeGreaterThanOrEqual(BigInt(table.tableSizeBytes));
+      }
+    });
   });
 
   describe("ScannerStorage.queryBlocks", () => {

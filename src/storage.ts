@@ -125,6 +125,19 @@ export interface ScannerProgress {
   latestObservedAt?: string;
 }
 
+export interface DatabaseTableStats {
+  tableName: string;
+  rowCount: string;
+  tableSizeBytes: string;
+  indexesSizeBytes: string;
+  totalSizeBytes: string;
+}
+
+export interface DatabaseStats {
+  totalSizeBytes: string;
+  tables: DatabaseTableStats[];
+}
+
 export class ScannerStorage {
   private readonly schema: string;
   private readonly qBlocks: string;
@@ -383,6 +396,64 @@ export class ScannerStorage {
       ...optionalBigIntField("latestObservedBlock", state.get(LATEST_OBSERVED_BLOCK_KEY)),
       ...optionalBigIntField("safeHeadBlock", state.get(SAFE_HEAD_BLOCK_KEY)),
       ...optionalStringField("latestObservedAt", state.get(LATEST_OBSERVED_AT_KEY)),
+    };
+  }
+
+  async getDatabaseStats(): Promise<DatabaseStats> {
+    const appTables = [
+      { name: "blocks", qualifiedName: this.qBlocks, regclassName: regclassName(this.schema, "blocks") },
+      {
+        name: "transactions",
+        qualifiedName: this.qTransactions,
+        regclassName: regclassName(this.schema, "transactions"),
+      },
+      {
+        name: "block_ranges",
+        qualifiedName: this.qBlockRanges,
+        regclassName: regclassName(this.schema, "block_ranges"),
+      },
+      {
+        name: "scanner_state",
+        qualifiedName: this.qScannerState,
+        regclassName: regclassName(this.schema, "scanner_state"),
+      },
+    ];
+
+    const [databaseSizeResult, tableStats] = await Promise.all([
+      this.pool.query<{ total_size_bytes: string }>(
+        `SELECT pg_database_size(current_database())::text AS total_size_bytes`,
+      ),
+      Promise.all(
+        appTables.map(async (table) => {
+          const result = await this.pool.query<{
+            row_count: string;
+            table_size_bytes: string;
+            indexes_size_bytes: string;
+            total_size_bytes: string;
+          }>(
+            `SELECT
+               COUNT(*)::text AS row_count,
+               pg_relation_size($1::regclass)::text AS table_size_bytes,
+               pg_indexes_size($1::regclass)::text AS indexes_size_bytes,
+               pg_total_relation_size($1::regclass)::text AS total_size_bytes
+             FROM ${table.qualifiedName}`,
+            [table.regclassName],
+          );
+          const row = result.rows[0];
+          return {
+            tableName: table.name,
+            rowCount: row?.row_count ?? "0",
+            tableSizeBytes: row?.table_size_bytes ?? "0",
+            indexesSizeBytes: row?.indexes_size_bytes ?? "0",
+            totalSizeBytes: row?.total_size_bytes ?? "0",
+          };
+        }),
+      ),
+    ]);
+
+    return {
+      totalSizeBytes: databaseSizeResult.rows[0]?.total_size_bytes ?? "0",
+      tables: tableStats,
     };
   }
 
@@ -1053,6 +1124,10 @@ function quoteIdent(name: string): string {
     throw new Error(`Invalid identifier: ${name}`);
   }
   return `"${name}"`;
+}
+
+function regclassName(schema: string, tableName: string): string {
+  return `${quoteIdent(schema)}.${quoteIdent(tableName)}`;
 }
 
 function parseOptionalBigInt(value: string | undefined): bigint | undefined {
