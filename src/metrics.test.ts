@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computeBlockMetrics } from "./metrics";
+import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import type { RpcBlock, RpcReceipt } from "./types";
 
 describe("computeBlockMetrics", () => {
@@ -74,6 +75,57 @@ describe("computeBlockMetrics", () => {
       averageTransactionGasUsed: "0",
       averagePriorityFeeWeightedWei: "0",
       averagePriorityFeeWei: "0",
+    });
+  });
+
+  test("ignores transactions from the configured dead sender address", () => {
+    const block: RpcBlock = {
+      number: "0x7b",
+      timestamp: "0x65a0bb80",
+      baseFeePerGas: "0x64",
+      gasUsed: "0xf",
+      gasLimit: "0x1c9c380",
+      transactions: [
+        {
+          hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          from: "0x111",
+        },
+        {
+          hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          from: IGNORED_TRANSACTION_FROM_ADDRESS,
+        },
+        {
+          hash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          from: "0x333",
+        },
+      ],
+    };
+    const receipts: RpcReceipt[] = [
+      {
+        transactionHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        gasUsed: "0x2",
+        effectiveGasPrice: "0xc8",
+      },
+      {
+        transactionHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        gasUsed: "0x8",
+        effectiveGasPrice: "0x6e",
+      },
+    ];
+
+    expect(computeBlockMetrics(block, receipts)).toMatchObject({
+      transactionCount: 2,
+      burntFeesWei: "1500",
+      totalTransactionFeeWei: "1280",
+      feePriceSumWei: "310",
+      priorityFeeSumWei: "110",
+      priorityFeeWeightedNumeratorWei: "48800",
+      priorityFeeGasWeightedNumeratorWei: "280",
+      averageFeePriceWei: "155",
+      averageTransactionFeeWei: "640",
+      averageTransactionGasUsed: "5",
+      averagePriorityFeeWeightedWei: "28",
+      averagePriorityFeeWei: "55",
     });
   });
 });

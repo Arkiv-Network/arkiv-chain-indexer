@@ -2,6 +2,7 @@ import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format"
 import { inspectBlockFromRpc } from "./blockInspector";
 import { readBuildInfo } from "./buildInfo";
 import { computeBlockMetrics } from "./metrics";
+import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { ScannerConfig } from "./config";
@@ -303,6 +304,9 @@ async function getTransactionReceipts(
 
   const receipts: RpcReceipt[] = [];
   for (const transaction of block.transactions) {
+    if (shouldIgnoreTransaction(transaction)) {
+      continue;
+    }
     receipts.push(await rpc.getTransactionReceipt(transaction.hash));
   }
   return receipts;
