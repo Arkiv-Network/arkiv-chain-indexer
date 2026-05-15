@@ -25,13 +25,14 @@ interface ChartsViewProps {
 
 interface ChartsFilters extends Record<string, string> {
   zoom: string;
-  startLt: string;
+  startDate: string;
   parameters: string;
 }
 
 const FETCH_LIMIT = 1000;
-const STORAGE_KEY = "gas-tracker.filters.charts";
-const FILTER_KEYS = ["zoom", "startLt", "parameters"] as const;
+const STORAGE_KEY = "gas-tracker.filters.charts.v2";
+const SIDEBAR_STORAGE_KEY = "gas-tracker.charts.sidebarCollapsed";
+const FILTER_KEYS = ["zoom", "startDate", "parameters"] as const;
 
 interface ZoomLevel {
   rangeSize: number;
@@ -47,6 +48,22 @@ const ZOOM_LEVELS: ZoomLevel[] = [
   { rangeSize: 50, label: "50" },
   { rangeSize: 100, label: "100" },
   { rangeSize: 1000, label: "1000" },
+];
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+interface TimeStep {
+  label: string;
+  ms: number;
+}
+
+const TIME_STEPS: TimeStep[] = [
+  { label: "1d", ms: DAY_MS },
+  { label: "1h", ms: HOUR_MS },
+  { label: "10m", ms: 10 * MINUTE_MS },
+  { label: "1m", ms: MINUTE_MS },
 ];
 
 const GWEI_IN_WEI = 1_000_000_000;
@@ -243,7 +260,7 @@ const DEFAULT_PARAMETERS = ["averageBaseFeeWei", "averagePriorityFeeWei"];
 
 const EMPTY: ChartsFilters = {
   zoom: "6",
-  startLt: "",
+  startDate: "",
   parameters: DEFAULT_PARAMETERS.join(","),
 };
 
@@ -263,10 +280,18 @@ function parseSelected(value: string): string[] {
     .filter((s) => PARAMETER_KEYS.has(s));
 }
 
+function normalizeIsoDate(value: string): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString();
+}
+
 function loadFilters(locationSearch: string): ChartsFilters {
   const stored = loadFromStorage<ChartsFilters>(STORAGE_KEY, EMPTY);
   const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+  const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+  return { ...merged, startDate: normalizeIsoDate(merged.startDate) };
 }
 
 interface ChartPoint {
@@ -336,29 +361,49 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
   };
 }
 
+function loadSidebarCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveSidebarCollapsed(value: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, value ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
 export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps) {
   const [filters, setFilters] = usePersistentState<ChartsFilters>(STORAGE_KEY, loadFilters(locationSearch));
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadSidebarCollapsed);
 
   const zoomIndex = clampZoomIndex(filters.zoom);
-  const zoom = ZOOM_LEVELS[zoomIndex];
   const selected = useMemo(() => parseSelected(filters.parameters), [filters.parameters]);
-  const startLt = filters.startLt.trim();
+  const startDate = filters.startDate.trim();
 
   const load = useCallback((f: ChartsFilters) => {
     const idx = clampZoomIndex(f.zoom);
     const lvl = ZOOM_LEVELS[idx];
     const limit = String(FETCH_LIMIT);
+    const anchor = normalizeIsoDate(f.startDate);
     setLoading(true);
     setError(null);
 
+    const params = new URLSearchParams();
+    params.set("limit", limit);
+    if (anchor) params.set("dateLt", anchor);
+
     if (lvl.rangeSize === 1) {
-      const params = new URLSearchParams();
-      params.set("limit", limit);
-      if (f.startLt.trim()) params.set("blockLt", f.startLt.trim());
       fetchBlocks(params)
         .then((body) => {
           const pts = body.blocks
@@ -373,10 +418,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
         })
         .finally(() => setLoading(false));
     } else {
-      const params = new URLSearchParams();
       params.set("rangeSize", String(lvl.rangeSize));
-      params.set("limit", limit);
-      if (f.startLt.trim()) params.set("rangeStartLt", f.startLt.trim());
       fetchRanges(params)
         .then((body) => {
           const pts = body.ranges
@@ -395,13 +437,17 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
 
   useEffect(() => {
     load(filters);
-  }, [filters.zoom, filters.startLt, load]);
+  }, [filters.zoom, filters.startDate, load]);
 
   useEffect(() => {
     const next = loadFilters(locationSearch);
     setFilters((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
     setCopyStatus("");
   }, [locationSearch, setFilters]);
+
+  useEffect(() => {
+    saveSidebarCollapsed(sidebarCollapsed);
+  }, [sidebarCollapsed]);
 
   const updateFilters = useCallback(
     (next: ChartsFilters) => {
@@ -416,35 +462,36 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
   const setZoomIndex = (next: number) => {
     const clamped = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, next));
     if (clamped === zoomIndex) return;
-    updateFilters({ ...filters, zoom: String(clamped), startLt: "" });
+    updateFilters({ ...filters, zoom: String(clamped) });
   };
 
-  const panBlocks = (direction: -1 | 1) => {
-    const windowSize = zoom.rangeSize * FETCH_LIMIT;
-    const step = Math.max(1, Math.floor(windowSize * 0.8));
-
-    if (direction < 0) {
-      let nextLt: bigint;
-      if (startLt) {
-        nextLt = BigInt(startLt) - BigInt(step);
-      } else if (points.length > 0) {
-        nextLt = BigInt(points[0].rangeStart);
-      } else {
-        return;
-      }
-      if (nextLt < 1n) nextLt = 1n;
-      updateFilters({ ...filters, startLt: nextLt.toString() });
-      return;
+  const panTime = (deltaMs: number) => {
+    let anchorMs: number;
+    if (startDate) {
+      const parsed = Date.parse(startDate);
+      if (!Number.isFinite(parsed)) return;
+      anchorMs = parsed;
+    } else if (points.length > 0) {
+      const last = Date.parse(points[points.length - 1].midDate);
+      if (!Number.isFinite(last)) return;
+      anchorMs = last;
+    } else {
+      anchorMs = Date.now();
     }
 
-    if (!startLt) return;
-    const nextLt = BigInt(startLt) + BigInt(step);
-    updateFilters({ ...filters, startLt: nextLt.toString() });
+    const nowMs = Date.now();
+    const nextMs = anchorMs + deltaMs;
+    if (nextMs >= nowMs) {
+      if (!startDate) return;
+      updateFilters({ ...filters, startDate: "" });
+      return;
+    }
+    updateFilters({ ...filters, startDate: new Date(nextMs).toISOString() });
   };
 
   const goLatest = () => {
-    if (!startLt && filters.zoom === String(zoomIndex)) return;
-    updateFilters({ ...filters, startLt: "" });
+    if (!startDate) return;
+    updateFilters({ ...filters, startDate: "" });
   };
 
   const toggleParameter = (key: string) => {
@@ -478,135 +525,180 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
   }, [points]);
 
   return (
-    <section className="view charts-view">
-      <h2>History charts</h2>
+    <section className={`view charts-view${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+      <div className="charts-layout">
+        {sidebarCollapsed ? (
+          <button
+            type="button"
+            className="sidebar-show"
+            onClick={() => setSidebarCollapsed(false)}
+            title="Show options"
+            aria-label="Show options"
+          >
+            »
+          </button>
+        ) : (
+          <aside className="charts-sidebar">
+            <div className="sidebar-header">
+              <h2>History charts</h2>
+              <button
+                type="button"
+                className="sidebar-hide"
+                onClick={() => setSidebarCollapsed(true)}
+                title="Hide options"
+                aria-label="Hide options"
+              >
+                «
+              </button>
+            </div>
 
-      <div className="charts-toolbar">
-        <div className="charts-toolbar-group">
-          <span className="toolbar-label">Zoom (range size)</span>
-          <div className="zoom-buttons">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setZoomIndex(zoomIndex - 1)}
-              disabled={zoomIndex === 0}
-              title="Zoom in (smaller range size)"
-            >
-              −
-            </button>
-            <div className="zoom-options">
-              {ZOOM_LEVELS.map((z, i) => (
+            <div className="sidebar-section">
+              <span className="toolbar-label">Pan window</span>
+              <div className="time-nav-grid">
+                {TIME_STEPS.map((s) => (
+                  <button
+                    key={`back-${s.label}`}
+                    type="button"
+                    className="secondary time-nav-btn"
+                    onClick={() => panTime(-s.ms)}
+                    title={`Go back ${s.label}`}
+                  >
+                    −{s.label}
+                  </button>
+                ))}
+                {TIME_STEPS.slice().reverse().map((s) => (
+                  <button
+                    key={`fwd-${s.label}`}
+                    type="button"
+                    className="secondary time-nav-btn"
+                    onClick={() => panTime(s.ms)}
+                    disabled={!startDate}
+                    title={startDate ? `Go forward ${s.label}` : "Already at latest"}
+                  >
+                    +{s.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="secondary latest-btn"
+                onClick={goLatest}
+                disabled={!startDate}
+                title={startDate ? "Jump to latest" : "Already at latest"}
+              >
+                ⤓ Jump to latest
+              </button>
+            </div>
+
+            <div className="sidebar-section">
+              <span className="toolbar-label">Zoom (range size)</span>
+              <div className="zoom-buttons">
                 <button
                   type="button"
-                  key={z.rangeSize}
-                  className={`zoom-pill${i === zoomIndex ? " active" : ""}`}
-                  onClick={() => setZoomIndex(i)}
+                  className="secondary"
+                  onClick={() => setZoomIndex(zoomIndex - 1)}
+                  disabled={zoomIndex === 0}
+                  title="Zoom in (smaller range size)"
                 >
-                  {z.label}
+                  −
                 </button>
-              ))}
+                <div className="zoom-options">
+                  {ZOOM_LEVELS.map((z, i) => (
+                    <button
+                      type="button"
+                      key={z.rangeSize}
+                      className={`zoom-pill${i === zoomIndex ? " active" : ""}`}
+                      onClick={() => setZoomIndex(i)}
+                    >
+                      {z.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setZoomIndex(zoomIndex + 1)}
+                  disabled={zoomIndex === ZOOM_LEVELS.length - 1}
+                  title="Zoom out (larger range size)"
+                >
+                  +
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setZoomIndex(zoomIndex + 1)}
-              disabled={zoomIndex === ZOOM_LEVELS.length - 1}
-              title="Zoom out (larger range size)"
-            >
-              +
-            </button>
-          </div>
-        </div>
 
-        <div className="charts-toolbar-group">
-          <span className="toolbar-label">Window</span>
-          <div className="nav-buttons">
-            <button type="button" className="secondary" onClick={() => panBlocks(-1)}>
-              « Older
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => panBlocks(1)}
-              disabled={!startLt}
-              title={startLt ? "Move to newer data" : "Already at latest"}
-            >
-              Newer »
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={goLatest}
-              disabled={!startLt}
-              title={startLt ? "Jump to latest" : "Already at latest"}
-            >
-              ⤓ Latest
-            </button>
-          </div>
-        </div>
+            <div className="sidebar-section">
+              <span className="toolbar-label">Anchor</span>
+              <div className="anchor-info">
+                {startDate ? fmtShortDate(startDate) : "Latest"}
+              </div>
+            </div>
 
-        <div className="charts-toolbar-group">
-          <span className="toolbar-label">Status</span>
-          <div className="charts-status">
-            {loading
-              ? "Loading…"
-              : error
-                ? <span className="error">Failed: {error}</span>
-                : windowInfo
-                  ? (
-                    <>
-                      {points.length} pts · blocks {windowInfo.first}–{windowInfo.last}
-                      <br />
-                      {fmtShortDate(windowInfo.firstDate)} → {fmtShortDate(windowInfo.lastDate)}
-                    </>
-                  )
-                  : "No data"}
-          </div>
-        </div>
+            <div className="sidebar-section">
+              <span className="toolbar-label">Status</span>
+              <div className="charts-status">
+                {loading
+                  ? "Loading…"
+                  : error
+                    ? <span className="error">Failed: {error}</span>
+                    : windowInfo
+                      ? (
+                        <>
+                          {points.length} pts · blocks {windowInfo.first}–{windowInfo.last}
+                          <br />
+                          {fmtShortDate(windowInfo.firstDate)} → {fmtShortDate(windowInfo.lastDate)}
+                        </>
+                      )
+                      : "No data"}
+              </div>
+            </div>
 
-        <div className="charts-toolbar-group">
-          <button type="button" className="secondary" onClick={copyPermalink}>
-            Copy link
-          </button>
-          {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
-        </div>
-      </div>
+            <div className="sidebar-section">
+              <span className="toolbar-label">Parameters</span>
+              <div className="parameters-grid sidebar-params">
+                {PARAMETERS.map((p) => {
+                  const isOn = selected.includes(p.key);
+                  return (
+                    <label key={p.key} className={`param-check${isOn ? " on" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={isOn}
+                        onChange={() => toggleParameter(p.key)}
+                      />
+                      <span className="param-swatch" style={{ background: isOn ? p.color : "transparent", borderColor: p.color }} />
+                      <span className="param-label">{p.label}</span>
+                      <span className="param-unit">{p.unit}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
 
-      <div className="parameters-panel">
-        <div className="parameters-title">Parameters</div>
-        <div className="parameters-grid">
-          {PARAMETERS.map((p) => {
-            const isOn = selected.includes(p.key);
-            return (
-              <label key={p.key} className={`param-check${isOn ? " on" : ""}`}>
-                <input
-                  type="checkbox"
-                  checked={isOn}
-                  onChange={() => toggleParameter(p.key)}
-                />
-                <span className="param-swatch" style={{ background: isOn ? p.color : "transparent", borderColor: p.color }} />
-                <span className="param-label">{p.label}</span>
-                <span className="param-unit">{p.unit}</span>
-              </label>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="chart-card">
-        {selected.length === 0 ? (
-          <div className="chart-empty">Select at least one parameter above to plot.</div>
-        ) : points.length === 0 && !loading ? (
-          <div className="chart-empty">No data in the selected window.</div>
-        ) : (
-          <Plot
-            data={traces}
-            layout={layout}
-            useResizeHandler
-            style={{ width: "100%", height: "560px" }}
-            config={{ displaylogo: false, responsive: true }}
-          />
+            <div className="sidebar-section">
+              <button type="button" className="secondary" onClick={copyPermalink}>
+                Copy link
+              </button>
+              {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
+            </div>
+          </aside>
         )}
+
+        <div className="chart-area">
+          <div className="chart-card">
+            {selected.length === 0 ? (
+              <div className="chart-empty">Select at least one parameter in the sidebar to plot.</div>
+            ) : points.length === 0 && !loading ? (
+              <div className="chart-empty">No data in the selected window.</div>
+            ) : (
+              <Plot
+                data={traces}
+                layout={layout}
+                useResizeHandler
+                style={{ width: "100%", height: "100%" }}
+                config={{ displaylogo: false, responsive: true }}
+              />
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
