@@ -260,7 +260,7 @@ export function TransactionsView({ locationSearch, onLocationChange }: Transacti
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (writePermalink("transactions", filters)) {
+    if (writePermalink("transactions", permalinkFilters(filters))) {
       onLocationChange();
     } else {
       setApplied(filters);
@@ -268,7 +268,7 @@ export function TransactionsView({ locationSearch, onLocationChange }: Transacti
   };
 
   const copyPermalink = async () => {
-    const href = buildPermalinkHref("transactions", applied);
+    const href = buildPermalinkHref("transactions", permalinkFilters(applied));
     try {
       await navigator.clipboard.writeText(href);
       setCopyStatus("Copied");
@@ -394,18 +394,32 @@ export function TransactionsView({ locationSearch, onLocationChange }: Transacti
 }
 
 function filtersToParams(filters: TransactionFilters): URLSearchParams {
+  const normalized = permalinkFilters(filters);
   const params = new URLSearchParams();
+  addParam(params, "block", normalized.block);
+  addParam(params, "blockGt", normalized.blockGt);
+  addParam(params, "blockLt", normalized.blockLt);
+  addParam(params, "dateGt", normalized.dateGt);
+  addParam(params, "dateLt", normalized.dateLt);
+  addParam(params, "limit", normalized.limit);
+  return params;
+}
+
+function permalinkFilters(filters: TransactionFilters): TransactionFilters {
   const block = filters.block.trim();
   if (block) {
-    params.set("block", block);
-  } else {
-    addParam(params, "blockGt", filters.blockGt);
-    addParam(params, "blockLt", filters.blockLt);
+    return {
+      ...filters,
+      block,
+      blockGt: "",
+      blockLt: "",
+    };
   }
-  addParam(params, "dateGt", filters.dateGt);
-  addParam(params, "dateLt", filters.dateLt);
-  addParam(params, "limit", filters.limit);
-  return params;
+
+  return {
+    ...filters,
+    block: "",
+  };
 }
 
 function hasScopedFilters(filters: TransactionFilters): boolean {
