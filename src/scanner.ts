@@ -26,6 +26,7 @@ export async function runScanner(
   runtime: ScannerRuntime = defaultRuntime,
 ): Promise<void> {
   logBuildInfo();
+  console.log(`Transaction row storage: ${config.saveTransactionData ? "enabled" : "disabled"}`);
   if (config.toBlock !== undefined) {
     await runBoundedForwardScanner(config, rpc, storage, runtime);
     return;
@@ -85,7 +86,15 @@ async function runBoundedForwardScanner(
     }
 
     try {
-      await scanOneBlock(nextBlock, rpc, storage, config.txReceiptConcurrency, { kind: "lastSuccessfulBlock" }, { latestBlock, safeHead });
+      await scanOneBlock(
+        nextBlock,
+        rpc,
+        storage,
+        config.txReceiptConcurrency,
+        { kind: "lastSuccessfulBlock" },
+        { latestBlock, safeHead },
+        config.saveTransactionData,
+      );
       nextBlock += 1n;
     } catch (error) {
       console.error(
@@ -230,7 +239,15 @@ async function scanBlockWithRetry(
 ): Promise<void> {
   while (true) {
     try {
-      await scanOneBlock(blockNumber, rpc, storage, config.txReceiptConcurrency, progressUpdate, summaryContext);
+      await scanOneBlock(
+        blockNumber,
+        rpc,
+        storage,
+        config.txReceiptConcurrency,
+        progressUpdate,
+        summaryContext,
+        config.saveTransactionData,
+      );
       return;
     } catch (error) {
       console.error(
@@ -249,6 +266,7 @@ export async function scanOneBlock(
   txReceiptConcurrency: number,
   progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
   summaryContext: BlockSummaryContext = {},
+  saveTransactionData = true,
 ): Promise<void> {
   const startedAt = performance.now();
   const rpcStatsBefore = rpc.getStatsSnapshot();
@@ -256,8 +274,10 @@ export async function scanOneBlock(
   const receipts = await getTransactionReceipts(block, rpc, txReceiptConcurrency);
 
   const metrics = computeBlockMetrics(block, receipts);
-  const inspected = inspectBlockFromRpc(block, receipts);
-  await storage.saveBlockMetrics(metrics, progressUpdate, inspected.transactions);
+  const transactions = saveTransactionData
+    ? inspectBlockFromRpc(block, receipts).transactions
+    : undefined;
+  await storage.saveBlockMetrics(metrics, progressUpdate, transactions);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats, summaryContext));

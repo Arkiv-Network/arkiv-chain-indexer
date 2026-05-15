@@ -78,6 +78,7 @@ export function HealthView({ timeZone }: HealthViewProps) {
             <Metric label="Browser time" value={fmtDate(browserNow.toISOString(), browserTimeZone)} />
             <Metric label="Selected time" value={fmtDate(browserNow.toISOString(), timeZone)} />
             <Metric label="Selected time zone" value={timeZone} />
+            <Metric label="Transaction data" value={data?.features.transactionData === false ? "Disabled" : "Enabled"} />
             <Metric label="Build commit" value={shortCommit(data?.build.commit)} />
             <Metric label="Build date UTC" value={fmtUtcDate(data?.build.builtAtUtc)} />
           </dl>

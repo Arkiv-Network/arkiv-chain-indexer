@@ -61,6 +61,26 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics.map((entry) => entry.blockNumber)).toEqual([245_650n]);
   });
 
+  test("stores block metrics without transaction rows when transaction data is disabled", async () => {
+    const rpc = new SimpleRpc(new Map(), 2);
+    const storage = new FakeStorage();
+
+    await scanOneBlock(
+      1n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+      { kind: "lastSuccessfulBlock" },
+      {},
+      false,
+    );
+
+    expect(storage.savedMetrics).toHaveLength(1);
+    expect(storage.savedMetrics[0]?.transactionCount).toBe(2);
+    expect(storage.savedTransactions).toHaveLength(0);
+    expect(storage.lastSuccessfulBlock).toBe(1n);
+  });
+
   test("does not store metrics or transactions when a receipt read fails", async () => {
     const rpc = new ControlledReceiptRpc(blockWithTransactions(3));
     const storage = new FakeStorage();
@@ -309,7 +329,10 @@ class FakeStorage {
 class SimpleRpc {
   requestedBlocks: bigint[] = [];
 
-  constructor(private readonly failuresByBlock = new Map<bigint, number>()) {}
+  constructor(
+    private readonly failuresByBlock = new Map<bigint, number>(),
+    private readonly transactionCount = 0,
+  ) {}
 
   getStatsSnapshot(): RpcStats {
     return { calls: 0, requestBytes: 0, responseBytes: 0 };
@@ -328,7 +351,7 @@ class SimpleRpc {
       throw new Error(`block ${blockNumber.toString()} failed`);
     }
 
-    return blockWithTransactions(0, blockNumber);
+    return blockWithTransactions(this.transactionCount, blockNumber);
   }
 
   async getTransactionReceipt(hash: Hex): Promise<RpcReceipt> {
@@ -393,6 +416,7 @@ function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> =
     pollMs: 12_000,
     retryMs: 5_000,
     txReceiptConcurrency: 1,
+    saveTransactionData: true,
     ...overrides,
   };
 }

@@ -1,7 +1,7 @@
 # gas-price-tracker
 
-A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block, plus inspected
-transaction rows, in **PostgreSQL**.
+A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block, with optional
+inspected transaction rows, in **PostgreSQL**.
 
 The scanner reads blocks sequentially, fetches every transaction receipt in each block, stores one completed
 block at a time, and resumes from the last successfully stored block after restart or failure. Failed block reads
@@ -25,11 +25,14 @@ docker compose up --build
 Open:
 
 - Frontend: <http://localhost:23560> (the React app talks to the backend through the same origin at `/api/*`)
-- Backend API (direct): <http://localhost:3000/blocks>, <http://localhost:3000/ranges>,
-  <http://localhost:3000/transactions?block=19000000>, and <http://localhost:3000/block/19000000>
+- Backend API (direct): <http://localhost:3000/blocks> and <http://localhost:3000/ranges>
 - Postgres: `postgres://gas:gas@localhost:5432/gas`
 
 The frontend container is a tiny Node `server.js` that serves the Vite-built React app from `dist/` and reverse-proxies any request starting with `/api/` to the `backend` service (the `/api` prefix is stripped). This means you don't need to expose the backend publicly — only port `23560` on the host is required for end users.
+
+The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so production-style mainnet scans keep
+block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
+`SAVE_TRANSACTION_DATA=true` if you want the `/transactions` and `/block/:blockNumber` APIs.
 
 The aggregator container runs `bun run aggregate-all` which walks every supported range size and sleeps for one
 minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
@@ -48,6 +51,9 @@ docker compose -f docker-compose-arkiv-tests.yml up --build
 By default this stack configures the scanner to read from the host RPC endpoint at
 `http://host.docker.internal:8545`. The compose file also adds Docker host-gateway resolution so this hostname
 works on Linux Docker installations.
+
+Arkiv test compose defaults `SAVE_TRANSACTION_DATA=true`, preserving the existing transaction-row behavior for
+inspection tests.
 
 The frontend portal is published on all host interfaces by default:
 
@@ -118,6 +124,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--poll-ms` | `SCANNER_POLL_MS` | `12000` | Delay while waiting for new safe blocks. |
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
+| `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Show help:
@@ -252,7 +259,7 @@ This means failed block reads are not skipped.
 
 ## HTTP Server
 
-A read-only HTTP server is included that serves stored block, range, and transaction rows from the same
+A read-only HTTP server is included that serves stored block, range, and optional transaction rows from the same
 PostgreSQL database. Run it alongside the scanner (or against an existing database):
 
 ```sh
@@ -263,6 +270,9 @@ bun run serve -- --database-url postgres://gas:gas@localhost:5432/gas --port 300
 
 By default the server listens on port `3000`. CORS headers are set on every response so the static frontend can
 fetch from a different origin.
+
+Set `SERVER_TRANSACTION_DATA_ENABLED=false` or `SAVE_TRANSACTION_DATA=false` to disable transaction inspection
+endpoints and advertise that state to the frontend through `GET /health`.
 
 ### `GET /blocks`
 
@@ -288,11 +298,13 @@ curl 'http://localhost:3000/blocks?blockGt=19000000&blockLt=19000005'
 Returns stored block metadata plus stored transaction rows for one scanned block. It does not call JSON-RPC and
 does not use an in-memory cache.
 
-If the block has not been scanned into PostgreSQL, this endpoint returns `404`.
+If transaction data is disabled, or if the block has not been scanned into PostgreSQL, this endpoint returns
+`404`.
 
 ### `GET /transactions`
 
-Returns stored transaction rows ordered by block number and position. Responses are capped at **1,000
+Returns stored transaction rows ordered by block number and position. When transaction data is disabled this
+endpoint returns `404`. Responses are capped at **1,000
 transactions**. Use `block` for an exact block query, or combine date and block range filters additively.
 
 | Query parameter | Description |
@@ -353,7 +365,8 @@ dependency-free Node HTTP server that:
    prefix). For example a browser request to `/api/blocks?blockGt=1` is forwarded to `http://backend:3000/blocks?blockGt=1`.
 3. Falls back to `index.html` for any other unknown path (SPA routing).
 
-Four views are provided:
+Four views are provided when transaction data is enabled; otherwise the Transactions view and inspection links
+are hidden:
 
 - **Blocks** — paged table of stored blocks with `blockGt`, `blockLt`, `dateGt`, `dateLt` filters.
 - **Transactions** — stored transaction query table for exact block, block range, and date range inspection.

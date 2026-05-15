@@ -2,6 +2,7 @@ export interface ServerConfig {
   databaseUrl: string;
   port: number;
   hostname?: string;
+  transactionDataEnabled: boolean;
 }
 
 const DEFAULT_PORT = 3000;
@@ -23,11 +24,19 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   const portRaw = parsed.values.port ?? env.SERVER_PORT ?? DEFAULT_PORT.toString();
   const port = parsePortOption("--port", portRaw);
   const hostnameRaw = parsed.values.host ?? env.SERVER_HOSTNAME;
+  const transactionDataEnabled = parseBooleanOption(
+    "--transaction-data-enabled",
+    parsed.values["transaction-data-enabled"] ??
+      env.SERVER_TRANSACTION_DATA_ENABLED ??
+      env.SAVE_TRANSACTION_DATA ??
+      "true",
+  );
 
   return {
     databaseUrl,
     port,
     ...(hostnameRaw ? { hostname: hostnameRaw } : {}),
+    transactionDataEnabled,
   };
 }
 
@@ -82,6 +91,13 @@ function parsePortOption(name: string, value: string): number {
   return parsed;
 }
 
+function parseBooleanOption(name: string, value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  throw new Error(`${name} must be a boolean`);
+}
+
 function usage(): string {
   return `Usage:
   DATABASE_URL=postgres://user:pass@host:5432/db bun run serve
@@ -90,5 +106,7 @@ Options:
   --database-url <url>  PostgreSQL connection string (or DATABASE_URL env).
   --port <port>         TCP port to listen on. Defaults to 3000 (or SERVER_PORT). Use 0 to pick any free port.
   --host <host>         Hostname/interface to bind. Defaults to Bun's default (all interfaces).
+  --transaction-data-enabled <bool>
+                        Enable transaction inspection endpoints and UI capability metadata. Defaults to true (or SERVER_TRANSACTION_DATA_ENABLED / SAVE_TRANSACTION_DATA).
   --help                Show this message.`;
 }

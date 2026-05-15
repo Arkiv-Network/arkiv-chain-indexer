@@ -12,6 +12,7 @@ describe("parseServerConfig", () => {
     expect(config.databaseUrl).toBe(TEST_URL);
     expect(config.port).toBe(3000);
     expect(config.hostname).toBeUndefined();
+    expect(config.transactionDataEnabled).toBe(true);
   });
 
   test("requires DATABASE_URL", () => {
@@ -25,10 +26,21 @@ describe("parseServerConfig", () => {
       DATABASE_URL: "postgres://envhost/db",
       SERVER_PORT: "4500",
       SERVER_HOSTNAME: "0.0.0.0",
+      SAVE_TRANSACTION_DATA: "false",
     });
     expect(config.databaseUrl).toBe("postgres://envhost/db");
     expect(config.port).toBe(4500);
     expect(config.hostname).toBe("0.0.0.0");
+    expect(config.transactionDataEnabled).toBe(false);
+  });
+
+  test("server-specific transaction data flag overrides shared env", () => {
+    const config = parseServerConfig([], {
+      DATABASE_URL: "postgres://envhost/db",
+      SAVE_TRANSACTION_DATA: "false",
+      SERVER_TRANSACTION_DATA_ENABLED: "true",
+    });
+    expect(config.transactionDataEnabled).toBe(true);
   });
 
   test("CLI flags override environment", () => {
@@ -40,20 +52,33 @@ describe("parseServerConfig", () => {
         "7000",
         "--host",
         "127.0.0.1",
+        "--transaction-data-enabled",
+        "false",
       ],
       {
         DATABASE_URL: "postgres://env/db",
         SERVER_PORT: "1234",
+        SERVER_TRANSACTION_DATA_ENABLED: "true",
       },
     );
     expect(config.databaseUrl).toBe("postgres://cli/db");
     expect(config.port).toBe(7000);
     expect(config.hostname).toBe("127.0.0.1");
+    expect(config.transactionDataEnabled).toBe(false);
   });
 
   test("rejects an invalid port", () => {
     expect(() => parseServerConfig(["--port", "abc"], BASE_ENV)).toThrow();
     expect(() => parseServerConfig(["--port", "70000"], BASE_ENV)).toThrow();
+  });
+
+  test("rejects invalid transaction data flag", () => {
+    expect(() =>
+      parseServerConfig([], {
+        DATABASE_URL: TEST_URL,
+        SAVE_TRANSACTION_DATA: "maybe",
+      }),
+    ).toThrow("--transaction-data-enabled must be a boolean");
   });
 
   test("--help raises ServerHelpRequested", () => {
