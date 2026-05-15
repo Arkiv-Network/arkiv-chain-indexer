@@ -459,3 +459,139 @@ button.secondary:disabled {
   justify-content: center;
 }
 
+.selection-panel {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--row-alt);
+  padding: 0.75rem 0.9rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.selection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.selection-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.selection-header button {
+  white-space: nowrap;
+}
+
+.selection-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  padding: 0.75rem;
+}
+
+.selection-empty.compact {
+  font-size: 0.82rem;
+  padding: 0.5rem;
+}
+
+.selection-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.selection-meta {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.selection-meta div {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.selection-meta dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.selection-meta dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.selection-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.selection-metric-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "swatch label"
+    "swatch value";
+  gap: 0.1rem 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.selection-metric-row .param-swatch {
+  grid-area: swatch;
+}
+
+.selection-metric-label {
+  grid-area: label;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.selection-metric-value {
+  grid-area: value;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .charts-layout {
+    flex-direction: column;
+  }
+
+  .charts-sidebar,
+  .selection-panel {
+    width: 100%;
+    max-height: none;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .charts-sidebar {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .selection-panel {
+    border-top: 1px solid var(--border);
+  }
+
+  .chart-area {
+    min-height: 55vh;
+  }
+}
