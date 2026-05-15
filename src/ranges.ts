@@ -7,7 +7,9 @@ export const SUPPORTED_RANGE_SIZES: readonly bigint[] = [
   20n,
   50n,
   100n,
+  150n,
   200n,
+  300n,
   500n,
   1000n,
 ];

@@ -19,7 +19,9 @@ describe("SUPPORTED_RANGE_SIZES", () => {
       20n,
       50n,
       100n,
+      150n,
       200n,
+      300n,
       500n,
       1000n,
     ]);
