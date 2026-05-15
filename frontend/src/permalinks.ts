@@ -1,4 +1,4 @@
-export type View = "blocks" | "ranges";
+export type View = "blocks" | "ranges" | "charts";
 
 const VIEW_PARAM = "view";
 
@@ -9,7 +9,10 @@ export function getCurrentSearch(): string {
 
 export function readViewFromSearch(search: string): View {
   const params = new URLSearchParams(search);
-  return params.get(VIEW_PARAM) === "ranges" ? "ranges" : "blocks";
+  const value = params.get(VIEW_PARAM);
+  if (value === "ranges") return "ranges";
+  if (value === "charts") return "charts";
+  return "blocks";
 }
 
 export function readFiltersFromSearch<T extends Record<string, string>>(
