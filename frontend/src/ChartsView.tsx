@@ -401,6 +401,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
 
     const params = new URLSearchParams();
     params.set("limit", limit);
+    params.set("order", "desc");
     if (anchor) params.set("dateLt", anchor);
 
     if (lvl.rangeSize === 1) {
@@ -730,23 +731,27 @@ function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResul
     axisRef[a.axis] = i === 0 ? "y" : `y${i + 1}`;
   });
 
-  const xs = points.map((pt) => pt.midDate);
-  const customdata = points.map((pt) => [pt.rangeStart, pt.rangeEnd] as [number, number]);
+  const xs = points.map((pt) => pt.rangeStart);
+  const customdata = points.map(
+    (pt) => [pt.rangeStart, pt.rangeEnd, fmtShortDate(pt.midDate)] as [number, number, string],
+  );
 
   const traces: Partial<Plotly.PlotData>[] = activeParams.map((p) => {
     const ys = points.map((pt) => p.toNumber(pt.values[p.key]));
     const trace: Partial<Plotly.PlotData> = {
       type: "scatter",
-      mode: "lines",
+      mode: "lines+markers",
       name: p.label,
       x: xs,
       y: ys as number[],
       yaxis: axisRef[p.axis],
       line: { color: p.color, width: 1.5 },
+      marker: { color: p.color, size: 5 },
       customdata: customdata as unknown as Plotly.Datum[],
       hovertemplate:
         `<b>${p.label}</b><br>` +
-        "%{x|%Y-%m-%d %H:%M:%SZ}<br>" +
+        "date %{customdata[2]}<br>" +
+        "x block %{x}<br>" +
         "blocks %{customdata[0]}–%{customdata[1]}<br>" +
         `%{y:.4~f} ${p.unit}<extra></extra>`,
     };
@@ -774,7 +779,8 @@ function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResul
     },
     hovermode: "x unified",
     xaxis: {
-      type: "date",
+      type: "linear",
+      title: { text: "First block in range" } as Plotly.DataTitle,
       domain: [domainStart, domainEnd],
       gridcolor: getCssColor("--border", "#d6d9df"),
       zerolinecolor: getCssColor("--border", "#d6d9df"),

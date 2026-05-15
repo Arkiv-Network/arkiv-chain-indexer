@@ -139,6 +139,16 @@ if (!hasPostgresForTests()) {
       expect(result.map((row) => row.blockNumber)).toEqual([1, 2, 3]);
     });
 
+    test("can return the newest matching blocks first", async () => {
+      const storage = await withStorage();
+      for (const blockNumber of [1n, 2n, 3n, 4n]) {
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+      }
+
+      const result = await storage.queryBlocks({ limit: 2, order: "desc" });
+      expect(result.map((row) => row.blockNumber)).toEqual([4, 3]);
+    });
+
     test("returns all stored fields in camelCase", async () => {
       const storage = await withStorage();
       await storage.saveBlockMetrics(
@@ -318,6 +328,16 @@ if (!hasPostgresForTests()) {
 
       const result = await storage.queryBlockRanges({ rangeStartGt: 0n, rangeStartLt: 300n });
       expect(result.map((row) => row.rangeStart)).toEqual([100, 200]);
+    });
+
+    test("queryBlockRanges can return the newest matching ranges first", async () => {
+      const storage = await withStorage();
+      for (const rangeStart of [0n, 100n, 200n, 300n]) {
+        await saveCompleteRange(storage, rangeStart, "2024-01-01T00:00:00.000Z");
+      }
+
+      const result = await storage.queryBlockRanges({ limit: 2, order: "desc" });
+      expect(result.map((row) => row.rangeStart)).toEqual([300, 200]);
     });
 
     test("queryBlockRanges caps results at MAX_RANGES_PER_QUERY", () => {

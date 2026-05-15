@@ -70,6 +70,17 @@ describe("parseFilterFromQuery", () => {
     expect(filter.limit).toBe(250);
   });
 
+  test("parses a valid order", () => {
+    const filter = parseFilterFromQuery(new URLSearchParams("order=desc"));
+    expect(filter.order).toBe("desc");
+  });
+
+  test("rejects an invalid order", () => {
+    expect(() => parseFilterFromQuery(new URLSearchParams("order=newest"))).toThrow(
+      /order must be either asc or desc/,
+    );
+  });
+
   test("rejects a non-numeric limit", () => {
     expect(() => parseFilterFromQuery(new URLSearchParams("limit=abc"))).toThrow(
       /limit must be a positive integer/,
@@ -125,6 +136,17 @@ describe("parseRangeFilterFromQuery", () => {
     expect(filter.limit).toBe(42);
   });
 
+  test("parses a valid order", () => {
+    const filter = parseRangeFilterFromQuery(new URLSearchParams("order=desc"));
+    expect(filter.order).toBe("desc");
+  });
+
+  test("rejects an invalid order", () => {
+    expect(() => parseRangeFilterFromQuery(new URLSearchParams("order=newest"))).toThrow(
+      /order must be either asc or desc/,
+    );
+  });
+
   test("rejects a limit greater than the hard cap", () => {
     expect(() =>
       parseRangeFilterFromQuery(new URLSearchParams("limit=10001")),
@@ -164,6 +186,16 @@ if (!hasPostgresForTests()) {
         expect(body.limit).toBe(2);
         expect(body.truncated).toBe(true);
         expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2]);
+      });
+    });
+
+    test("honors descending block order for limited windows", async () => {
+      const storage = await openStorageWithBlocks([1n, 2n, 3n, 4n, 5n]);
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/blocks?limit=2&order=desc`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as BlocksResponseBody;
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([5, 4]);
       });
     });
 
@@ -285,6 +317,20 @@ if (!hasPostgresForTests()) {
         expect(body.ranges.map((row) => row.rangeStart)).toEqual([0, 50, 100]);
         expect(body.ranges.every((row) => row.rangeSize === 50)).toBe(true);
         expect(body.filters.rangeSize).toBe("50");
+      });
+    });
+
+    test("honors descending range order for limited windows", async () => {
+      const storage = await withStorage();
+      await saveCompleteRange(storage, 0n);
+      await saveCompleteRange(storage, 100n);
+      await saveCompleteRange(storage, 200n);
+
+      await withServer(storage, async (url) => {
+        const response = await fetch(`${url}/ranges?limit=2&order=desc`);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as RangesResponseBody;
+        expect(body.ranges.map((row) => row.rangeStart)).toEqual([200, 100]);
       });
     });
 

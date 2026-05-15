@@ -5,6 +5,7 @@ import {
   ScannerStorage,
   type BlockQueryFilter,
   type BlockRangeQueryFilter,
+  type QueryOrder,
   type StoredBlock,
   type StoredBlockRange,
 } from "./storage";
@@ -169,6 +170,11 @@ export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter 
     filter.limit = parseLimitParam(limit, MAX_BLOCKS_PER_QUERY);
   }
 
+  const order = params.get("order");
+  if (order !== null) {
+    filter.order = parseOrderParam(order);
+  }
+
   return filter;
 }
 
@@ -211,6 +217,11 @@ export function parseRangeFilterFromQuery(params: URLSearchParams): BlockRangeQu
     filter.limit = parseLimitParam(limit, MAX_RANGES_PER_QUERY);
   }
 
+  const order = params.get("order");
+  if (order !== null) {
+    filter.order = parseOrderParam(order);
+  }
+
   return filter;
 }
 
@@ -241,6 +252,11 @@ function parseDateParam(name: string, value: string): string {
     throw new Error(`${name} must be a valid ISO-8601 date string`);
   }
   return parsed.toISOString();
+}
+
+function parseOrderParam(value: string): QueryOrder {
+  if (value === "asc" || value === "desc") return value;
+  throw new Error(`order must be either asc or desc`);
 }
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
