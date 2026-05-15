@@ -49,6 +49,8 @@ const ZOOM_LEVELS: ZoomLevel[] = [
   { rangeSize: 20, label: "20" },
   { rangeSize: 50, label: "50" },
   { rangeSize: 100, label: "100" },
+  { rangeSize: 150, label: "150" },
+  { rangeSize: 300, label: "300" },
   { rangeSize: 1000, label: "1000" },
 ];
 
