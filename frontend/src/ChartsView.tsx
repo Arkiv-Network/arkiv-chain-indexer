@@ -26,13 +26,15 @@ interface ChartsViewProps {
 interface ChartsFilters extends Record<string, string> {
   zoom: string;
   startDate: string;
+  blockStart: string;
+  blockEnd: string;
   parameters: string;
 }
 
 const FETCH_LIMIT = 1000;
-const STORAGE_KEY = "gas-tracker.filters.charts.v2";
+const STORAGE_KEY = "gas-tracker.filters.charts.v3";
 const SIDEBAR_STORAGE_KEY = "gas-tracker.charts.sidebarCollapsed";
-const FILTER_KEYS = ["zoom", "startDate", "parameters"] as const;
+const FILTER_KEYS = ["zoom", "startDate", "blockStart", "blockEnd", "parameters"] as const;
 
 interface ZoomLevel {
   rangeSize: number;
@@ -261,6 +263,8 @@ const DEFAULT_PARAMETERS = ["averageBaseFeeWei", "averagePriorityFeeWei"];
 const EMPTY: ChartsFilters = {
   zoom: "6",
   startDate: "",
+  blockStart: "",
+  blockEnd: "",
   parameters: DEFAULT_PARAMETERS.join(","),
 };
 
@@ -285,6 +289,25 @@ function normalizeIsoDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return d.toISOString();
+}
+
+interface BlockWindow {
+  start: number;
+  end: number;
+}
+
+function parseBlockWindow(filters: ChartsFilters): BlockWindow | null {
+  if (!filters.blockStart.trim() || !filters.blockEnd.trim()) return null;
+  const start = Number(filters.blockStart);
+  const end = Number(filters.blockEnd);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
+  if (start < 0 || end < start) return null;
+  return { start, end };
+}
+
+function clearBlockWindow(filters: ChartsFilters): ChartsFilters {
+  if (!filters.blockStart && !filters.blockEnd) return filters;
+  return { ...filters, blockStart: "", blockEnd: "" };
 }
 
 function loadFilters(locationSearch: string): ChartsFilters {
@@ -361,6 +384,10 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
   };
 }
 
+function pointKey(point: ChartPoint): string {
+  return `${point.rangeSize}:${point.rangeStart}:${point.rangeEnd}`;
+}
+
 function loadSidebarCollapsed(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -386,25 +413,37 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadSidebarCollapsed);
+  const [selectedPointKey, setSelectedPointKey] = useState<string | null>(null);
 
   const zoomIndex = clampZoomIndex(filters.zoom);
   const selected = useMemo(() => parseSelected(filters.parameters), [filters.parameters]);
   const startDate = filters.startDate.trim();
+  const blockWindow = useMemo(() => parseBlockWindow(filters), [filters]);
+  const activeBlockWindow = zoomIndex === 0 ? blockWindow : null;
 
   const load = useCallback((f: ChartsFilters) => {
     const idx = clampZoomIndex(f.zoom);
     const lvl = ZOOM_LEVELS[idx];
-    const limit = String(FETCH_LIMIT);
     const anchor = normalizeIsoDate(f.startDate);
+    const blockRange = parseBlockWindow(f);
     setLoading(true);
     setError(null);
 
     const params = new URLSearchParams();
-    params.set("limit", limit);
-    params.set("order", "desc");
-    if (anchor) params.set("dateLt", anchor);
 
     if (lvl.rangeSize === 1) {
+      if (blockRange) {
+        const blockCount = blockRange.end - blockRange.start + 1;
+        params.set("limit", String(Math.min(FETCH_LIMIT, blockCount)));
+        params.set("order", "asc");
+        if (blockRange.start > 0) params.set("blockGt", String(blockRange.start - 1));
+        params.set("blockLt", String(blockRange.end + 1));
+      } else {
+        params.set("limit", String(FETCH_LIMIT));
+        params.set("order", "desc");
+        if (anchor) params.set("dateLt", anchor);
+      }
+
       fetchBlocks(params)
         .then((body) => {
           const pts = body.blocks
@@ -419,6 +458,9 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
         })
         .finally(() => setLoading(false));
     } else {
+      params.set("limit", String(FETCH_LIMIT));
+      params.set("order", "desc");
+      if (anchor) params.set("dateLt", anchor);
       params.set("rangeSize", String(lvl.rangeSize));
       fetchRanges(params)
         .then((body) => {
@@ -438,7 +480,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
 
   useEffect(() => {
     load(filters);
-  }, [filters.zoom, filters.startDate, load]);
+  }, [filters.zoom, filters.startDate, filters.blockStart, filters.blockEnd, load]);
 
   useEffect(() => {
     const next = loadFilters(locationSearch);
@@ -449,6 +491,12 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
   useEffect(() => {
     saveSidebarCollapsed(sidebarCollapsed);
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (selectedPointKey !== null && !points.some((point) => pointKey(point) === selectedPointKey)) {
+      setSelectedPointKey(null);
+    }
+  }, [points, selectedPointKey]);
 
   const updateFilters = useCallback(
     (next: ChartsFilters) => {
@@ -463,7 +511,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
   const setZoomIndex = (next: number) => {
     const clamped = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, next));
     if (clamped === zoomIndex) return;
-    updateFilters({ ...filters, zoom: String(clamped) });
+    updateFilters(clearBlockWindow({ ...filters, zoom: String(clamped) }));
   };
 
   const panTime = (deltaMs: number) => {
@@ -484,15 +532,15 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
     const nextMs = anchorMs + deltaMs;
     if (nextMs >= nowMs) {
       if (!startDate) return;
-      updateFilters({ ...filters, startDate: "" });
+      updateFilters(clearBlockWindow({ ...filters, startDate: "" }));
       return;
     }
-    updateFilters({ ...filters, startDate: new Date(nextMs).toISOString() });
+    updateFilters(clearBlockWindow({ ...filters, startDate: new Date(nextMs).toISOString() }));
   };
 
   const goLatest = () => {
-    if (!startDate) return;
-    updateFilters({ ...filters, startDate: "" });
+    if (!startDate && !activeBlockWindow) return;
+    updateFilters(clearBlockWindow({ ...filters, startDate: "" }));
   };
 
   const toggleParameter = (key: string) => {
@@ -513,7 +561,38 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
     }
   };
 
-  const { traces, layout } = useMemo(() => buildPlot(points, selected), [points, selected]);
+  const selectedPoint = useMemo(
+    () => points.find((point) => pointKey(point) === selectedPointKey) ?? null,
+    [points, selectedPointKey],
+  );
+
+  const handlePlotClick = useCallback(
+    (event: Readonly<Plotly.PlotMouseEvent>) => {
+      const clicked = event.points[0];
+      const index = clicked?.pointIndex;
+      if (typeof index !== "number") return;
+      const point = points[index];
+      if (!point) return;
+      setSelectedPointKey(pointKey(point));
+    },
+    [points],
+  );
+
+  const zoomToSelectedRange = () => {
+    if (!selectedPoint || selectedPoint.rangeSize === 1) return;
+    updateFilters({
+      ...filters,
+      zoom: "0",
+      startDate: "",
+      blockStart: String(selectedPoint.rangeStart),
+      blockEnd: String(selectedPoint.rangeEnd),
+    });
+  };
+
+  const { traces, layout } = useMemo(
+    () => buildPlot(points, selected, selectedPoint),
+    [points, selected, selectedPoint],
+  );
 
   const windowInfo = useMemo(() => {
     if (points.length === 0) return null;
@@ -573,8 +652,8 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
                     type="button"
                     className="secondary time-nav-btn"
                     onClick={() => panTime(s.ms)}
-                    disabled={!startDate}
-                    title={startDate ? `Go forward ${s.label}` : "Already at latest"}
+                    disabled={!startDate && !activeBlockWindow}
+                    title={startDate || activeBlockWindow ? `Go forward ${s.label}` : "Already at latest"}
                   >
                     +{s.label}
                   </button>
@@ -584,8 +663,8 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
                 type="button"
                 className="secondary latest-btn"
                 onClick={goLatest}
-                disabled={!startDate}
-                title={startDate ? "Jump to latest" : "Already at latest"}
+                disabled={!startDate && !activeBlockWindow}
+                title={startDate || activeBlockWindow ? "Jump to latest" : "Already at latest"}
               >
                 ⤓ Jump to latest
               </button>
@@ -630,7 +709,11 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
             <div className="sidebar-section">
               <span className="toolbar-label">Anchor</span>
               <div className="anchor-info">
-                {startDate ? fmtShortDate(startDate) : "Latest"}
+                {activeBlockWindow
+                  ? `Blocks ${activeBlockWindow.start}–${activeBlockWindow.end}`
+                  : startDate
+                    ? fmtShortDate(startDate)
+                    : "Latest"}
               </div>
             </div>
 
@@ -696,10 +779,36 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
                 useResizeHandler
                 style={{ width: "100%", height: "100%" }}
                 config={{ displaylogo: false, responsive: true }}
+                onClick={handlePlotClick}
               />
             )}
           </div>
         </div>
+        <aside className="selection-panel">
+          <div className="selection-header">
+            <h2>Selection</h2>
+            <button
+              type="button"
+              className="secondary"
+              onClick={zoomToSelectedRange}
+              disabled={!selectedPoint || selectedPoint.rangeSize === 1}
+              title={
+                selectedPoint
+                  ? selectedPoint.rangeSize === 1
+                    ? "Blocks cannot be zoomed further"
+                    : "Zoom to this range and show blocks"
+                  : "Select a chart point first"
+              }
+            >
+              Zoom to range
+            </button>
+          </div>
+          {selectedPoint ? (
+            <SelectionDetails point={selectedPoint} selectedKeys={selected} />
+          ) : (
+            <div className="selection-empty">Click a chart point to inspect a block or range.</div>
+          )}
+        </aside>
       </div>
     </section>
   );
@@ -716,7 +825,11 @@ interface PlotBuildResult {
   layout: Partial<Plotly.Layout>;
 }
 
-function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResult {
+function buildPlot(
+  points: ChartPoint[],
+  selectedKeys: string[],
+  selectedPoint: ChartPoint | null,
+): PlotBuildResult {
   const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
 
   const usedAxes: { axis: string; axisLabel: string }[] = [];
@@ -731,7 +844,7 @@ function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResul
     axisRef[a.axis] = i === 0 ? "y" : `y${i + 1}`;
   });
 
-  const xs = points.map((pt) => pt.rangeStart);
+  const xs = points.map((pt) => pt.midBlock);
   const customdata = points.map(
     (pt) => [pt.rangeStart, pt.rangeEnd, fmtShortDate(pt.midDate)] as [number, number, string],
   );
@@ -751,7 +864,6 @@ function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResul
       hovertemplate:
         `<b>${p.label}</b><br>` +
         "date %{customdata[2]}<br>" +
-        "x block %{x}<br>" +
         "blocks %{customdata[0]}–%{customdata[1]}<br>" +
         `%{y:.4~f} ${p.unit}<extra></extra>`,
     };
@@ -764,6 +876,7 @@ function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResul
   const sidePad = 0.06;
   const domainStart = leftSideCount * sidePad;
   const domainEnd = 1 - rightSideCount * sidePad;
+  const xRange = getPlotXRange(points);
 
   const layout: Partial<Plotly.Layout> = {
     autosize: true,
@@ -780,12 +893,36 @@ function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResul
     hovermode: "x unified",
     xaxis: {
       type: "linear",
-      title: { text: "First block in range" } as Plotly.DataTitle,
+      title: { text: "Block range" } as Plotly.DataTitle,
       domain: [domainStart, domainEnd],
+      range: xRange,
       gridcolor: getCssColor("--border", "#d6d9df"),
       zerolinecolor: getCssColor("--border", "#d6d9df"),
     },
   };
+
+  if (selectedPoint) {
+    const selectedStart = selectedPoint.rangeSize === 1
+      ? selectedPoint.rangeStart - 0.5
+      : selectedPoint.rangeStart;
+    const selectedEnd = selectedPoint.rangeSize === 1
+      ? selectedPoint.rangeEnd + 0.5
+      : selectedPoint.rangeEnd;
+    layout.shapes = [
+      {
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: selectedStart,
+        x1: selectedEnd,
+        y0: 0,
+        y1: 1,
+        fillcolor: "rgba(46, 99, 216, 0.14)",
+        line: { color: getCssColor("--accent", "#2e63d8"), width: 1 },
+        layer: "below",
+      },
+    ];
+  }
 
   let leftIdx = 0;
   let rightIdx = 0;
@@ -823,6 +960,80 @@ function buildPlot(points: ChartPoint[], selectedKeys: string[]): PlotBuildResul
   });
 
   return { traces, layout };
+}
+
+function getPlotXRange(points: ChartPoint[]): [number, number] | undefined {
+  if (points.length === 0) return undefined;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (!first || !last) return undefined;
+  if (first.rangeStart === last.rangeEnd) {
+    return [first.rangeStart - 0.5, last.rangeEnd + 0.5];
+  }
+  return [first.rangeStart, last.rangeEnd];
+}
+
+function SelectionDetails({
+  point,
+  selectedKeys,
+}: {
+  point: ChartPoint;
+  selectedKeys: string[];
+}) {
+  const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
+  return (
+    <div className="selection-content">
+      <dl className="selection-meta">
+        <div>
+          <dt>Type</dt>
+          <dd>{point.rangeSize === 1 ? "Block" : "Range"}</dd>
+        </div>
+        <div>
+          <dt>Blocks</dt>
+          <dd>{point.rangeStart === point.rangeEnd ? point.rangeStart : `${point.rangeStart}–${point.rangeEnd}`}</dd>
+        </div>
+        <div>
+          <dt>Range size</dt>
+          <dd>{point.rangeSize}</dd>
+        </div>
+        <div>
+          <dt>Date</dt>
+          <dd>{fmtShortDate(point.midDate)}</dd>
+        </div>
+      </dl>
+
+      <div className="selection-metrics">
+        <span className="toolbar-label">Selected metrics</span>
+        {activeParams.length === 0 ? (
+          <div className="selection-empty compact">No active metrics.</div>
+        ) : (
+          activeParams.map((param) => (
+            <div key={param.key} className="selection-metric-row">
+              <span className="param-swatch" style={{ background: param.color, borderColor: param.color }} />
+              <span className="selection-metric-label">{param.label}</span>
+              <span className="selection-metric-value">{formatMetricValue(param, point)}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatMetricValue(param: ParameterDef, point: ChartPoint): string {
+  const value = param.toNumber(point.values[param.key]);
+  if (value === null || !Number.isFinite(value)) return "—";
+
+  if (param.unit === "gwei") {
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 4 })} gwei`;
+  }
+  if (param.unit === "ETH") {
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 8 })} ETH`;
+  }
+  if (param.unit === "gas" || param.unit === "count") {
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${param.unit}`;
+  }
+  return `${value.toLocaleString()} ${param.unit}`;
 }
 
 function getCssColor(varName: string, fallback: string): string {
