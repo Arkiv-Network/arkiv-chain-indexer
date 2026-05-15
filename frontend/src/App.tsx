@@ -50,7 +50,7 @@ export function App() {
           </button>
         </nav>
       </header>
-      <main>
+      <main className={view === "charts" ? "fullscreen" : ""}>
         {view === "blocks" ? (
           <BlocksView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
         ) : view === "ranges" ? (

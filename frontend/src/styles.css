@@ -30,6 +30,9 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: var(--fg);
   background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 header {
@@ -39,6 +42,7 @@ header {
   gap: 1rem;
   flex-wrap: wrap;
   align-items: center;
+  flex-shrink: 0;
 }
 
 header h1 {
@@ -67,6 +71,14 @@ nav button.active {
 
 main {
   padding: 1.5rem;
+  flex: 1;
+  min-height: 0;
+}
+
+main.fullscreen {
+  padding: 0;
+  display: flex;
+  min-height: 0;
 }
 
 form {
@@ -198,23 +210,75 @@ td.num {
 
 /* ---- Charts view ---- */
 
-.charts-view h2 {
-  margin-top: 0;
-}
-
-.charts-toolbar {
+.charts-view {
   display: flex;
-  flex-wrap: wrap;
-  gap: 1rem 1.5rem;
-  align-items: flex-start;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--row-alt);
-  margin-bottom: 0.75rem;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
-.charts-toolbar-group {
+.charts-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.charts-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--row-alt);
+  padding: 0.75rem 0.9rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.sidebar-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.sidebar-hide,
+.sidebar-show {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-hide:hover,
+.sidebar-show:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sidebar-show {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 10;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.sidebar-section {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -227,8 +291,33 @@ td.num {
   color: var(--muted);
 }
 
-.zoom-buttons,
-.nav-buttons {
+.time-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+}
+
+.time-nav-btn {
+  padding: 0.35rem 0.25rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.latest-btn {
+  margin-top: 0.25rem;
+}
+
+.anchor-info {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.45rem;
+}
+
+.zoom-buttons {
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -239,16 +328,17 @@ td.num {
   display: flex;
   gap: 0.2rem;
   flex-wrap: wrap;
+  flex: 1;
 }
 
 .zoom-pill {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg);
-  padding: 0.3rem 0.55rem;
+  padding: 0.25rem 0.5rem;
   border-radius: 999px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -258,8 +348,7 @@ td.num {
   background: rgba(46, 99, 216, 0.08);
 }
 
-.zoom-buttons button.secondary,
-.nav-buttons button.secondary {
+.zoom-buttons button.secondary {
   min-width: 2rem;
 }
 
@@ -269,7 +358,7 @@ button.secondary:disabled {
 }
 
 .charts-status {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: var(--fg);
   line-height: 1.35;
 }
@@ -279,26 +368,15 @@ button.secondary:disabled {
   color: var(--muted);
 }
 
-.parameters-panel {
-  margin-bottom: 0.75rem;
-  padding: 0.65rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-}
-
-.parameters-title {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin-bottom: 0.5rem;
-}
-
 .parameters-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 0.4rem 0.75rem;
+}
+
+.parameters-grid.sidebar-params {
+  grid-template-columns: 1fr;
+  gap: 0.2rem;
 }
 
 .param-check {
@@ -317,7 +395,7 @@ button.secondary:disabled {
 }
 
 .param-check.on {
-  background: var(--row-alt);
+  background: var(--bg);
 }
 
 .param-check input[type="checkbox"] {
@@ -341,11 +419,33 @@ button.secondary:disabled {
   font-size: 0.75rem;
 }
 
+.chart-area {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem;
+}
+
+.charts-view.sidebar-collapsed .chart-area {
+  padding-left: 3rem;
+}
+
 .chart-card {
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-card .js-plotly-plot {
+  flex: 1;
+  min-height: 0;
 }
 
 .chart-empty {
@@ -353,5 +453,9 @@ button.secondary:disabled {
   text-align: center;
   padding: 4rem 1rem;
   font-size: 0.95rem;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
