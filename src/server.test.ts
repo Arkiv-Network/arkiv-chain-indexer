@@ -293,6 +293,18 @@ describe("GET /health", () => {
         safeHeadBlock: 107n,
         latestObservedAt: "2024-01-01T00:00:10.000Z",
       }),
+      getDatabaseStats: async () => ({
+        totalSizeBytes: "65536",
+        tables: [
+          {
+            tableName: "blocks",
+            rowCount: "100",
+            tableSizeBytes: "32768",
+            indexesSizeBytes: "16384",
+            totalSizeBytes: "49152",
+          },
+        ],
+      }),
     } as unknown as ScannerStorage;
 
     const response = await handleRequest(new Request("http://example.test/health"), storage);
@@ -308,6 +320,14 @@ describe("GET /health", () => {
     expect(body.scanner.headLagBlocks).toBe("10");
     expect(body.scanner.safeHeadLagBlocks).toBe("7");
     expect(body.scanner.lastBlockAgeSeconds).toBeGreaterThanOrEqual(0);
+    expect(body.database.totalSizeBytes).toBe("65536");
+    expect(body.database.tables[0]).toEqual({
+      tableName: "blocks",
+      rowCount: "100",
+      tableSizeBytes: "32768",
+      indexesSizeBytes: "16384",
+      totalSizeBytes: "49152",
+    });
   });
 });
 

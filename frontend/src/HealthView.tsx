@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth, type HealthResponse } from "./api";
-import { fmtDate, fmtDurationSeconds, fmtInteger, fmtUtcDate } from "./format";
+import { fmtBytes, fmtDate, fmtDurationSeconds, fmtInteger, fmtUtcDate } from "./format";
 
 interface HealthViewProps {
   timeZone: string;
@@ -33,6 +33,7 @@ export function HealthView({ timeZone }: HealthViewProps) {
   }, [load]);
 
   const scanner = data?.scanner;
+  const database = data?.database;
 
   return (
     <section className="view health-view">
@@ -81,16 +82,57 @@ export function HealthView({ timeZone }: HealthViewProps) {
             <Metric label="Build date UTC" value={fmtUtcDate(data?.build.builtAtUtc)} />
           </dl>
         </section>
+
+        <section className="health-panel database-panel">
+          <h3>Database</h3>
+          <dl>
+            <Metric
+              label="Total database size"
+              value={fmtBytes(database?.totalSizeBytes)}
+              title={bytesTitle(database?.totalSizeBytes)}
+            />
+          </dl>
+          <div className="table-wrap health-table-wrap">
+            <table className="data-table health-table">
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>Rows</th>
+                  <th>Table</th>
+                  <th>Indexes</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(database?.tables ?? []).map((table) => (
+                  <tr key={table.tableName}>
+                    <td>{table.tableName}</td>
+                    <td className="num">{fmtInteger(table.rowCount)}</td>
+                    <td className="num" title={bytesTitle(table.tableSizeBytes)}>
+                      {fmtBytes(table.tableSizeBytes)}
+                    </td>
+                    <td className="num" title={bytesTitle(table.indexesSizeBytes)}>
+                      {fmtBytes(table.indexesSizeBytes)}
+                    </td>
+                    <td className="num" title={bytesTitle(table.totalSizeBytes)}>
+                      {fmtBytes(table.totalSizeBytes)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <>
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd title={title}>{value}</dd>
     </>
   );
 }
@@ -98,4 +140,8 @@ function Metric({ label, value }: { label: string; value: string }) {
 function shortCommit(value: string | null | undefined): string {
   if (!value) return "—";
   return value.length > 12 ? value.slice(0, 12) : value;
+}
+
+function bytesTitle(value: string | null | undefined): string | undefined {
+  return value ? `${value} bytes` : undefined;
 }

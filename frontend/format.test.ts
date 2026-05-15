@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { fmtDate, fmtDurationSeconds, fmtEth, fmtGwei, fmtInteger, fmtRatio, fmtUtcDate } from "./src/format";
+import {
+  fmtBytes,
+  fmtDate,
+  fmtDurationSeconds,
+  fmtEth,
+  fmtGwei,
+  fmtInteger,
+  fmtRatio,
+  fmtUtcDate,
+} from "./src/format";
 
 describe("frontend format helpers", () => {
   test("formats wei values as Gwei with at most four decimal places", () => {
@@ -29,6 +38,15 @@ describe("frontend format helpers", () => {
     expect(fmtRatio("bad", "100")).toBe("bad / 100");
     expect(fmtInteger("12345678901234567890")).toBe("12345678901234567890");
     expect(fmtInteger("not-a-number")).toBe("not-a-number");
+  });
+
+  test("formats byte counts with readable units", () => {
+    expect(fmtBytes(null)).toBe("—");
+    expect(fmtBytes("0")).toBe("0 B");
+    expect(fmtBytes("1024")).toBe("1.00 KB");
+    expect(fmtBytes("1536")).toBe("1.50 KB");
+    expect(fmtBytes("10485760")).toBe("10.0 MB");
+    expect(fmtBytes("not-a-number")).toBe("not-a-number");
   });
 
   test("formats timestamps in selected timezones and UTC", () => {

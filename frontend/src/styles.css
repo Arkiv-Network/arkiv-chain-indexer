@@ -269,6 +269,23 @@ td.num {
   overflow-wrap: anywhere;
 }
 
+.database-panel {
+  grid-column: 1 / -1;
+}
+
+.health-table-wrap {
+  margin-top: 0.85rem;
+}
+
+.health-table {
+  min-width: 720px;
+}
+
+.health-table th,
+.health-table td {
+  white-space: nowrap;
+}
+
 /* ---- Charts view ---- */
 
 .charts-view {

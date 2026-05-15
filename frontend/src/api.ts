@@ -117,6 +117,14 @@ export interface TransactionsResponse {
   transactions: StoredTransaction[];
 }
 
+export interface DatabaseTableStats {
+  tableName: string;
+  rowCount: string;
+  tableSizeBytes: string;
+  indexesSizeBytes: string;
+  totalSizeBytes: string;
+}
+
 export interface HealthResponse {
   ok: boolean;
   serverTimeUtc: string;
@@ -136,6 +144,10 @@ export interface HealthResponse {
     latestObservationAgeSeconds: number | null;
     headLagBlocks: string | null;
     safeHeadLagBlocks: string | null;
+  };
+  database: {
+    totalSizeBytes: string;
+    tables: DatabaseTableStats[];
   };
 }
 
