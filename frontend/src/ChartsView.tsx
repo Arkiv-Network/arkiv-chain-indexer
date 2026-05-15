@@ -21,6 +21,7 @@ const Plot = createPlotlyComponent(Plotly);
 interface ChartsViewProps {
   locationSearch: string;
   onLocationChange: () => void;
+  timeZone: string;
 }
 
 interface ChartsFilters extends Record<string, string> {
@@ -408,7 +409,7 @@ function saveSidebarCollapsed(value: boolean) {
   }
 }
 
-export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps) {
+export function ChartsView({ locationSearch, onLocationChange, timeZone }: ChartsViewProps) {
   const [filters, setFilters] = usePersistentState<ChartsFilters>(STORAGE_KEY, loadFilters(locationSearch));
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -599,8 +600,8 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
   };
 
   const { traces, layout } = useMemo(
-    () => buildPlot(points, selected, selectedPoint),
-    [points, selected, selectedPoint],
+    () => buildPlot(points, selected, selectedPoint, timeZone),
+    [points, selected, selectedPoint, timeZone],
   );
 
   const windowInfo = useMemo(() => {
@@ -721,7 +722,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
                 {activeBlockWindow
                   ? `Blocks ${activeBlockWindow.start}–${activeBlockWindow.end}`
                   : startDate
-                    ? fmtShortDate(startDate)
+                    ? fmtShortDate(startDate, timeZone)
                     : "Latest"}
               </div>
             </div>
@@ -738,7 +739,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
                         <>
                           {points.length} pts · blocks {windowInfo.first}–{windowInfo.last}
                           <br />
-                          {fmtShortDate(windowInfo.firstDate)} → {fmtShortDate(windowInfo.lastDate)}
+                          {fmtShortDate(windowInfo.firstDate, timeZone)} → {fmtShortDate(windowInfo.lastDate, timeZone)}
                         </>
                       )
                       : "No data"}
@@ -830,7 +831,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
             </div>
           </div>
           {selectedPoint ? (
-            <SelectionDetails point={selectedPoint} selectedKeys={selected} />
+            <SelectionDetails point={selectedPoint} selectedKeys={selected} timeZone={timeZone} />
           ) : (
             <div className="selection-empty">Click a chart point to inspect a block or range.</div>
           )}
@@ -840,10 +841,20 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
   );
 }
 
-function fmtShortDate(value: string): string {
+function fmtShortDate(value: string, timeZone = "UTC"): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toISOString().replace("T", " ").replace(/\..*Z$/, "Z");
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(d);
 }
 
 interface PlotBuildResult {
@@ -855,6 +866,7 @@ function buildPlot(
   points: ChartPoint[],
   selectedKeys: string[],
   selectedPoint: ChartPoint | null,
+  timeZone: string,
 ): PlotBuildResult {
   const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
 
@@ -872,7 +884,7 @@ function buildPlot(
 
   const xs = points.map((pt) => pt.midBlock);
   const customdata = points.map(
-    (pt) => [pt.rangeStart, pt.rangeEnd, fmtShortDate(pt.midDate)] as [number, number, string],
+    (pt) => [pt.rangeStart, pt.rangeEnd, fmtShortDate(pt.midDate, timeZone)] as [number, number, string],
   );
 
   const traces: Partial<Plotly.PlotData>[] = activeParams.map((p) => {
@@ -1002,9 +1014,11 @@ function getPlotXRange(points: ChartPoint[]): [number, number] | undefined {
 function SelectionDetails({
   point,
   selectedKeys,
+  timeZone,
 }: {
   point: ChartPoint;
   selectedKeys: string[];
+  timeZone: string;
 }) {
   const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
   return (
@@ -1024,7 +1038,7 @@ function SelectionDetails({
         </div>
         <div>
           <dt>Date</dt>
-          <dd>{fmtShortDate(point.midDate)}</dd>
+          <dd>{fmtShortDate(point.midDate, timeZone)}</dd>
         </div>
       </dl>
 

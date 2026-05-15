@@ -117,6 +117,28 @@ export interface TransactionsResponse {
   transactions: StoredTransaction[];
 }
 
+export interface HealthResponse {
+  ok: boolean;
+  serverTimeUtc: string;
+  build: {
+    commit: string | null;
+    builtAtUtc: string | null;
+  };
+  scanner: {
+    lastSuccessfulBlock: string | null;
+    lastSuccessfulBlockDate: string | null;
+    lastSuccessfulScannedAtUtc: string | null;
+    lastBlockAgeSeconds: number | null;
+    backfillNextBlock: string | null;
+    latestObservedBlock: string | null;
+    safeHeadBlock: string | null;
+    latestObservedAtUtc: string | null;
+    latestObservationAgeSeconds: number | null;
+    headLagBlocks: string | null;
+    safeHeadLagBlocks: string | null;
+  };
+}
+
 async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
   const qs = params.toString();
   const url = qs ? `/api${path}?${qs}` : `/api${path}`;
@@ -142,4 +164,8 @@ export function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResp
 
 export function fetchTransactions(params: URLSearchParams): Promise<TransactionsResponse> {
   return getJson<TransactionsResponse>("/transactions", params);
+}
+
+export function fetchHealth(): Promise<HealthResponse> {
+  return getJson<HealthResponse>("/health", new URLSearchParams());
 }

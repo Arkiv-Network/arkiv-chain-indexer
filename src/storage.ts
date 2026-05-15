@@ -15,6 +15,9 @@ types.setTypeParser(20, (value: string) => value);
 
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
 const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
+const LATEST_OBSERVED_BLOCK_KEY = "latest_observed_block";
+const SAFE_HEAD_BLOCK_KEY = "safe_head_block";
+const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
 
 export const MAX_BLOCKS_PER_QUERY = 10_000;
 export const MAX_RANGES_PER_QUERY = 10_000;
@@ -110,6 +113,16 @@ export interface StoredBlockRange {
 
 export interface ScannerStorageOptions {
   schema?: string;
+}
+
+export interface ScannerProgress {
+  lastSuccessfulBlock?: bigint;
+  lastSuccessfulBlockDate?: string;
+  lastSuccessfulScannedAt?: string;
+  backfillNextBlock?: bigint;
+  latestObservedBlock?: bigint;
+  safeHeadBlock?: bigint;
+  latestObservedAt?: string;
 }
 
 export class ScannerStorage {
@@ -315,6 +328,64 @@ export class ScannerStorage {
     return this.getStateBigInt(BACKFILL_NEXT_BLOCK_KEY);
   }
 
+  async saveChainProgress(
+    latestObservedBlock: bigint,
+    safeHeadBlock: bigint,
+    observedAt: Date = new Date(),
+  ): Promise<void> {
+    const observedAtIso = observedAt.toISOString();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await this.upsertStateValue(client, LATEST_OBSERVED_BLOCK_KEY, latestObservedBlock.toString());
+      await this.upsertStateValue(client, SAFE_HEAD_BLOCK_KEY, safeHeadBlock.toString());
+      await this.upsertStateValue(client, LATEST_OBSERVED_AT_KEY, observedAtIso);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getScannerProgress(): Promise<ScannerProgress> {
+    const stateResult = await this.pool.query<{ key: string; value: string }>(
+      `SELECT key, value FROM ${this.qScannerState}
+       WHERE key = ANY($1::text[])`,
+      [
+        [
+          LAST_SUCCESSFUL_BLOCK_KEY,
+          BACKFILL_NEXT_BLOCK_KEY,
+          LATEST_OBSERVED_BLOCK_KEY,
+          SAFE_HEAD_BLOCK_KEY,
+          LATEST_OBSERVED_AT_KEY,
+        ],
+      ],
+    );
+    const state = new Map(stateResult.rows.map((row) => [row.key, row.value]));
+
+    const lastSuccessfulBlock = parseOptionalBigInt(state.get(LAST_SUCCESSFUL_BLOCK_KEY));
+    const lastSuccessfulBlockDetails =
+      lastSuccessfulBlock === undefined
+        ? undefined
+        : await this.getStoredBlockTiming(lastSuccessfulBlock);
+
+    return {
+      ...(lastSuccessfulBlock !== undefined ? { lastSuccessfulBlock } : {}),
+      ...(lastSuccessfulBlockDetails?.blockDate !== undefined
+        ? { lastSuccessfulBlockDate: lastSuccessfulBlockDetails.blockDate }
+        : {}),
+      ...(lastSuccessfulBlockDetails?.scannedAt !== undefined
+        ? { lastSuccessfulScannedAt: lastSuccessfulBlockDetails.scannedAt }
+        : {}),
+      ...optionalBigIntField("backfillNextBlock", state.get(BACKFILL_NEXT_BLOCK_KEY)),
+      ...optionalBigIntField("latestObservedBlock", state.get(LATEST_OBSERVED_BLOCK_KEY)),
+      ...optionalBigIntField("safeHeadBlock", state.get(SAFE_HEAD_BLOCK_KEY)),
+      ...optionalStringField("latestObservedAt", state.get(LATEST_OBSERVED_AT_KEY)),
+    };
+  }
+
   private async getStateBigInt(key: string): Promise<bigint | undefined> {
     const result = await this.pool.query<{ value: string }>(
       `SELECT value FROM ${this.qScannerState} WHERE key = $1`,
@@ -322,6 +393,21 @@ export class ScannerStorage {
     );
     const row = result.rows[0];
     return row ? BigInt(row.value) : undefined;
+  }
+
+  private async getStoredBlockTiming(
+    blockNumber: bigint,
+  ): Promise<{ blockDate: string; scannedAt: string } | undefined> {
+    const result = await this.pool.query<{ block_date: string; scanned_at_utc: string }>(
+      `SELECT
+         block_date,
+         to_char(scanned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS scanned_at_utc
+       FROM ${this.qBlocks}
+       WHERE block_number = $1`,
+      [blockNumber.toString()],
+    );
+    const row = result.rows[0];
+    return row ? { blockDate: row.block_date, scannedAt: row.scanned_at_utc } : undefined;
   }
 
   async saveBlockMetrics(
@@ -924,24 +1010,27 @@ export class ScannerStorage {
   ): Promise<void> {
     switch (progressUpdate.kind) {
       case "lastSuccessfulBlock":
-        await client.query(
-          `INSERT INTO ${this.qScannerState} (key, value, updated_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-          [LAST_SUCCESSFUL_BLOCK_KEY, metrics.blockNumber.toString()],
-        );
+        await this.upsertStateValue(client, LAST_SUCCESSFUL_BLOCK_KEY, metrics.blockNumber.toString());
         return;
       case "backfillNextBlock":
-        await client.query(
-          `INSERT INTO ${this.qScannerState} (key, value, updated_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-          [BACKFILL_NEXT_BLOCK_KEY, progressUpdate.nextBlock.toString()],
-        );
+        await this.upsertStateValue(client, BACKFILL_NEXT_BLOCK_KEY, progressUpdate.nextBlock.toString());
         return;
       case "none":
         return;
     }
+  }
+
+  private async upsertStateValue(
+    client: pg.PoolClient,
+    key: string,
+    value: string,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO ${this.qScannerState} (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, value],
+    );
   }
 
   async close(): Promise<void> {
@@ -964,6 +1053,24 @@ function quoteIdent(name: string): string {
     throw new Error(`Invalid identifier: ${name}`);
   }
   return `"${name}"`;
+}
+
+function parseOptionalBigInt(value: string | undefined): bigint | undefined {
+  return value === undefined ? undefined : BigInt(value);
+}
+
+function optionalBigIntField<K extends string>(
+  key: K,
+  value: string | undefined,
+): { [P in K]?: bigint } {
+  return value === undefined ? {} : { [key]: BigInt(value) } as { [P in K]?: bigint };
+}
+
+function optionalStringField<K extends string>(
+  key: K,
+  value: string | undefined,
+): { [P in K]?: string } {
+  return value === undefined ? {} : { [key]: value } as { [P in K]?: string };
 }
 
 function mapTransactionRow(row: {

@@ -1,5 +1,6 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type BlockInspectionResult } from "./blockInspector";
+import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
@@ -62,6 +63,25 @@ export interface TransactionsResponseBody {
 
 export type BlockInspectResponseBody = BlockInspectionResult;
 
+export interface HealthResponseBody {
+  ok: boolean;
+  serverTimeUtc: string;
+  build: BuildInfo;
+  scanner: {
+    lastSuccessfulBlock: string | null;
+    lastSuccessfulBlockDate: string | null;
+    lastSuccessfulScannedAtUtc: string | null;
+    lastBlockAgeSeconds: number | null;
+    backfillNextBlock: string | null;
+    latestObservedBlock: string | null;
+    safeHeadBlock: string | null;
+    latestObservedAtUtc: string | null;
+    latestObservationAgeSeconds: number | null;
+    headLagBlocks: string | null;
+    safeHeadLagBlocks: string | null;
+  };
+}
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -95,7 +115,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/health") {
-    return jsonResponse({ ok: true });
+    return handleGetHealth(storage);
   }
 
   if (url.pathname === "/blocks") {
@@ -116,6 +136,42 @@ export async function handleRequest(
   }
 
   return jsonError(404, `Not found: ${url.pathname}`);
+}
+
+async function handleGetHealth(storage: ScannerStorage): Promise<Response> {
+  const now = new Date();
+  const progress = await storage.getScannerProgress();
+  const lastBlockAgeSeconds = secondsBetween(now, progress.lastSuccessfulBlockDate);
+  const latestObservationAgeSeconds = secondsBetween(now, progress.latestObservedAt);
+  const headLagBlocks =
+    progress.latestObservedBlock !== undefined && progress.lastSuccessfulBlock !== undefined
+      ? clampLag(progress.latestObservedBlock - progress.lastSuccessfulBlock)
+      : null;
+  const safeHeadLagBlocks =
+    progress.safeHeadBlock !== undefined && progress.lastSuccessfulBlock !== undefined
+      ? clampLag(progress.safeHeadBlock - progress.lastSuccessfulBlock)
+      : null;
+
+  const body: HealthResponseBody = {
+    ok: true,
+    serverTimeUtc: now.toISOString(),
+    build: readBuildInfo(),
+    scanner: {
+      lastSuccessfulBlock: progress.lastSuccessfulBlock?.toString() ?? null,
+      lastSuccessfulBlockDate: progress.lastSuccessfulBlockDate ?? null,
+      lastSuccessfulScannedAtUtc: progress.lastSuccessfulScannedAt ?? null,
+      lastBlockAgeSeconds,
+      backfillNextBlock: progress.backfillNextBlock?.toString() ?? null,
+      latestObservedBlock: progress.latestObservedBlock?.toString() ?? null,
+      safeHeadBlock: progress.safeHeadBlock?.toString() ?? null,
+      latestObservedAtUtc: progress.latestObservedAt ?? null,
+      latestObservationAgeSeconds,
+      headLagBlocks,
+      safeHeadLagBlocks,
+    },
+  };
+
+  return jsonResponse(body);
 }
 
 async function handleGetBlockInspect(
@@ -383,6 +439,17 @@ function parseDateParam(name: string, value: string): string {
 function parseOrderParam(value: string): QueryOrder {
   if (value === "asc" || value === "desc") return value;
   throw new Error(`order must be either asc or desc`);
+}
+
+function secondsBetween(now: Date, isoDate: string | undefined): number | null {
+  if (isoDate === undefined) return null;
+  const timestamp = Date.parse(isoDate);
+  if (!Number.isFinite(timestamp)) return null;
+  return Math.max(0, Math.floor((now.getTime() - timestamp) / 1000));
+}
+
+function clampLag(value: bigint): string {
+  return value > 0n ? value.toString() : "0";
 }
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {

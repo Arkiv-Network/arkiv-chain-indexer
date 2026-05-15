@@ -1,5 +1,6 @@
 import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format";
 import { inspectBlockFromRpc } from "./blockInspector";
+import { readBuildInfo } from "./buildInfo";
 import { computeBlockMetrics } from "./metrics";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
@@ -24,12 +25,20 @@ export async function runScanner(
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
 ): Promise<void> {
+  logBuildInfo();
   if (config.toBlock !== undefined) {
     await runBoundedForwardScanner(config, rpc, storage, runtime);
     return;
   }
 
   await runNearHeadBackfillScanner(config, rpc, storage, runtime);
+}
+
+function logBuildInfo(): void {
+  const build = readBuildInfo();
+  console.log(
+    `Scanner build: commit ${build.commit ?? "unknown"}, built at ${build.builtAtUtc ?? "unknown"}`,
+  );
 }
 
 async function runBoundedForwardScanner(
@@ -62,6 +71,7 @@ async function runBoundedForwardScanner(
 
     const safeHead =
       latestBlock > config.confirmationDepth ? latestBlock - config.confirmationDepth : 0n;
+    await recordChainProgress(storage, latestBlock, safeHead);
     const upperBound = config.toBlock !== undefined && config.toBlock < safeHead ? config.toBlock : safeHead;
 
     if (nextBlock > upperBound) {
@@ -75,7 +85,7 @@ async function runBoundedForwardScanner(
     }
 
     try {
-      await scanOneBlock(nextBlock, rpc, storage, config.txReceiptConcurrency);
+      await scanOneBlock(nextBlock, rpc, storage, config.txReceiptConcurrency, { kind: "lastSuccessfulBlock" }, { latestBlock, safeHead });
       nextBlock += 1n;
     } catch (error) {
       console.error(
@@ -98,7 +108,7 @@ async function runNearHeadBackfillScanner(
   );
 
   while (true) {
-    const backfillSafeHead = await readSafeHeadWithRetry(config, rpc, runtime);
+    const backfillSafeHead = await readSafeHeadWithRetry(config, rpc, storage, runtime);
     const lowestBackfilledBlock = await backfillDownForSlice(
       backfillSafeHead,
       config,
@@ -107,7 +117,7 @@ async function runNearHeadBackfillScanner(
       runtime,
     );
 
-    const catchUpSafeHead = await readSafeHeadWithRetry(config, rpc, runtime);
+    const catchUpSafeHead = await readSafeHeadWithRetry(config, rpc, storage, runtime);
     const scannedForward = await scanForwardToSafeHead(
       catchUpSafeHead,
       lowestBackfilledBlock ?? catchUpSafeHead,
@@ -126,12 +136,15 @@ async function runNearHeadBackfillScanner(
 async function readSafeHeadWithRetry(
   config: ScannerConfig,
   rpc: EthereumRpcClient,
+  storage: ScannerStorage,
   runtime: ScannerRuntime,
 ): Promise<bigint> {
   while (true) {
     try {
       const latestBlock = await rpc.getLatestBlockNumber();
-      return computeSafeHead(latestBlock, config.confirmationDepth);
+      const safeHead = computeSafeHead(latestBlock, config.confirmationDepth);
+      await recordChainProgress(storage, latestBlock, safeHead);
+      return safeHead;
     } catch (error) {
       console.error(`Failed to read latest block; retrying after ${config.retryMs}ms`, error);
       await runtime.sleep(config.retryMs);
@@ -164,6 +177,7 @@ export async function backfillDownForSlice(
       runtime,
       { kind: "backfillNextBlock", nextBlock: blockToScan - 1n },
       "backfill",
+      { safeHead },
     );
 
     lowestBackfilledBlock = blockToScan;
@@ -194,6 +208,7 @@ export async function scanForwardToSafeHead(
       runtime,
       { kind: "lastSuccessfulBlock" },
       "forward",
+      { safeHead },
     );
 
     scanned = true;
@@ -211,10 +226,11 @@ async function scanBlockWithRetry(
   runtime: ScannerRuntime,
   progressUpdate: BlockProgressUpdate,
   direction: "backfill" | "forward",
+  summaryContext: BlockSummaryContext = {},
 ): Promise<void> {
   while (true) {
     try {
-      await scanOneBlock(blockNumber, rpc, storage, config.txReceiptConcurrency, progressUpdate);
+      await scanOneBlock(blockNumber, rpc, storage, config.txReceiptConcurrency, progressUpdate, summaryContext);
       return;
     } catch (error) {
       console.error(
@@ -232,6 +248,7 @@ export async function scanOneBlock(
   storage: ScannerStorage,
   txReceiptConcurrency: number,
   progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
+  summaryContext: BlockSummaryContext = {},
 ): Promise<void> {
   const startedAt = performance.now();
   const rpcStatsBefore = rpc.getStatsSnapshot();
@@ -243,7 +260,12 @@ export async function scanOneBlock(
   await storage.saveBlockMetrics(metrics, progressUpdate, inspected.transactions);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
-  console.log(formatBlockSummary(metrics, elapsedMs, rpcStats));
+  console.log(formatBlockSummary(metrics, elapsedMs, rpcStats, summaryContext));
+}
+
+interface BlockSummaryContext {
+  latestBlock?: bigint;
+  safeHead?: bigint;
 }
 
 function computeSafeHead(latestBlock: bigint, confirmationDepth: bigint): bigint {
@@ -270,12 +292,41 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function formatBlockSummary(metrics: BlockMetrics, elapsedMs: number, rpcStats: RpcStats): string {
+async function recordChainProgress(
+  storage: ScannerStorage,
+  latestBlock: bigint,
+  safeHead: bigint,
+): Promise<void> {
+  try {
+    await storage.saveChainProgress(latestBlock, safeHead);
+  } catch (error) {
+    console.error("Failed to store chain progress metadata", error);
+  }
+}
+
+function formatBlockSummary(
+  metrics: BlockMetrics,
+  elapsedMs: number,
+  rpcStats: RpcStats,
+  context: BlockSummaryContext,
+): string {
   const totalRpcBytes = rpcStats.requestBytes + rpcStats.responseBytes;
+  const safeHeadLag =
+    context.safeHead !== undefined ? context.safeHead - metrics.blockNumber : undefined;
+  const headLag =
+    context.latestBlock !== undefined ? context.latestBlock - metrics.blockNumber : undefined;
+  const blockAgeMs = Date.now() - Date.parse(metrics.blockDate);
 
   return [
     `Block ${metrics.blockNumber.toString()} scanned and stored`,
     `  Date: ${metrics.blockDate}`,
+    `  Block age: ${Number.isFinite(blockAgeMs) ? formatDurationMs(Math.max(0, blockAgeMs)) : "unknown"}`,
+    ...(context.safeHead !== undefined
+      ? [`  Safe head lag: ${safeHeadLag !== undefined && safeHeadLag >= 0n ? safeHeadLag.toString() : "0"} blocks`]
+      : []),
+    ...(context.latestBlock !== undefined
+      ? [`  Chain head lag: ${headLag !== undefined && headLag >= 0n ? headLag.toString() : "0"} blocks`]
+      : []),
     `  Duration: ${formatDurationMs(elapsedMs)}`,
     `  Transactions: ${metrics.transactionCount.toString()}`,
     `  Gas used: ${formatKGas(metrics.totalGasUsed)} / ${formatKGas(metrics.maxGasInBlock)}`,

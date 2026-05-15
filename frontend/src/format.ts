@@ -62,7 +62,28 @@ export function fmtInteger(value: string | number | null | undefined): string {
   }
 }
 
-export function fmtDate(value: string | null | undefined): string {
+export function fmtDate(value: string | null | undefined, timeZone = "UTC"): string {
+  if (!value) return "—";
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      timeZoneName: "short",
+    }).format(d);
+  } catch {
+    return value;
+  }
+}
+
+export function fmtUtcDate(value: string | null | undefined): string {
   if (!value) return "—";
   try {
     const d = new Date(value);
@@ -71,4 +92,16 @@ export function fmtDate(value: string | null | undefined): string {
   } catch {
     return value;
   }
+}
+
+export function fmtDurationSeconds(value: number | null | undefined): string {
+  if (value === undefined || value === null || !Number.isFinite(value)) return "—";
+  const seconds = Math.max(0, Math.floor(value));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
 }

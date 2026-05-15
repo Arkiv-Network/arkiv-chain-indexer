@@ -7,6 +7,7 @@ import {
   parseTransactionFilterFromQuery,
   type BlockInspectResponseBody,
   type BlocksResponseBody,
+  type HealthResponseBody,
   type RangesResponseBody,
   type TransactionsResponseBody,
 } from "./server";
@@ -277,6 +278,36 @@ describe("GET /transactions", () => {
     );
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe("GET /health", () => {
+  test("returns scanner progress and build metadata", async () => {
+    const storage = {
+      getScannerProgress: async () => ({
+        lastSuccessfulBlock: 100n,
+        lastSuccessfulBlockDate: "2024-01-01T00:00:00.000Z",
+        lastSuccessfulScannedAt: "2024-01-01T00:00:05.000Z",
+        backfillNextBlock: 90n,
+        latestObservedBlock: 110n,
+        safeHeadBlock: 107n,
+        latestObservedAt: "2024-01-01T00:00:10.000Z",
+      }),
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(new Request("http://example.test/health"), storage);
+    const body = (await response.json()) as HealthResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.serverTimeUtc).toMatch(/Z$/);
+    expect(body.scanner.lastSuccessfulBlock).toBe("100");
+    expect(body.scanner.backfillNextBlock).toBe("90");
+    expect(body.scanner.latestObservedBlock).toBe("110");
+    expect(body.scanner.safeHeadBlock).toBe("107");
+    expect(body.scanner.headLagBlocks).toBe("10");
+    expect(body.scanner.safeHeadLagBlocks).toBe("7");
+    expect(body.scanner.lastBlockAgeSeconds).toBeGreaterThanOrEqual(0);
   });
 });
 
