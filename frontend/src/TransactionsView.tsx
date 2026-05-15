@@ -13,6 +13,7 @@ import { loadFromStorage, usePersistentState } from "./persistentState";
 interface TransactionsViewProps {
   locationSearch: string;
   onLocationChange: () => void;
+  timeZone: string;
 }
 
 interface TransactionFilters extends Record<string, string> {
@@ -72,7 +73,8 @@ const EMPTY: TransactionFilters = {
   limit: "1000",
 };
 
-const TX_COLUMNS: Column[] = [
+function transactionColumns(timeZone: string): Column[] {
+  return [
   {
     key: "blockNumber",
     label: "Block",
@@ -84,7 +86,7 @@ const TX_COLUMNS: Column[] = [
     key: "blockDate",
     label: "Date",
     width: "13rem",
-    render: (row) => fmtDate(row.blockDate),
+    render: (row) => fmtDate(row.blockDate, timeZone),
   },
   {
     key: "position",
@@ -208,7 +210,8 @@ const TX_COLUMNS: Column[] = [
     width: "10rem",
     render: (row) => fmtEth(row.transactionFeeWei),
   },
-];
+  ];
+}
 
 function loadFilters(locationSearch: string): TransactionFilters {
   const stored = loadFromStorage<TransactionFilters>(STORAGE_KEY, EMPTY);
@@ -216,7 +219,7 @@ function loadFilters(locationSearch: string): TransactionFilters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
 }
 
-export function TransactionsView({ locationSearch, onLocationChange }: TransactionsViewProps) {
+export function TransactionsView({ locationSearch, onLocationChange, timeZone }: TransactionsViewProps) {
   const [filters, setFilters] = usePersistentState<TransactionFilters>(
     STORAGE_KEY,
     loadFilters(locationSearch),
@@ -281,6 +284,7 @@ export function TransactionsView({ locationSearch, onLocationChange }: Transacti
     const transactions = data?.transactions ?? [];
     return transactions.slice().sort((a, b) => compareRows(a, b, sort));
   }, [data, sort]);
+  const columns = useMemo(() => transactionColumns(timeZone), [timeZone]);
 
   const setSortKey = (key: SortKey) => {
     setSort((current) => {
@@ -360,13 +364,13 @@ export function TransactionsView({ locationSearch, onLocationChange }: Transacti
       <div className="table-wrap">
         <table className="data-table tx-table">
           <colgroup>
-            {TX_COLUMNS.map((column) => (
+            {columns.map((column) => (
               <col key={column.key} style={{ width: column.width }} />
             ))}
           </colgroup>
           <thead>
             <tr>
-              {TX_COLUMNS.map((column) => (
+              {columns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
                   <button type="button" className="sort-header" onClick={() => setSortKey(column.key)}>
                     <span>{column.label}</span>
@@ -379,7 +383,7 @@ export function TransactionsView({ locationSearch, onLocationChange }: Transacti
           <tbody>
             {rows.map((row) => (
               <tr key={`${row.blockNumberDecimal}:${row.position}:${row.hash}`}>
-                {TX_COLUMNS.map((column) => (
+                {columns.map((column) => (
                   <td key={column.key} className={column.className} data-label={column.label}>
                     {column.render(row)}
                   </td>

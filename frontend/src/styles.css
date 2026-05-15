@@ -69,6 +69,24 @@ nav button.active {
   color: var(--accent);
 }
 
+.timezone-select {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.timezone-select select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
 main {
   padding: 1.5rem;
   flex: 1;
@@ -206,6 +224,49 @@ td.num {
 
 .error {
   color: #c83838;
+}
+
+.view-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.health-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  background: var(--bg);
+}
+
+.health-panel h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.health-panel dl {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(0, 1.5fr);
+  gap: 0.55rem 0.85rem;
+  margin: 0;
+}
+
+.health-panel dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.health-panel dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 /* ---- Charts view ---- */

@@ -1,4 +1,4 @@
-export type View = "blocks" | "transactions" | "ranges" | "charts";
+export type View = "blocks" | "transactions" | "ranges" | "charts" | "health";
 
 const VIEW_PARAM = "view";
 
@@ -13,6 +13,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "block" || value === "transactions") return "transactions";
   if (value === "ranges") return "ranges";
   if (value === "charts") return "charts";
+  if (value === "health") return "health";
   return "blocks";
 }
 

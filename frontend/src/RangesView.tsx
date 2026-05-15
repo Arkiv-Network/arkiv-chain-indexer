@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchRanges, type RangesResponse, type StoredBlockRange } from "./api";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
@@ -13,6 +13,7 @@ import { loadFromStorage, usePersistentState } from "./persistentState";
 interface RangesViewProps {
   locationSearch: string;
   onLocationChange: () => void;
+  timeZone: string;
 }
 
 interface Filters extends Record<string, string> {
@@ -45,7 +46,8 @@ interface Column<T> {
   render: (row: T) => ReactNode;
 }
 
-const RANGE_COLUMNS: Column<StoredBlockRange>[] = [
+function rangeColumns(timeZone: string): Column<StoredBlockRange>[] {
+  return [
   {
     key: "rangeSize",
     label: "Range size",
@@ -71,13 +73,13 @@ const RANGE_COLUMNS: Column<StoredBlockRange>[] = [
     key: "minBlockDate",
     label: "Min date",
     width: "12.5rem",
-    render: (row) => fmtDate(row.minBlockDate),
+    render: (row) => fmtDate(row.minBlockDate, timeZone),
   },
   {
     key: "maxBlockDate",
     label: "Max date",
     width: "12.5rem",
-    render: (row) => fmtDate(row.maxBlockDate),
+    render: (row) => fmtDate(row.maxBlockDate, timeZone),
   },
   {
     key: "minBaseFeeWei",
@@ -184,7 +186,8 @@ const RANGE_COLUMNS: Column<StoredBlockRange>[] = [
     width: "16rem",
     render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
   },
-];
+  ];
+}
 
 function buildParams(filters: Filters): URLSearchParams {
   const params = new URLSearchParams();
@@ -201,7 +204,7 @@ function loadFilters(locationSearch: string): Filters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
 }
 
-export function RangesView({ locationSearch, onLocationChange }: RangesViewProps) {
+export function RangesView({ locationSearch, onLocationChange, timeZone }: RangesViewProps) {
   const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<RangesResponse | null>(null);
@@ -259,6 +262,7 @@ export function RangesView({ locationSearch, onLocationChange }: RangesViewProps
   const sorted = data
     ? data.ranges.slice().sort((a, b) => b.rangeStart - a.rangeStart)
     : [];
+  const columns = useMemo(() => rangeColumns(timeZone), [timeZone]);
 
   return (
     <section className="view">
@@ -340,13 +344,13 @@ export function RangesView({ locationSearch, onLocationChange }: RangesViewProps
       <div className="table-wrap">
         <table className="data-table">
           <colgroup>
-            {RANGE_COLUMNS.map((column) => (
+            {columns.map((column) => (
               <col key={column.key} style={{ width: column.width }} />
             ))}
           </colgroup>
           <thead>
             <tr>
-              {RANGE_COLUMNS.map((column) => (
+              {columns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
                   {column.label}
                 </th>
@@ -356,7 +360,7 @@ export function RangesView({ locationSearch, onLocationChange }: RangesViewProps
           <tbody>
             {sorted.map((row) => (
               <tr key={`${row.rangeSize}-${row.rangeStart}`}>
-                {RANGE_COLUMNS.map((column) => (
+                {columns.map((column) => (
                   <td key={column.key} className={column.className} data-label={column.label}>
                     {column.render(row)}
                   </td>

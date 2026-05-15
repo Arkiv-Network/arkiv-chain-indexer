@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
@@ -13,6 +13,7 @@ import { loadFromStorage, usePersistentState } from "./persistentState";
 interface BlocksViewProps {
   locationSearch: string;
   onLocationChange: () => void;
+  timeZone: string;
 }
 
 interface Filters extends Record<string, string> {
@@ -42,7 +43,8 @@ interface Column<T> {
   render: (row: T) => ReactNode;
 }
 
-const BLOCK_COLUMNS: Column<StoredBlock>[] = [
+function blockColumns(timeZone: string): Column<StoredBlock>[] {
+  return [
   {
     key: "block",
     label: "Block",
@@ -54,7 +56,7 @@ const BLOCK_COLUMNS: Column<StoredBlock>[] = [
     key: "date",
     label: "Date",
     width: "12.5rem",
-    render: (row) => fmtDate(row.blockDate),
+    render: (row) => fmtDate(row.blockDate, timeZone),
   },
   {
     key: "transactionCount",
@@ -119,7 +121,8 @@ const BLOCK_COLUMNS: Column<StoredBlock>[] = [
     width: "15rem",
     render: (row) => fmtRatio(row.totalGasUsed, row.maxGasInBlock),
   },
-];
+  ];
+}
 
 function buildParams(filters: Filters): URLSearchParams {
   const params = new URLSearchParams();
@@ -136,7 +139,7 @@ function loadFilters(locationSearch: string): Filters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
 }
 
-export function BlocksView({ locationSearch, onLocationChange }: BlocksViewProps) {
+export function BlocksView({ locationSearch, onLocationChange, timeZone }: BlocksViewProps) {
   const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<BlocksResponse | null>(null);
@@ -194,6 +197,7 @@ export function BlocksView({ locationSearch, onLocationChange }: BlocksViewProps
   const sorted = data
     ? data.blocks.slice().sort((a, b) => b.blockNumber - a.blockNumber)
     : [];
+  const columns = useMemo(() => blockColumns(timeZone), [timeZone]);
 
   return (
     <section className="view">
@@ -245,13 +249,13 @@ export function BlocksView({ locationSearch, onLocationChange }: BlocksViewProps
       <div className="table-wrap">
         <table className="data-table">
           <colgroup>
-            {BLOCK_COLUMNS.map((column) => (
+            {columns.map((column) => (
               <col key={column.key} style={{ width: column.width }} />
             ))}
           </colgroup>
           <thead>
             <tr>
-              {BLOCK_COLUMNS.map((column) => (
+              {columns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
                   {column.label}
                 </th>
@@ -261,7 +265,7 @@ export function BlocksView({ locationSearch, onLocationChange }: BlocksViewProps
           <tbody>
             {sorted.map((row) => (
               <tr key={row.blockNumber}>
-                {BLOCK_COLUMNS.map((column) => (
+                {columns.map((column) => (
                   <td key={column.key} className={column.className} data-label={column.label}>
                     {column.render(row)}
                   </td>
