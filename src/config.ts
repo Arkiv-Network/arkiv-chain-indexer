@@ -8,6 +8,7 @@ export interface ScannerConfig {
   pollMs: number;
   retryMs: number;
   txReceiptConcurrency: number;
+  saveTransactionData: boolean;
 }
 
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
@@ -70,6 +71,13 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
       parsed.values["tx-receipt-concurrency"] ??
         env.SCANNER_TX_RECEIPT_CONCURRENCY ??
         DEFAULT_TX_RECEIPT_CONCURRENCY.toString(),
+    ),
+    saveTransactionData: parseBooleanOption(
+      "--save-transaction-data",
+      parsed.values["save-transaction-data"] ??
+        env.SCANNER_SAVE_TRANSACTION_DATA ??
+        env.SAVE_TRANSACTION_DATA ??
+        "true",
     ),
   };
 }
@@ -147,6 +155,13 @@ function parsePositiveNumberOption(name: string, value: string): number {
   return parsed;
 }
 
+function parseBooleanOption(name: string, value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  throw new Error(`${name} must be a boolean`);
+}
+
 function usage(): string {
   return `Usage:
   SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \\
@@ -162,5 +177,6 @@ Options:
   --poll-ms <number>                Delay while waiting for new safe blocks. Defaults to 12000.
   --retry-ms <number>               Delay before retrying a failed block. Defaults to 5000.
   --tx-receipt-concurrency <n>      Legacy setting accepted for compatibility; receipts are fetched sequentially.
+  --save-transaction-data <bool>    Store inspected transaction rows. Defaults to true (or SCANNER_SAVE_TRANSACTION_DATA / SAVE_TRANSACTION_DATA).
   --help                            Show this message.`;
 }

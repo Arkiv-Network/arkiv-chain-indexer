@@ -11,6 +11,7 @@ async function main(): Promise<void> {
     const server = createBlockServer(storage, {
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
+      transactionDataEnabled: config.transactionDataEnabled,
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
 

@@ -37,6 +37,7 @@ services:
       SCANNER_POLL_MS: ${SCANNER_POLL_MS:-12000}
       SCANNER_RETRY_MS: ${SCANNER_RETRY_MS:-5000}
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
+      SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
     command: ["bun", "run", "scan"]
 
   aggregator:
@@ -70,6 +71,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
+      SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     command: ["bun", "run", "serve"]

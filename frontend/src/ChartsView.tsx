@@ -22,6 +22,7 @@ interface ChartsViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  transactionDataEnabled: boolean;
 }
 
 interface ChartsFilters extends Record<string, string> {
@@ -409,7 +410,12 @@ function saveSidebarCollapsed(value: boolean) {
   }
 }
 
-export function ChartsView({ locationSearch, onLocationChange, timeZone }: ChartsViewProps) {
+export function ChartsView({
+  locationSearch,
+  onLocationChange,
+  timeZone,
+  transactionDataEnabled,
+}: ChartsViewProps) {
   const [filters, setFilters] = usePersistentState<ChartsFilters>(STORAGE_KEY, loadFilters(locationSearch));
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -813,27 +819,29 @@ export function ChartsView({ locationSearch, onLocationChange, timeZone }: Chart
               >
                 Zoom to range
               </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={inspectSelectedBlock}
-                disabled={!selectedPoint || selectedPoint.rangeSize !== 1}
-                title={
-                  selectedPoint
-                    ? selectedPoint.rangeSize === 1
-                      ? "Inspect this block"
-                      : "Zoom to blocks before inspecting one block"
-                    : "Select a chart point first"
-                }
-              >
-                Inspect block
-              </button>
+              {transactionDataEnabled ? (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={inspectSelectedBlock}
+                  disabled={!selectedPoint || selectedPoint.rangeSize !== 1}
+                  title={
+                    selectedPoint
+                      ? selectedPoint.rangeSize === 1
+                        ? "Inspect this block"
+                        : "Zoom to blocks before inspecting one block"
+                      : "Select a chart point first"
+                  }
+                >
+                  Inspect block
+                </button>
+              ) : null}
             </div>
           </div>
           {selectedPoint ? (
             <SelectionDetails point={selectedPoint} selectedKeys={selected} timeZone={timeZone} />
           ) : (
-            <div className="selection-empty">Click a chart point to inspect a block or range.</div>
+            <div className="selection-empty">Click a chart point to view block or range details.</div>
           )}
         </aside>
       </div>

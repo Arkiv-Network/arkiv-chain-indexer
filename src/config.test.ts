@@ -69,6 +69,47 @@ describe("parseConfig", () => {
     expect(parseConfig([], baseEnv).txReceiptConcurrency).toBe(20);
   });
 
+  test("saves transaction data by default", () => {
+    expect(parseConfig([], baseEnv).saveTransactionData).toBe(true);
+  });
+
+  test("reads transaction data storage flag from env", () => {
+    expect(
+      parseConfig([], {
+        ...baseEnv,
+        SAVE_TRANSACTION_DATA: "false",
+      }).saveTransactionData,
+    ).toBe(false);
+  });
+
+  test("lets scanner-specific transaction data storage flag override shared env", () => {
+    expect(
+      parseConfig([], {
+        ...baseEnv,
+        SAVE_TRANSACTION_DATA: "false",
+        SCANNER_SAVE_TRANSACTION_DATA: "true",
+      }).saveTransactionData,
+    ).toBe(true);
+  });
+
+  test("lets the CLI transaction data storage flag override env", () => {
+    expect(
+      parseConfig(["--save-transaction-data", "false"], {
+        ...baseEnv,
+        SAVE_TRANSACTION_DATA: "true",
+      }).saveTransactionData,
+    ).toBe(false);
+  });
+
+  test("rejects invalid transaction data storage flag", () => {
+    expect(() =>
+      parseConfig([], {
+        ...baseEnv,
+        SAVE_TRANSACTION_DATA: "maybe",
+      }),
+    ).toThrow("--save-transaction-data must be a boolean");
+  });
+
   test("reads transaction receipt concurrency from env", () => {
     expect(
       parseConfig([], {
@@ -104,6 +145,7 @@ describe("parseConfig", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(HelpRequested);
       expect(String((error as Error).message)).toContain("--tx-receipt-concurrency <n>");
+      expect(String((error as Error).message)).toContain("--save-transaction-data <bool>");
     }
   });
 

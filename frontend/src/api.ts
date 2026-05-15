@@ -149,6 +149,9 @@ export interface HealthResponse {
     totalSizeBytes: string;
     tables: DatabaseTableStats[];
   };
+  features: {
+    transactionData: boolean;
+  };
 }
 
 async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {

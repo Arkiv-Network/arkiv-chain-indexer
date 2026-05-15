@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fetchHealth } from "./api";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
@@ -12,10 +13,12 @@ const TIME_ZONE_STORAGE_KEY = "gas-tracker.time-zone";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
+  const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
   const [timeZoneState, setTimeZoneState] = usePersistentState(TIME_ZONE_STORAGE_KEY, {
     timeZone: detectBrowserTimeZone(),
   });
   const view = readViewFromSearch(locationSearch);
+  const activeView = transactionDataEnabled !== true && view === "transactions" ? "blocks" : view;
   const timeZone = timeZoneState.timeZone;
 
   useEffect(() => {
@@ -23,6 +26,18 @@ export function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    fetchHealth()
+      .then((body) => setTransactionDataEnabled(body.features.transactionData))
+      .catch(() => setTransactionDataEnabled(true));
+  }, []);
+
+  useEffect(() => {
+    if (transactionDataEnabled === false && view === "transactions" && writePermalink("blocks", {})) {
+      setLocationSearch(getCurrentSearch());
+    }
+  }, [transactionDataEnabled, view]);
 
   const refreshFromLocation = () => setLocationSearch(getCurrentSearch());
 
@@ -43,35 +58,37 @@ export function App() {
         <nav>
           <button
             type="button"
-            className={view === "blocks" ? "active" : ""}
+            className={activeView === "blocks" ? "active" : ""}
             onClick={() => setView("blocks")}
           >
             Blocks
           </button>
+          {transactionDataEnabled === true ? (
+            <button
+              type="button"
+              className={activeView === "transactions" ? "active" : ""}
+              onClick={() => setView("transactions")}
+            >
+              Transactions
+            </button>
+          ) : null}
           <button
             type="button"
-            className={view === "transactions" ? "active" : ""}
-            onClick={() => setView("transactions")}
-          >
-            Transactions
-          </button>
-          <button
-            type="button"
-            className={view === "ranges" ? "active" : ""}
+            className={activeView === "ranges" ? "active" : ""}
             onClick={() => setView("ranges")}
           >
             Ranges
           </button>
           <button
             type="button"
-            className={view === "charts" ? "active" : ""}
+            className={activeView === "charts" ? "active" : ""}
             onClick={() => setView("charts")}
           >
             Charts
           </button>
           <button
             type="button"
-            className={view === "health" ? "active" : ""}
+            className={activeView === "health" ? "active" : ""}
             onClick={() => setView("health")}
           >
             Health
@@ -88,30 +105,31 @@ export function App() {
           </select>
         </label>
       </header>
-      <main className={view === "charts" ? "fullscreen" : ""}>
-        {view === "blocks" ? (
+      <main className={activeView === "charts" ? "fullscreen" : ""}>
+        {activeView === "blocks" ? (
           <BlocksView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
           />
-        ) : view === "transactions" ? (
+        ) : activeView === "transactions" ? (
           <TransactionsView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
           />
-        ) : view === "ranges" ? (
+        ) : activeView === "ranges" ? (
           <RangesView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
           />
-        ) : view === "charts" ? (
+        ) : activeView === "charts" ? (
           <ChartsView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            transactionDataEnabled={transactionDataEnabled === true}
           />
         ) : (
           <HealthView timeZone={timeZone} />

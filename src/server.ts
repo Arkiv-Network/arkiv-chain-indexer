@@ -19,6 +19,7 @@ import {
 export interface BlockServerOptions {
   port?: number;
   hostname?: string;
+  transactionDataEnabled?: boolean;
 }
 
 export interface BlocksResponseBody {
@@ -82,6 +83,9 @@ export interface HealthResponseBody {
     safeHeadLagBlocks: string | null;
   };
   database: DatabaseStats;
+  features: {
+    transactionData: boolean;
+  };
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -92,9 +96,10 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
+  const transactionDataEnabled = options.transactionDataEnabled ?? true;
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
-    fetch: (request) => handleRequest(request, storage),
+    fetch: (request) => handleRequest(request, storage, { transactionDataEnabled }),
   };
   if (options.hostname !== undefined) {
     serveOptions.hostname = options.hostname;
@@ -105,8 +110,10 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
 export async function handleRequest(
   request: Request,
   storage: ScannerStorage,
+  options: BlockServerOptions = {},
 ): Promise<Response> {
   const url = new URL(request.url);
+  const transactionDataEnabled = options.transactionDataEnabled ?? true;
 
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -117,7 +124,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/health") {
-    return handleGetHealth(storage);
+    return handleGetHealth(storage, transactionDataEnabled);
   }
 
   if (url.pathname === "/blocks") {
@@ -126,6 +133,9 @@ export async function handleRequest(
 
   const blockInspectMatch = url.pathname.match(/^\/block\/(\d+)$/);
   if (blockInspectMatch?.[1]) {
+    if (!transactionDataEnabled) {
+      return jsonError(404, "Transaction data is disabled");
+    }
     return handleGetBlockInspect(blockInspectMatch[1], storage);
   }
 
@@ -134,13 +144,19 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/transactions") {
+    if (!transactionDataEnabled) {
+      return jsonError(404, "Transaction data is disabled");
+    }
     return handleGetTransactions(url, storage);
   }
 
   return jsonError(404, `Not found: ${url.pathname}`);
 }
 
-async function handleGetHealth(storage: ScannerStorage): Promise<Response> {
+async function handleGetHealth(
+  storage: ScannerStorage,
+  transactionDataEnabled: boolean,
+): Promise<Response> {
   const now = new Date();
   const [progress, database] = await Promise.all([
     storage.getScannerProgress(),
@@ -175,6 +191,9 @@ async function handleGetHealth(storage: ScannerStorage): Promise<Response> {
       safeHeadLagBlocks,
     },
     database,
+    features: {
+      transactionData: transactionDataEnabled,
+    },
   };
 
   return jsonResponse(body);

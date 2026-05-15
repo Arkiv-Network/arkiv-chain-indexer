@@ -224,6 +224,19 @@ describe("GET /block/:blockNumber", () => {
     expect(body.cached).toBe(false);
     expect(body.block.blockNumberDecimal).toBe("42");
   });
+
+  test("returns 404 when transaction data is disabled", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/block/42"),
+      {} as ScannerStorage,
+      { transactionDataEnabled: false },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Transaction data is disabled",
+    });
+  });
 });
 
 describe("GET /transactions", () => {
@@ -279,6 +292,19 @@ describe("GET /transactions", () => {
 
     expect(response.status).toBe(400);
   });
+
+  test("returns 404 when transaction data is disabled", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/transactions?block=42"),
+      {} as ScannerStorage,
+      { transactionDataEnabled: false },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Transaction data is disabled",
+    });
+  });
 });
 
 describe("GET /health", () => {
@@ -320,6 +346,7 @@ describe("GET /health", () => {
     expect(body.scanner.headLagBlocks).toBe("10");
     expect(body.scanner.safeHeadLagBlocks).toBe("7");
     expect(body.scanner.lastBlockAgeSeconds).toBeGreaterThanOrEqual(0);
+    expect(body.features.transactionData).toBe(true);
     expect(body.database.totalSizeBytes).toBe("65536");
     expect(body.database.tables[0]).toEqual({
       tableName: "blocks",
@@ -328,6 +355,26 @@ describe("GET /health", () => {
       indexesSizeBytes: "16384",
       totalSizeBytes: "49152",
     });
+  });
+
+  test("reports disabled transaction data feature", async () => {
+    const storage = {
+      getScannerProgress: async () => ({}),
+      getDatabaseStats: async () => ({
+        totalSizeBytes: "0",
+        tables: [],
+      }),
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/health"),
+      storage,
+      { transactionDataEnabled: false },
+    );
+    const body = (await response.json()) as HealthResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.features.transactionData).toBe(false);
   });
 });
 
