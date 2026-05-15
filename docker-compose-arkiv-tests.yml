@@ -1,0 +1,98 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gas}
+      POSTGRES_DB: ${POSTGRES_DB:-gas}
+    volumes:
+      - arkiv_tests_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE:-http://host.docker.internal:8545}
+      SCANNER_FROM_BLOCK: ${SCANNER_FROM_BLOCK:-}
+      SCANNER_TO_BLOCK: ${SCANNER_TO_BLOCK:-}
+      SCANNER_OLDEST_BACKFILL_BLOCK: ${SCANNER_OLDEST_BACKFILL_BLOCK:-25000000}
+      SCANNER_CONFIRMATION_DEPTH: ${SCANNER_CONFIRMATION_DEPTH:-3}
+      SCANNER_POLL_MS: ${SCANNER_POLL_MS:-12000}
+      SCANNER_RETRY_MS: ${SCANNER_RETRY_MS:-5000}
+      SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
+    command: ["bun", "run", "scan"]
+
+  aggregator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      AGGREGATE_INTERVAL_MS: ${AGGREGATE_INTERVAL_MS:-60000}
+    command: ["bun", "run", "aggregate-all"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      SERVER_PORT: 3000
+      SERVER_HOSTNAME: 0.0.0.0
+    command: ["bun", "run", "serve"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      PORT: 23560
+      BACKEND_HOST: backend
+      BACKEND_PORT: 3000
+    ports:
+      - target: 23560
+        published: "${ARKIV_TESTS_PORT:-20155}"
+        host_ip: "${ARKIV_TESTS_HOST:-0.0.0.0}"
+        protocol: tcp
+
+volumes:
+  arkiv_tests_pgdata:

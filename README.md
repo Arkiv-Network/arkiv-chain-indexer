@@ -37,6 +37,32 @@ minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
 To do a quick bounded backfill instead of continuous near-head scanning, set `SCANNER_FROM_BLOCK` and
 `SCANNER_TO_BLOCK` in `.env`.
 
+## Arkiv test Docker Compose
+
+For Arkiv test runs where the JSON-RPC node is running on the Docker host, use the dedicated compose file:
+
+```sh
+docker compose -f docker-compose-arkiv-tests.yml up --build
+```
+
+By default this stack configures the scanner to read from the host RPC endpoint at
+`http://host.docker.internal:8545`. The compose file also adds Docker host-gateway resolution so this hostname
+works on Linux Docker installations.
+
+The frontend portal is published on all host interfaces by default:
+
+- Portal: <http://localhost:20155>
+- Public bind address: `0.0.0.0:20155`
+
+Override these defaults when needed:
+
+```sh
+SCANNER_RPC_FULL_NODE=http://host.docker.internal:9545 \
+ARKIV_TESTS_HOST=127.0.0.1 \
+ARKIV_TESTS_PORT=20156 \
+docker compose -f docker-compose-arkiv-tests.yml up --build
+```
+
 ## Running locally without Docker
 
 Requirements:
