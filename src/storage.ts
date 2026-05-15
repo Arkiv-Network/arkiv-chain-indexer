@@ -18,6 +18,8 @@ const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
 export const MAX_BLOCKS_PER_QUERY = 10_000;
 export const MAX_RANGES_PER_QUERY = 10_000;
 
+export type QueryOrder = "asc" | "desc";
+
 export type BlockProgressUpdate =
   | { kind: "lastSuccessfulBlock" }
   | { kind: "backfillNextBlock"; nextBlock: bigint }
@@ -29,6 +31,7 @@ export interface BlockQueryFilter {
   dateGt?: string;
   dateLt?: string;
   limit?: number;
+  order?: QueryOrder;
 }
 
 export interface BlockRangeQueryFilter {
@@ -38,6 +41,7 @@ export interface BlockRangeQueryFilter {
   dateGt?: string;
   dateLt?: string;
   limit?: number;
+  order?: QueryOrder;
 }
 
 export interface StoredBlock {
@@ -369,6 +373,7 @@ export class ScannerStorage {
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     params.push(resolveLimit(filter.limit, MAX_BLOCKS_PER_QUERY));
+    const order = resolveQueryOrder(filter.order);
     const sql = `
       SELECT
         block_number,
@@ -391,7 +396,7 @@ export class ScannerStorage {
         average_priority_fee_wei
       FROM ${this.qBlocks}
       ${where}
-      ORDER BY block_number ASC
+      ORDER BY block_number ${order}
       LIMIT $${params.length}
     `;
 
@@ -571,6 +576,7 @@ export class ScannerStorage {
 
     params.push(resolveLimit(filter.limit, MAX_RANGES_PER_QUERY));
 
+    const order = resolveQueryOrder(filter.order);
     const sql = `
       SELECT
         range_size,
@@ -596,7 +602,7 @@ export class ScannerStorage {
         average_priority_fee_wei
       FROM ${this.qBlockRanges}
       WHERE ${clauses.join(" AND ")}
-      ORDER BY range_start ASC
+      ORDER BY range_start ${order}
       LIMIT $${params.length}
     `;
 
@@ -701,6 +707,10 @@ function resolveLimit(requested: number | undefined, hardMax: number): number {
   if (requested === undefined) return hardMax;
   if (!Number.isFinite(requested) || requested < 1) return 1;
   return Math.min(Math.floor(requested), hardMax);
+}
+
+function resolveQueryOrder(order: QueryOrder | undefined): "ASC" | "DESC" {
+  return order === "desc" ? "DESC" : "ASC";
 }
 
 function quoteIdent(name: string): string {
