@@ -589,6 +589,13 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
     });
   };
 
+  const inspectSelectedBlock = () => {
+    if (!selectedPoint || selectedPoint.rangeSize !== 1) return;
+    if (writePermalink("block", { block: String(selectedPoint.rangeStart) })) {
+      onLocationChange();
+    }
+  };
+
   const { traces, layout } = useMemo(
     () => buildPlot(points, selected, selectedPoint),
     [points, selected, selectedPoint],
@@ -787,21 +794,38 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
         <aside className="selection-panel">
           <div className="selection-header">
             <h2>Selection</h2>
-            <button
-              type="button"
-              className="secondary"
-              onClick={zoomToSelectedRange}
-              disabled={!selectedPoint || selectedPoint.rangeSize === 1}
-              title={
-                selectedPoint
-                  ? selectedPoint.rangeSize === 1
-                    ? "Blocks cannot be zoomed further"
-                    : "Zoom to this range and show blocks"
-                  : "Select a chart point first"
-              }
-            >
-              Zoom to range
-            </button>
+            <div className="selection-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={zoomToSelectedRange}
+                disabled={!selectedPoint || selectedPoint.rangeSize === 1}
+                title={
+                  selectedPoint
+                    ? selectedPoint.rangeSize === 1
+                      ? "Blocks cannot be zoomed further"
+                      : "Zoom to this range and show blocks"
+                    : "Select a chart point first"
+                }
+              >
+                Zoom to range
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={inspectSelectedBlock}
+                disabled={!selectedPoint || selectedPoint.rangeSize !== 1}
+                title={
+                  selectedPoint
+                    ? selectedPoint.rangeSize === 1
+                      ? "Inspect this block"
+                      : "Zoom to blocks before inspecting one block"
+                    : "Select a chart point first"
+                }
+              >
+                Inspect block
+              </button>
+            </div>
           </div>
           {selectedPoint ? (
             <SelectionDetails point={selectedPoint} selectedKeys={selected} />

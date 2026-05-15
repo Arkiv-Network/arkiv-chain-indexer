@@ -1,4 +1,5 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
+import { type BlockInspectionResult, type BlockInspector } from "./blockInspector";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
@@ -13,6 +14,7 @@ import {
 export interface BlockServerOptions {
   port?: number;
   hostname?: string;
+  blockInspector?: BlockInspector;
 }
 
 export interface BlocksResponseBody {
@@ -42,6 +44,8 @@ export interface RangesResponseBody {
   ranges: StoredBlockRange[];
 }
 
+export type BlockInspectResponseBody = BlockInspectionResult;
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -52,7 +56,7 @@ const CORS_HEADERS: Record<string, string> = {
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
-    fetch: (request) => handleRequest(request, storage),
+    fetch: (request) => handleRequest(request, storage, options.blockInspector),
   };
   if (options.hostname !== undefined) {
     serveOptions.hostname = options.hostname;
@@ -60,7 +64,11 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
   return Bun.serve(serveOptions);
 }
 
-export async function handleRequest(request: Request, storage: ScannerStorage): Promise<Response> {
+export async function handleRequest(
+  request: Request,
+  storage: ScannerStorage,
+  blockInspector?: BlockInspector,
+): Promise<Response> {
   const url = new URL(request.url);
 
   if (request.method === "OPTIONS") {
@@ -79,11 +87,38 @@ export async function handleRequest(request: Request, storage: ScannerStorage): 
     return handleGetBlocks(url, storage);
   }
 
+  const blockInspectMatch = url.pathname.match(/^\/block\/(\d+)$/);
+  if (blockInspectMatch?.[1]) {
+    return handleGetBlockInspect(blockInspectMatch[1], blockInspector);
+  }
+
   if (url.pathname === "/ranges") {
     return handleGetRanges(url, storage);
   }
 
   return jsonError(404, `Not found: ${url.pathname}`);
+}
+
+async function handleGetBlockInspect(
+  rawBlockNumber: string,
+  blockInspector: BlockInspector | undefined,
+): Promise<Response> {
+  if (!blockInspector) {
+    return jsonError(503, "Block inspection requires SCANNER_RPC_FULL_NODE on the backend");
+  }
+
+  let blockNumber: bigint;
+  try {
+    blockNumber = parseBlockParam("blockNumber", rawBlockNumber);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  try {
+    return jsonResponse(await blockInspector.inspectBlock(blockNumber));
+  } catch (error) {
+    return jsonError(502, error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function handleGetBlocks(url: URL, storage: ScannerStorage): Promise<Response> {

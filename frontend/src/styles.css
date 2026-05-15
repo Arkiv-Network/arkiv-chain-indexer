@@ -357,6 +357,78 @@ button.secondary:disabled {
   cursor: not-allowed;
 }
 
+.block-inspector-form {
+  grid-template-columns: minmax(180px, 320px) auto;
+  justify-content: start;
+}
+
+.block-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.5rem;
+  margin: 0 0 0.9rem;
+}
+
+.block-summary div {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  background: var(--row-alt);
+}
+
+.block-summary dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.block-summary dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.sort-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+th:not(.num) .sort-header {
+  justify-content: space-between;
+}
+
+.sort-header:hover {
+  color: var(--accent);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.truncate {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.tx-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .charts-status {
   font-size: 0.82rem;
   color: var(--fg);
@@ -485,6 +557,13 @@ button.secondary:disabled {
 
 .selection-header button {
   white-space: nowrap;
+}
+
+.selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
 }
 
 .selection-empty {

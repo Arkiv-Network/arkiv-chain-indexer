@@ -57,6 +57,43 @@ export interface RangesResponse {
   ranges: StoredBlockRange[];
 }
 
+export interface InspectedTransaction {
+  position: number;
+  hash: string;
+  from: string | null;
+  to: string | null;
+  type: string | null;
+  nonce: string | null;
+  valueWei: string;
+  gasLimit: string;
+  gasUsed: string;
+  cumulativeGasUsed: string | null;
+  gasPriceWei: string | null;
+  maxFeePerGasWei: string | null;
+  maxPriorityFeePerGasWei: string | null;
+  effectiveGasPriceWei: string;
+  priorityFeeWei: string;
+  transactionFeeWei: string;
+  status: string | null;
+  contractAddress: string | null;
+}
+
+export interface InspectedBlock {
+  blockNumber: number;
+  blockNumberDecimal: string;
+  blockDate: string;
+  baseBlockFeeWei: string;
+  totalGasUsed: string;
+  maxGasInBlock: string;
+  transactionCount: number;
+  transactions: InspectedTransaction[];
+}
+
+export interface BlockInspectResponse {
+  cached: boolean;
+  block: InspectedBlock;
+}
+
 async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
   const qs = params.toString();
   const url = qs ? `/api${path}?${qs}` : `/api${path}`;
@@ -74,4 +111,8 @@ export function fetchBlocks(params: URLSearchParams): Promise<BlocksResponse> {
 
 export function fetchRanges(params: URLSearchParams): Promise<RangesResponse> {
   return getJson<RangesResponse>("/ranges", params);
+}
+
+export function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResponse> {
+  return getJson<BlockInspectResponse>(`/block/${encodeURIComponent(blockNumber)}`, new URLSearchParams());
 }

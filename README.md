@@ -24,7 +24,8 @@ docker compose up --build
 Open:
 
 - Frontend: <http://localhost:23560> (the React app talks to the backend through the same origin at `/api/*`)
-- Backend API (direct): <http://localhost:3000/blocks> and <http://localhost:3000/ranges>
+- Backend API (direct): <http://localhost:3000/blocks>, <http://localhost:3000/ranges>, and
+  <http://localhost:3000/block/19000000>
 - Postgres: `postgres://gas:gas@localhost:5432/gas`
 
 The frontend container is a tiny Node `server.js` that serves the Vite-built React app from `dist/` and reverse-proxies any request starting with `/api/` to the `backend` service (the `/api` prefix is stripped). This means you don't need to expose the backend publicly — only port `23560` on the host is required for end users.
@@ -223,13 +224,16 @@ This means failed block reads are not skipped.
 
 ## HTTP Server
 
-A read-only HTTP server is included that serves stored block rows from the same PostgreSQL database. Run it
-alongside the scanner (or against an existing database):
+A read-only HTTP server is included that serves stored block rows from the same PostgreSQL database. When
+`SCANNER_RPC_FULL_NODE` is configured, it can also inspect one block on demand by reading that block and its
+transaction receipts from JSON-RPC and keeping the result in local process memory. Run it alongside the scanner
+(or against an existing database):
 
 ```sh
 DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run serve
 # or
-bun run serve -- --database-url postgres://gas:gas@localhost:5432/gas --port 3000
+SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
+  bun run serve -- --database-url postgres://gas:gas@localhost:5432/gas --port 3000
 ```
 
 By default the server listens on port `3000`. CORS headers are set on every response so the static frontend can
@@ -253,6 +257,16 @@ Example:
 ```sh
 curl 'http://localhost:3000/blocks?blockGt=19000000&blockLt=19000005'
 ```
+
+### `GET /block/:blockNumber`
+
+Inspects a single block on request and returns block metadata plus one row per transaction. The backend fetches
+the block and receipts from `SCANNER_RPC_FULL_NODE`, computes values such as gas used, effective gas price,
+priority fee, transaction fee, status, sender, recipient, and value, then stores that inspected response in an
+in-memory cache for faster repeat loads. This endpoint does not write transaction data to PostgreSQL.
+
+If the backend is started without `SCANNER_RPC_FULL_NODE`, this endpoint returns `503` while `/blocks` and
+`/ranges` continue to serve database-backed data.
 
 ### `GET /ranges`
 
@@ -281,6 +295,7 @@ curl 'http://localhost:3000/ranges?rangeSize=50&rangeStartGt=245500&rangeStartLt
 | `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
+| `--rpc-url` | `SCANNER_RPC_FULL_NODE` | unset | Ethereum JSON-RPC endpoint for on-demand block inspection. |
 
 ```sh
 bun run serve -- --help
@@ -296,10 +311,12 @@ dependency-free Node HTTP server that:
    prefix). For example a browser request to `/api/blocks?blockGt=1` is forwarded to `http://backend:3000/blocks?blockGt=1`.
 3. Falls back to `index.html` for any other unknown path (SPA routing).
 
-Two views are provided:
+Four views are provided:
 
 - **Blocks** — paged table of stored blocks with `blockGt`, `blockLt`, `dateGt`, `dateLt` filters.
+- **Block** — on-demand block inspector with sortable transaction rows backed by the backend memory cache.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
+- **Charts** — interactive historical chart view with links from selected block points into the Block inspector.
 
 ### Frontend configuration
 
