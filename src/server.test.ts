@@ -1,12 +1,15 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   createBlockServer,
+  handleRequest,
   parseFilterFromQuery,
   parseRangeFilterFromQuery,
+  type BlockInspectResponseBody,
   type BlocksResponseBody,
   type RangesResponseBody,
 } from "./server";
 import { type ScannerStorage } from "./storage";
+import { type BlockInspector } from "./blockInspector";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import {
   closeTestPools,
@@ -151,6 +154,49 @@ describe("parseRangeFilterFromQuery", () => {
     expect(() =>
       parseRangeFilterFromQuery(new URLSearchParams("limit=10001")),
     ).toThrow(/limit must be at most 10000/);
+  });
+});
+
+describe("GET /block/:blockNumber", () => {
+  test("returns 503 when block inspection is not configured", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/block/42"),
+      {} as ScannerStorage,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Block inspection requires SCANNER_RPC_FULL_NODE on the backend",
+    });
+  });
+
+  test("returns inspected block data from the configured inspector", async () => {
+    const inspector = {
+      inspectBlock: async (blockNumber: bigint) => ({
+        cached: true,
+        block: {
+          blockNumber: Number(blockNumber),
+          blockNumberDecimal: blockNumber.toString(),
+          blockDate: "2024-01-01T00:00:00.000Z",
+          baseBlockFeeWei: "100",
+          totalGasUsed: "21000",
+          maxGasInBlock: "30000000",
+          transactionCount: 0,
+          transactions: [],
+        },
+      }),
+    } as unknown as BlockInspector;
+
+    const response = await handleRequest(
+      new Request("http://example.test/block/42"),
+      {} as ScannerStorage,
+      inspector,
+    );
+    const body = (await response.json()) as BlockInspectResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.cached).toBe(true);
+    expect(body.block.blockNumberDecimal).toBe("42");
   });
 });
 

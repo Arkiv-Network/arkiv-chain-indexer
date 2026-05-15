@@ -2,7 +2,15 @@ export type Hex = `0x${string}`;
 
 export interface RpcTransaction {
   hash: Hex;
+  from?: Hex;
+  to?: Hex | null;
+  type?: Hex;
+  nonce?: Hex;
+  value?: Hex;
+  gas?: Hex;
   gasPrice?: Hex;
+  maxFeePerGas?: Hex;
+  maxPriorityFeePerGas?: Hex;
 }
 
 export interface RpcBlock {
@@ -17,7 +25,10 @@ export interface RpcBlock {
 export interface RpcReceipt {
   transactionHash: Hex;
   gasUsed: Hex;
+  cumulativeGasUsed?: Hex;
   effectiveGasPrice?: Hex;
+  status?: Hex;
+  contractAddress?: Hex | null;
 }
 
 export interface BlockMetrics {

@@ -2,6 +2,7 @@ export interface ServerConfig {
   databaseUrl: string;
   port: number;
   hostname?: string;
+  rpcUrl?: string;
 }
 
 const DEFAULT_PORT = 3000;
@@ -23,11 +24,13 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   const portRaw = parsed.values.port ?? env.SERVER_PORT ?? DEFAULT_PORT.toString();
   const port = parsePortOption("--port", portRaw);
   const hostnameRaw = parsed.values.host ?? env.SERVER_HOSTNAME;
+  const rpcUrl = parsed.values["rpc-url"] ?? env.SCANNER_RPC_FULL_NODE;
 
   return {
     databaseUrl,
     port,
     ...(hostnameRaw ? { hostname: hostnameRaw } : {}),
+    ...(rpcUrl ? { rpcUrl } : {}),
   };
 }
 
@@ -90,5 +93,6 @@ Options:
   --database-url <url>  PostgreSQL connection string (or DATABASE_URL env).
   --port <port>         TCP port to listen on. Defaults to 3000 (or SERVER_PORT). Use 0 to pick any free port.
   --host <host>         Hostname/interface to bind. Defaults to Bun's default (all interfaces).
+  --rpc-url <url>       Optional Ethereum JSON-RPC endpoint for on-demand block inspection.
   --help                Show this message.`;
 }

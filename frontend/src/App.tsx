@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
@@ -36,6 +37,13 @@ export function App() {
           </button>
           <button
             type="button"
+            className={view === "block" ? "active" : ""}
+            onClick={() => setView("block")}
+          >
+            Block
+          </button>
+          <button
+            type="button"
             className={view === "ranges" ? "active" : ""}
             onClick={() => setView("ranges")}
           >
@@ -53,6 +61,8 @@ export function App() {
       <main className={view === "charts" ? "fullscreen" : ""}>
         {view === "blocks" ? (
           <BlocksView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
+        ) : view === "block" ? (
+          <BlockView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
         ) : view === "ranges" ? (
           <RangesView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
         ) : (
