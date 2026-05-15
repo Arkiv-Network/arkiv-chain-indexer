@@ -32,10 +32,14 @@ type SortKey =
   | "from"
   | "to"
   | "type"
+  | "nonce"
   | "status"
   | "valueWei"
   | "gasLimit"
   | "gasUsed"
+  | "cumulativeGasUsed"
+  | "gasPriceWei"
+  | "maxFeePerGasWei"
   | "effectiveGasPriceWei"
   | "priorityFeeWei"
   | "maxPriorityFeePerGasWei"
@@ -87,6 +91,13 @@ const TX_COLUMNS: Column[] = [
     render: (row) => row.type ?? "-",
   },
   {
+    key: "nonce",
+    label: "Nonce",
+    className: "num",
+    width: "7rem",
+    render: (row) => row.nonce ?? "-",
+  },
+  {
     key: "status",
     label: "Status",
     width: "6rem",
@@ -112,6 +123,27 @@ const TX_COLUMNS: Column[] = [
     className: "num",
     width: "9rem",
     render: (row) => fmtInteger(row.gasUsed),
+  },
+  {
+    key: "cumulativeGasUsed",
+    label: "Cumulative gas",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtInteger(row.cumulativeGasUsed),
+  },
+  {
+    key: "gasPriceWei",
+    label: "Gas price (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.gasPriceWei),
+  },
+  {
+    key: "maxFeePerGasWei",
+    label: "Max fee (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.maxFeePerGasWei),
   },
   {
     key: "effectiveGasPriceWei",
@@ -337,10 +369,14 @@ function sortValue(row: InspectedTransaction, key: SortKey): string | bigint {
   if (
     key === "position" ||
     key === "type" ||
+    key === "nonce" ||
     key === "status" ||
     key === "valueWei" ||
     key === "gasLimit" ||
     key === "gasUsed" ||
+    key === "cumulativeGasUsed" ||
+    key === "gasPriceWei" ||
+    key === "maxFeePerGasWei" ||
     key === "effectiveGasPriceWei" ||
     key === "priorityFeeWei" ||
     key === "maxPriorityFeePerGasWei" ||
