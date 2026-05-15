@@ -1,13 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { BlockInspector, inspectBlockFromRpc } from "./blockInspector";
-import { EthereumRpcClient } from "./rpc";
+import { describe, expect, test } from "bun:test";
+import { inspectBlockFromRpc } from "./blockInspector";
 import type { RpcBlock, RpcReceipt } from "./types";
-
-const originalFetch = globalThis.fetch;
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
 
 describe("inspectBlockFromRpc", () => {
   test("computes transaction inspection fields from block and receipts", () => {
@@ -51,58 +44,6 @@ describe("inspectBlockFromRpc", () => {
     );
   });
 });
-
-describe("BlockInspector", () => {
-  test("fetches receipts sequentially and reuses the memory cache", async () => {
-    const requestedMethods: string[] = [];
-    globalThis.fetch = (async (_input: FetchInput, init: FetchInit) => {
-      const body = JSON.parse(String(init?.body)) as {
-        id: number;
-        method: string;
-        params: unknown[];
-      };
-      requestedMethods.push(body.method);
-
-      if (body.method === "eth_getBlockByNumber") {
-        return rpcResponse(body.id, blockFixture());
-      }
-      if (body.method === "eth_getTransactionReceipt") {
-        const hash = body.params[0];
-        const receipt = receiptsFixture().find((item) => item.transactionHash === hash);
-        return rpcResponse(body.id, receipt ?? null);
-      }
-      return rpcResponse(body.id, null);
-    }) as typeof fetch;
-
-    const inspector = new BlockInspector(new EthereumRpcClient("https://example.test"));
-
-    await expect(inspector.inspectBlock(42n)).resolves.toMatchObject({
-      cached: false,
-      block: { blockNumber: 42, transactionCount: 2 },
-    });
-    await expect(inspector.inspectBlock(42n)).resolves.toMatchObject({
-      cached: true,
-      block: { blockNumber: 42, transactionCount: 2 },
-    });
-
-    expect(requestedMethods).toEqual([
-      "eth_getBlockByNumber",
-      "eth_getTransactionReceipt",
-      "eth_getTransactionReceipt",
-    ]);
-    expect(inspector.getCachedBlockCount()).toBe(1);
-  });
-});
-
-type FetchInput = Parameters<typeof fetch>[0];
-type FetchInit = Parameters<typeof fetch>[1];
-
-function rpcResponse(id: number, result: unknown): Response {
-  return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 function blockFixture(): RpcBlock {
   return {

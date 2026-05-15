@@ -1,20 +1,22 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
-import { type BlockInspectionResult, type BlockInspector } from "./blockInspector";
+import { type BlockInspectionResult } from "./blockInspector";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
+  MAX_TRANSACTIONS_PER_QUERY,
   ScannerStorage,
   type BlockQueryFilter,
   type BlockRangeQueryFilter,
   type QueryOrder,
   type StoredBlock,
   type StoredBlockRange,
+  type StoredTransaction,
+  type TransactionQueryFilter,
 } from "./storage";
 
 export interface BlockServerOptions {
   port?: number;
   hostname?: string;
-  blockInspector?: BlockInspector;
 }
 
 export interface BlocksResponseBody {
@@ -44,6 +46,20 @@ export interface RangesResponseBody {
   ranges: StoredBlockRange[];
 }
 
+export interface TransactionsResponseBody {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  filters: {
+    block: string | null;
+    blockGt: string | null;
+    blockLt: string | null;
+    dateGt: string | null;
+    dateLt: string | null;
+  };
+  transactions: StoredTransaction[];
+}
+
 export type BlockInspectResponseBody = BlockInspectionResult;
 
 const CORS_HEADERS: Record<string, string> = {
@@ -56,7 +72,7 @@ const CORS_HEADERS: Record<string, string> = {
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
-    fetch: (request) => handleRequest(request, storage, options.blockInspector),
+    fetch: (request) => handleRequest(request, storage),
   };
   if (options.hostname !== undefined) {
     serveOptions.hostname = options.hostname;
@@ -67,7 +83,6 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
 export async function handleRequest(
   request: Request,
   storage: ScannerStorage,
-  blockInspector?: BlockInspector,
 ): Promise<Response> {
   const url = new URL(request.url);
 
@@ -89,11 +104,15 @@ export async function handleRequest(
 
   const blockInspectMatch = url.pathname.match(/^\/block\/(\d+)$/);
   if (blockInspectMatch?.[1]) {
-    return handleGetBlockInspect(blockInspectMatch[1], blockInspector);
+    return handleGetBlockInspect(blockInspectMatch[1], storage);
   }
 
   if (url.pathname === "/ranges") {
     return handleGetRanges(url, storage);
+  }
+
+  if (url.pathname === "/transactions") {
+    return handleGetTransactions(url, storage);
   }
 
   return jsonError(404, `Not found: ${url.pathname}`);
@@ -101,12 +120,8 @@ export async function handleRequest(
 
 async function handleGetBlockInspect(
   rawBlockNumber: string,
-  blockInspector: BlockInspector | undefined,
+  storage: ScannerStorage,
 ): Promise<Response> {
-  if (!blockInspector) {
-    return jsonError(503, "Block inspection requires SCANNER_RPC_FULL_NODE on the backend");
-  }
-
   let blockNumber: bigint;
   try {
     blockNumber = parseBlockParam("blockNumber", rawBlockNumber);
@@ -115,9 +130,13 @@ async function handleGetBlockInspect(
   }
 
   try {
-    return jsonResponse(await blockInspector.inspectBlock(blockNumber));
+    const block = await storage.getInspectedBlock(blockNumber);
+    if (!block) {
+      return jsonError(404, `Block ${blockNumber.toString()} was not found in storage`);
+    }
+    return jsonResponse({ cached: false, block } satisfies BlockInspectResponseBody);
   } catch (error) {
-    return jsonError(502, error instanceof Error ? error.message : String(error));
+    return jsonError(500, error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -172,6 +191,37 @@ async function handleGetRanges(url: URL, storage: ScannerStorage): Promise<Respo
       dateLt: filter.dateLt ?? null,
     },
     ranges,
+  };
+
+  return jsonResponse(body);
+}
+
+async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise<Response> {
+  let filter: TransactionQueryFilter;
+  try {
+    filter = parseTransactionFilterFromQuery(url.searchParams);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  const transactions = await storage.queryTransactions(filter);
+  const effectiveLimit = Math.min(
+    filter.limit ?? MAX_TRANSACTIONS_PER_QUERY,
+    MAX_TRANSACTIONS_PER_QUERY,
+  );
+
+  const body: TransactionsResponseBody = {
+    count: transactions.length,
+    limit: effectiveLimit,
+    truncated: transactions.length >= effectiveLimit,
+    filters: {
+      block: filter.blockNumber !== undefined ? filter.blockNumber.toString() : null,
+      blockGt: filter.blockGt !== undefined ? filter.blockGt.toString() : null,
+      blockLt: filter.blockLt !== undefined ? filter.blockLt.toString() : null,
+      dateGt: filter.dateGt ?? null,
+      dateLt: filter.dateLt ?? null,
+    },
+    transactions,
   };
 
   return jsonResponse(body);
@@ -250,6 +300,47 @@ export function parseRangeFilterFromQuery(params: URLSearchParams): BlockRangeQu
   const limit = params.get("limit");
   if (limit !== null) {
     filter.limit = parseLimitParam(limit, MAX_RANGES_PER_QUERY);
+  }
+
+  const order = params.get("order");
+  if (order !== null) {
+    filter.order = parseOrderParam(order);
+  }
+
+  return filter;
+}
+
+export function parseTransactionFilterFromQuery(params: URLSearchParams): TransactionQueryFilter {
+  const filter: TransactionQueryFilter = {};
+
+  const block = params.get("block");
+  if (block !== null) {
+    filter.blockNumber = parseBlockParam("block", block);
+  }
+
+  const blockGt = params.get("blockGt");
+  if (blockGt !== null) {
+    filter.blockGt = parseBlockParam("blockGt", blockGt);
+  }
+
+  const blockLt = params.get("blockLt");
+  if (blockLt !== null) {
+    filter.blockLt = parseBlockParam("blockLt", blockLt);
+  }
+
+  const dateGt = params.get("dateGt");
+  if (dateGt !== null) {
+    filter.dateGt = parseDateParam("dateGt", dateGt);
+  }
+
+  const dateLt = params.get("dateLt");
+  if (dateLt !== null) {
+    filter.dateLt = parseDateParam("dateLt", dateLt);
+  }
+
+  const limit = params.get("limit");
+  if (limit !== null) {
+    filter.limit = parseLimitParam(limit, MAX_TRANSACTIONS_PER_QUERY);
   }
 
   const order = params.get("order");

@@ -58,6 +58,10 @@ export interface RangesResponse {
 }
 
 export interface InspectedTransaction {
+  blockNumber?: number;
+  blockNumberDecimal?: string;
+  blockDate?: string;
+  baseBlockFeeWei?: string;
   position: number;
   hash: string;
   from: string | null;
@@ -94,6 +98,25 @@ export interface BlockInspectResponse {
   block: InspectedBlock;
 }
 
+export type StoredTransaction = InspectedTransaction &
+  Required<
+    Pick<InspectedTransaction, "blockNumber" | "blockNumberDecimal" | "blockDate" | "baseBlockFeeWei">
+  >;
+
+export interface TransactionsResponse {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  filters: {
+    block: string | null;
+    blockGt: string | null;
+    blockLt: string | null;
+    dateGt: string | null;
+    dateLt: string | null;
+  };
+  transactions: StoredTransaction[];
+}
+
 async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
   const qs = params.toString();
   const url = qs ? `/api${path}?${qs}` : `/api${path}`;
@@ -115,4 +138,8 @@ export function fetchRanges(params: URLSearchParams): Promise<RangesResponse> {
 
 export function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResponse> {
   return getJson<BlockInspectResponse>(`/block/${encodeURIComponent(blockNumber)}`, new URLSearchParams());
+}
+
+export function fetchTransactions(params: URLSearchParams): Promise<TransactionsResponse> {
+  return getJson<TransactionsResponse>("/transactions", params);
 }

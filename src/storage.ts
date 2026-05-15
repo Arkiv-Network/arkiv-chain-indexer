@@ -6,7 +6,8 @@ import {
   rangeEndFor,
   type BlockRangeMetrics,
 } from "./ranges";
-import type { BlockMetrics } from "./types";
+import type { BlockMetrics, Hex } from "./types";
+import type { InspectedBlock, InspectedTransaction } from "./blockInspector";
 
 const { Pool, types } = pg;
 
@@ -17,6 +18,7 @@ const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
 
 export const MAX_BLOCKS_PER_QUERY = 10_000;
 export const MAX_RANGES_PER_QUERY = 10_000;
+export const MAX_TRANSACTIONS_PER_QUERY = 1_000;
 
 export type QueryOrder = "asc" | "desc";
 
@@ -44,6 +46,16 @@ export interface BlockRangeQueryFilter {
   order?: QueryOrder;
 }
 
+export interface TransactionQueryFilter {
+  blockNumber?: bigint;
+  blockGt?: bigint;
+  blockLt?: bigint;
+  dateGt?: string;
+  dateLt?: string;
+  limit?: number;
+  order?: QueryOrder;
+}
+
 export interface StoredBlock {
   blockNumber: number;
   blockDate: string;
@@ -63,6 +75,13 @@ export interface StoredBlock {
   averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
+}
+
+export interface StoredTransaction extends InspectedTransaction {
+  blockNumber: number;
+  blockNumberDecimal: string;
+  blockDate: string;
+  baseBlockFeeWei: string;
 }
 
 export interface StoredBlockRange {
@@ -98,6 +117,7 @@ export class ScannerStorage {
   private readonly qBlocks: string;
   private readonly qScannerState: string;
   private readonly qBlockRanges: string;
+  private readonly qTransactions: string;
 
   private constructor(
     private readonly pool: pg.Pool,
@@ -107,6 +127,7 @@ export class ScannerStorage {
     this.qBlocks = `${quoteIdent(this.schema)}.blocks`;
     this.qScannerState = `${quoteIdent(this.schema)}.scanner_state`;
     this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
+    this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
   }
 
   static async open(
@@ -199,6 +220,41 @@ export class ScannerStorage {
       )
     `);
     await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qTransactions} (
+        block_number BIGINT NOT NULL,
+        block_date TEXT NOT NULL,
+        base_block_fee_wei TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        hash TEXT NOT NULL,
+        from_address TEXT,
+        to_address TEXT,
+        transaction_type TEXT,
+        nonce TEXT,
+        value_wei TEXT NOT NULL,
+        gas_limit TEXT NOT NULL,
+        gas_used TEXT NOT NULL,
+        cumulative_gas_used TEXT,
+        gas_price_wei TEXT,
+        max_fee_per_gas_wei TEXT,
+        max_priority_fee_per_gas_wei TEXT,
+        effective_gas_price_wei TEXT NOT NULL,
+        priority_fee_wei TEXT NOT NULL,
+        transaction_fee_wei TEXT NOT NULL,
+        status TEXT,
+        contract_address TEXT,
+        scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (block_number, position)
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_block_date_idx")}
+       ON ${this.qTransactions} (block_date)`,
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_hash_idx")}
+       ON ${this.qTransactions} (hash)`,
+    );
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBlockRanges} (
         range_size BIGINT NOT NULL,
         range_start BIGINT NOT NULL,
@@ -271,6 +327,7 @@ export class ScannerStorage {
   async saveBlockMetrics(
     metrics: BlockMetrics,
     progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
+    transactions?: InspectedTransaction[],
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -337,6 +394,9 @@ export class ScannerStorage {
           metrics.averagePriorityFeeWei,
         ],
       );
+      if (transactions !== undefined) {
+        await this.replaceTransactionsForBlock(client, metrics, transactions);
+      }
       await this.applyProgressUpdate(client, metrics, progressUpdate);
       await client.query("COMMIT");
     } catch (error) {
@@ -345,6 +405,81 @@ export class ScannerStorage {
     } finally {
       client.release();
     }
+  }
+
+  private async replaceTransactionsForBlock(
+    client: pg.PoolClient,
+    metrics: BlockMetrics,
+    transactions: InspectedTransaction[],
+  ): Promise<void> {
+    await client.query(`DELETE FROM ${this.qTransactions} WHERE block_number = $1`, [
+      metrics.blockNumber.toString(),
+    ]);
+
+    if (transactions.length === 0) {
+      return;
+    }
+
+    const columnsPerRow = 21;
+    const params: Array<string | number | null> = [];
+    const values = transactions.map((transaction, rowIndex) => {
+      const offset = rowIndex * columnsPerRow;
+      params.push(
+        metrics.blockNumber.toString(),
+        metrics.blockDate,
+        metrics.baseBlockFeeWei,
+        transaction.position,
+        transaction.hash,
+        transaction.from,
+        transaction.to,
+        transaction.type,
+        transaction.nonce,
+        transaction.valueWei,
+        transaction.gasLimit,
+        transaction.gasUsed,
+        transaction.cumulativeGasUsed,
+        transaction.gasPriceWei,
+        transaction.maxFeePerGasWei,
+        transaction.maxPriorityFeePerGasWei,
+        transaction.effectiveGasPriceWei,
+        transaction.priorityFeeWei,
+        transaction.transactionFeeWei,
+        transaction.status,
+        transaction.contractAddress,
+      );
+      const placeholders = Array.from(
+        { length: columnsPerRow },
+        (_unused, columnIndex) => `$${offset + columnIndex + 1}`,
+      );
+      return `(${placeholders.join(", ")})`;
+    });
+
+    await client.query(
+      `INSERT INTO ${this.qTransactions} (
+        block_number,
+        block_date,
+        base_block_fee_wei,
+        position,
+        hash,
+        from_address,
+        to_address,
+        transaction_type,
+        nonce,
+        value_wei,
+        gas_limit,
+        gas_used,
+        cumulative_gas_used,
+        gas_price_wei,
+        max_fee_per_gas_wei,
+        max_priority_fee_per_gas_wei,
+        effective_gas_price_wei,
+        priority_fee_wei,
+        transaction_fee_wei,
+        status,
+        contract_address
+      ) VALUES ${values.join(", ")}`,
+      params,
+    );
   }
 
   async queryBlocks(filter: BlockQueryFilter = {}): Promise<StoredBlock[]> {
@@ -455,6 +590,117 @@ export class ScannerStorage {
       blockGt: rangeStart - 1n,
       blockLt: rangeEnd + 1n,
     });
+  }
+
+  async queryTransactions(filter: TransactionQueryFilter = {}): Promise<StoredTransaction[]> {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filter.blockNumber !== undefined) {
+      params.push(filter.blockNumber.toString());
+      clauses.push(`block_number = $${params.length}`);
+    }
+
+    if (filter.blockGt !== undefined) {
+      params.push(filter.blockGt.toString());
+      clauses.push(`block_number > $${params.length}`);
+    }
+
+    if (filter.blockLt !== undefined) {
+      params.push(filter.blockLt.toString());
+      clauses.push(`block_number < $${params.length}`);
+    }
+
+    if (filter.dateGt !== undefined) {
+      params.push(filter.dateGt);
+      clauses.push(`block_date > $${params.length}`);
+    }
+
+    if (filter.dateLt !== undefined) {
+      params.push(filter.dateLt);
+      clauses.push(`block_date < $${params.length}`);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    params.push(resolveLimit(filter.limit, MAX_TRANSACTIONS_PER_QUERY));
+    const order = resolveQueryOrder(filter.order);
+    const sql = `
+      SELECT
+        block_number,
+        block_date,
+        base_block_fee_wei,
+        position,
+        hash,
+        from_address,
+        to_address,
+        transaction_type,
+        nonce,
+        value_wei,
+        gas_limit,
+        gas_used,
+        cumulative_gas_used,
+        gas_price_wei,
+        max_fee_per_gas_wei,
+        max_priority_fee_per_gas_wei,
+        effective_gas_price_wei,
+        priority_fee_wei,
+        transaction_fee_wei,
+        status,
+        contract_address
+      FROM ${this.qTransactions}
+      ${where}
+      ORDER BY block_number ${order}, position ${order}
+      LIMIT $${params.length}
+    `;
+
+    const result = await this.pool.query<{
+      block_number: string;
+      block_date: string;
+      base_block_fee_wei: string;
+      position: number;
+      hash: string;
+      from_address: string | null;
+      to_address: string | null;
+      transaction_type: string | null;
+      nonce: string | null;
+      value_wei: string;
+      gas_limit: string;
+      gas_used: string;
+      cumulative_gas_used: string | null;
+      gas_price_wei: string | null;
+      max_fee_per_gas_wei: string | null;
+      max_priority_fee_per_gas_wei: string | null;
+      effective_gas_price_wei: string;
+      priority_fee_wei: string;
+      transaction_fee_wei: string;
+      status: string | null;
+      contract_address: string | null;
+    }>(sql, params);
+
+    return result.rows.map(mapTransactionRow);
+  }
+
+  async getInspectedBlock(blockNumber: bigint): Promise<InspectedBlock | undefined> {
+    const [block] = await this.queryBlocks({ blockGt: blockNumber - 1n, blockLt: blockNumber + 1n });
+    if (!block) {
+      return undefined;
+    }
+
+    const transactions = await this.queryTransactions({
+      blockNumber,
+      limit: MAX_TRANSACTIONS_PER_QUERY,
+    });
+
+    return {
+      blockNumber: block.blockNumber,
+      blockNumberDecimal: blockNumber.toString(),
+      blockDate: block.blockDate,
+      baseBlockFeeWei: block.baseBlockFeeWei,
+      totalGasUsed: block.totalGasUsed,
+      maxGasInBlock: block.maxGasInBlock,
+      transactionCount: block.transactionCount,
+      transactions: transactions.map(stripStoredTransactionContext),
+    };
   }
 
   async aggregateRangeIfComplete(
@@ -718,4 +964,76 @@ function quoteIdent(name: string): string {
     throw new Error(`Invalid identifier: ${name}`);
   }
   return `"${name}"`;
+}
+
+function mapTransactionRow(row: {
+  block_number: string;
+  block_date: string;
+  base_block_fee_wei: string;
+  position: number;
+  hash: string;
+  from_address: string | null;
+  to_address: string | null;
+  transaction_type: string | null;
+  nonce: string | null;
+  value_wei: string;
+  gas_limit: string;
+  gas_used: string;
+  cumulative_gas_used: string | null;
+  gas_price_wei: string | null;
+  max_fee_per_gas_wei: string | null;
+  max_priority_fee_per_gas_wei: string | null;
+  effective_gas_price_wei: string;
+  priority_fee_wei: string;
+  transaction_fee_wei: string;
+  status: string | null;
+  contract_address: string | null;
+}): StoredTransaction {
+  return {
+    blockNumber: Number(row.block_number),
+    blockNumberDecimal: row.block_number,
+    blockDate: row.block_date,
+    baseBlockFeeWei: row.base_block_fee_wei,
+    position: row.position,
+    hash: row.hash as Hex,
+    from: row.from_address as Hex | null,
+    to: row.to_address as Hex | null,
+    type: row.transaction_type,
+    nonce: row.nonce,
+    valueWei: row.value_wei,
+    gasLimit: row.gas_limit,
+    gasUsed: row.gas_used,
+    cumulativeGasUsed: row.cumulative_gas_used,
+    gasPriceWei: row.gas_price_wei,
+    maxFeePerGasWei: row.max_fee_per_gas_wei,
+    maxPriorityFeePerGasWei: row.max_priority_fee_per_gas_wei,
+    effectiveGasPriceWei: row.effective_gas_price_wei,
+    priorityFeeWei: row.priority_fee_wei,
+    transactionFeeWei: row.transaction_fee_wei,
+    status: row.status,
+    contractAddress: row.contract_address as Hex | null,
+  };
+}
+
+function stripStoredTransactionContext(row: StoredTransaction): InspectedTransaction {
+  return {
+    position: row.position,
+    hash: row.hash,
+    from: row.from,
+    to: row.to,
+    type: row.type,
+    nonce: row.nonce,
+    valueWei: row.valueWei,
+    gasLimit: row.gasLimit,
+    gasUsed: row.gasUsed,
+    cumulativeGasUsed: row.cumulativeGasUsed,
+    gasPriceWei: row.gasPriceWei,
+    maxFeePerGasWei: row.maxFeePerGasWei,
+    maxPriorityFeePerGasWei: row.maxPriorityFeePerGasWei,
+    effectiveGasPriceWei: row.effectiveGasPriceWei,
+    priorityFeeWei: row.priorityFeeWei,
+    transactionFeeWei: row.transactionFeeWei,
+    status: row.status,
+    contractAddress: row.contractAddress,
+  };
 }

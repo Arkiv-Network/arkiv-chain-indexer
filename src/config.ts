@@ -161,6 +161,6 @@ Options:
   --confirmation-depth <number>     Blocks to stay behind latest head. Defaults to 3.
   --poll-ms <number>                Delay while waiting for new safe blocks. Defaults to 12000.
   --retry-ms <number>               Delay before retrying a failed block. Defaults to 5000.
-  --tx-receipt-concurrency <n>      Max receipt RPC calls in flight per block. Defaults to 20.
+  --tx-receipt-concurrency <n>      Legacy setting accepted for compatibility; receipts are fetched sequentially.
   --help                            Show this message.`;
 }

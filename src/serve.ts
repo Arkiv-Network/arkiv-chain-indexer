@@ -1,6 +1,4 @@
 import { parseServerConfig, ServerHelpRequested } from "./serverConfig";
-import { BlockInspector } from "./blockInspector";
-import { EthereumRpcClient } from "./rpc";
 import { createBlockServer } from "./server";
 import { ScannerStorage } from "./storage";
 
@@ -10,13 +8,9 @@ async function main(): Promise<void> {
   try {
     const config = parseServerConfig(process.argv.slice(2));
     storage = await ScannerStorage.open(config.databaseUrl);
-    const blockInspector = config.rpcUrl
-      ? new BlockInspector(new EthereumRpcClient(config.rpcUrl))
-      : undefined;
     const server = createBlockServer(storage, {
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
-      ...(blockInspector !== undefined ? { blockInspector } : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
 

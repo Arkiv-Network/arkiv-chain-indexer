@@ -25,12 +25,10 @@ describe("parseServerConfig", () => {
       DATABASE_URL: "postgres://envhost/db",
       SERVER_PORT: "4500",
       SERVER_HOSTNAME: "0.0.0.0",
-      SCANNER_RPC_FULL_NODE: "https://rpc.example",
     });
     expect(config.databaseUrl).toBe("postgres://envhost/db");
     expect(config.port).toBe(4500);
     expect(config.hostname).toBe("0.0.0.0");
-    expect(config.rpcUrl).toBe("https://rpc.example");
   });
 
   test("CLI flags override environment", () => {
@@ -42,19 +40,15 @@ describe("parseServerConfig", () => {
         "7000",
         "--host",
         "127.0.0.1",
-        "--rpc-url",
-        "https://rpc.cli",
       ],
       {
         DATABASE_URL: "postgres://env/db",
         SERVER_PORT: "1234",
-        SCANNER_RPC_FULL_NODE: "https://rpc.env",
       },
     );
     expect(config.databaseUrl).toBe("postgres://cli/db");
     expect(config.port).toBe(7000);
     expect(config.hostname).toBe("127.0.0.1");
-    expect(config.rpcUrl).toBe("https://rpc.cli");
   });
 
   test("rejects an invalid port", () => {

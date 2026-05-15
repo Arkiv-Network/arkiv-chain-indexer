@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
+import { TransactionsView } from "./TransactionsView";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
@@ -37,10 +37,10 @@ export function App() {
           </button>
           <button
             type="button"
-            className={view === "block" ? "active" : ""}
-            onClick={() => setView("block")}
+            className={view === "transactions" ? "active" : ""}
+            onClick={() => setView("transactions")}
           >
-            Block
+            Transactions
           </button>
           <button
             type="button"
@@ -61,8 +61,8 @@ export function App() {
       <main className={view === "charts" ? "fullscreen" : ""}>
         {view === "blocks" ? (
           <BlocksView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
-        ) : view === "block" ? (
-          <BlockView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
+        ) : view === "transactions" ? (
+          <TransactionsView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
         ) : view === "ranges" ? (
           <RangesView locationSearch={locationSearch} onLocationChange={refreshFromLocation} />
         ) : (

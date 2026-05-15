@@ -1,4 +1,5 @@
 import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format";
+import { inspectBlockFromRpc } from "./blockInspector";
 import { computeBlockMetrics } from "./metrics";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
@@ -238,7 +239,8 @@ export async function scanOneBlock(
   const receipts = await getTransactionReceipts(block, rpc, txReceiptConcurrency);
 
   const metrics = computeBlockMetrics(block, receipts);
-  await storage.saveBlockMetrics(metrics, progressUpdate);
+  const inspected = inspectBlockFromRpc(block, receipts);
+  await storage.saveBlockMetrics(metrics, progressUpdate, inspected.transactions);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats));
@@ -253,47 +255,15 @@ async function getTransactionReceipts(
   rpc: EthereumRpcClient,
   txReceiptConcurrency: number,
 ): Promise<RpcReceipt[]> {
-  const limit = createConcurrencyLimit(txReceiptConcurrency);
-  const receiptJobs = block.transactions.map((transaction) =>
-    limit(() => rpc.getTransactionReceipt(transaction.hash)),
-  );
-  const results = await Promise.allSettled(receiptJobs);
-
-  const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-  if (rejected) {
-    throw rejected.reason;
-  }
-
-  return results.map((result) => {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
-
-    return result.value;
-  });
-}
-
-function createConcurrencyLimit(maxConcurrency: number): <T>(work: () => Promise<T>) => Promise<T> {
-  if (maxConcurrency < 1) {
+  if (txReceiptConcurrency < 1) {
     throw new Error("Transaction receipt concurrency must be greater than zero");
   }
 
-  let active = 0;
-  const waiting: Array<() => void> = [];
-
-  return async <T>(work: () => Promise<T>): Promise<T> => {
-    if (active >= maxConcurrency) {
-      await new Promise<void>((resolve) => waiting.push(resolve));
-    }
-
-    active += 1;
-    try {
-      return await work();
-    } finally {
-      active -= 1;
-      waiting.shift()?.();
-    }
-  };
+  const receipts: RpcReceipt[] = [];
+  for (const transaction of block.transactions) {
+    receipts.push(await rpc.getTransactionReceipt(transaction.hash));
+  }
+  return receipts;
 }
 
 function sleep(ms: number): Promise<void> {
