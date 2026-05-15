@@ -591,7 +591,7 @@ export function ChartsView({ locationSearch, onLocationChange }: ChartsViewProps
 
   const inspectSelectedBlock = () => {
     if (!selectedPoint || selectedPoint.rangeSize !== 1) return;
-    if (writePermalink("block", { block: String(selectedPoint.rangeStart) })) {
+    if (writePermalink("transactions", { block: String(selectedPoint.rangeStart) })) {
       onLocationChange();
     }
   };

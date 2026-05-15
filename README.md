@@ -1,6 +1,7 @@
 # gas-price-tracker
 
-A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block in **PostgreSQL**.
+A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block, plus inspected
+transaction rows, in **PostgreSQL**.
 
 The scanner reads blocks sequentially, fetches every transaction receipt in each block, stores one completed
 block at a time, and resumes from the last successfully stored block after restart or failure. Failed block reads
@@ -24,8 +25,8 @@ docker compose up --build
 Open:
 
 - Frontend: <http://localhost:23560> (the React app talks to the backend through the same origin at `/api/*`)
-- Backend API (direct): <http://localhost:3000/blocks>, <http://localhost:3000/ranges>, and
-  <http://localhost:3000/block/19000000>
+- Backend API (direct): <http://localhost:3000/blocks>, <http://localhost:3000/ranges>,
+  <http://localhost:3000/transactions?block=19000000>, and <http://localhost:3000/block/19000000>
 - Postgres: `postgres://gas:gas@localhost:5432/gas`
 
 The frontend container is a tiny Node `server.js` that serves the Vite-built React app from `dist/` and reverse-proxies any request starting with `/api/` to the `backend` service (the `/api` prefix is stripped). This means you don't need to expose the backend publicly — only port `23560` on the host is required for end users.
@@ -90,7 +91,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--confirmation-depth` | `SCANNER_CONFIRMATION_DEPTH` | `3` | Number of blocks to stay behind the latest head. |
 | `--poll-ms` | `SCANNER_POLL_MS` | `12000` | Delay while waiting for new safe blocks. |
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
-| `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Max receipt RPC calls in flight per block. |
+| `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Show help:
@@ -217,23 +218,21 @@ For continuous scans:
 
 1. The backfill cursor starts at the current safe head when no prior cursor exists.
 2. The scanner walks backward for 20 seconds of work, updating `backfill_next_block` only with the block row.
-3. It then scans forward through the latest safe head, updating `last_successful_block` only with the block row.
+3. It then scans forward through the latest safe head, updating `last_successful_block` only with the block row
+   and transaction rows committed.
 4. The backward cursor stops at `--oldest-backfill-block`.
 
 This means failed block reads are not skipped.
 
 ## HTTP Server
 
-A read-only HTTP server is included that serves stored block rows from the same PostgreSQL database. When
-`SCANNER_RPC_FULL_NODE` is configured, it can also inspect one block on demand by reading that block and its
-transaction receipts from JSON-RPC and keeping the result in local process memory. Run it alongside the scanner
-(or against an existing database):
+A read-only HTTP server is included that serves stored block, range, and transaction rows from the same
+PostgreSQL database. Run it alongside the scanner (or against an existing database):
 
 ```sh
 DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run serve
 # or
-SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
-  bun run serve -- --database-url postgres://gas:gas@localhost:5432/gas --port 3000
+bun run serve -- --database-url postgres://gas:gas@localhost:5432/gas --port 3000
 ```
 
 By default the server listens on port `3000`. CORS headers are set on every response so the static frontend can
@@ -260,13 +259,31 @@ curl 'http://localhost:3000/blocks?blockGt=19000000&blockLt=19000005'
 
 ### `GET /block/:blockNumber`
 
-Inspects a single block on request and returns block metadata plus one row per transaction. The backend fetches
-the block and receipts from `SCANNER_RPC_FULL_NODE`, computes values such as gas used, effective gas price,
-priority fee, transaction fee, status, sender, recipient, and value, then stores that inspected response in an
-in-memory cache for faster repeat loads. This endpoint does not write transaction data to PostgreSQL.
+Returns stored block metadata plus stored transaction rows for one scanned block. It does not call JSON-RPC and
+does not use an in-memory cache.
 
-If the backend is started without `SCANNER_RPC_FULL_NODE`, this endpoint returns `503` while `/blocks` and
-`/ranges` continue to serve database-backed data.
+If the block has not been scanned into PostgreSQL, this endpoint returns `404`.
+
+### `GET /transactions`
+
+Returns stored transaction rows ordered by block number and position. Responses are capped at **1,000
+transactions**. Use `block` for an exact block query, or combine date and block range filters additively.
+
+| Query parameter | Description |
+| --- | --- |
+| `block` | Only transactions from exactly this block number. |
+| `blockGt` | Only transactions with `block_number > blockGt`. Ignored by the frontend when `block` is set. |
+| `blockLt` | Only transactions with `block_number < blockLt`. Ignored by the frontend when `block` is set. |
+| `dateGt` | ISO-8601 timestamp; only transactions in blocks newer than this. |
+| `dateLt` | ISO-8601 timestamp; only transactions in blocks older than this. |
+| `limit` | Maximum rows to return, up to `1000`. |
+| `order` | `asc` or `desc`; defaults to `asc`. |
+
+Example:
+
+```sh
+curl 'http://localhost:3000/transactions?dateGt=2024-01-01T00:00:00Z&dateLt=2024-01-02T00:00:00Z&limit=1000'
+```
 
 ### `GET /ranges`
 
@@ -295,7 +312,6 @@ curl 'http://localhost:3000/ranges?rangeSize=50&rangeStartGt=245500&rangeStartLt
 | `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
-| `--rpc-url` | `SCANNER_RPC_FULL_NODE` | unset | Ethereum JSON-RPC endpoint for on-demand block inspection. |
 
 ```sh
 bun run serve -- --help
@@ -314,9 +330,9 @@ dependency-free Node HTTP server that:
 Four views are provided:
 
 - **Blocks** — paged table of stored blocks with `blockGt`, `blockLt`, `dateGt`, `dateLt` filters.
-- **Block** — on-demand block inspector with sortable transaction rows backed by the backend memory cache.
+- **Transactions** — stored transaction query table for exact block, block range, and date range inspection.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
-- **Charts** — interactive historical chart view with links from selected block points into the Block inspector.
+- **Charts** — interactive historical chart view with links from selected block points into Transactions.
 
 ### Frontend configuration
 

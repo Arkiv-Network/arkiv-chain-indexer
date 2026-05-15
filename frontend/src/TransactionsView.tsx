@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { fetchBlockInspect, type BlockInspectResponse, type InspectedTransaction } from "./api";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
+import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -10,13 +10,18 @@ import {
 } from "./permalinks";
 import { loadFromStorage, usePersistentState } from "./persistentState";
 
-interface BlockViewProps {
+interface TransactionsViewProps {
   locationSearch: string;
   onLocationChange: () => void;
 }
 
-interface BlockFilters extends Record<string, string> {
+interface TransactionFilters extends Record<string, string> {
   block: string;
+  blockGt: string;
+  blockLt: string;
+  dateGt: string;
+  dateLt: string;
+  limit: string;
 }
 
 type SortDirection = "asc" | "desc";
@@ -27,6 +32,9 @@ interface SortState {
 }
 
 type SortKey =
+  | "blockNumber"
+  | "blockDate"
+  | "baseBlockFeeWei"
   | "position"
   | "hash"
   | "from"
@@ -50,14 +58,34 @@ interface Column {
   label: string;
   className?: string;
   width: string;
-  render: (row: InspectedTransaction) => ReactNode;
+  render: (row: StoredTransaction) => ReactNode;
 }
 
-const STORAGE_KEY = "gas-tracker.filters.block";
-const FILTER_KEYS = ["block"] as const;
-const EMPTY: BlockFilters = { block: "" };
+const STORAGE_KEY = "gas-tracker.filters.transactions";
+const FILTER_KEYS = ["block", "blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
+const EMPTY: TransactionFilters = {
+  block: "",
+  blockGt: "",
+  blockLt: "",
+  dateGt: "",
+  dateLt: "",
+  limit: "1000",
+};
 
 const TX_COLUMNS: Column[] = [
+  {
+    key: "blockNumber",
+    label: "Block",
+    className: "num",
+    width: "8rem",
+    render: (row) => row.blockNumberDecimal,
+  },
+  {
+    key: "blockDate",
+    label: "Date",
+    width: "13rem",
+    render: (row) => fmtDate(row.blockDate),
+  },
   {
     key: "position",
     label: "Pos",
@@ -132,6 +160,13 @@ const TX_COLUMNS: Column[] = [
     render: (row) => fmtInteger(row.cumulativeGasUsed),
   },
   {
+    key: "baseBlockFeeWei",
+    label: "Base fee (gwei)",
+    className: "num",
+    width: "11rem",
+    render: (row) => fmtGwei(row.baseBlockFeeWei),
+  },
+  {
     key: "gasPriceWei",
     label: "Gas price (gwei)",
     className: "num",
@@ -175,32 +210,35 @@ const TX_COLUMNS: Column[] = [
   },
 ];
 
-function loadFilters(locationSearch: string): BlockFilters {
-  const stored = loadFromStorage<BlockFilters>(STORAGE_KEY, EMPTY);
+function loadFilters(locationSearch: string): TransactionFilters {
+  const stored = loadFromStorage<TransactionFilters>(STORAGE_KEY, EMPTY);
   const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
 }
 
-export function BlockView({ locationSearch, onLocationChange }: BlockViewProps) {
-  const [filters, setFilters] = usePersistentState<BlockFilters>(STORAGE_KEY, loadFilters(locationSearch));
-  const [applied, setApplied] = useState<BlockFilters>(filters);
-  const [data, setData] = useState<BlockInspectResponse | null>(null);
+export function TransactionsView({ locationSearch, onLocationChange }: TransactionsViewProps) {
+  const [filters, setFilters] = usePersistentState<TransactionFilters>(
+    STORAGE_KEY,
+    loadFilters(locationSearch),
+  );
+  const [applied, setApplied] = useState<TransactionFilters>(filters);
+  const [data, setData] = useState<TransactionsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
-  const [sort, setSort] = useState<SortState>({ key: "position", direction: "asc" });
+  const [sort, setSort] = useState<SortState>({ key: "blockNumber", direction: "asc" });
 
-  const load = useCallback((f: BlockFilters) => {
-    const block = f.block.trim();
-    if (!block) {
+  const load = useCallback((f: TransactionFilters) => {
+    if (!hasScopedFilters(f)) {
       setData(null);
       setError(null);
       return;
     }
 
+    const params = filtersToParams(f);
     setLoading(true);
     setError(null);
-    fetchBlockInspect(block)
+    fetchTransactions(params)
       .then((body) => setData(body))
       .catch((err: Error) => {
         setData(null);
@@ -222,7 +260,7 @@ export function BlockView({ locationSearch, onLocationChange }: BlockViewProps) 
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (writePermalink("block", filters)) {
+    if (writePermalink("transactions", filters)) {
       onLocationChange();
     } else {
       setApplied(filters);
@@ -230,7 +268,7 @@ export function BlockView({ locationSearch, onLocationChange }: BlockViewProps) 
   };
 
   const copyPermalink = async () => {
-    const href = buildPermalinkHref("block", applied);
+    const href = buildPermalinkHref("transactions", applied);
     try {
       await navigator.clipboard.writeText(href);
       setCopyStatus("Copied");
@@ -240,7 +278,7 @@ export function BlockView({ locationSearch, onLocationChange }: BlockViewProps) 
   };
 
   const rows = useMemo(() => {
-    const transactions = data?.block.transactions ?? [];
+    const transactions = data?.transactions ?? [];
     return transactions.slice().sort((a, b) => compareRows(a, b, sort));
   }, [data, sort]);
 
@@ -253,39 +291,71 @@ export function BlockView({ locationSearch, onLocationChange }: BlockViewProps) 
     });
   };
 
-  const onBlockChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilters({ block: e.target.value });
+  const setFilter = (key: keyof TransactionFilters) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilters({ ...filters, [key]: e.target.value });
   };
 
+  const hasAppliedFilters = hasScopedFilters(applied);
+
   return (
-    <section className="view block-view">
-      <h2>Block inspector</h2>
-      <form onSubmit={onSubmit} className="block-inspector-form">
+    <section className="view transactions-view">
+      <h2>Transactions</h2>
+      <form onSubmit={onSubmit} className="transactions-form">
         <label>
           block
-          <input type="text" inputMode="numeric" value={filters.block} onChange={onBlockChange} />
+          <input type="text" inputMode="numeric" value={filters.block} onChange={setFilter("block")} />
         </label>
-        <button type="submit">Inspect</button>
+        <label>
+          block &gt;
+          <input
+            type="text"
+            inputMode="numeric"
+            value={filters.blockGt}
+            onChange={setFilter("blockGt")}
+            disabled={Boolean(filters.block.trim())}
+          />
+        </label>
+        <label>
+          block &lt;
+          <input
+            type="text"
+            inputMode="numeric"
+            value={filters.blockLt}
+            onChange={setFilter("blockLt")}
+            disabled={Boolean(filters.block.trim())}
+          />
+        </label>
+        <label>
+          date &gt;
+          <input type="text" value={filters.dateGt} onChange={setFilter("dateGt")} />
+        </label>
+        <label>
+          date &lt;
+          <input type="text" value={filters.dateLt} onChange={setFilter("dateLt")} />
+        </label>
+        <label>
+          limit
+          <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
+        </label>
+        <button type="submit">Query</button>
       </form>
 
       <p className={`summary${error ? " error" : ""}`}>
         {loading
           ? "Loading..."
           : error
-            ? `Failed to inspect block: ${error}`
+            ? `Failed to query transactions: ${error}`
             : data
-              ? `${data.block.transactionCount} transactions${data.cached ? " - memory cache hit" : " - loaded from RPC"}`
-              : "Enter a block number to inspect its transactions."}
+              ? `${data.count} transactions${data.truncated ? `, capped at ${data.limit}` : ""}`
+              : "Enter a block or date range to query stored transactions."}
       </p>
 
       <div className="permalink-row">
-        <button type="button" className="secondary" onClick={copyPermalink} disabled={!applied.block.trim()}>
+        <button type="button" className="secondary" onClick={copyPermalink} disabled={!hasAppliedFilters}>
           Copy link
         </button>
         {copyStatus ? <span>{copyStatus}</span> : null}
       </div>
-
-      {data ? <BlockSummary data={data} /> : null}
 
       <div className="table-wrap">
         <table className="data-table tx-table">
@@ -308,7 +378,7 @@ export function BlockView({ locationSearch, onLocationChange }: BlockViewProps) 
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={`${row.position}:${row.hash}`}>
+              <tr key={`${row.blockNumberDecimal}:${row.position}:${row.hash}`}>
                 {TX_COLUMNS.map((column) => (
                   <td key={column.key} className={column.className} data-label={column.label}>
                     {column.render(row)}
@@ -323,35 +393,37 @@ export function BlockView({ locationSearch, onLocationChange }: BlockViewProps) 
   );
 }
 
-function BlockSummary({ data }: { data: BlockInspectResponse }) {
-  const block = data.block;
-  return (
-    <dl className="block-summary">
-      <div>
-        <dt>Block</dt>
-        <dd>{block.blockNumberDecimal}</dd>
-      </div>
-      <div>
-        <dt>Date</dt>
-        <dd>{fmtDate(block.blockDate)}</dd>
-      </div>
-      <div>
-        <dt>Base fee</dt>
-        <dd>{fmtGwei(block.baseBlockFeeWei)} gwei</dd>
-      </div>
-      <div>
-        <dt>Gas used / limit</dt>
-        <dd>{fmtRatio(block.totalGasUsed, block.maxGasInBlock)}</dd>
-      </div>
-      <div>
-        <dt>Transactions</dt>
-        <dd>{block.transactionCount}</dd>
-      </div>
-    </dl>
+function filtersToParams(filters: TransactionFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  const block = filters.block.trim();
+  if (block) {
+    params.set("block", block);
+  } else {
+    addParam(params, "blockGt", filters.blockGt);
+    addParam(params, "blockLt", filters.blockLt);
+  }
+  addParam(params, "dateGt", filters.dateGt);
+  addParam(params, "dateLt", filters.dateLt);
+  addParam(params, "limit", filters.limit);
+  return params;
+}
+
+function hasScopedFilters(filters: TransactionFilters): boolean {
+  return Boolean(
+    filters.block.trim() ||
+      filters.blockGt.trim() ||
+      filters.blockLt.trim() ||
+      filters.dateGt.trim() ||
+      filters.dateLt.trim(),
   );
 }
 
-function compareRows(a: InspectedTransaction, b: InspectedTransaction, sort: SortState): number {
+function addParam(params: URLSearchParams, key: string, value: string): void {
+  const trimmed = value.trim();
+  if (trimmed) params.set(key, trimmed);
+}
+
+function compareRows(a: StoredTransaction, b: StoredTransaction, sort: SortState): number {
   const direction = sort.direction === "asc" ? 1 : -1;
   const left = sortValue(a, sort.key);
   const right = sortValue(b, sort.key);
@@ -365,8 +437,9 @@ function compareRows(a: InspectedTransaction, b: InspectedTransaction, sort: Sor
   return textCompare === 0 ? a.position - b.position : textCompare * direction;
 }
 
-function sortValue(row: InspectedTransaction, key: SortKey): string | bigint {
+function sortValue(row: StoredTransaction, key: SortKey): string | bigint {
   if (
+    key === "blockNumber" ||
     key === "position" ||
     key === "type" ||
     key === "nonce" ||
@@ -375,6 +448,7 @@ function sortValue(row: InspectedTransaction, key: SortKey): string | bigint {
     key === "gasLimit" ||
     key === "gasUsed" ||
     key === "cumulativeGasUsed" ||
+    key === "baseBlockFeeWei" ||
     key === "gasPriceWei" ||
     key === "maxFeePerGasWei" ||
     key === "effectiveGasPriceWei" ||
@@ -398,7 +472,14 @@ function toBigInt(value: string | number | null): bigint {
 }
 
 function defaultDirection(key: SortKey): SortDirection {
-  return key === "position" || key === "hash" || key === "from" || key === "to" ? "asc" : "desc";
+  return key === "blockNumber" ||
+    key === "blockDate" ||
+    key === "position" ||
+    key === "hash" ||
+    key === "from" ||
+    key === "to"
+    ? "asc"
+    : "desc";
 }
 
 function sortIcon(direction: SortDirection): string {

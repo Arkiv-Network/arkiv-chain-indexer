@@ -59,7 +59,6 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
-      SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
     ports:

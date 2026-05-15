@@ -4,12 +4,13 @@ import {
   handleRequest,
   parseFilterFromQuery,
   parseRangeFilterFromQuery,
+  parseTransactionFilterFromQuery,
   type BlockInspectResponseBody,
   type BlocksResponseBody,
   type RangesResponseBody,
+  type TransactionsResponseBody,
 } from "./server";
 import { type ScannerStorage } from "./storage";
-import { type BlockInspector } from "./blockInspector";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import {
   closeTestPools,
@@ -157,46 +158,125 @@ describe("parseRangeFilterFromQuery", () => {
   });
 });
 
-describe("GET /block/:blockNumber", () => {
-  test("returns 503 when block inspection is not configured", async () => {
-    const response = await handleRequest(
-      new Request("http://example.test/block/42"),
-      {} as ScannerStorage,
+describe("parseTransactionFilterFromQuery", () => {
+  test("parses exact block, range, date, limit, and order filters", () => {
+    const filter = parseTransactionFilterFromQuery(
+      new URLSearchParams(
+        "block=42&blockGt=10&blockLt=50&dateGt=2024-01-01T00:00:00Z&dateLt=2024-01-02T00:00:00Z&limit=25&order=desc",
+      ),
     );
 
-    expect(response.status).toBe(503);
+    expect(filter.blockNumber).toBe(42n);
+    expect(filter.blockGt).toBe(10n);
+    expect(filter.blockLt).toBe(50n);
+    expect(filter.dateGt).toBe("2024-01-01T00:00:00.000Z");
+    expect(filter.dateLt).toBe("2024-01-02T00:00:00.000Z");
+    expect(filter.limit).toBe(25);
+    expect(filter.order).toBe("desc");
+  });
+
+  test("rejects transaction limits above 1000", () => {
+    expect(() =>
+      parseTransactionFilterFromQuery(new URLSearchParams("limit=1001")),
+    ).toThrow(/limit must be at most 1000/);
+  });
+});
+
+describe("GET /block/:blockNumber", () => {
+  test("returns 404 when the block is not stored", async () => {
+    const storage = {
+      getInspectedBlock: async () => undefined,
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/block/42"),
+      storage,
+    );
+
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "Block inspection requires SCANNER_RPC_FULL_NODE on the backend",
+      error: "Block 42 was not found in storage",
     });
   });
 
-  test("returns inspected block data from the configured inspector", async () => {
-    const inspector = {
-      inspectBlock: async (blockNumber: bigint) => ({
-        cached: true,
-        block: {
-          blockNumber: Number(blockNumber),
-          blockNumberDecimal: blockNumber.toString(),
-          blockDate: "2024-01-01T00:00:00.000Z",
-          baseBlockFeeWei: "100",
-          totalGasUsed: "21000",
-          maxGasInBlock: "30000000",
-          transactionCount: 0,
-          transactions: [],
-        },
+  test("returns inspected block data from storage", async () => {
+    const storage = {
+      getInspectedBlock: async (blockNumber: bigint) => ({
+        blockNumber: Number(blockNumber),
+        blockNumberDecimal: blockNumber.toString(),
+        blockDate: "2024-01-01T00:00:00.000Z",
+        baseBlockFeeWei: "100",
+        totalGasUsed: "21000",
+        maxGasInBlock: "30000000",
+        transactionCount: 0,
+        transactions: [],
       }),
-    } as unknown as BlockInspector;
+    } as unknown as ScannerStorage;
 
     const response = await handleRequest(
       new Request("http://example.test/block/42"),
-      {} as ScannerStorage,
-      inspector,
+      storage,
     );
     const body = (await response.json()) as BlockInspectResponseBody;
 
     expect(response.status).toBe(200);
-    expect(body.cached).toBe(true);
+    expect(body.cached).toBe(false);
     expect(body.block.blockNumberDecimal).toBe("42");
+  });
+});
+
+describe("GET /transactions", () => {
+  test("returns stored transactions and echoes filters", async () => {
+    const storage = {
+      queryTransactions: async () => [
+        {
+          blockNumber: 42,
+          blockNumberDecimal: "42",
+          blockDate: "2024-01-01T00:00:00.000Z",
+          baseBlockFeeWei: "100",
+          position: 0,
+          hash: "0xaaa",
+          from: "0x111",
+          to: "0x222",
+          type: "2",
+          nonce: "1",
+          valueWei: "0",
+          gasLimit: "21000",
+          gasUsed: "21000",
+          cumulativeGasUsed: "21000",
+          gasPriceWei: "110",
+          maxFeePerGasWei: "200",
+          maxPriorityFeePerGasWei: "10",
+          effectiveGasPriceWei: "110",
+          priorityFeeWei: "10",
+          transactionFeeWei: "2310000",
+          status: "1",
+          contractAddress: null,
+        },
+      ],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/transactions?block=42&limit=25"),
+      storage,
+    );
+    const body = (await response.json()) as TransactionsResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.count).toBe(1);
+    expect(body.limit).toBe(25);
+    expect(body.filters.block).toBe("42");
+    expect(body.transactions[0]?.blockNumber).toBe(42);
+    expect(body.transactions[0]?.position).toBe(0);
+  });
+
+  test("rejects invalid transaction filters", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/transactions?limit=1001"),
+      {} as ScannerStorage,
+    );
+
+    expect(response.status).toBe(400);
   });
 });
 

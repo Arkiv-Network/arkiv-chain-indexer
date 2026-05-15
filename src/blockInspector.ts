@@ -1,5 +1,4 @@
 import { hexToBigInt } from "./math";
-import { EthereumRpcClient } from "./rpc";
 import type { Hex, RpcBlock, RpcReceipt, RpcTransaction } from "./types";
 
 export interface InspectedTransaction {
@@ -37,74 +36,6 @@ export interface InspectedBlock {
 export interface BlockInspectionResult {
   cached: boolean;
   block: InspectedBlock;
-}
-
-export interface BlockInspectorOptions {
-  maxCachedBlocks?: number;
-}
-
-const DEFAULT_MAX_CACHED_BLOCKS = 100;
-
-export class BlockInspector {
-  private readonly maxCachedBlocks: number;
-  private readonly cache = new Map<string, InspectedBlock>();
-  private readonly pending = new Map<string, Promise<InspectedBlock>>();
-
-  constructor(
-    private readonly rpc: EthereumRpcClient,
-    options: BlockInspectorOptions = {},
-  ) {
-    this.maxCachedBlocks = options.maxCachedBlocks ?? DEFAULT_MAX_CACHED_BLOCKS;
-  }
-
-  async inspectBlock(blockNumber: bigint): Promise<BlockInspectionResult> {
-    const key = blockNumber.toString();
-    const cached = this.cache.get(key);
-    if (cached) {
-      return { cached: true, block: cached };
-    }
-
-    let promise = this.pending.get(key);
-    if (!promise) {
-      promise = this.fetchAndInspectBlock(blockNumber);
-      this.pending.set(key, promise);
-    }
-
-    try {
-      const block = await promise;
-      return { cached: false, block };
-    } finally {
-      this.pending.delete(key);
-    }
-  }
-
-  getCachedBlockCount(): number {
-    return this.cache.size;
-  }
-
-  private async fetchAndInspectBlock(blockNumber: bigint): Promise<InspectedBlock> {
-    const block = await this.rpc.getBlockWithTransactions(blockNumber);
-    const receipts: RpcReceipt[] = [];
-
-    for (const transaction of block.transactions) {
-      receipts.push(await this.rpc.getTransactionReceipt(transaction.hash));
-    }
-
-    const inspected = inspectBlockFromRpc(block, receipts);
-    this.writeCache(blockNumber.toString(), inspected);
-    return inspected;
-  }
-
-  private writeCache(key: string, block: InspectedBlock) {
-    if (this.maxCachedBlocks <= 0) return;
-
-    this.cache.set(key, block);
-    while (this.cache.size > this.maxCachedBlocks) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest === undefined) break;
-      this.cache.delete(oldest);
-    }
-  }
 }
 
 export function inspectBlockFromRpc(block: RpcBlock, receipts: RpcReceipt[]): InspectedBlock {

@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { backfillDownForSlice, scanForwardToSafeHead, scanOneBlock } from "./scanner";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { BlockProgressUpdate, ScannerStorage } from "./storage";
+import type { InspectedTransaction } from "./blockInspector";
 import type { BlockMetrics, Hex, RpcBlock, RpcReceipt } from "./types";
 
 describe("scanOneBlock", () => {
-  test("limits transaction receipt fetches and stores after all receipts finish", async () => {
+  test("fetches transaction receipts sequentially and stores transactions after all receipts finish", async () => {
     const rpc = new ControlledReceiptRpc(blockWithTransactions(4));
     const storage = new FakeStorage();
 
@@ -16,24 +17,33 @@ describe("scanOneBlock", () => {
       2,
     );
 
-    await waitUntil(() => rpc.pending.length === 2);
-    expect(rpc.maxActiveReceipts).toBe(2);
-    expect(rpc.requestedReceipts).toEqual([txHash(0), txHash(1)]);
+    await waitUntil(() => rpc.pending.length === 1);
+    expect(rpc.maxActiveReceipts).toBe(1);
+    expect(rpc.requestedReceipts).toEqual([txHash(0)]);
+    expect(storage.savedMetrics).toHaveLength(0);
+
+    rpc.resolveNext();
+    await waitUntil(() => rpc.requestedReceipts.length === 2);
+    expect(rpc.maxActiveReceipts).toBe(1);
     expect(storage.savedMetrics).toHaveLength(0);
 
     rpc.resolveNext();
     await waitUntil(() => rpc.requestedReceipts.length === 3);
-    expect(rpc.maxActiveReceipts).toBe(2);
-    expect(storage.savedMetrics).toHaveLength(0);
-
     rpc.resolveNext();
     await waitUntil(() => rpc.requestedReceipts.length === 4);
-    rpc.resolveAll();
+    rpc.resolveNext();
     await scanPromise;
 
     expect(rpc.requestedReceipts).toEqual([txHash(0), txHash(1), txHash(2), txHash(3)]);
     expect(storage.savedMetrics).toHaveLength(1);
     expect(storage.savedMetrics[0]?.transactionCount).toBe(4);
+    expect(storage.savedTransactions).toHaveLength(1);
+    expect(storage.savedTransactions[0]?.map((entry) => entry.hash)).toEqual([
+      txHash(0),
+      txHash(1),
+      txHash(2),
+      txHash(3),
+    ]);
   });
 
   test("does not aggregate ranges inline after storing a block", async () => {
@@ -51,31 +61,24 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics.map((entry) => entry.blockNumber)).toEqual([245_650n]);
   });
 
-  test("waits for all receipt jobs to settle before failing the block", async () => {
+  test("does not store metrics or transactions when a receipt read fails", async () => {
     const rpc = new ControlledReceiptRpc(blockWithTransactions(3));
     const storage = new FakeStorage();
-    let settled = false;
 
     const scanPromise = scanOneBlock(
       1n,
       rpc as unknown as EthereumRpcClient,
       storage as unknown as ScannerStorage,
       2,
-    ).finally(() => {
-      settled = true;
-    });
+    );
 
-    await waitUntil(() => rpc.pending.length === 2);
+    await waitUntil(() => rpc.pending.length === 1);
     rpc.rejectNext(new Error("receipt failed"));
-    await waitUntil(() => rpc.requestedReceipts.length === 3);
-
-    expect(settled).toBe(false);
-    expect(storage.savedMetrics).toHaveLength(0);
-
-    rpc.resolveAll();
 
     await expect(scanPromise).rejects.toThrow("receipt failed");
     expect(storage.savedMetrics).toHaveLength(0);
+    expect(storage.savedTransactions).toHaveLength(0);
+    expect(rpc.requestedReceipts).toEqual([txHash(0)]);
   });
 });
 
@@ -266,6 +269,7 @@ class ControlledReceiptRpc {
 
 class FakeStorage {
   savedMetrics: BlockMetrics[] = [];
+  savedTransactions: InspectedTransaction[][] = [];
   aggregatedRanges: bigint[] = [];
   lastSuccessfulBlock: bigint | undefined;
   backfillNextBlock: bigint | undefined;
@@ -281,8 +285,12 @@ class FakeStorage {
   async saveBlockMetrics(
     metrics: BlockMetrics,
     progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
+    transactions?: InspectedTransaction[],
   ): Promise<void> {
     this.savedMetrics.push(metrics);
+    if (transactions !== undefined) {
+      this.savedTransactions.push(transactions);
+    }
 
     switch (progressUpdate.kind) {
       case "lastSuccessfulBlock":
@@ -351,6 +359,15 @@ function blockWithTransactions(transactionCount: number, blockNumber = 1n): RpcB
     gasLimit: "0x1c9c380",
     transactions: Array.from({ length: transactionCount }, (_unused, index) => ({
       hash: txHash(index),
+      from: "0x111",
+      to: "0x222",
+      type: "0x2",
+      nonce: `0x${index.toString(16)}`,
+      value: "0x0",
+      gas: "0x5208",
+      gasPrice: "0x2",
+      maxFeePerGas: "0x3",
+      maxPriorityFeePerGas: "0x1",
     })),
   };
 }

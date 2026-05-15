@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
+  MAX_TRANSACTIONS_PER_QUERY,
   type ScannerStorage,
 } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
@@ -11,6 +12,7 @@ import {
   hasPostgresForTests,
 } from "./testPostgres";
 import type { BlockMetrics } from "./types";
+import type { InspectedTransaction } from "./blockInspector";
 
 const RANGE_SIZE = DEFAULT_RANGE_SIZE;
 
@@ -348,6 +350,57 @@ if (!hasPostgresForTests()) {
       expect(MAX_BLOCKS_PER_QUERY).toBe(10_000);
     });
 
+    test("queryTransactions caps results at MAX_TRANSACTIONS_PER_QUERY", () => {
+      expect(MAX_TRANSACTIONS_PER_QUERY).toBe(1_000);
+    });
+
+    test("saves and queries transactions with block context", async () => {
+      const storage = await withStorage();
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({
+          blockNumber: 42n,
+          blockDate: "2024-01-02T03:04:05.000Z",
+          baseBlockFeeWei: "100",
+          transactionCount: 2,
+        }),
+        { kind: "lastSuccessfulBlock" },
+        [
+          transactionFixture({ position: 0, hash: "0xaaa" }),
+          transactionFixture({ position: 1, hash: "0xbbb", to: null, contractAddress: "0xccc" }),
+        ],
+      );
+
+      const rows = await storage.queryTransactions({ blockNumber: 42n });
+      expect(rows.map((row) => row.hash)).toEqual(["0xaaa", "0xbbb"]);
+      expect(rows[0]).toMatchObject({
+        blockNumber: 42,
+        blockNumberDecimal: "42",
+        blockDate: "2024-01-02T03:04:05.000Z",
+        baseBlockFeeWei: "100",
+        position: 0,
+        gasUsed: "21000",
+      });
+
+      const inspected = await storage.getInspectedBlock(42n);
+      expect(inspected?.transactionCount).toBe(2);
+      expect(inspected?.transactions.map((row) => row.hash)).toEqual(["0xaaa", "0xbbb"]);
+    });
+
+    test("replaces transactions when a block is re-saved", async () => {
+      const storage = await withStorage();
+      const metrics = blockMetricsFixture({ blockNumber: 42n });
+
+      await storage.saveBlockMetrics(metrics, { kind: "lastSuccessfulBlock" }, [
+        transactionFixture({ position: 0, hash: "0xaaa" }),
+      ]);
+      await storage.saveBlockMetrics(metrics, { kind: "lastSuccessfulBlock" }, [
+        transactionFixture({ position: 0, hash: "0xbbb" }),
+      ]);
+
+      const rows = await storage.queryTransactions({ blockNumber: 42n });
+      expect(rows.map((row) => row.hash)).toEqual(["0xbbb"]);
+    });
+
     test("aggregates and isolates rows for multiple range sizes", async () => {
       const storage = await withStorage();
       for (let blockNumber = 0n; blockNumber < 200n; blockNumber += 1n) {
@@ -425,6 +478,30 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     averageTransactionGasUsed: "21000",
     averagePriorityFeeWeightedWei: "10",
     averagePriorityFeeWei: "10",
+    ...overrides,
+  };
+}
+
+function transactionFixture(overrides: Partial<InspectedTransaction> = {}): InspectedTransaction {
+  return {
+    position: 0,
+    hash: "0xaaa",
+    from: "0x111",
+    to: "0x222",
+    type: "2",
+    nonce: "1",
+    valueWei: "0",
+    gasLimit: "21000",
+    gasUsed: "21000",
+    cumulativeGasUsed: "21000",
+    gasPriceWei: "110",
+    maxFeePerGasWei: "200",
+    maxPriorityFeePerGasWei: "10",
+    effectiveGasPriceWei: "110",
+    priorityFeeWei: "10",
+    transactionFeeWei: "2310000",
+    status: "1",
+    contractAddress: null,
     ...overrides,
   };
 }
