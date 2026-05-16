@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gas}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gas}
@@ -20,6 +21,7 @@ services:
       args:
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,6 +47,7 @@ services:
       args:
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,6 +63,7 @@ services:
       args:
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,6 +83,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     depends_on:
       - backend
     environment:
