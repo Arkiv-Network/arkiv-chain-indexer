@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchHealth } from "./api";
+import { BaseloadView } from "./BaseloadView";
+import { loadStoredBaseloadConfig, saveStoredBaseloadConfig } from "./baseloadStorage";
+import { BaseloadWorkerRuntime, type BaseloadTaskStatus } from "./baseloadWorkerRuntime";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
@@ -14,6 +17,9 @@ const TIME_ZONE_STORAGE_KEY = "gas-tracker.time-zone";
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
+  const [baseloadConfig, setBaseloadConfig] = useState(() => loadStoredBaseloadConfig());
+  const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
+  const baseloadRuntimeRef = useRef<BaseloadWorkerRuntime | null>(null);
   const [timeZoneState, setTimeZoneState] = usePersistentState(TIME_ZONE_STORAGE_KEY, {
     timeZone: detectBrowserTimeZone(),
   });
@@ -32,6 +38,21 @@ export function App() {
       .then((body) => setTransactionDataEnabled(body.features.transactionData))
       .catch(() => setTransactionDataEnabled(true));
   }, []);
+
+  useEffect(() => {
+    baseloadRuntimeRef.current = new BaseloadWorkerRuntime((status) => {
+      setBaseloadTaskStatuses((current) => ({ ...current, [status.workerId]: status }));
+    });
+    return () => {
+      baseloadRuntimeRef.current?.dispose();
+      baseloadRuntimeRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    baseloadRuntimeRef.current?.sync(baseloadConfig);
+    saveStoredBaseloadConfig(baseloadConfig);
+  }, [baseloadConfig]);
 
   useEffect(() => {
     if (transactionDataEnabled === false && view === "transactions" && writePermalink("blocks", {})) {
@@ -93,6 +114,13 @@ export function App() {
           >
             Health
           </button>
+          <button
+            type="button"
+            className={activeView === "baseload" ? "active" : ""}
+            onClick={() => setView("baseload")}
+          >
+            Baseload
+          </button>
         </nav>
         <label className="timezone-select">
           Time zone
@@ -130,6 +158,12 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             transactionDataEnabled={transactionDataEnabled === true}
+          />
+        ) : activeView === "baseload" ? (
+          <BaseloadView
+            config={baseloadConfig}
+            onConfigChange={setBaseloadConfig}
+            taskStatuses={baseloadTaskStatuses}
           />
         ) : (
           <HealthView timeZone={timeZone} />
