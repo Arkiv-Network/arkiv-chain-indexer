@@ -83,7 +83,7 @@ async def run_rate_limit_check(total_requests, start_block):
 
 
 async def main():
-    total_requests = 200
+    total_requests = 300
     start_block = 10000
 
     print(f"Starting single-burst rate limit test on {rpc_url}")
