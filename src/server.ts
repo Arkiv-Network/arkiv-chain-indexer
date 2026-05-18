@@ -1,5 +1,6 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type BlockInspectionResult } from "./blockInspector";
+import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import {
   MAX_BLOCKS_PER_QUERY,
@@ -20,6 +21,7 @@ export interface BlockServerOptions {
   port?: number;
   hostname?: string;
   transactionDataEnabled?: boolean;
+  baseloadRuntime?: BaseloadRuntime;
 }
 
 export interface BlocksResponseBody {
@@ -90,7 +92,7 @@ export interface HealthResponseBody {
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Max-Age": "86400",
 };
@@ -99,7 +101,11 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
-    fetch: (request) => handleRequest(request, storage, { transactionDataEnabled }),
+    fetch: (request) =>
+      handleRequest(request, storage, {
+        transactionDataEnabled,
+        ...(options.baseloadRuntime ? { baseloadRuntime: options.baseloadRuntime } : {}),
+      }),
   };
   if (options.hostname !== undefined) {
     serveOptions.hostname = options.hostname;
@@ -117,6 +123,10 @@ export async function handleRequest(
 
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  if (url.pathname === "/baseload") {
+    return handleBaseloadRequest(request, options.baseloadRuntime);
   }
 
   if (request.method !== "GET") {
@@ -151,6 +161,36 @@ export async function handleRequest(
   }
 
   return jsonError(404, `Not found: ${url.pathname}`);
+}
+
+async function handleBaseloadRequest(
+  request: Request,
+  baseloadRuntime: BaseloadRuntime | undefined,
+): Promise<Response> {
+  if (!baseloadRuntime) {
+    return jsonError(503, "Baseload runtime is unavailable");
+  }
+
+  if (request.method === "GET") {
+    return jsonResponse(baseloadRuntime.getState() satisfies BaseloadState);
+  }
+
+  if (request.method === "PUT") {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return jsonError(400, "Request body must be valid JSON");
+    }
+
+    try {
+      return jsonResponse(baseloadRuntime.updateConfig(body) satisfies BaseloadState);
+    } catch (error) {
+      return jsonError(400, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return jsonError(405, `Method ${request.method} is not allowed`);
 }
 
 async function handleGetHealth(

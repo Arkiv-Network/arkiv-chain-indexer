@@ -11,6 +11,7 @@ import {
   type RangesResponseBody,
   type TransactionsResponseBody,
 } from "./server";
+import { BaseloadRuntime } from "./baseloadRuntime";
 import { type ScannerStorage } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import {
@@ -21,6 +22,7 @@ import {
 import type { BlockMetrics } from "./types";
 
 const RANGE_SIZE = DEFAULT_RANGE_SIZE;
+const TEST_MNEMONIC = "test test test test test test test test test test test junk";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -235,6 +237,61 @@ describe("GET /block/:blockNumber", () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
       error: "Transaction data is disabled",
+    });
+  });
+});
+
+describe("Baseload API", () => {
+  test("returns backend baseload state", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload"),
+      {} as ScannerStorage,
+      { baseloadRuntime: runtime },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      enabled: false,
+      config: { version: 1, workers: [] },
+      statuses: {},
+    });
+  });
+
+  test("updates backend baseload config", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
+      }),
+      {} as ScannerStorage,
+      { baseloadRuntime: runtime },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.config.workers).toHaveLength(1);
+    expect(body.config.workers[0].walletAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    runtime.stop();
+  });
+
+  test("rejects invalid backend baseload configs", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workers: [{ walletNumber: 2 }, { walletNumber: 2 }] }),
+      }),
+      {} as ScannerStorage,
+      { baseloadRuntime: runtime },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Wallet 2 is already attached to another worker",
     });
   });
 });

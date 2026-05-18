@@ -31,7 +31,6 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE:-http://host.docker.internal:8545}
-      BASELOAD_RPC_NODE: ${BASELOAD_RPC_NODE:-http://host.docker.internal:8645}
       SCANNER_FROM_BLOCK: ${SCANNER_FROM_BLOCK:-}
       SCANNER_TO_BLOCK: ${SCANNER_TO_BLOCK:-}
       SCANNER_OLDEST_BACKFILL_BLOCK: ${SCANNER_OLDEST_BACKFILL_BLOCK:-25000000}
@@ -76,6 +75,8 @@ services:
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-true}
+      BASELOAD_RPC_NODE: ${BASELOAD_RPC_NODE:-http://host.docker.internal:8645}
+      BASELOAD_MNEMONIC: ${BASELOAD_MNEMONIC:-parent picture garment parrot churn record stadium pill rocket craft fish fiscal clip virus view diary replace wealth extra kitten door enforce piece nut}
     command: ["bun", "run", "serve"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
@@ -94,7 +95,6 @@ services:
       PORT: 23560
       BACKEND_HOST: backend
       BACKEND_PORT: 3000
-      MNEMONIC: ${MNEMONIC:-parent picture garment parrot churn record stadium pill rocket craft fish fiscal clip virus view diary replace wealth extra kitten door enforce piece nut}
     ports:
       - target: 23560
         published: "${ARKIV_TESTS_PORT:-20155}"

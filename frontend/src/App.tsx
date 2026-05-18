@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { fetchHealth } from "./api";
+import { useEffect, useState } from "react";
+import {
+  fetchBaseloadState,
+  fetchHealth,
+  updateBaseloadConfig as putBaseloadConfig,
+  type BaseloadTaskStatus,
+} from "./api";
 import { BaseloadView } from "./BaseloadView";
-import { loadStoredBaseloadConfig, saveStoredBaseloadConfig } from "./baseloadStorage";
-import { BaseloadWorkerRuntime, type BaseloadTaskStatus } from "./baseloadWorkerRuntime";
+import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
@@ -17,9 +21,9 @@ const TIME_ZONE_STORAGE_KEY = "gas-tracker.time-zone";
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
-  const [baseloadConfig, setBaseloadConfig] = useState(() => loadStoredBaseloadConfig());
+  const [baseloadConfig, setBaseloadConfig] = useState<BaseloadConfig>(EMPTY_BASELOAD_CONFIG);
   const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
-  const baseloadRuntimeRef = useRef<BaseloadWorkerRuntime | null>(null);
+  const [baseloadError, setBaseloadError] = useState<string | null>(null);
   const [timeZoneState, setTimeZoneState] = usePersistentState(TIME_ZONE_STORAGE_KEY, {
     timeZone: detectBrowserTimeZone(),
   });
@@ -40,19 +44,29 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    baseloadRuntimeRef.current = new BaseloadWorkerRuntime((status) => {
-      setBaseloadTaskStatuses((current) => ({ ...current, [status.workerId]: status }));
-    });
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const state = await fetchBaseloadState();
+        if (cancelled) return;
+        setBaseloadConfig(state.config);
+        setBaseloadTaskStatuses(state.statuses);
+        setBaseloadError(state.enabled ? null : "BASELOAD_RPC_NODE is not configured on the backend");
+      } catch (error) {
+        if (!cancelled) {
+          setBaseloadError(error instanceof Error ? error.message : String(error));
+        }
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(refresh, 2_000);
     return () => {
-      baseloadRuntimeRef.current?.dispose();
-      baseloadRuntimeRef.current = null;
+      cancelled = true;
+      window.clearInterval(interval);
     };
   }, []);
-
-  useEffect(() => {
-    baseloadRuntimeRef.current?.sync(baseloadConfig);
-    saveStoredBaseloadConfig(baseloadConfig);
-  }, [baseloadConfig]);
 
   useEffect(() => {
     if (transactionDataEnabled === false && view === "transactions" && writePermalink("blocks", {})) {
@@ -70,6 +84,17 @@ export function App() {
 
   const onTimeZoneChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setTimeZoneState({ timeZone: event.target.value });
+  };
+
+  const updateBaseloadConfig = async (config: BaseloadConfig) => {
+    try {
+      const state = await putBaseloadConfig(config);
+      setBaseloadConfig(state.config);
+      setBaseloadTaskStatuses(state.statuses);
+      setBaseloadError(state.enabled ? null : "BASELOAD_RPC_NODE is not configured on the backend");
+    } catch (error) {
+      setBaseloadError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   return (
@@ -162,8 +187,9 @@ export function App() {
         ) : activeView === "baseload" ? (
           <BaseloadView
             config={baseloadConfig}
-            onConfigChange={setBaseloadConfig}
+            onConfigChange={updateBaseloadConfig}
             taskStatuses={baseloadTaskStatuses}
+            backendError={baseloadError}
           />
         ) : (
           <HealthView timeZone={timeZone} />
