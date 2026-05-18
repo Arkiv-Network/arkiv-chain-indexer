@@ -21,9 +21,11 @@ describe("baseload config helpers", () => {
       singleCreateStringArgumentCount: 2,
       singleCreateNumberArgumentCount: 2,
       walletNumber: 7,
+      walletAddress: "0x15cf3D9b2F65Ef7fb29643c7a73C737C44e69D19",
       startBlock: 0,
       endBlock: null,
       durationSeconds: null,
+      ttlSeconds: 3600,
     });
   });
 
@@ -40,6 +42,7 @@ describe("baseload config helpers", () => {
           startBlock: "10",
           endBlock: "20",
           durationSeconds: "60",
+          ttlSeconds: "120",
         },
       ],
     });
@@ -55,12 +58,22 @@ describe("baseload config helpers", () => {
           singleCreateStringArgumentCount: 3,
           singleCreateNumberArgumentCount: 4,
           walletNumber: 1,
+          walletAddress: "0x8C59ca3A3BF65F5C530Eb5Ea67F2bd4b37049cf2",
           startBlock: 10,
           endBlock: 20,
           durationSeconds: 60,
+          ttlSeconds: 120,
         },
       ],
     });
+  });
+
+  test("fills the default TTL for older configs", () => {
+    const config = normalizeBaseloadConfig({
+      workers: [{ walletNumber: 0 }],
+    });
+
+    expect(config.workers[0].ttlSeconds).toBe(3600);
   });
 
   test("rejects duplicate wallets", () => {
@@ -106,9 +119,11 @@ describe("baseload config helpers", () => {
           singleCreateStringArgumentCount: 2,
           singleCreateNumberArgumentCount: 2,
           walletNumber: 4,
+          walletAddress: "0xB73715983FE14431d3112f5303b033D797cb8F61",
           startBlock: 0,
           endBlock: null,
           durationSeconds: null,
+          ttlSeconds: 3600,
         },
       ],
     });

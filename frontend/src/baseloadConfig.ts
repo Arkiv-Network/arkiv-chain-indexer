@@ -1,3 +1,5 @@
+import { deriveBaseloadWalletAddress, getBaseloadMnemonic } from "./baseloadWallets";
+
 export interface BaseloadWorkerConfig {
   id: string;
   maxGasPriceGwei: number;
@@ -6,9 +8,11 @@ export interface BaseloadWorkerConfig {
   singleCreateStringArgumentCount: number;
   singleCreateNumberArgumentCount: number;
   walletNumber: number;
+  walletAddress: string;
   startBlock: number;
   endBlock: number | null;
   durationSeconds: number | null;
+  ttlSeconds: number;
 }
 
 export interface BaseloadConfig {
@@ -26,6 +30,7 @@ export interface BaseloadWorkerDraft {
   startBlock: string;
   endBlock: string;
   durationSeconds: string;
+  ttlSeconds: string;
 }
 
 export const BASELOAD_CONFIG_VERSION = 1;
@@ -41,6 +46,7 @@ export const DEFAULT_BASELOAD_WORKER_VALUES = {
   startBlock: 0,
   endBlock: null,
   durationSeconds: null,
+  ttlSeconds: 3600,
 } as const;
 
 export const EMPTY_BASELOAD_CONFIG: BaseloadConfig = {
@@ -63,6 +69,7 @@ export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerD
     startBlock: String(DEFAULT_BASELOAD_WORKER_VALUES.startBlock),
     endBlock: "",
     durationSeconds: "",
+    ttlSeconds: String(DEFAULT_BASELOAD_WORKER_VALUES.ttlSeconds),
   };
 }
 
@@ -112,6 +119,10 @@ export function createBaseloadWorkerFromDraft(draft: BaseloadWorkerDraft): Basel
             allowFloat: false,
             min: 1,
           }),
+    ttlSeconds: parseFiniteNumber("TTL seconds", draft.ttlSeconds, {
+      allowFloat: false,
+      min: 1,
+    }),
   });
 }
 
@@ -183,6 +194,7 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
     min: MIN_WALLET_NUMBER,
     max: MAX_WALLET_NUMBER,
   });
+  const walletAddress = deriveBaseloadWalletAddress(walletNumber, getBaseloadMnemonic());
   const startBlock = coerceInteger("Start block", input.startBlock, { min: 0 });
   const endBlock = coerceNullableInteger("End block", input.endBlock, { min: 0 });
 
@@ -214,9 +226,11 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
       { min: 0 },
     ),
     walletNumber,
+    walletAddress,
     startBlock,
     endBlock,
     durationSeconds: coerceNullableInteger("Duration seconds", input.durationSeconds, { min: 1 }),
+    ttlSeconds: coerceInteger("TTL seconds", input.ttlSeconds, { min: 1 }),
   };
 }
 
@@ -301,6 +315,8 @@ function defaultNumberFor(label: string): number {
       return DEFAULT_BASELOAD_WORKER_VALUES.singleCreateNumberArgumentCount;
     case "Start block":
       return DEFAULT_BASELOAD_WORKER_VALUES.startBlock;
+    case "TTL seconds":
+      return DEFAULT_BASELOAD_WORKER_VALUES.ttlSeconds;
     default:
       return 0;
   }

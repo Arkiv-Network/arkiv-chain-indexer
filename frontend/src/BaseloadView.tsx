@@ -203,6 +203,16 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
             onChange={onDraftChange("durationSeconds")}
           />
         </label>
+        <label>
+          Entry TTL seconds
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={draft.ttlSeconds}
+            onChange={onDraftChange("ttlSeconds")}
+          />
+        </label>
         <button type="submit" disabled={availableWallets.length === 0}>
           Add worker
         </button>
@@ -217,6 +227,7 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
           <thead>
             <tr>
               <th scope="col">Wallet</th>
+              <th scope="col">Address</th>
               <th scope="col">Max gas gwei</th>
               <th scope="col">Creates/min</th>
               <th scope="col">Payload size</th>
@@ -225,6 +236,7 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
               <th scope="col">Start block</th>
               <th scope="col">End block</th>
               <th scope="col">Duration sec</th>
+              <th scope="col">TTL sec</th>
               <th scope="col">Task</th>
               <th scope="col">Actions</th>
             </tr>
@@ -232,12 +244,13 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
           <tbody>
             {config.workers.length === 0 ? (
               <tr>
-                <td colSpan={11}>No baseload workers configured.</td>
+                <td colSpan={13}>No baseload workers configured.</td>
               </tr>
             ) : (
               config.workers.map((worker) => (
                 <tr key={worker.id}>
                   <td className="num">{worker.walletNumber}</td>
+                  <td className="wallet-address">{worker.walletAddress}</td>
                   <td>
                     <EditableNumber
                       value={worker.maxGasPriceGwei}
@@ -319,6 +332,17 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
                       step="1"
                       integer
                       onChange={(value) => updateWorker(worker, { durationSeconds: value })}
+                    />
+                  </td>
+                  <td>
+                    <EditableNumber
+                      value={worker.ttlSeconds}
+                      min={1}
+                      step="1"
+                      integer
+                      onChange={(value) => {
+                        if (value !== null) updateWorker(worker, { ttlSeconds: value });
+                      }}
                     />
                   </td>
                   <td>{taskStatuses[worker.id]?.status ?? "starting"}</td>

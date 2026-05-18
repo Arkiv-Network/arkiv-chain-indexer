@@ -259,6 +259,14 @@ td.num {
   vertical-align: middle;
 }
 
+.wallet-address {
+  max-width: 15rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
 .table-input {
   width: 8rem;
   padding: 0.35rem 0.45rem;
