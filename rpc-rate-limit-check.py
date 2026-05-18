@@ -1,11 +1,15 @@
 import asyncio
 import json
+import os
 import ssl
 import time
 from urllib.parse import urlparse
 
 rpc_url = "https://braga.hoodi.arkiv.network/rpc"
 headers = {"Content-Type": "application/json"}
+braga_no_limit_key = os.getenv("BRAGA_NO_LIMIT_KEY")
+if braga_no_limit_key:
+    headers["X-Api-Key"] = braga_no_limit_key
 request_timeout_seconds = 15
 
 
