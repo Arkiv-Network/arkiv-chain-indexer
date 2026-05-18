@@ -95,7 +95,6 @@ services:
       PORT: 23560
       BACKEND_HOST: backend
       BACKEND_PORT: 3000
-      MNEMONIC: ${MNEMONIC:-parent picture garment parrot churn record stadium pill rocket craft fish fiscal clip virus view diary replace wealth extra kitten door enforce piece nut}
     ports:
       - target: 23560
         published: "${ARKIV_TESTS_PORT:-20155}"
