@@ -154,10 +154,62 @@ export interface HealthResponse {
   };
 }
 
+export interface BaseloadWorkerConfig {
+  id: string;
+  maxGasPriceGwei: number;
+  createsPerMinute: number;
+  singleCreatePayloadSize: number;
+  singleCreateStringArgumentCount: number;
+  singleCreateNumberArgumentCount: number;
+  walletNumber: number;
+  walletAddress: string;
+  startBlock: number;
+  endBlock: number | null;
+  durationSeconds: number | null;
+  ttlSeconds: number;
+}
+
+export interface BaseloadConfig {
+  version: 1;
+  workers: BaseloadWorkerConfig[];
+}
+
+export interface BaseloadTaskStatus {
+  workerId: string;
+  walletNumber: number;
+  status: "starting" | "ready" | "updated" | "running" | "waiting" | "completed" | "error" | "stopped";
+  updatedAt: string;
+  currentBlock?: number;
+  message?: string;
+  attemptedCount?: number;
+  createdCount?: number;
+  entityKey?: string;
+  txHash?: string;
+}
+
+export interface BaseloadStateResponse {
+  enabled: boolean;
+  config: BaseloadConfig;
+  statuses: Record<string, BaseloadTaskStatus>;
+}
+
 async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
   const qs = params.toString();
   const url = qs ? `/api${path}?${qs}` : `/api${path}`;
   const response = await fetch(url);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -183,4 +235,12 @@ export function fetchTransactions(params: URLSearchParams): Promise<Transactions
 
 export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", new URLSearchParams());
+}
+
+export function fetchBaseloadState(): Promise<BaseloadStateResponse> {
+  return getJson<BaseloadStateResponse>("/baseload", new URLSearchParams());
+}
+
+export function updateBaseloadConfig(config: BaseloadConfig): Promise<BaseloadStateResponse> {
+  return putJson<BaseloadStateResponse>("/baseload", config);
 }

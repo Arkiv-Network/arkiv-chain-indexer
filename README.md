@@ -37,6 +37,10 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 The aggregator container runs `bun run aggregate-all` which walks every supported range size and sleeps for one
 minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
 
+Baseload workers run in the backend service, not in the browser. Set `BASELOAD_RPC_NODE` to the Arkiv JSON-RPC
+endpoint that should receive create transactions. The frontend only adds, edits, deletes, imports, exports, and
+monitors worker configuration through `/api/baseload`.
+
 To do a quick bounded backfill instead of continuous near-head scanning, set `SCANNER_FROM_BLOCK` and
 `SCANNER_TO_BLOCK` in `.env`.
 
@@ -132,6 +136,34 @@ Show help:
 ```sh
 bun run scan -- --help
 ```
+
+## Baseload Backend Workers
+
+The Baseload view is a control plane for backend tasks. It never sends Arkiv RPC calls or private-key material
+from the browser. All create transactions are produced by the backend process using `@arkiv-network/sdk`.
+
+Backend configuration:
+
+| Environment variable | Default | Description |
+| --- | --- | --- |
+| `BASELOAD_RPC_NODE` | unset | Arkiv JSON-RPC endpoint used by backend workers for block reads, transaction sends, and receipt polling. |
+| `BASELOAD_MNEMONIC` | deterministic development mnemonic | Mnemonic used by the backend to derive worker wallets at `m/44'/60'/0'/0/<walletNumber>`. |
+
+Worker behavior:
+
+- Each configured worker runs on the backend within its configured start block, optional end block, and optional duration.
+- Each worker targets up to its configured create transactions per minute. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
+- Each worker sends only one create transaction at a time and waits for the transaction receipt before submitting the next create.
+- Gas is set aggressively from the worker's max gas price: both `maxFeePerGas` and `maxPriorityFeePerGas` use the configured gwei value.
+- Each create uses a random binary payload of the configured size, a project attribute, and the configured count of random string and numeric attributes. Defaults are two string attributes and two numeric attributes.
+- Entity TTL is set from the worker's TTL seconds value.
+
+Backend API:
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/baseload` | Returns backend Baseload enabled state, current config, and worker statuses. |
+| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. |
 
 ## Stored Metrics
 

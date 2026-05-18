@@ -7,6 +7,7 @@
       "dependencies": {
         "@arkiv-network/sdk": "file:arkiv-sdk-js/arkiv-network-sdk-latest.tgz",
         "pg": "^8.20.0",
+        "viem": "^2.38.2",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",

@@ -12,15 +12,16 @@ import {
   type BaseloadWorkerConfig,
   type BaseloadWorkerDraft,
 } from "./baseloadConfig";
-import { type BaseloadTaskStatus } from "./baseloadWorkerRuntime";
+import { type BaseloadTaskStatus } from "./api";
 
 interface BaseloadViewProps {
   config: BaseloadConfig;
-  onConfigChange: React.Dispatch<React.SetStateAction<BaseloadConfig>>;
+  onConfigChange: (config: BaseloadConfig) => void | Promise<void>;
   taskStatuses: Record<string, BaseloadTaskStatus>;
+  backendError: string | null;
 }
 
-export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadViewProps) {
+export function BaseloadView({ config, onConfigChange, taskStatuses, backendError }: BaseloadViewProps) {
   const availableWallets = useMemo(() => getAvailableWalletNumbers(config.workers), [config.workers]);
   const [draft, setDraft] = useState<BaseloadWorkerDraft>(() =>
     createBaseloadWorkerDraft(availableWallets[0] ?? 0),
@@ -52,7 +53,7 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
         ...config,
         workers: [...config.workers, worker],
       });
-      onConfigChange(nextConfig);
+      void onConfigChange(nextConfig);
       const nextWallet = getAvailableWalletNumbers(nextConfig.workers)[0] ?? 0;
       setDraft(createBaseloadWorkerDraft(nextWallet));
       setError(null);
@@ -64,7 +65,7 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
 
   const updateWorker = (worker: BaseloadWorkerConfig, patch: Partial<BaseloadWorkerConfig>) => {
     try {
-      onConfigChange((current) => updateBaseloadWorker(current, worker.id, patch));
+      void onConfigChange(updateBaseloadWorker(config, worker.id, patch));
       setError(null);
       setDownloadStatus("");
     } catch (err) {
@@ -73,7 +74,7 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
   };
 
   const deleteWorker = (workerId: string) => {
-    onConfigChange((current) => removeBaseloadWorker(current, workerId));
+    void onConfigChange(removeBaseloadWorker(config, workerId));
     setError(null);
     setDownloadStatus("");
   };
@@ -96,7 +97,7 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
 
     try {
       const nextConfig = parseBaseloadConfigJson(await file.text());
-      onConfigChange(nextConfig);
+      await onConfigChange(nextConfig);
       setDraft(createBaseloadWorkerDraft(getAvailableWalletNumbers(nextConfig.workers)[0] ?? 0));
       setError(null);
       setDownloadStatus("");
@@ -218,8 +219,8 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
         </button>
       </form>
 
-      <p className={`summary${error ? " error" : ""}`}>
-        {error ? error : downloadStatus || `${config.workers.length} workers configured`}
+      <p className={`summary${error || backendError ? " error" : ""}`}>
+        {error || backendError || downloadStatus || `${config.workers.length} workers configured`}
       </p>
 
       <div className="table-wrap">

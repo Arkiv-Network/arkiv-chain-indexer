@@ -6,8 +6,9 @@ import {
   getBaseloadLimitState,
   getMillisecondsUntilNextMinute,
   getMinuteAttemptLimit,
-} from "./src/baseloadTaskHelpers";
-import { type BaseloadWorkerConfig } from "./src/baseloadConfig";
+  parseGweiToWei,
+} from "./baseloadTaskHelpers";
+import { type BaseloadWorkerConfig } from "./baseloadConfig";
 
 describe("baseload task helpers", () => {
   test("uses whole minute attempt budgets without fractional carryover", () => {
@@ -67,6 +68,12 @@ describe("baseload task helpers", () => {
     );
 
     expect(attributes).toEqual([BASELOAD_PROJECT_ATTRIBUTE]);
+  });
+
+  test("converts gwei decimals to wei", () => {
+    expect(parseGweiToWei(1)).toBe(1_000_000_000n);
+    expect(parseGweiToWei(0.1)).toBe(100_000_000n);
+    expect(parseGweiToWei(5.123456789)).toBe(5_123_456_789n);
   });
 });
 

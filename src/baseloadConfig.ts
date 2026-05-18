@@ -1,6 +1,24 @@
-import { type BaseloadConfig, type BaseloadWorkerConfig } from "./api";
+import { mnemonicToAccount } from "viem/accounts";
 
-export type { BaseloadConfig, BaseloadWorkerConfig } from "./api";
+export interface BaseloadWorkerConfig {
+  id: string;
+  maxGasPriceGwei: number;
+  createsPerMinute: number;
+  singleCreatePayloadSize: number;
+  singleCreateStringArgumentCount: number;
+  singleCreateNumberArgumentCount: number;
+  walletNumber: number;
+  walletAddress: string;
+  startBlock: number;
+  endBlock: number | null;
+  durationSeconds: number | null;
+  ttlSeconds: number;
+}
+
+export interface BaseloadConfig {
+  version: 1;
+  workers: BaseloadWorkerConfig[];
+}
 
 export interface BaseloadWorkerDraft {
   maxGasPriceGwei: string;
@@ -15,9 +33,17 @@ export interface BaseloadWorkerDraft {
   ttlSeconds: string;
 }
 
+export interface BaseloadRuntimeConfig {
+  rpcUrl: string | null;
+  mnemonic: string;
+}
+
 export const BASELOAD_CONFIG_VERSION = 1;
 export const MIN_WALLET_NUMBER = 0;
 export const MAX_WALLET_NUMBER = 100;
+export const BASELOAD_DERIVATION_PATH_PREFIX = "m/44'/60'/0'/0";
+export const DEFAULT_BASELOAD_MNEMONIC =
+  "parent picture garment parrot churn record stadium pill rocket craft fish fiscal clip virus view diary replace wealth extra kitten door enforce piece nut";
 
 export const DEFAULT_BASELOAD_WORKER_VALUES = {
   maxGasPriceGwei: 1000,
@@ -35,6 +61,12 @@ export const EMPTY_BASELOAD_CONFIG: BaseloadConfig = {
   version: BASELOAD_CONFIG_VERSION,
   workers: [],
 };
+
+export function parseBaseloadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): BaseloadRuntimeConfig {
+  const rpcUrl = env.BASELOAD_RPC_NODE?.trim() || null;
+  const mnemonic = env.BASELOAD_MNEMONIC?.trim() || env.MNEMONIC?.trim() || DEFAULT_BASELOAD_MNEMONIC;
+  return { rpcUrl, mnemonic };
+}
 
 export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerDraft {
   return {
@@ -55,67 +87,76 @@ export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerD
   };
 }
 
-export function createBaseloadWorkerFromDraft(draft: BaseloadWorkerDraft): BaseloadWorkerConfig {
-  return normalizeBaseloadWorker({
-    ...DEFAULT_BASELOAD_WORKER_VALUES,
-    id: createWorkerId(Number(draft.walletNumber)),
-    maxGasPriceGwei: parseFiniteNumber("Max gas price accepted gwei", draft.maxGasPriceGwei, {
-      allowFloat: true,
-      min: 0,
-    }),
-    createsPerMinute: parseFiniteNumber("Number of creates per minute", draft.createsPerMinute, {
-      allowFloat: true,
-      min: 0,
-    }),
-    singleCreatePayloadSize: parseFiniteNumber("Single create payload size", draft.singleCreatePayloadSize, {
-      allowFloat: false,
-      min: 0,
-    }),
-    singleCreateStringArgumentCount: parseFiniteNumber(
-      "Single create string argument number",
-      draft.singleCreateStringArgumentCount,
-      { allowFloat: false, min: 0 },
-    ),
-    singleCreateNumberArgumentCount: parseFiniteNumber(
-      "Single create number argument number",
-      draft.singleCreateNumberArgumentCount,
-      { allowFloat: false, min: 0 },
-    ),
-    walletNumber: parseFiniteNumber("Wallet number", draft.walletNumber, {
-      allowFloat: false,
-      min: MIN_WALLET_NUMBER,
-      max: MAX_WALLET_NUMBER,
-    }),
-    startBlock: parseFiniteNumber("Start block", draft.startBlock, {
-      allowFloat: false,
-      min: 0,
-    }),
-    endBlock:
-      draft.endBlock.trim() === ""
-        ? null
-        : parseFiniteNumber("End block", draft.endBlock, { allowFloat: false, min: 0 }),
-    durationSeconds:
-      draft.durationSeconds.trim() === ""
-        ? null
-        : parseFiniteNumber("Duration seconds", draft.durationSeconds, {
-            allowFloat: false,
-            min: 1,
-          }),
-    ttlSeconds: parseFiniteNumber("TTL seconds", draft.ttlSeconds, {
-      allowFloat: false,
-      min: 1,
-    }),
-  });
+export function createBaseloadWorkerFromDraft(
+  draft: BaseloadWorkerDraft,
+  mnemonic = DEFAULT_BASELOAD_MNEMONIC,
+): BaseloadWorkerConfig {
+  return normalizeBaseloadWorker(
+    {
+      ...DEFAULT_BASELOAD_WORKER_VALUES,
+      id: createWorkerId(Number(draft.walletNumber)),
+      maxGasPriceGwei: parseFiniteNumber("Max gas price accepted gwei", draft.maxGasPriceGwei, {
+        allowFloat: true,
+        min: 0,
+      }),
+      createsPerMinute: parseFiniteNumber("Number of creates per minute", draft.createsPerMinute, {
+        allowFloat: true,
+        min: 0,
+      }),
+      singleCreatePayloadSize: parseFiniteNumber("Single create payload size", draft.singleCreatePayloadSize, {
+        allowFloat: false,
+        min: 0,
+      }),
+      singleCreateStringArgumentCount: parseFiniteNumber(
+        "Single create string argument number",
+        draft.singleCreateStringArgumentCount,
+        { allowFloat: false, min: 0 },
+      ),
+      singleCreateNumberArgumentCount: parseFiniteNumber(
+        "Single create number argument number",
+        draft.singleCreateNumberArgumentCount,
+        { allowFloat: false, min: 0 },
+      ),
+      walletNumber: parseFiniteNumber("Wallet number", draft.walletNumber, {
+        allowFloat: false,
+        min: MIN_WALLET_NUMBER,
+        max: MAX_WALLET_NUMBER,
+      }),
+      startBlock: parseFiniteNumber("Start block", draft.startBlock, {
+        allowFloat: false,
+        min: 0,
+      }),
+      endBlock:
+        draft.endBlock.trim() === ""
+          ? null
+          : parseFiniteNumber("End block", draft.endBlock, { allowFloat: false, min: 0 }),
+      durationSeconds:
+        draft.durationSeconds.trim() === ""
+          ? null
+          : parseFiniteNumber("Duration seconds", draft.durationSeconds, {
+              allowFloat: false,
+              min: 1,
+            }),
+      ttlSeconds: parseFiniteNumber("TTL seconds", draft.ttlSeconds, {
+        allowFloat: false,
+        min: 1,
+      }),
+    },
+    mnemonic,
+  );
 }
 
-export function normalizeBaseloadConfig(value: unknown): BaseloadConfig {
+export function normalizeBaseloadConfig(
+  value: unknown,
+  mnemonic = DEFAULT_BASELOAD_MNEMONIC,
+): BaseloadConfig {
   if (value === null || typeof value !== "object") {
     throw new Error("Baseload configuration must be a JSON object");
   }
 
   const input = value as Partial<BaseloadConfig>;
   const rawWorkers = Array.isArray(input.workers) ? input.workers : [];
-  const workers = rawWorkers.map((worker) => normalizeBaseloadWorker(worker));
+  const workers = rawWorkers.map((worker) => normalizeBaseloadWorker(worker, mnemonic));
   assertUniqueWallets(workers);
 
   return {
@@ -124,14 +165,17 @@ export function normalizeBaseloadConfig(value: unknown): BaseloadConfig {
   };
 }
 
-export function parseBaseloadConfigJson(json: string): BaseloadConfig {
+export function parseBaseloadConfigJson(
+  json: string,
+  mnemonic = DEFAULT_BASELOAD_MNEMONIC,
+): BaseloadConfig {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
   } catch {
     throw new Error("Configuration file is not valid JSON");
   }
-  return normalizeBaseloadConfig(parsed);
+  return normalizeBaseloadConfig(parsed, mnemonic);
 }
 
 export function serializeBaseloadConfig(config: BaseloadConfig): string {
@@ -151,9 +195,10 @@ export function updateBaseloadWorker(
   config: BaseloadConfig,
   workerId: string,
   patch: Partial<BaseloadWorkerConfig>,
+  mnemonic = DEFAULT_BASELOAD_MNEMONIC,
 ): BaseloadConfig {
   const workers = config.workers.map((worker) =>
-    worker.id === workerId ? normalizeBaseloadWorker({ ...worker, ...patch }) : worker,
+    worker.id === workerId ? normalizeBaseloadWorker({ ...worker, ...patch }, mnemonic) : worker,
   );
   assertUniqueWallets(workers);
   return { version: BASELOAD_CONFIG_VERSION, workers };
@@ -166,7 +211,19 @@ export function removeBaseloadWorker(config: BaseloadConfig, workerId: string): 
   };
 }
 
-function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
+export function deriveBaseloadWalletAddress(
+  walletNumber: number,
+  mnemonic = DEFAULT_BASELOAD_MNEMONIC,
+): string {
+  return mnemonicToAccount(mnemonic.trim(), {
+    path: `${BASELOAD_DERIVATION_PATH_PREFIX}/${walletNumber}`,
+  }).address;
+}
+
+function normalizeBaseloadWorker(
+  value: unknown,
+  mnemonic = DEFAULT_BASELOAD_MNEMONIC,
+): BaseloadWorkerConfig {
   if (value === null || typeof value !== "object") {
     throw new Error("Each baseload worker must be a JSON object");
   }
@@ -207,7 +264,7 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
       { min: 0 },
     ),
     walletNumber,
-    walletAddress: typeof input.walletAddress === "string" ? input.walletAddress : "",
+    walletAddress: deriveBaseloadWalletAddress(walletNumber, mnemonic),
     startBlock,
     endBlock,
     durationSeconds: coerceNullableInteger("Duration seconds", input.durationSeconds, { min: 1 }),
