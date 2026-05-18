@@ -10,6 +10,7 @@ const PORT = Number.parseInt(process.env.PORT ?? "23560", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
 const BACKEND_HOST = process.env.BACKEND_HOST ?? "backend";
 const BACKEND_PORT = Number.parseInt(process.env.BACKEND_PORT ?? "3000", 10);
+const BASELOAD_MNEMONIC = process.env.BASELOAD_MNEMONIC ?? process.env.MNEMONIC ?? "";
 const STATIC_DIR = path.resolve(__dirname, "dist");
 const INDEX_FILE = path.join(STATIC_DIR, "index.html");
 
@@ -79,6 +80,18 @@ function proxyApi(req, res) {
   req.pipe(proxyReq);
 }
 
+function sendRuntimeConfig(res) {
+  res.writeHead(200, {
+    "cache-control": "no-store",
+    "content-type": "application/javascript; charset=utf-8",
+  });
+  res.end(
+    `window.__ARKIV_CONFIG__ = ${JSON.stringify({
+      baseloadMnemonic: BASELOAD_MNEMONIC,
+    })};\n`,
+  );
+}
+
 async function serveStatic(req, res) {
   const rawPath = (req.url ?? "/").split("?")[0];
   const decoded = decodeURIComponent(rawPath);
@@ -112,6 +125,10 @@ async function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = req.url ?? "/";
+  if (url === "/runtime-config.js" || url.startsWith("/runtime-config.js?")) {
+    sendRuntimeConfig(res);
+    return;
+  }
   if (url === "/api" || url.startsWith("/api/") || url.startsWith("/api?")) {
     proxyApi(req, res);
     return;
