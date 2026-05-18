@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
+import { addressDisplay } from "./addressAliases";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import {
   buildPermalinkHref,
@@ -105,13 +106,13 @@ function transactionColumns(timeZone: string): Column[] {
     key: "from",
     label: "From",
     width: "12rem",
-    render: (row) => <span className="mono truncate">{shortHash(row.from)}</span>,
+    render: (row) => <AddressCell address={row.from} />,
   },
   {
     key: "to",
     label: "To / contract",
     width: "12rem",
-    render: (row) => <span className="mono truncate">{shortHash(row.to ?? row.contractAddress)}</span>,
+    render: (row) => <AddressCell address={row.to ?? row.contractAddress} />,
   },
   {
     key: "type",
@@ -394,6 +395,15 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
         </table>
       </div>
     </section>
+  );
+}
+
+function AddressCell({ address }: { address: string | null | undefined }) {
+  const display = addressDisplay(address);
+  return (
+    <span className="mono truncate" title={display.title}>
+      {display.label}
+    </span>
   );
 }
 
