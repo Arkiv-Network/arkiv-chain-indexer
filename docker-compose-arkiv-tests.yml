@@ -21,6 +21,7 @@ services:
       args:
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -47,6 +48,7 @@ services:
       args:
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -63,6 +65,7 @@ services:
       args:
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
     restart: unless-stopped
     depends_on:
       postgres:

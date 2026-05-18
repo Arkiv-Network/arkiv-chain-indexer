@@ -1,4 +1,5 @@
 node_modules/
+arkiv-sdk-js/
 .env
 .env.local
 .env.*.local
