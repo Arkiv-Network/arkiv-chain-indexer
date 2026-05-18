@@ -1,10 +1,17 @@
 import { type BaseloadConfig, type BaseloadWorkerConfig } from "./baseloadConfig";
+import { getBaseloadMnemonic } from "./baseloadWallets";
 
 export interface BaseloadTaskStatus {
   workerId: string;
   walletNumber: number;
-  status: "starting" | "ready" | "updated" | "stopped";
+  status: "starting" | "ready" | "updated" | "running" | "waiting" | "completed" | "error" | "stopped";
   updatedAt: string;
+  currentBlock?: number;
+  message?: string;
+  attemptedCount?: number;
+  createdCount?: number;
+  entityKey?: string;
+  txHash?: string;
 }
 
 interface TaskHandle {
@@ -50,6 +57,12 @@ export class BaseloadWorkerRuntime {
               walletNumber: event.data.walletNumber ?? workerConfig.walletNumber,
               status: event.data.status,
               updatedAt: event.data.updatedAt,
+              currentBlock: event.data.currentBlock,
+              message: event.data.message,
+              attemptedCount: event.data.attemptedCount,
+              createdCount: event.data.createdCount,
+              entityKey: event.data.entityKey,
+              txHash: event.data.txHash,
             });
           }
         };
@@ -60,10 +73,10 @@ export class BaseloadWorkerRuntime {
           status: "starting",
           updatedAt: new Date().toISOString(),
         });
-        task.postMessage({ type: "start", worker: workerConfig });
+        task.postMessage({ type: "start", worker: workerConfig, mnemonic: getBaseloadMnemonic() });
       } else if (JSON.stringify(existing.workerConfig) !== JSON.stringify(workerConfig)) {
         existing.workerConfig = workerConfig;
-        existing.task.postMessage({ type: "update", worker: workerConfig });
+        existing.task.postMessage({ type: "update", worker: workerConfig, mnemonic: getBaseloadMnemonic() });
       }
     }
   }
@@ -89,12 +102,24 @@ function isTaskStatusMessage(value: unknown): value is {
   workerId: string | null;
   walletNumber: number | null;
   updatedAt: string;
+  currentBlock?: number;
+  message?: string;
+  attemptedCount?: number;
+  createdCount?: number;
+  entityKey?: string;
+  txHash?: string;
 } {
   if (value === null || typeof value !== "object") return false;
   const message = value as { type?: unknown; status?: unknown; updatedAt?: unknown };
   return (
     message.type === "status" &&
-    (message.status === "ready" || message.status === "updated" || message.status === "stopped") &&
+    (message.status === "ready" ||
+      message.status === "updated" ||
+      message.status === "running" ||
+      message.status === "waiting" ||
+      message.status === "completed" ||
+      message.status === "error" ||
+      message.status === "stopped") &&
     typeof message.updatedAt === "string"
   );
 }

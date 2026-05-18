@@ -345,7 +345,9 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
                       }}
                     />
                   </td>
-                  <td>{taskStatuses[worker.id]?.status ?? "starting"}</td>
+                  <td>
+                    <TaskStatusCell status={taskStatuses[worker.id]} />
+                  </td>
                   <td>
                     <button type="button" className="secondary" onClick={() => deleteWorker(worker.id)}>
                       Delete
@@ -359,6 +361,23 @@ export function BaseloadView({ config, onConfigChange, taskStatuses }: BaseloadV
       </div>
     </section>
   );
+}
+
+function TaskStatusCell({ status }: { status: BaseloadTaskStatus | undefined }) {
+  if (!status) return "starting";
+  const count =
+    status.attemptedCount === undefined
+      ? ""
+      : ` ${status.createdCount ?? 0}/${status.attemptedCount}`;
+  const block = status.currentBlock === undefined ? "" : ` block ${status.currentBlock}`;
+  const tx = status.txHash ? ` tx ${shortHash(status.txHash)}` : "";
+  const label = `${status.status}${count}${block}${tx}`;
+
+  return <span title={status.message ?? status.txHash ?? status.entityKey}>{label}</span>;
+}
+
+function shortHash(value: string): string {
+  return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
 function EditableNumber({

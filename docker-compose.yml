@@ -92,6 +92,7 @@ services:
       PORT: 23560
       BACKEND_HOST: backend
       BACKEND_PORT: 3000
+      BASELOAD_MNEMONIC: ${BASELOAD_MNEMONIC:-}
     ports:
       - "${FRONTEND_PORT:-23560}:23560"
 
