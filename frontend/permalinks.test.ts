@@ -14,6 +14,10 @@ describe("frontend permalink helpers", () => {
     expect(readViewFromSearch("?view=health")).toBe("health");
   });
 
+  test("reads the baseload view", () => {
+    expect(readViewFromSearch("?view=baseload")).toBe("baseload");
+  });
+
   test("falls back to blocks for unknown views", () => {
     expect(readViewFromSearch("?view=unknown")).toBe("blocks");
   });
