@@ -10,11 +10,9 @@ import {
 import {
   buildPermalinkHref,
   filtersEqual,
-  hasAnyFilterParam,
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
-import { loadFromStorage, usePersistentState } from "./persistentState";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -34,8 +32,6 @@ interface ChartsFilters extends Record<string, string> {
 }
 
 const FETCH_LIMIT = 1000;
-const STORAGE_KEY = "gas-tracker.filters.charts.v3";
-const SIDEBAR_STORAGE_KEY = "gas-tracker.charts.sidebarCollapsed";
 const FILTER_KEYS = ["zoom", "startDate", "blockStart", "blockEnd", "parameters"] as const;
 
 interface ZoomLevel {
@@ -315,9 +311,7 @@ function clearBlockWindow(filters: ChartsFilters): ChartsFilters {
 }
 
 function loadFilters(locationSearch: string): ChartsFilters {
-  const stored = loadFromStorage<ChartsFilters>(STORAGE_KEY, EMPTY);
-  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
-  const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+  const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
   return { ...merged, startDate: normalizeIsoDate(merged.startDate) };
 }
 
@@ -392,36 +386,18 @@ function pointKey(point: ChartPoint): string {
   return `${point.rangeSize}:${point.rangeStart}:${point.rangeEnd}`;
 }
 
-function loadSidebarCollapsed(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function saveSidebarCollapsed(value: boolean) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, value ? "1" : "0");
-  } catch {
-    // ignore
-  }
-}
-
 export function ChartsView({
   locationSearch,
   onLocationChange,
   timeZone,
   transactionDataEnabled,
 }: ChartsViewProps) {
-  const [filters, setFilters] = usePersistentState<ChartsFilters>(STORAGE_KEY, loadFilters(locationSearch));
+  const [filters, setFilters] = useState<ChartsFilters>(() => loadFilters(locationSearch));
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadSidebarCollapsed);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [selectedPointKey, setSelectedPointKey] = useState<string | null>(null);
 
   const zoomIndex = clampZoomIndex(filters.zoom);
@@ -496,10 +472,6 @@ export function ChartsView({
     setFilters((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
     setCopyStatus("");
   }, [locationSearch, setFilters]);
-
-  useEffect(() => {
-    saveSidebarCollapsed(sidebarCollapsed);
-  }, [sidebarCollapsed]);
 
   useEffect(() => {
     if (selectedPointKey !== null && !points.some((point) => pointKey(point) === selectedPointKey)) {

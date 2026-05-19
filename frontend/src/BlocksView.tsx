@@ -4,11 +4,9 @@ import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
-  hasAnyFilterParam,
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
-import { loadFromStorage, usePersistentState } from "./persistentState";
 
 interface BlocksViewProps {
   locationSearch: string;
@@ -25,7 +23,6 @@ interface Filters extends Record<string, string> {
 }
 
 const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
-const STORAGE_KEY = "gas-tracker.filters.blocks";
 const FILTER_KEYS = ["blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
 const EMPTY: Filters = {
   blockGt: "",
@@ -134,13 +131,11 @@ function buildParams(filters: Filters): URLSearchParams {
 }
 
 function loadFilters(locationSearch: string): Filters {
-  const stored = loadFromStorage<Filters>(STORAGE_KEY, EMPTY);
-  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
 }
 
 export function BlocksView({ locationSearch, onLocationChange, timeZone }: BlocksViewProps) {
-  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, loadFilters(locationSearch));
+  const [filters, setFilters] = useState<Filters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<BlocksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);

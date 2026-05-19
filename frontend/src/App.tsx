@@ -12,12 +12,9 @@ import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
-import { usePersistentState } from "./persistentState";
 import { RangesView } from "./RangesView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
-
-const TIME_ZONE_STORAGE_KEY = "gas-tracker.time-zone";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
@@ -26,12 +23,9 @@ export function App() {
   const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
   const [baseloadBalances, setBaseloadBalances] = useState<Record<string, BaseloadWorkerBalance>>({});
   const [baseloadError, setBaseloadError] = useState<string | null>(null);
-  const [timeZoneState, setTimeZoneState] = usePersistentState(TIME_ZONE_STORAGE_KEY, {
-    timeZone: detectBrowserTimeZone(),
-  });
+  const [timeZone, setTimeZone] = useState<string>(detectBrowserTimeZone);
   const view = readViewFromSearch(locationSearch);
   const activeView = transactionDataEnabled !== true && view === "transactions" ? "blocks" : view;
-  const timeZone = timeZoneState.timeZone;
 
   useEffect(() => {
     const onPopState = () => setLocationSearch(getCurrentSearch());
@@ -86,7 +80,7 @@ export function App() {
   };
 
   const onTimeZoneChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setTimeZoneState({ timeZone: event.target.value });
+    setTimeZone(event.target.value);
   };
 
   const updateBaseloadConfig = async (config: BaseloadConfig) => {

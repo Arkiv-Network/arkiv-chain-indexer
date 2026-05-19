@@ -5,11 +5,9 @@ import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
-  hasAnyFilterParam,
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
-import { loadFromStorage, usePersistentState } from "./persistentState";
 
 interface TransactionsViewProps {
   locationSearch: string;
@@ -63,7 +61,6 @@ interface Column {
   render: (row: StoredTransaction) => ReactNode;
 }
 
-const STORAGE_KEY = "gas-tracker.filters.transactions";
 const FILTER_KEYS = ["block", "blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
 const EMPTY: TransactionFilters = {
   block: "",
@@ -215,16 +212,11 @@ function transactionColumns(timeZone: string): Column[] {
 }
 
 function loadFilters(locationSearch: string): TransactionFilters {
-  const stored = loadFromStorage<TransactionFilters>(STORAGE_KEY, EMPTY);
-  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
 }
 
 export function TransactionsView({ locationSearch, onLocationChange, timeZone }: TransactionsViewProps) {
-  const [filters, setFilters] = usePersistentState<TransactionFilters>(
-    STORAGE_KEY,
-    loadFilters(locationSearch),
-  );
+  const [filters, setFilters] = useState<TransactionFilters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<TransactionFilters>(filters);
   const [data, setData] = useState<TransactionsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);

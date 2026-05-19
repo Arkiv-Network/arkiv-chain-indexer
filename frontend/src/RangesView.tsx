@@ -4,11 +4,9 @@ import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
-  hasAnyFilterParam,
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
-import { loadFromStorage, usePersistentState } from "./persistentState";
 
 interface RangesViewProps {
   locationSearch: string;
@@ -27,7 +25,6 @@ interface Filters extends Record<string, string> {
 
 const RANGE_SIZES = ["2", "5", "10", "20", "50", "100", "150", "200", "300", "500", "1000"];
 const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
-const STORAGE_KEY = "gas-tracker.filters.ranges";
 const FILTER_KEYS = ["rangeSize", "rangeStartGt", "rangeStartLt", "dateGt", "dateLt", "limit"] as const;
 const EMPTY: Filters = {
   rangeSize: "100",
@@ -199,13 +196,11 @@ function buildParams(filters: Filters): URLSearchParams {
 }
 
 function loadFilters(locationSearch: string): Filters {
-  const stored = loadFromStorage<Filters>(STORAGE_KEY, EMPTY);
-  const fallback = hasAnyFilterParam(locationSearch, FILTER_KEYS) ? EMPTY : stored;
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, fallback);
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
 }
 
 export function RangesView({ locationSearch, onLocationChange, timeZone }: RangesViewProps) {
-  const [filters, setFilters] = usePersistentState<Filters>(STORAGE_KEY, loadFilters(locationSearch));
+  const [filters, setFilters] = useState<Filters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<RangesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
