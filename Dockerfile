@@ -19,7 +19,7 @@ ARG BUILD_COMMIT=unknown
 ARG BUILD_DATE=unknown
 
 COPY --from=sdk-builder /sdk/arkiv-network-sdk-latest.tgz ./arkiv-sdk-js/arkiv-network-sdk-latest.tgz
-COPY package.json bun.lock ./
+COPY package.json ./
 RUN bun install
 
 COPY tsconfig.json ./
