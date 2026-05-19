@@ -91,7 +91,7 @@ export function parseGweiToWei(value: number): bigint {
   }
 
   const text = value.toFixed(9);
-  const [wholeRaw, fractionRaw = ""] = text.split(".");
+  const [wholeRaw = "", fractionRaw = ""] = text.split(".");
   const whole = wholeRaw === "" ? "0" : wholeRaw;
   const fraction = fractionRaw.padEnd(9, "0").slice(0, 9);
   if (!/^\d+$/.test(whole) || !/^\d{9}$/.test(fraction)) {

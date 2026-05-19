@@ -1,4 +1,4 @@
-import {ArkivClient, createWalletClient, http} from "@arkiv-network/sdk";
+import { createWalletClient, http } from "@arkiv-network/sdk";
 import { braga } from "@arkiv-network/sdk/chains";
 import { mnemonicToAccount } from "viem/accounts";
 import {
@@ -58,7 +58,7 @@ export interface BaseloadState {
 interface BaseloadArkivClient {
   createEntity: (
     data: ReturnType<typeof createBaseloadEntityInput>,
-    txParams: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint, gasLimit: bigint },
+    txParams: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gas: bigint },
   ) => Promise<{ entityKey: HexString; txHash: HexString }>;
 }
 
@@ -244,7 +244,7 @@ class BaseloadWorkerTask {
     let attemptedCount = 0;
     let createdCount = 0;
     let activeWorkerKey = configKey(this.worker);
-    let cachedClients: { key: string; arkiv: ArkivClient; rpc: BaseloadRpcClient } | null = null;
+    let cachedClients: { key: string; arkiv: BaseloadArkivClient; rpc: BaseloadRpcClient } | null = null;
 
     try {
       while (!this.abortController.signal.aborted) {
@@ -284,8 +284,9 @@ class BaseloadWorkerTask {
               rpc: createRpcClient(this.runtimeConfig.rpcUrl),
             };
           }
+          const clients = cachedClients;
 
-          const currentBlock = await cachedClients.rpc.getBlockNumber();
+          const currentBlock = await clients.rpc.getBlockNumber();
           const limitState = getBaseloadLimitState(worker, currentBlock, runStartedAtMs, nowMs);
 
           if (limitState.type === "before-start") {
@@ -362,12 +363,12 @@ class BaseloadWorkerTask {
           // There is an issue with gas estimation in SDK so just overwrite with safe value
           const SAFE_GAS_LIMIT = 500000n;
           const SUFFICIENT_PRIORITY_FEE_PER_GAS = 1n;
-          const result = await cachedClients.arkiv.createEntity(createBaseloadEntityInput(worker), {
+          const result = await clients.arkiv.createEntity(createBaseloadEntityInput(worker), {
             maxFeePerGas,
             maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
-            gas: SAFE_GAS_LIMIT
+            gas: SAFE_GAS_LIMIT,
           });
-          await cachedClients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
+          await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
 
           createdCount += 1;
           this.postStatus("running", {
@@ -520,7 +521,7 @@ function describeError(error: unknown): string {
 
     if (current instanceof Error) {
       const header = `${current.name}: ${current.message}`;
-      const extras = collectErrorExtras(current as Record<string, unknown>);
+      const extras = collectErrorExtras(current as unknown as Record<string, unknown>);
       const stack = typeof current.stack === "string" ? trimStack(current.stack) : "";
       parts.push([header, extras, stack].filter((part) => part).join("\n"));
       current = (current as Error & { cause?: unknown }).cause;
