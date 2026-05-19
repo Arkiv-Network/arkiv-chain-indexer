@@ -156,7 +156,7 @@ Worker behavior:
 - Each worker targets up to its configured create transactions per minute. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
 - Each worker sends only one create transaction at a time and waits for the transaction receipt before submitting the next create.
 - Gas is set aggressively from the worker's max gas price: both `maxFeePerGas` and `maxPriorityFeePerGas` use the configured gwei value.
-- Each create uses a payload of the configured size filled with a single repeated byte (0x77) so packed/compressed network traffic stays tiny while the entity still claims its declared size. Attributes are still randomized: a project attribute, plus the configured count of random string and numeric attributes (defaults are two of each).
+- Each create uses a random binary payload of the configured size, a project attribute, and the configured count of random string and numeric attributes. Defaults are two string attributes and two numeric attributes.
 - Entity TTL is set from the worker's TTL seconds value.
 
 Backend API:

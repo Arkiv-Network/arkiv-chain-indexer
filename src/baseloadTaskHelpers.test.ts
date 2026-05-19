@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  BASELOAD_PAYLOAD_FILL_BYTE,
   BASELOAD_PROJECT_ATTRIBUTE,
   createBaseloadAttributes,
   createBaseloadEntityInput,
@@ -50,14 +49,7 @@ describe("baseload task helpers", () => {
 
     const input = createBaseloadEntityInput(worker, fixedRandomBytes);
 
-    expect(input.payload).toHaveLength(5);
-    expect(Array.from(input.payload)).toEqual([
-      BASELOAD_PAYLOAD_FILL_BYTE,
-      BASELOAD_PAYLOAD_FILL_BYTE,
-      BASELOAD_PAYLOAD_FILL_BYTE,
-      BASELOAD_PAYLOAD_FILL_BYTE,
-      BASELOAD_PAYLOAD_FILL_BYTE,
-    ]);
+    expect(Array.from(input.payload)).toEqual([0, 1, 2, 3, 4]);
     expect(input.contentType).toBe("application/octet-stream");
     expect(input.expiresIn).toBe(120);
     expect(input.attributes).toHaveLength(4);
