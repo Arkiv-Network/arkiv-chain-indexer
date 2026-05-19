@@ -5,6 +5,11 @@ export const BASELOAD_PROJECT_ATTRIBUTE = {
   value: "arkiv-chain-indexer-baseload",
 } as const;
 
+// Sparse fill byte for entity payloads. We deliberately use a single repeated
+// byte (0x77) instead of random data so packed/compressed network traffic stays
+// tiny while the on-chain entity still claims the configured payload size.
+export const BASELOAD_PAYLOAD_FILL_BYTE = 0x77;
+
 export type BaseloadTaskLimitState =
   | { type: "before-start"; currentBlock: number }
   | { type: "after-end"; currentBlock: number }
@@ -51,8 +56,10 @@ export function createBaseloadEntityInput(
   worker: BaseloadWorkerConfig,
   randomBytes: RandomBytes = secureRandomBytes,
 ): BaseloadCreateInput {
+  const payload = new Uint8Array(worker.singleCreatePayloadSize);
+  payload.fill(BASELOAD_PAYLOAD_FILL_BYTE);
   return {
-    payload: randomBytes(worker.singleCreatePayloadSize),
+    payload,
     contentType: "application/octet-stream",
     attributes: createBaseloadAttributes(worker, randomBytes),
     expiresIn: worker.ttlSeconds,
