@@ -113,19 +113,26 @@ async function runNearHeadBackfillScanner(
   storage: ScannerStorage,
   runtime: ScannerRuntime,
 ): Promise<void> {
-  console.log(
-    `Starting near-head scanner with oldest backfill block ${config.oldestBackfillBlock.toString()}`,
-  );
+  if (config.disableBackfill) {
+    console.log("Starting near-head scanner with backfill disabled");
+  } else {
+    console.log(
+      `Starting near-head scanner with oldest backfill block ${config.oldestBackfillBlock.toString()}`,
+    );
+  }
 
   while (true) {
-    const backfillSafeHead = await readSafeHeadWithRetry(config, rpc, storage, runtime);
-    const lowestBackfilledBlock = await backfillDownForSlice(
-      backfillSafeHead,
-      config,
-      rpc,
-      storage,
-      runtime,
-    );
+    let lowestBackfilledBlock: bigint | undefined;
+    if (!config.disableBackfill) {
+      const backfillSafeHead = await readSafeHeadWithRetry(config, rpc, storage, runtime);
+      lowestBackfilledBlock = await backfillDownForSlice(
+        backfillSafeHead,
+        config,
+        rpc,
+        storage,
+        runtime,
+      );
+    }
 
     const catchUpSafeHead = await readSafeHeadWithRetry(config, rpc, storage, runtime);
     const scannedForward = await scanForwardToSafeHead(

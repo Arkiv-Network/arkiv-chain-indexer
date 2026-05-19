@@ -157,4 +157,35 @@ describe("parseConfig", () => {
       expect(String((error as Error).message)).toContain("--oldest-backfill-block <number>");
     }
   });
+
+  test("does not disable backfill by default", () => {
+    expect(parseConfig([], baseEnv).disableBackfill).toBe(false);
+  });
+
+  test("reads disable backfill flag from env", () => {
+    expect(
+      parseConfig([], {
+        ...baseEnv,
+        SCANNER_DISABLE_BACKFILL: "true",
+      }).disableBackfill,
+    ).toBe(true);
+  });
+
+  test("lets the CLI disable backfill flag override env", () => {
+    expect(
+      parseConfig(["--disable-backfill", "true"], {
+        ...baseEnv,
+        SCANNER_DISABLE_BACKFILL: "false",
+      }).disableBackfill,
+    ).toBe(true);
+  });
+
+  test("rejects invalid disable backfill flag", () => {
+    expect(() =>
+      parseConfig([], {
+        ...baseEnv,
+        SCANNER_DISABLE_BACKFILL: "maybe",
+      }),
+    ).toThrow("--disable-backfill must be a boolean");
+  });
 });

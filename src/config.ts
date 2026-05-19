@@ -9,6 +9,7 @@ export interface ScannerConfig {
   retryMs: number;
   txReceiptConcurrency: number;
   saveTransactionData: boolean;
+  disableBackfill: boolean;
 }
 
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
@@ -78,6 +79,12 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
         env.SCANNER_SAVE_TRANSACTION_DATA ??
         env.SAVE_TRANSACTION_DATA ??
         "true",
+    ),
+    disableBackfill: parseBooleanOption(
+      "--disable-backfill",
+      parsed.values["disable-backfill"] ??
+        env.SCANNER_DISABLE_BACKFILL ??
+        "false",
     ),
   };
 }
@@ -178,5 +185,6 @@ Options:
   --retry-ms <number>               Delay before retrying a failed block. Defaults to 5000.
   --tx-receipt-concurrency <n>      Legacy setting accepted for compatibility; receipts are fetched sequentially.
   --save-transaction-data <bool>    Store inspected transaction rows. Defaults to true (or SCANNER_SAVE_TRANSACTION_DATA / SAVE_TRANSACTION_DATA).
+  --disable-backfill <bool>         Skip the historical backfill phase and only scan forward from the safe head. Defaults to false.
   --help                            Show this message.`;
 }

@@ -124,6 +124,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--from-block` | `SCANNER_FROM_BLOCK` | unset | First block for bounded `--to-block` scans. |
 | `--to-block` | `SCANNER_TO_BLOCK` | unset | Optional inclusive block number to stop at. |
 | `--oldest-backfill-block` | `SCANNER_OLDEST_BACKFILL_BLOCK` | `25000000` | Oldest block the continuous scanner will backfill to. |
+| `--disable-backfill` | `SCANNER_DISABLE_BACKFILL` | `false` | Skip the historical backfill phase and only scan forward from the safe head. |
 | `--confirmation-depth` | `SCANNER_CONFIRMATION_DEPTH` | `3` | Number of blocks to stay behind the latest head. |
 | `--poll-ms` | `SCANNER_POLL_MS` | `12000` | Delay while waiting for new safe blocks. |
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |

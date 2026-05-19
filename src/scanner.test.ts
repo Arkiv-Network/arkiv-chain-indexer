@@ -449,6 +449,7 @@ function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> =
     retryMs: 5_000,
     txReceiptConcurrency: 1,
     saveTransactionData: true,
+    disableBackfill: false,
     ...overrides,
   };
 }

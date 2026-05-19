@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gas}
@@ -34,6 +34,7 @@ services:
       SCANNER_FROM_BLOCK: ${SCANNER_FROM_BLOCK:-}
       SCANNER_TO_BLOCK: ${SCANNER_TO_BLOCK:-}
       SCANNER_OLDEST_BACKFILL_BLOCK: ${SCANNER_OLDEST_BACKFILL_BLOCK:-25000000}
+      SCANNER_DISABLE_BACKFILL: ${SCANNER_DISABLE_BACKFILL:-false}
       SCANNER_CONFIRMATION_DEPTH: ${SCANNER_CONFIRMATION_DEPTH:-3}
       SCANNER_POLL_MS: ${SCANNER_POLL_MS:-12000}
       SCANNER_RETRY_MS: ${SCANNER_RETRY_MS:-5000}
