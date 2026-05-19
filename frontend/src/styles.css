@@ -165,6 +165,11 @@ button.secondary {
   font-size: 0.9rem;
 }
 
+.summary.error {
+  color: var(--error, #b91c1c);
+  font-weight: 600;
+}
+
 .permalink-row {
   display: flex;
   align-items: center;
@@ -265,6 +270,58 @@ td.num {
   white-space: normal;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.78rem;
+}
+
+.balance-error,
+.task-status-error {
+  color: var(--error, #b91c1c);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.cell-error-message {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--error, #b91c1c);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 32rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.error-banner {
+  margin: 0.5rem 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--error, #b91c1c);
+  border-radius: 6px;
+  background: rgba(185, 28, 28, 0.08);
+  color: var(--error, #b91c1c);
+}
+
+.error-banner h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.error-banner ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+
+.error-banner li {
+  margin: 0.25rem 0;
+  line-height: 1.4;
+}
+
+.error-banner .error-detail {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .table-input {

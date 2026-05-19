@@ -12,16 +12,24 @@ import {
   type BaseloadWorkerConfig,
   type BaseloadWorkerDraft,
 } from "./baseloadConfig";
-import { type BaseloadTaskStatus } from "./api";
+import { type BaseloadTaskStatus, type BaseloadWorkerBalance } from "./api";
+import { fmtEth } from "./format";
 
 interface BaseloadViewProps {
   config: BaseloadConfig;
   onConfigChange: (config: BaseloadConfig) => void | Promise<void>;
   taskStatuses: Record<string, BaseloadTaskStatus>;
+  balances: Record<string, BaseloadWorkerBalance>;
   backendError: string | null;
 }
 
-export function BaseloadView({ config, onConfigChange, taskStatuses, backendError }: BaseloadViewProps) {
+export function BaseloadView({
+  config,
+  onConfigChange,
+  taskStatuses,
+  balances,
+  backendError,
+}: BaseloadViewProps) {
   const availableWallets = useMemo(() => getAvailableWalletNumbers(config.workers), [config.workers]);
   const [draft, setDraft] = useState<BaseloadWorkerDraft>(() =>
     createBaseloadWorkerDraft(availableWallets[0] ?? 0),
@@ -223,12 +231,21 @@ export function BaseloadView({ config, onConfigChange, taskStatuses, backendErro
         {error || backendError || downloadStatus || `${config.workers.length} workers configured`}
       </p>
 
+      <ErrorBanner
+        formError={error}
+        backendError={backendError}
+        workers={config.workers}
+        taskStatuses={taskStatuses}
+        balances={balances}
+      />
+
       <div className="table-wrap">
         <table className="data-table baseload-table">
           <thead>
             <tr>
               <th scope="col">Wallet</th>
               <th scope="col">Address</th>
+              <th scope="col">Balance</th>
               <th scope="col">Max gas gwei</th>
               <th scope="col">Creates/min</th>
               <th scope="col">Payload size</th>
@@ -245,13 +262,16 @@ export function BaseloadView({ config, onConfigChange, taskStatuses, backendErro
           <tbody>
             {config.workers.length === 0 ? (
               <tr>
-                <td colSpan={13}>No baseload workers configured.</td>
+                <td colSpan={14}>No baseload workers configured.</td>
               </tr>
             ) : (
               config.workers.map((worker) => (
                 <tr key={worker.id}>
                   <td className="num">{worker.walletNumber}</td>
                   <td className="wallet-address">{worker.walletAddress}</td>
+                  <td className="num">
+                    <BalanceCell balance={balances[worker.id]} />
+                  </td>
                   <td>
                     <EditableNumber
                       value={worker.maxGasPriceGwei}
@@ -364,8 +384,24 @@ export function BaseloadView({ config, onConfigChange, taskStatuses, backendErro
   );
 }
 
+function BalanceCell({ balance }: { balance: BaseloadWorkerBalance | undefined }) {
+  if (!balance) return <span title="No balance reported yet">—</span>;
+  const label = `${fmtEth(balance.balanceWei)} ETH`;
+  if (balance.error) {
+    return (
+      <span className="balance-error" title={`${balance.balanceWei} wei (last updated ${balance.updatedAt})`}>
+        <span>{label}</span>
+        <span className="cell-error-message">RPC error: {balance.error}</span>
+      </span>
+    );
+  }
+  return (
+    <span title={`${balance.balanceWei} wei (updated ${balance.updatedAt})`}>{label}</span>
+  );
+}
+
 function TaskStatusCell({ status }: { status: BaseloadTaskStatus | undefined }) {
-  if (!status) return "starting";
+  if (!status) return <span>starting</span>;
   const count =
     status.attemptedCount === undefined
       ? ""
@@ -373,8 +409,85 @@ function TaskStatusCell({ status }: { status: BaseloadTaskStatus | undefined }) 
   const block = status.currentBlock === undefined ? "" : ` block ${status.currentBlock}`;
   const tx = status.txHash ? ` tx ${shortHash(status.txHash)}` : "";
   const label = `${status.status}${count}${block}${tx}`;
+  const isError = status.status === "error";
 
-  return <span title={status.message ?? status.txHash ?? status.entityKey}>{label}</span>;
+  return (
+    <span
+      className={isError ? "task-status-error" : undefined}
+      title={status.message ?? status.txHash ?? status.entityKey}
+    >
+      <span>{label}</span>
+      {isError && status.message ? (
+        <span className="cell-error-message">{status.message}</span>
+      ) : null}
+    </span>
+  );
+}
+
+function ErrorBanner({
+  formError,
+  backendError,
+  workers,
+  taskStatuses,
+  balances,
+}: {
+  formError: string | null;
+  backendError: string | null;
+  workers: readonly BaseloadWorkerConfig[];
+  taskStatuses: Record<string, BaseloadTaskStatus>;
+  balances: Record<string, BaseloadWorkerBalance>;
+}) {
+  const workerErrors = workers.flatMap((worker) => {
+    const entries: { workerId: string; walletNumber: number; source: string; message: string; updatedAt?: string }[] = [];
+    const status = taskStatuses[worker.id];
+    if (status && status.status === "error" && status.message) {
+      entries.push({
+        workerId: worker.id,
+        walletNumber: worker.walletNumber,
+        source: "task",
+        message: status.message,
+        updatedAt: status.updatedAt,
+      });
+    }
+    const balance = balances[worker.id];
+    if (balance?.error) {
+      entries.push({
+        workerId: worker.id,
+        walletNumber: worker.walletNumber,
+        source: "balance RPC",
+        message: balance.error,
+        updatedAt: balance.updatedAt,
+      });
+    }
+    return entries;
+  });
+
+  if (!formError && !backendError && workerErrors.length === 0) return null;
+
+  return (
+    <div className="error-banner" role="alert">
+      <h3>Errors</h3>
+      <ul>
+        {formError ? (
+          <li>
+            <strong>Form:</strong> <span className="error-detail">{formError}</span>
+          </li>
+        ) : null}
+        {backendError ? (
+          <li>
+            <strong>Backend:</strong> <span className="error-detail">{backendError}</span>
+          </li>
+        ) : null}
+        {workerErrors.map((entry, index) => (
+          <li key={`${entry.workerId}-${entry.source}-${index}`}>
+            <strong>Wallet {entry.walletNumber}</strong> ({entry.source}
+            {entry.updatedAt ? ` @ ${entry.updatedAt}` : ""}):{" "}
+            <span className="error-detail">{entry.message}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function shortHash(value: string): string {

@@ -1,4 +1,4 @@
-import { createWalletClient, http } from "@arkiv-network/sdk";
+import {ArkivClient, createWalletClient, http} from "@arkiv-network/sdk";
 import { braga } from "@arkiv-network/sdk/chains";
 import { mnemonicToAccount } from "viem/accounts";
 import {
@@ -42,16 +42,23 @@ export interface BaseloadWorkerStatus {
   txHash?: string;
 }
 
+export interface BaseloadWorkerBalance {
+  balanceWei: string;
+  updatedAt: string;
+  error?: string;
+}
+
 export interface BaseloadState {
   enabled: boolean;
   config: BaseloadConfig;
   statuses: Record<string, BaseloadWorkerStatus>;
+  balances: Record<string, BaseloadWorkerBalance>;
 }
 
 interface BaseloadArkivClient {
   createEntity: (
     data: ReturnType<typeof createBaseloadEntityInput>,
-    txParams: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint },
+    txParams: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint, gasLimit: bigint },
   ) => Promise<{ entityKey: HexString; txHash: HexString }>;
 }
 
@@ -60,18 +67,29 @@ interface BaseloadRpcClient {
   waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<void>;
 }
 
+const BALANCE_POLL_INTERVAL_MS = 10_000;
+
 export class BaseloadRuntime {
   private config: BaseloadConfig = EMPTY_BASELOAD_CONFIG;
   private readonly tasks = new Map<string, BaseloadWorkerTask>();
   private readonly statuses = new Map<string, BaseloadWorkerStatus>();
+  private readonly balances = new Map<string, BaseloadWorkerBalance>();
+  private balancePollTimer: ReturnType<typeof setTimeout> | null = null;
+  private balancePollInFlight = false;
+  private stopped = false;
 
-  constructor(private readonly runtimeConfig: BaseloadRuntimeConfig) {}
+  constructor(private readonly runtimeConfig: BaseloadRuntimeConfig) {
+    if (runtimeConfig.rpcUrl) {
+      this.scheduleBalancePoll(0);
+    }
+  }
 
   getState(): BaseloadState {
     return {
       enabled: this.runtimeConfig.rpcUrl !== null,
       config: this.config,
       statuses: Object.fromEntries(this.statuses),
+      balances: Object.fromEntries(this.balances),
     };
   }
 
@@ -79,14 +97,82 @@ export class BaseloadRuntime {
     const nextConfig = normalizeBaseloadConfig(value, this.runtimeConfig.mnemonic);
     this.config = nextConfig;
     this.syncTasks();
+    this.pruneBalances();
+    if (this.runtimeConfig.rpcUrl && !this.balancePollTimer && !this.balancePollInFlight) {
+      this.scheduleBalancePoll(0);
+    }
     return this.getState();
   }
 
   stop() {
+    this.stopped = true;
+    if (this.balancePollTimer) {
+      clearTimeout(this.balancePollTimer);
+      this.balancePollTimer = null;
+    }
     for (const task of this.tasks.values()) {
       task.stop();
     }
     this.tasks.clear();
+  }
+
+  private pruneBalances() {
+    const activeIds = new Set(this.config.workers.map((worker) => worker.id));
+    for (const workerId of this.balances.keys()) {
+      if (!activeIds.has(workerId)) this.balances.delete(workerId);
+    }
+  }
+
+  private scheduleBalancePoll(delayMs: number) {
+    if (this.stopped) return;
+    if (this.balancePollTimer) clearTimeout(this.balancePollTimer);
+    this.balancePollTimer = setTimeout(() => {
+      this.balancePollTimer = null;
+      void this.refreshBalances();
+    }, delayMs);
+    if (typeof this.balancePollTimer === "object" && this.balancePollTimer && "unref" in this.balancePollTimer) {
+      (this.balancePollTimer as { unref: () => void }).unref();
+    }
+  }
+
+  private async refreshBalances() {
+    if (this.stopped || this.balancePollInFlight) return;
+    const rpcUrl = this.runtimeConfig.rpcUrl;
+    if (!rpcUrl) return;
+
+    this.balancePollInFlight = true;
+    try {
+      const workers = [...this.config.workers];
+      await Promise.all(
+        workers.map(async (worker) => {
+          const updatedAt = new Date().toISOString();
+          try {
+            const result = await callRpc(rpcUrl, "eth_getBalance", [worker.walletAddress, "latest"]);
+            if (typeof result !== "string") {
+              throw new Error("eth_getBalance returned a non-string result");
+            }
+            this.balances.set(worker.id, {
+              balanceWei: BigInt(result).toString(),
+              updatedAt,
+            });
+          } catch (error) {
+            const previous = this.balances.get(worker.id);
+            const verbose = describeError(error);
+            console.error(
+              `[baseload] eth_getBalance failed for wallet ${worker.walletNumber} (${worker.walletAddress}): ${verbose}`,
+            );
+            this.balances.set(worker.id, {
+              balanceWei: previous?.balanceWei ?? "0",
+              updatedAt,
+              error: verbose,
+            });
+          }
+        }),
+      );
+    } finally {
+      this.balancePollInFlight = false;
+      this.scheduleBalancePoll(BALANCE_POLL_INTERVAL_MS);
+    }
   }
 
   private syncTasks() {
@@ -158,7 +244,7 @@ class BaseloadWorkerTask {
     let attemptedCount = 0;
     let createdCount = 0;
     let activeWorkerKey = configKey(this.worker);
-    let cachedClients: { key: string; arkiv: BaseloadArkivClient; rpc: BaseloadRpcClient } | null = null;
+    let cachedClients: { key: string; arkiv: ArkivClient; rpc: BaseloadRpcClient } | null = null;
 
     try {
       while (!this.abortController.signal.aborted) {
@@ -269,9 +355,17 @@ class BaseloadWorkerTask {
           });
 
           const maxFeePerGas = parseGweiToWei(worker.maxGasPriceGwei);
+
+          // Note for an agent:
+          // This code was changed by hand and do not change following parameters:
+          // maxPriorityFeePerGas is OK to be minimal and 1
+          // There is an issue with gas estimation in SDK so just overwrite with safe value
+          const SAFE_GAS_LIMIT = 500000n;
+          const SUFFICIENT_PRIORITY_FEE_PER_GAS = 1n;
           const result = await cachedClients.arkiv.createEntity(createBaseloadEntityInput(worker), {
             maxFeePerGas,
-            maxPriorityFeePerGas: maxFeePerGas,
+            maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
+            gas: SAFE_GAS_LIMIT
           });
           await cachedClients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
 
@@ -286,8 +380,12 @@ class BaseloadWorkerTask {
           });
         } catch (error) {
           if (this.abortController.signal.aborted) break;
+          const verbose = describeError(error);
+          console.error(
+            `[baseload] worker ${this.worker.id} (wallet ${this.worker.walletNumber}) failed: ${verbose}`,
+          );
           this.postStatus("error", {
-            message: error instanceof Error ? error.message : String(error),
+            message: verbose,
             attemptedCount,
             createdCount,
           });
@@ -355,21 +453,122 @@ function createRpcClient(rpcUrl: string): BaseloadRpcClient {
 }
 
 async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+  } catch (error) {
+    throw new Error(
+      `RPC ${method} request to ${rpcUrl} failed before any response: ${describeError(error)}`,
+      { cause: error },
+    );
+  }
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`RPC ${method} failed with HTTP ${response.status}: ${text}`);
+    throw new Error(
+      `RPC ${method} at ${rpcUrl} failed with HTTP ${response.status} ${response.statusText}: ${text}`,
+    );
   }
 
-  const body = JSON.parse(text) as { result?: unknown; error?: { message?: string } };
+  let body: { result?: unknown; error?: { message?: string; code?: number; data?: unknown } };
+  try {
+    body = JSON.parse(text) as typeof body;
+  } catch {
+    throw new Error(`RPC ${method} at ${rpcUrl} returned non-JSON body: ${text}`);
+  }
   if (body.error) {
-    throw new Error(`RPC ${method} failed: ${body.error.message ?? JSON.stringify(body.error)}`);
+    const code = typeof body.error.code === "number" ? ` (code ${body.error.code})` : "";
+    const data = body.error.data === undefined ? "" : ` data=${JSON.stringify(body.error.data)}`;
+    throw new Error(
+      `RPC ${method} at ${rpcUrl} failed: ${body.error.message ?? JSON.stringify(body.error)}${code}${data}`,
+    );
   }
   return body.result;
+}
+
+const EXTRA_ERROR_FIELDS = [
+  "shortMessage",
+  "details",
+  "metaMessages",
+  "code",
+  "errorCode",
+  "reason",
+  "data",
+  "info",
+  "method",
+  "transaction",
+  "body",
+  "responseBody",
+  "url",
+] as const;
+
+function describeError(error: unknown): string {
+  const seen = new Set<unknown>();
+  const parts: string[] = [];
+  let current: unknown = error;
+  let depth = 0;
+
+  while (current !== undefined && current !== null && depth < 10) {
+    if (seen.has(current)) {
+      parts.push("(cycle)");
+      break;
+    }
+    seen.add(current);
+
+    if (current instanceof Error) {
+      const header = `${current.name}: ${current.message}`;
+      const extras = collectErrorExtras(current as Record<string, unknown>);
+      const stack = typeof current.stack === "string" ? trimStack(current.stack) : "";
+      parts.push([header, extras, stack].filter((part) => part).join("\n"));
+      current = (current as Error & { cause?: unknown }).cause;
+    } else if (typeof current === "object") {
+      parts.push(safeStringify(current));
+      current = undefined;
+    } else {
+      parts.push(String(current));
+      current = undefined;
+    }
+    depth += 1;
+  }
+
+  return parts.length > 0 ? parts.join("\n→ caused by ") : "Unknown error";
+}
+
+function collectErrorExtras(error: Record<string, unknown>): string {
+  const lines: string[] = [];
+  for (const field of EXTRA_ERROR_FIELDS) {
+    const value = error[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string") {
+      if (!value.trim()) continue;
+      lines.push(`  ${field}: ${value}`);
+    } else if (Array.isArray(value)) {
+      if (value.length === 0) continue;
+      lines.push(`  ${field}: ${value.map((v) => (typeof v === "string" ? v : safeStringify(v))).join(" | ")}`);
+    } else {
+      lines.push(`  ${field}: ${safeStringify(value)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, (_key, val) => {
+      if (typeof val === "bigint") return `${val.toString()}n`;
+      return val;
+    });
+  } catch {
+    return String(value);
+  }
+}
+
+function trimStack(stack: string): string {
+  const lines = stack.split("\n").slice(0, 6);
+  return lines.length > 0 ? `  stack:\n    ${lines.join("\n    ")}` : "";
 }
 
 function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {

@@ -4,6 +4,7 @@ import {
   fetchHealth,
   updateBaseloadConfig as putBaseloadConfig,
   type BaseloadTaskStatus,
+  type BaseloadWorkerBalance,
 } from "./api";
 import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
@@ -23,6 +24,7 @@ export function App() {
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
   const [baseloadConfig, setBaseloadConfig] = useState<BaseloadConfig>(EMPTY_BASELOAD_CONFIG);
   const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
+  const [baseloadBalances, setBaseloadBalances] = useState<Record<string, BaseloadWorkerBalance>>({});
   const [baseloadError, setBaseloadError] = useState<string | null>(null);
   const [timeZoneState, setTimeZoneState] = usePersistentState(TIME_ZONE_STORAGE_KEY, {
     timeZone: detectBrowserTimeZone(),
@@ -52,6 +54,7 @@ export function App() {
         if (cancelled) return;
         setBaseloadConfig(state.config);
         setBaseloadTaskStatuses(state.statuses);
+        setBaseloadBalances(state.balances ?? {});
         setBaseloadError(state.enabled ? null : "BASELOAD_RPC_NODE is not configured on the backend");
       } catch (error) {
         if (!cancelled) {
@@ -91,6 +94,7 @@ export function App() {
       const state = await putBaseloadConfig(config);
       setBaseloadConfig(state.config);
       setBaseloadTaskStatuses(state.statuses);
+      setBaseloadBalances(state.balances ?? {});
       setBaseloadError(state.enabled ? null : "BASELOAD_RPC_NODE is not configured on the backend");
     } catch (error) {
       setBaseloadError(error instanceof Error ? error.message : String(error));
@@ -189,6 +193,7 @@ export function App() {
             config={baseloadConfig}
             onConfigChange={updateBaseloadConfig}
             taskStatuses={baseloadTaskStatuses}
+            balances={baseloadBalances}
             backendError={baseloadError}
           />
         ) : (

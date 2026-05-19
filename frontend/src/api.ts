@@ -187,10 +187,17 @@ export interface BaseloadTaskStatus {
   txHash?: string;
 }
 
+export interface BaseloadWorkerBalance {
+  balanceWei: string;
+  updatedAt: string;
+  error?: string;
+}
+
 export interface BaseloadStateResponse {
   enabled: boolean;
   config: BaseloadConfig;
   statuses: Record<string, BaseloadTaskStatus>;
+  balances: Record<string, BaseloadWorkerBalance>;
 }
 
 async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
