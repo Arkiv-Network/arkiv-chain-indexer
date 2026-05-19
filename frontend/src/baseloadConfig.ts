@@ -20,7 +20,7 @@ export const MIN_WALLET_NUMBER = 0;
 export const MAX_WALLET_NUMBER = 100;
 
 export const DEFAULT_BASELOAD_WORKER_VALUES = {
-  maxGasPriceGwei: 1000,
+  maxGasPriceGwei: 0.1,
   createsPerMinute: 1,
   singleCreatePayloadSize: 5000,
   singleCreateStringArgumentCount: 2,
