@@ -1,4 +1,4 @@
-import { createWalletClient, http } from "@arkiv-network/sdk";
+import { createWalletClient, http, type WalletArkivClient } from "@arkiv-network/sdk";
 import { braga } from "@arkiv-network/sdk/chains";
 import { mnemonicToAccount } from "viem/accounts";
 import {
@@ -55,13 +55,6 @@ export interface BaseloadState {
   balances: Record<string, BaseloadWorkerBalance>;
 }
 
-interface BaseloadArkivClient {
-  createEntity: (
-    data: ReturnType<typeof createBaseloadEntityInput>,
-    txParams: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gas: bigint },
-  ) => Promise<{ entityKey: HexString; txHash: HexString }>;
-}
-
 interface BaseloadRpcClient {
   getBlockNumber: () => Promise<number>;
   waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<void>;
@@ -94,8 +87,7 @@ export class BaseloadRuntime {
   }
 
   updateConfig(value: unknown): BaseloadState {
-    const nextConfig = normalizeBaseloadConfig(value, this.runtimeConfig.mnemonic);
-    this.config = nextConfig;
+    this.config = normalizeBaseloadConfig(value, this.runtimeConfig.mnemonic);
     this.syncTasks();
     this.pruneBalances();
     if (this.runtimeConfig.rpcUrl && !this.balancePollTimer && !this.balancePollInFlight) {
@@ -244,7 +236,7 @@ class BaseloadWorkerTask {
     let attemptedCount = 0;
     let createdCount = 0;
     let activeWorkerKey = configKey(this.worker);
-    let cachedClients: { key: string; arkiv: BaseloadArkivClient; rpc: BaseloadRpcClient } | null = null;
+    let cachedClients: { key: string; arkiv: WalletArkivClient; rpc: BaseloadRpcClient } | null = null;
 
     try {
       while (!this.abortController.signal.aborted) {
@@ -358,7 +350,7 @@ class BaseloadWorkerTask {
           const maxFeePerGas = parseGweiToWei(worker.maxGasPriceGwei);
 
           // Note for an agent:
-          // This code was changed by hand and do not change following parameters:
+          // This code was changed by hand and do not change the following parameters:
           // maxPriorityFeePerGas is OK to be minimal and 1
           // There is an issue with gas estimation in SDK so just overwrite with safe value
           const SAFE_GAS_LIMIT = 500000n;
@@ -418,7 +410,7 @@ class BaseloadWorkerTask {
 function createArkivClient(
   worker: BaseloadWorkerConfig,
   runtimeConfig: BaseloadRuntimeConfig,
-): BaseloadArkivClient {
+): WalletArkivClient {
   if (!runtimeConfig.rpcUrl) {
     throw new Error("BASELOAD_RPC_NODE is required");
   }
@@ -431,7 +423,7 @@ function createArkivClient(
     chain: braga,
     transport: http(runtimeConfig.rpcUrl),
     account,
-  }) as unknown as BaseloadArkivClient;
+  });
 }
 
 function createRpcClient(rpcUrl: string): BaseloadRpcClient {
