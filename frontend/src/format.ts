@@ -1,11 +1,15 @@
-const MAX_DISPLAY_FRACTION_DIGITS = 4;
 const GWEI_IN_WEI = 1_000_000_000n;
 const ETH_IN_WEI = 1_000_000_000_000_000_000n;
+const SIG_DIGITS = 4;
+const MAX_DECIMALS = 9;
+const ZERO_THRESHOLD = 1e-8;
+const LARGE_THRESHOLD = 1000;
+const PRECISION_SCALE = 1_000_000_000_000n; // 1e12 — enough headroom for MAX_DECIMALS
 
 export function fmtGwei(weiStr: string | null | undefined): string {
   if (weiStr === undefined || weiStr === null) return "—";
   try {
-    return formatBigIntDecimal(BigInt(weiStr), GWEI_IN_WEI, MAX_DISPLAY_FRACTION_DIGITS);
+    return fmtSig(weiToScaledNumber(BigInt(weiStr), GWEI_IN_WEI));
   } catch {
     return String(weiStr);
   }
@@ -14,7 +18,7 @@ export function fmtGwei(weiStr: string | null | undefined): string {
 export function fmtEth(weiStr: string | null | undefined): string {
   if (weiStr === undefined || weiStr === null) return "—";
   try {
-    return formatBigIntDecimal(BigInt(weiStr), ETH_IN_WEI, MAX_DISPLAY_FRACTION_DIGITS);
+    return fmtSig(weiToScaledNumber(BigInt(weiStr), ETH_IN_WEI));
   } catch {
     return String(weiStr);
   }
@@ -33,24 +37,42 @@ export function fmtRatio(usedStr: string | null | undefined, limitStr: string | 
   }
 }
 
-function formatBigIntDecimal(value: bigint, divisor: bigint, maxFractionDigits: number): string {
-  const sign = value < 0n ? "-" : "";
-  const absoluteValue = value < 0n ? -value : value;
-  const whole = absoluteValue / divisor;
-  const remainder = absoluteValue % divisor;
+/**
+ * Renders a number with up to 4 significant digits, picking a sensible width:
+ *   - |x| < 1e-8       → "0"
+ *   - |x| >= 1000      → fixed 1 decimal place ("1234.5")
+ *   - otherwise        → 4 significant digits, capped at 9 decimals, trailing
+ *                        zeros trimmed ("0.0001345", "1.234", "999.9")
+ */
+export function fmtSig(value: number | string | null | undefined): string {
+  if (value === undefined || value === null) return "—";
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  if (num === 0) return "0";
 
-  if (remainder === 0n || maxFractionDigits === 0) {
-    return `${sign}${whole.toString()}`;
+  const abs = Math.abs(num);
+  if (abs < ZERO_THRESHOLD) return "0";
+
+  if (abs >= LARGE_THRESHOLD) {
+    return num.toFixed(1);
   }
 
-  const scale = 10n ** BigInt(maxFractionDigits);
-  const fraction = (remainder * scale) / divisor;
-  if (fraction === 0n) {
-    return `${sign}${whole.toString()}`;
-  }
+  const exp = Math.floor(Math.log10(abs));
+  const decimals = Math.min(MAX_DECIMALS, Math.max(0, SIG_DIGITS - 1 - exp));
+  let result = num.toFixed(decimals);
 
-  const fractionStr = fraction.toString().padStart(maxFractionDigits, "0").replace(/0+$/, "");
-  return `${sign}${whole.toString()}.${fractionStr}`;
+  if (result.includes(".")) {
+    result = result.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  }
+  return result;
+}
+
+function weiToScaledNumber(value: bigint, divisor: bigint): number {
+  const negative = value < 0n;
+  const absValue = negative ? -value : value;
+  const scaled = (absValue * PRECISION_SCALE) / divisor;
+  const result = Number(scaled) / Number(PRECISION_SCALE);
+  return negative ? -result : result;
 }
 
 export function fmtInteger(value: string | number | null | undefined): string {

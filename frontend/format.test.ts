@@ -7,28 +7,54 @@ import {
   fmtGwei,
   fmtInteger,
   fmtRatio,
+  fmtSig,
   fmtUtcDate,
 } from "./src/format";
 
 describe("frontend format helpers", () => {
-  test("formats wei values as Gwei with at most four decimal places", () => {
+  test("formats wei values as Gwei with 4 significant digits", () => {
     expect(fmtGwei(undefined)).toBe("—");
     expect(fmtGwei(null)).toBe("—");
     expect(fmtGwei("0")).toBe("0");
     expect(fmtGwei("1000000000")).toBe("1");
-    expect(fmtGwei("1234567890")).toBe("1.2345");
+    expect(fmtGwei("1234567890")).toBe("1.235");
     expect(fmtGwei("1234000000")).toBe("1.234");
     expect(fmtGwei("not-a-number")).toBe("not-a-number");
   });
 
-  test("formats wei values as ETH with at most four decimal places", () => {
+  test("formats wei values as ETH with 4 significant digits", () => {
     expect(fmtEth(undefined)).toBe("—");
     expect(fmtEth(null)).toBe("—");
     expect(fmtEth("0")).toBe("0");
     expect(fmtEth("1000000000000000000")).toBe("1");
-    expect(fmtEth("1234567890000000000")).toBe("1.2345");
+    expect(fmtEth("1234567890000000000")).toBe("1.235");
     expect(fmtEth("1234000000000000000")).toBe("1.234");
+    expect(fmtEth("1000000000000000")).toBe("0.001");
+    expect(fmtEth("134500000000000")).toBe("0.0001345");
+    expect(fmtEth("9")).toBe("0");
     expect(fmtEth("not-a-number")).toBe("not-a-number");
+  });
+
+  test("fmtSig caps at 4 significant digits and trims zeros", () => {
+    expect(fmtSig(undefined)).toBe("—");
+    expect(fmtSig(null)).toBe("—");
+    expect(fmtSig("not-a-number")).toBe("not-a-number");
+
+    expect(fmtSig(0)).toBe("0");
+    expect(fmtSig(1e-9)).toBe("0");
+    expect(fmtSig(1e-8)).toBe("0.00000001");
+    expect(fmtSig(0.0001345)).toBe("0.0001345");
+    expect(fmtSig(0.001)).toBe("0.001");
+    expect(fmtSig(1)).toBe("1");
+    expect(fmtSig(1.234567)).toBe("1.235");
+    expect(fmtSig(12.34567)).toBe("12.35");
+    expect(fmtSig(123.4567)).toBe("123.5");
+    expect(fmtSig(999.9)).toBe("999.9");
+    expect(fmtSig(1000)).toBe("1000.0");
+    expect(fmtSig(1234.56)).toBe("1234.6");
+    expect(fmtSig(1_234_567)).toBe("1234567.0");
+    expect(fmtSig(-1.234567)).toBe("-1.235");
+    expect(fmtSig(-0.0001345)).toBe("-0.0001345");
   });
 
   test("formats ratios and integers without changing stored precision", () => {
