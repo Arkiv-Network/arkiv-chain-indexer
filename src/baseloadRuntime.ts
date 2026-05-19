@@ -57,6 +57,7 @@ export interface BaseloadState {
 
 interface BaseloadRpcClient {
   getBlockNumber: () => Promise<number>;
+  getLatestNonce: (address: string) => Promise<number>;
   waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<void>;
 }
 
@@ -353,12 +354,15 @@ class BaseloadWorkerTask {
           // This code was changed by hand and do not change the following parameters:
           // maxPriorityFeePerGas is OK to be minimal and 1
           // There is an issue with gas estimation in SDK so just overwrite with safe value
-          const SAFE_GAS_LIMIT = 500000n;
-          const SUFFICIENT_PRIORITY_FEE_PER_GAS = 1n;
+          // const SAFE_GAS_LIMIT = 500000n;
+          const SUFFICIENT_PRIORITY_FEE_PER_GAS = 2n;
+          // Use the latest confirmed nonce so a re-send replaces any pending
+          // tx that's been sitting in the mempool (under-priced, RPC reset, etc.).
+          const nonce = await clients.rpc.getLatestNonce(worker.walletAddress);
           const result = await clients.arkiv.createEntity(createBaseloadEntityInput(worker), {
             maxFeePerGas,
             maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
-            gas: SAFE_GAS_LIMIT,
+            nonce,
           });
           await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
 
@@ -434,6 +438,17 @@ function createRpcClient(rpcUrl: string): BaseloadRpcClient {
         throw new Error("RPC eth_blockNumber returned a non-string result");
       }
       return Number(BigInt(result));
+    },
+    getLatestNonce: async (address) => {
+      const result = await callRpc(rpcUrl, "eth_getTransactionCount", [address, "latest"]);
+      if (typeof result !== "string") {
+        throw new Error("RPC eth_getTransactionCount returned a non-string result");
+      }
+      const nonce = BigInt(result);
+      if (nonce < 0n || nonce > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`RPC eth_getTransactionCount returned out-of-range nonce ${nonce.toString()}`);
+      }
+      return Number(nonce);
     },
     waitForTransactionReceipt: async (txHash, signal) => {
       while (!signal.aborted) {
