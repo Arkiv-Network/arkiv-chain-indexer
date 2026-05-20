@@ -106,6 +106,9 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
       handleRequest(request, storage, {
         transactionDataEnabled,
         ...(options.baseloadRuntime ? { baseloadRuntime: options.baseloadRuntime } : {}),
+        ...(options.baseloadAdminBearerToken !== undefined
+          ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
+          : {}),
       }),
   };
   if (options.hostname !== undefined) {

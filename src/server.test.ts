@@ -373,6 +373,32 @@ describe("Baseload API", () => {
       error: "Wallet 2 is already attached to another worker",
     });
   });
+
+  test("requires admin bearer for baseload updates through the live server", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const server = createBlockServer({} as ScannerStorage, {
+      port: 0,
+      hostname: "127.0.0.1",
+      baseloadRuntime: runtime,
+      baseloadAdminBearerToken: "secret",
+    });
+
+    try {
+      const response = await fetch(`http://${server.hostname}:${server.port}/baseload`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
+      });
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({
+        error: "Admin bearer token is required",
+      });
+    } finally {
+      runtime.stop();
+      await server.stop();
+    }
+  });
 });
 
 describe("GET /transactions", () => {
