@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_BASELOAD_WORKER_VALUES,
   createBaseloadWorkerDraft,
   createBaseloadWorkerFromDraft,
   getAvailableWalletNumbers,
+  moveDraftToNextAvailableWallet,
   normalizeBaseloadConfig,
   parseBaseloadConfigJson,
   serializeBaseloadConfig,
@@ -15,7 +17,7 @@ describe("baseload config helpers", () => {
 
     expect(worker).toEqual({
       id: "wallet-7",
-      maxGasPriceGwei: 1000,
+      maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
       createsPerMinute: 1,
       singleCreatePayloadSize: 5000,
       singleCreateStringArgumentCount: 2,
@@ -101,6 +103,39 @@ describe("baseload config helpers", () => {
     expect(wallets.at(-1)).toBe(99);
   });
 
+  test("defaults a new draft to the smallest available wallet", () => {
+    const config = normalizeBaseloadConfig({
+      workers: [{ walletNumber: 1 }, { walletNumber: 2 }],
+    });
+
+    const draft = createBaseloadWorkerDraft(getAvailableWalletNumbers(config.workers)[0] ?? 0);
+
+    expect(draft.walletNumber).toBe("0");
+  });
+
+  test("moves a draft to the next available wallet without resetting values", () => {
+    const draft = {
+      ...createBaseloadWorkerDraft(0),
+      maxGasPriceGwei: "7.5",
+      createsPerMinute: "11",
+      singleCreatePayloadSize: "2048",
+      singleCreateStringArgumentCount: "5",
+      singleCreateNumberArgumentCount: "6",
+      startBlock: "123",
+      endBlock: "456",
+      durationSeconds: "789",
+      ttlSeconds: "321",
+    };
+    const config = normalizeBaseloadConfig({
+      workers: [{ walletNumber: 0 }, { walletNumber: 2 }],
+    });
+
+    expect(moveDraftToNextAvailableWallet(draft, config.workers)).toEqual({
+      ...draft,
+      walletNumber: "1",
+    });
+  });
+
   test("serializes a stable downloadable JSON configuration", () => {
     const config = parseBaseloadConfigJson(
       JSON.stringify({
@@ -113,7 +148,7 @@ describe("baseload config helpers", () => {
       workers: [
         {
           id: "wallet-4",
-          maxGasPriceGwei: 1000,
+          maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
           createsPerMinute: 1,
           singleCreatePayloadSize: 5000,
           singleCreateStringArgumentCount: 2,

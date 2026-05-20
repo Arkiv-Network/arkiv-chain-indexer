@@ -3,6 +3,7 @@ import {
   createBaseloadWorkerDraft,
   createBaseloadWorkerFromDraft,
   getAvailableWalletNumbers,
+  moveDraftToNextAvailableWallet,
   normalizeBaseloadConfig,
   parseBaseloadConfigJson,
   removeBaseloadWorker,
@@ -102,8 +103,7 @@ export function BaseloadView({
         workers: [...config.workers, worker],
       });
       void onConfigChange(nextConfig);
-      const nextWallet = getAvailableWalletNumbers(nextConfig.workers)[0] ?? 0;
-      setDraft(createBaseloadWorkerDraft(nextWallet));
+      setDraft((current) => moveDraftToNextAvailableWallet(current, nextConfig.workers));
       setError(null);
       setDownloadStatus("");
     } catch (err) {
