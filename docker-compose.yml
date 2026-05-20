@@ -1,3 +1,6 @@
+x-extra-hosts: &extra-hosts
+  - "host.docker.internal:${HOST_GATEWAY_IP:-0.0.0.0}"
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -39,6 +42,7 @@ services:
       SCANNER_RETRY_MS: ${SCANNER_RETRY_MS:-5000}
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+    extra_hosts: *extra-hosts
     command: ["bun", "run", "scan"]
 
   aggregator:
@@ -55,6 +59,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       AGGREGATE_INTERVAL_MS: ${AGGREGATE_INTERVAL_MS:-60000}
+    extra_hosts: *extra-hosts
     command: ["bun", "run", "aggregate-all"]
 
   backend:
@@ -79,6 +84,7 @@ services:
       PORTAL_BASE_URL: ${PORTAL_BASE_URL:-https://scanner.arkiv-global.net}
     ports:
       - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
+    extra_hosts: *extra-hosts
     command: ["bun", "run", "serve"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
