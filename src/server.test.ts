@@ -277,6 +277,85 @@ describe("Baseload API", () => {
     runtime.stop();
   });
 
+  test("keeps backend baseload state public when admin bearer is configured", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload"),
+      {} as ScannerStorage,
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      enabled: false,
+      config: { version: 1, workers: [] },
+      statuses: {},
+    });
+    runtime.stop();
+  });
+
+  test("requires admin bearer for backend baseload updates when configured", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
+      }),
+      {} as ScannerStorage,
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Admin bearer token is required",
+    });
+    runtime.stop();
+  });
+
+  test("rejects invalid backend baseload admin bearer tokens", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload", {
+        method: "PUT",
+        headers: {
+          "authorization": "Bearer wrong",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
+      }),
+      {} as ScannerStorage,
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Admin bearer token is invalid",
+    });
+    runtime.stop();
+  });
+
+  test("accepts valid backend baseload admin bearer tokens", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload", {
+        method: "PUT",
+        headers: {
+          "authorization": "Bearer secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
+      }),
+      {} as ScannerStorage,
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.config.workers).toHaveLength(1);
+    runtime.stop();
+  });
+
   test("rejects invalid backend baseload configs", async () => {
     const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
     const response = await handleRequest(

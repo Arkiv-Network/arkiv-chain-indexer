@@ -3,6 +3,7 @@ export interface ServerConfig {
   port: number;
   hostname?: string;
   transactionDataEnabled: boolean;
+  baseloadAdminBearerToken?: string;
 }
 
 const DEFAULT_PORT = 3000;
@@ -31,12 +32,15 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
       env.SAVE_TRANSACTION_DATA ??
       "true",
   );
+  const baseloadAdminBearerToken =
+    parsed.values["baseload-admin-bearer-token"] ?? env.BASELOAD_ADMIN_BEARER_TOKEN;
 
   return {
     databaseUrl,
     port,
     ...(hostnameRaw ? { hostname: hostnameRaw } : {}),
     transactionDataEnabled,
+    ...(baseloadAdminBearerToken ? { baseloadAdminBearerToken } : {}),
   };
 }
 
@@ -108,5 +112,7 @@ Options:
   --host <host>         Hostname/interface to bind. Defaults to Bun's default (all interfaces).
   --transaction-data-enabled <bool>
                         Enable transaction inspection endpoints and UI capability metadata. Defaults to true (or SERVER_TRANSACTION_DATA_ENABLED / SAVE_TRANSACTION_DATA).
+  --baseload-admin-bearer-token <token>
+                        Bearer token required for mutating Baseload worker requests. Defaults to BASELOAD_ADMIN_BEARER_TOKEN. If unset, Baseload mutations are unrestricted.
   --help                Show this message.`;
 }

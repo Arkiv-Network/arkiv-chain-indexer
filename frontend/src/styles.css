@@ -159,6 +159,25 @@ button.secondary {
   display: none;
 }
 
+.admin-token-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.admin-token-field input {
+  width: 15rem;
+  max-width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
 .summary {
   margin: 0.25rem 0 0.75rem;
   color: var(--muted);

@@ -29,6 +29,8 @@ interface BaseloadViewProps {
   taskStatuses: Record<string, BaseloadTaskStatus>;
   balances: Record<string, BaseloadWorkerBalance>;
   backendError: string | null;
+  adminToken: string;
+  onAdminTokenChange: (token: string) => void;
 }
 
 const DRAFT_STORAGE_KEY = "baseload.workerDraft";
@@ -62,6 +64,8 @@ export function BaseloadView({
   taskStatuses,
   balances,
   backendError,
+  adminToken,
+  onAdminTokenChange,
 }: BaseloadViewProps) {
   const availableWallets = useMemo(() => getAvailableWalletNumbers(config.workers), [config.workers]);
   const [draft, setDraft] = useState<BaseloadWorkerDraft>(() =>
@@ -160,6 +164,15 @@ export function BaseloadView({
       <div className="view-heading-row">
         <h2>Baseload workers</h2>
         <div className="button-row">
+          <label className="admin-token-field">
+            Admin bearer token
+            <input
+              type="password"
+              autoComplete="off"
+              value={adminToken}
+              onChange={(event) => onAdminTokenChange(event.target.value)}
+            />
+          </label>
           <label className="secondary file-button">
             Load config
             <input type="file" accept="application/json,.json" onChange={loadConfigFile} />
