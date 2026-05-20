@@ -8,6 +8,7 @@ import {
 } from "./ranges";
 import type { BlockMetrics, Hex } from "./types";
 import type { InspectedBlock, InspectedTransaction } from "./blockInspector";
+import type { BaseloadConfig } from "./baseloadConfig";
 
 const { Pool, types } = pg;
 
@@ -138,12 +139,24 @@ export interface DatabaseStats {
   tables: DatabaseTableStats[];
 }
 
+export interface StoredBaseloadConfigSummary {
+  name: string;
+  workerCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredBaseloadConfig extends StoredBaseloadConfigSummary {
+  config: BaseloadConfig;
+}
+
 export class ScannerStorage {
   private readonly schema: string;
   private readonly qBlocks: string;
   private readonly qScannerState: string;
   private readonly qBlockRanges: string;
   private readonly qTransactions: string;
+  private readonly qBaseloadConfigs: string;
 
   private constructor(
     private readonly pool: pg.Pool,
@@ -154,6 +167,7 @@ export class ScannerStorage {
     this.qScannerState = `${quoteIdent(this.schema)}.scanner_state`;
     this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
     this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
+    this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
   }
 
   static async open(
@@ -242,6 +256,14 @@ export class ScannerStorage {
       CREATE TABLE IF NOT EXISTS ${this.qScannerState} (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qBaseloadConfigs} (
+        name TEXT PRIMARY KEY,
+        config_json JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
@@ -416,6 +438,11 @@ export class ScannerStorage {
         name: "scanner_state",
         qualifiedName: this.qScannerState,
         regclassName: regclassName(this.schema, "scanner_state"),
+      },
+      {
+        name: "baseload_configs",
+        qualifiedName: this.qBaseloadConfigs,
+        regclassName: regclassName(this.schema, "baseload_configs"),
       },
     ];
 
@@ -860,6 +887,68 @@ export class ScannerStorage {
     };
   }
 
+  async listBaseloadConfigs(): Promise<StoredBaseloadConfigSummary[]> {
+    const result = await this.pool.query<{
+      name: string;
+      worker_count: number;
+      created_at_utc: string;
+      updated_at_utc: string;
+    }>(
+      `SELECT
+         name,
+         jsonb_array_length(COALESCE(config_json->'workers', '[]'::jsonb)) AS worker_count,
+         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at_utc,
+         to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at_utc
+       FROM ${this.qBaseloadConfigs}
+       ORDER BY name ASC`,
+    );
+
+    return result.rows.map(mapBaseloadConfigSummaryRow);
+  }
+
+  async getBaseloadConfig(name: string): Promise<StoredBaseloadConfig | undefined> {
+    const result = await this.pool.query<BaseloadConfigRow>(
+      `SELECT
+         name,
+         config_json::text AS config_json,
+         jsonb_array_length(COALESCE(config_json->'workers', '[]'::jsonb)) AS worker_count,
+         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at_utc,
+         to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at_utc
+       FROM ${this.qBaseloadConfigs}
+       WHERE name = $1`,
+      [name],
+    );
+
+    const row = result.rows[0];
+    return row ? mapBaseloadConfigRow(row) : undefined;
+  }
+
+  async saveBaseloadConfig(name: string, config: BaseloadConfig): Promise<StoredBaseloadConfig> {
+    const result = await this.pool.query<BaseloadConfigRow>(
+      `INSERT INTO ${this.qBaseloadConfigs} (name, config_json, created_at, updated_at)
+       VALUES ($1, $2::jsonb, NOW(), NOW())
+       ON CONFLICT (name) DO UPDATE SET
+         config_json = EXCLUDED.config_json,
+         updated_at = NOW()
+       RETURNING
+         name,
+         config_json::text AS config_json,
+         jsonb_array_length(COALESCE(config_json->'workers', '[]'::jsonb)) AS worker_count,
+         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at_utc,
+         to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at_utc`,
+      [name, JSON.stringify(config)],
+    );
+
+    const row = result.rows[0];
+    if (!row) throw new Error("Failed to save Baseload config");
+    return mapBaseloadConfigRow(row);
+  }
+
+  async deleteBaseloadConfig(name: string): Promise<boolean> {
+    const result = await this.pool.query(`DELETE FROM ${this.qBaseloadConfigs} WHERE name = $1`, [name]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async aggregateRangeIfComplete(
     rangeStart: bigint,
     rangeSize: bigint,
@@ -1146,6 +1235,33 @@ function optionalStringField<K extends string>(
   value: string | undefined,
 ): { [P in K]?: string } {
   return value === undefined ? {} : { [key]: value } as { [P in K]?: string };
+}
+
+interface BaseloadConfigSummaryRow {
+  name: string;
+  worker_count: number;
+  created_at_utc: string;
+  updated_at_utc: string;
+}
+
+interface BaseloadConfigRow extends BaseloadConfigSummaryRow {
+  config_json: string;
+}
+
+function mapBaseloadConfigSummaryRow(row: BaseloadConfigSummaryRow): StoredBaseloadConfigSummary {
+  return {
+    name: row.name,
+    workerCount: row.worker_count,
+    createdAt: row.created_at_utc,
+    updatedAt: row.updated_at_utc,
+  };
+}
+
+function mapBaseloadConfigRow(row: BaseloadConfigRow): StoredBaseloadConfig {
+  return {
+    ...mapBaseloadConfigSummaryRow(row),
+    config: JSON.parse(row.config_json) as BaseloadConfig,
+  };
 }
 
 function mapTransactionRow(row: {

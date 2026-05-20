@@ -87,8 +87,12 @@ export class BaseloadRuntime {
     };
   }
 
+  normalizeConfig(value: unknown): BaseloadConfig {
+    return normalizeBaseloadConfig(value, this.runtimeConfig.mnemonic);
+  }
+
   updateConfig(value: unknown): BaseloadState {
-    this.config = normalizeBaseloadConfig(value, this.runtimeConfig.mnemonic);
+    this.config = this.normalizeConfig(value);
     this.syncTasks();
     this.pruneBalances();
     if (this.runtimeConfig.rpcUrl && !this.balancePollTimer && !this.balancePollInFlight) {

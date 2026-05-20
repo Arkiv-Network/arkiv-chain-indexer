@@ -1,6 +1,7 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type BlockInspectionResult } from "./blockInspector";
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
+import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import {
   MAX_BLOCKS_PER_QUERY,
@@ -13,6 +14,8 @@ import {
   type QueryOrder,
   type StoredBlock,
   type StoredBlockRange,
+  type StoredBaseloadConfig,
+  type StoredBaseloadConfigSummary,
   type StoredTransaction,
   type TransactionQueryFilter,
 } from "./storage";
@@ -66,6 +69,12 @@ export interface TransactionsResponseBody {
   transactions: StoredTransaction[];
 }
 
+export interface BaseloadConfigsResponseBody {
+  configs: StoredBaseloadConfigSummary[];
+}
+
+export type BaseloadConfigResponseBody = StoredBaseloadConfig;
+
 export type BlockInspectResponseBody = BlockInspectionResult;
 
 export interface HealthResponseBody {
@@ -93,7 +102,7 @@ export interface HealthResponseBody {
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Max-Age": "86400",
 };
@@ -131,6 +140,16 @@ export async function handleRequest(
 
   if (url.pathname === "/baseload") {
     return handleBaseloadRequest(request, options.baseloadRuntime, options.baseloadAdminBearerToken);
+  }
+
+  if (url.pathname === "/baseload/configs" || url.pathname.startsWith("/baseload/configs/")) {
+    return handleBaseloadConfigsRequest(
+      request,
+      url,
+      storage,
+      options.baseloadRuntime,
+      options.baseloadAdminBearerToken,
+    );
   }
 
   if (request.method !== "GET") {
@@ -196,6 +215,94 @@ async function handleBaseloadRequest(
     } catch (error) {
       return jsonError(400, error instanceof Error ? error.message : String(error));
     }
+  }
+
+  return jsonError(405, `Method ${request.method} is not allowed`);
+}
+
+async function handleBaseloadConfigsRequest(
+  request: Request,
+  url: URL,
+  storage: ScannerStorage,
+  baseloadRuntime: BaseloadRuntime | undefined,
+  adminBearerToken: string | undefined,
+): Promise<Response> {
+  const authError = requireAdminBearerToken(request, adminBearerToken);
+  if (authError) return authError;
+
+  if (url.pathname === "/baseload/configs") {
+    if (request.method !== "GET") {
+      return jsonError(405, `Method ${request.method} is not allowed`);
+    }
+    return jsonResponse({
+      configs: await storage.listBaseloadConfigs(),
+    } satisfies BaseloadConfigsResponseBody);
+  }
+
+  const loadMatch = url.pathname.match(/^\/baseload\/configs\/([^/]+)\/load$/);
+  if (loadMatch?.[1]) {
+    if (request.method !== "PUT") {
+      return jsonError(405, `Method ${request.method} is not allowed`);
+    }
+    if (!baseloadRuntime) {
+      return jsonError(503, "Baseload runtime is unavailable");
+    }
+    let name: string;
+    try {
+      name = parseBaseloadConfigName(loadMatch[1]);
+    } catch (error) {
+      return jsonError(400, error instanceof Error ? error.message : String(error));
+    }
+    const saved = await storage.getBaseloadConfig(name);
+    if (!saved) {
+      return jsonError(404, `Baseload config ${name} was not found`);
+    }
+    try {
+      return jsonResponse(baseloadRuntime.updateConfig(saved.config) satisfies BaseloadState);
+    } catch (error) {
+      return jsonError(400, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  const configMatch = url.pathname.match(/^\/baseload\/configs\/([^/]+)$/);
+  if (!configMatch?.[1]) {
+    return jsonError(404, `Not found: ${url.pathname}`);
+  }
+  let name: string;
+  try {
+    name = parseBaseloadConfigName(configMatch[1]);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  if (request.method === "GET") {
+    const saved = await storage.getBaseloadConfig(name);
+    if (!saved) {
+      return jsonError(404, `Baseload config ${name} was not found`);
+    }
+    return jsonResponse(saved satisfies BaseloadConfigResponseBody);
+  }
+
+  if (request.method === "PUT") {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return jsonError(400, "Request body must be valid JSON");
+    }
+
+    try {
+      const config = baseloadRuntime
+        ? baseloadRuntime.normalizeConfig(body)
+        : normalizeBaseloadConfig(body);
+      return jsonResponse(await storage.saveBaseloadConfig(name, config));
+    } catch (error) {
+      return jsonError(400, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (request.method === "DELETE") {
+    return jsonResponse({ deleted: await storage.deleteBaseloadConfig(name) });
   }
 
   return jsonError(405, `Method ${request.method} is not allowed`);
@@ -532,6 +639,19 @@ function parseDateParam(name: string, value: string): string {
 function parseOrderParam(value: string): QueryOrder {
   if (value === "asc" || value === "desc") return value;
   throw new Error(`order must be either asc or desc`);
+}
+
+function parseBaseloadConfigName(value: string): string {
+  const decoded = decodeURIComponent(value).trim();
+  if (!decoded) {
+    throw new Error("Baseload config name is required");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,79}$/.test(decoded)) {
+    throw new Error(
+      "Baseload config name must start with a letter or number and contain only letters, numbers, spaces, dots, underscores, or hyphens",
+    );
+  }
+  return decoded;
 }
 
 function secondsBetween(now: Date, isoDate: string | undefined): number | null {

@@ -12,6 +12,7 @@ import {
   type TransactionsResponseBody,
 } from "./server";
 import { BaseloadRuntime } from "./baseloadRuntime";
+import { type BaseloadConfig } from "./baseloadConfig";
 import { type ScannerStorage } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import {
@@ -354,6 +355,132 @@ describe("Baseload API", () => {
     const body = await response.json();
     expect(body.config.workers).toHaveLength(1);
     runtime.stop();
+  });
+
+  test("requires admin bearer for saved baseload config endpoints", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/baseload/configs"),
+      {
+        listBaseloadConfigs: async () => [],
+      } as unknown as ScannerStorage,
+      { baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Admin bearer token is required",
+    });
+  });
+
+  test("lists saved baseload configs when authorized", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/baseload/configs", {
+        headers: { authorization: "Bearer secret" },
+      }),
+      {
+        listBaseloadConfigs: async () => [
+          {
+            name: "low gas",
+            workerCount: 2,
+            createdAt: "2024-01-01T00:00:00.000Z",
+            updatedAt: "2024-01-01T00:00:00.000Z",
+          },
+        ],
+      } as unknown as ScannerStorage,
+      { baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      configs: [
+        {
+          name: "low gas",
+          workerCount: 2,
+          createdAt: "2024-01-01T00:00:00.000Z",
+          updatedAt: "2024-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  test("saves named baseload configs with backend normalization", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    let savedWorkerAddress = "";
+    const response = await handleRequest(
+      new Request("http://example.test/baseload/configs/low%20gas", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
+      }),
+      {
+        saveBaseloadConfig: async (name: string, config: BaseloadConfig) => {
+          savedWorkerAddress = config.workers[0]?.walletAddress ?? "";
+          return {
+            name,
+            workerCount: config.workers.length,
+            config,
+            createdAt: "2024-01-01T00:00:00.000Z",
+            updatedAt: "2024-01-01T00:00:00.000Z",
+          };
+        },
+      } as unknown as ScannerStorage,
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(savedWorkerAddress).toBe("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+    await expect(response.json()).resolves.toMatchObject({
+      name: "low gas",
+      workerCount: 1,
+      config: { workers: [{ walletNumber: 0 }] },
+    });
+    runtime.stop();
+  });
+
+  test("loads saved baseload configs into the runtime", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    const savedConfig = runtime.normalizeConfig({ workers: [{ walletNumber: 1 }] });
+    const response = await handleRequest(
+      new Request("http://example.test/baseload/configs/low%20gas/load", {
+        method: "PUT",
+        headers: { authorization: "Bearer secret" },
+      }),
+      {
+        getBaseloadConfig: async () => ({
+          name: "low gas",
+          workerCount: 1,
+          config: savedConfig,
+          createdAt: "2024-01-01T00:00:00.000Z",
+          updatedAt: "2024-01-01T00:00:00.000Z",
+        }),
+      } as unknown as ScannerStorage,
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.config.workers[0].walletNumber).toBe(1);
+    expect(runtime.getState().config.workers[0]?.walletNumber).toBe(1);
+    runtime.stop();
+  });
+
+  test("deletes saved baseload configs when authorized", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/baseload/configs/low%20gas", {
+        method: "DELETE",
+        headers: { authorization: "Bearer secret" },
+      }),
+      {
+        deleteBaseloadConfig: async (name: string) => name === "low gas",
+      } as unknown as ScannerStorage,
+      { baseloadAdminBearerToken: "secret" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ deleted: true });
   });
 
   test("rejects invalid backend baseload configs", async () => {

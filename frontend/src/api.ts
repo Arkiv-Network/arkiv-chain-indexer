@@ -200,10 +200,39 @@ export interface BaseloadStateResponse {
   balances: Record<string, BaseloadWorkerBalance>;
 }
 
+export interface StoredBaseloadConfigSummary {
+  name: string;
+  workerCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredBaseloadConfig extends StoredBaseloadConfigSummary {
+  config: BaseloadConfig;
+}
+
+export interface BaseloadConfigsResponse {
+  configs: StoredBaseloadConfigSummary[];
+}
+
 async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
   const qs = params.toString();
   const url = qs ? `/api${path}?${qs}` : `/api${path}`;
   const response = await fetch(url);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function getAdminJson<T>(path: string, bearerToken?: string): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (bearerToken) {
+    headers.authorization = `Bearer ${bearerToken}`;
+  }
+
+  const response = await fetch(`/api${path}`, { headers });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -221,6 +250,23 @@ async function putJson<T>(path: string, body: unknown, bearerToken?: string): Pr
     method: "PUT",
     headers,
     body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function deleteJson<T>(path: string, bearerToken?: string): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (bearerToken) {
+    headers.authorization = `Bearer ${bearerToken}`;
+  }
+
+  const response = await fetch(`/api${path}`, {
+    method: "DELETE",
+    headers,
   });
   if (!response.ok) {
     const text = await response.text();
@@ -258,4 +304,41 @@ export function updateBaseloadConfig(
   adminBearerToken?: string,
 ): Promise<BaseloadStateResponse> {
   return putJson<BaseloadStateResponse>("/baseload", config, adminBearerToken);
+}
+
+export function fetchBaseloadConfigs(adminBearerToken?: string): Promise<BaseloadConfigsResponse> {
+  return getAdminJson<BaseloadConfigsResponse>("/baseload/configs", adminBearerToken);
+}
+
+export function saveBaseloadConfig(
+  name: string,
+  config: BaseloadConfig,
+  adminBearerToken?: string,
+): Promise<StoredBaseloadConfig> {
+  return putJson<StoredBaseloadConfig>(
+    `/baseload/configs/${encodeURIComponent(name)}`,
+    config,
+    adminBearerToken,
+  );
+}
+
+export function loadBaseloadConfig(
+  name: string,
+  adminBearerToken?: string,
+): Promise<BaseloadStateResponse> {
+  return putJson<BaseloadStateResponse>(
+    `/baseload/configs/${encodeURIComponent(name)}/load`,
+    {},
+    adminBearerToken,
+  );
+}
+
+export function deleteBaseloadConfig(
+  name: string,
+  adminBearerToken?: string,
+): Promise<{ deleted: boolean }> {
+  return deleteJson<{ deleted: boolean }>(
+    `/baseload/configs/${encodeURIComponent(name)}`,
+    adminBearerToken,
+  );
 }
