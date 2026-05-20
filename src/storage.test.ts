@@ -147,16 +147,56 @@ if (!hasPostgresForTests()) {
         "transactions",
         "block_ranges",
         "scanner_state",
+        "baseload_configs",
       ]);
       expect(byName.get("blocks")?.rowCount).toBe("2");
       expect(byName.get("transactions")?.rowCount).toBe("2");
       expect(byName.get("block_ranges")?.rowCount).toBe("1");
       expect(byName.get("scanner_state")?.rowCount).toBe("1");
+      expect(byName.get("baseload_configs")?.rowCount).toBe("0");
       for (const table of stats.tables) {
         expect(BigInt(table.tableSizeBytes)).toBeGreaterThanOrEqual(0n);
         expect(BigInt(table.indexesSizeBytes)).toBeGreaterThanOrEqual(0n);
         expect(BigInt(table.totalSizeBytes)).toBeGreaterThanOrEqual(BigInt(table.tableSizeBytes));
       }
+    });
+
+    test("persists named baseload configs as JSON documents", async () => {
+      const storage = await withStorage();
+
+      const saved = await storage.saveBaseloadConfig("low gas", {
+        version: 1,
+        workers: [
+          {
+            id: "wallet-0",
+            maxGasPriceGwei: 0.1,
+            createsPerMinute: 1,
+            singleCreatePayloadSize: 5000,
+            singleCreateStringArgumentCount: 2,
+            singleCreateNumberArgumentCount: 2,
+            walletNumber: 0,
+            walletAddress: "0x0000000000000000000000000000000000000000",
+            startBlock: 0,
+            endBlock: null,
+            durationSeconds: null,
+            ttlSeconds: 3600,
+          },
+        ],
+      });
+
+      expect(saved.name).toBe("low gas");
+      expect(saved.workerCount).toBe(1);
+      expect(saved.createdAt).toMatch(/Z$/);
+      expect(saved.updatedAt).toMatch(/Z$/);
+
+      await storage.saveBaseloadConfig("empty", { version: 1, workers: [] });
+      expect((await storage.listBaseloadConfigs()).map((config) => config.name)).toEqual([
+        "empty",
+        "low gas",
+      ]);
+      expect((await storage.getBaseloadConfig("low gas"))?.config.workers[0]?.walletNumber).toBe(0);
+      expect(await storage.deleteBaseloadConfig("low gas")).toBe(true);
+      expect(await storage.getBaseloadConfig("low gas")).toBeUndefined();
     });
   });
 

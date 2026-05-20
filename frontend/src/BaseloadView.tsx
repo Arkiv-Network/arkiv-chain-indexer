@@ -13,7 +13,11 @@ import {
   type BaseloadWorkerConfig,
   type BaseloadWorkerDraft,
 } from "./baseloadConfig";
-import { type BaseloadTaskStatus, type BaseloadWorkerBalance } from "./api";
+import {
+  type BaseloadTaskStatus,
+  type BaseloadWorkerBalance,
+  type StoredBaseloadConfigSummary,
+} from "./api";
 import { fmtEth } from "./format";
 import {
   readStoredString,
@@ -31,6 +35,12 @@ interface BaseloadViewProps {
   backendError: string | null;
   adminToken: string;
   onAdminTokenChange: (token: string) => void;
+  savedConfigs: StoredBaseloadConfigSummary[];
+  configManagerError: string | null;
+  onRefreshSavedConfigs: () => Promise<void>;
+  onSaveCurrentConfig: (name: string) => Promise<void>;
+  onLoadSavedConfig: (name: string) => Promise<void>;
+  onDeleteSavedConfig: (name: string) => Promise<void>;
 }
 
 const DRAFT_STORAGE_KEY = "baseload.workerDraft";
@@ -66,6 +76,12 @@ export function BaseloadView({
   backendError,
   adminToken,
   onAdminTokenChange,
+  savedConfigs,
+  configManagerError,
+  onRefreshSavedConfigs,
+  onSaveCurrentConfig,
+  onLoadSavedConfig,
+  onDeleteSavedConfig,
 }: BaseloadViewProps) {
   const availableWallets = useMemo(() => getAvailableWalletNumbers(config.workers), [config.workers]);
   const [draft, setDraft] = useState<BaseloadWorkerDraft>(() =>
@@ -77,6 +93,11 @@ export function BaseloadView({
   );
   const [error, setError] = useState<string | null>(null);
   const [downloadStatus, setDownloadStatus] = useState("");
+  const [configName, setConfigName] = useState("");
+  const [selectedConfigName, setSelectedConfigName] = useState("");
+  const [managerError, setManagerError] = useState<string | null>(null);
+  const [managerStatus, setManagerStatus] = useState("");
+  const displayedConfigManagerError = managerError || configManagerError;
 
   useEffect(() => {
     if (availableWallets.length === 0) return;
@@ -88,6 +109,16 @@ export function BaseloadView({
   useEffect(() => {
     writeStoredStringRecord(DRAFT_STORAGE_KEY, draft, DRAFT_KEYS);
   }, [draft]);
+
+  useEffect(() => {
+    if (savedConfigs.length === 0) {
+      setSelectedConfigName("");
+      return;
+    }
+    if (!savedConfigs.some((saved) => saved.name === selectedConfigName)) {
+      setSelectedConfigName(savedConfigs[0]?.name ?? "");
+    }
+  }, [savedConfigs, selectedConfigName]);
 
   const onDraftChange = (key: keyof BaseloadWorkerDraft) => (
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
@@ -141,6 +172,56 @@ export function BaseloadView({
     link.click();
     URL.revokeObjectURL(url);
     setDownloadStatus("Downloaded");
+  };
+
+  const runConfigManagerAction = async (action: () => Promise<void>, status: string) => {
+    try {
+      await action();
+      setManagerError(null);
+      setManagerStatus(status);
+      setError(null);
+      setDownloadStatus("");
+    } catch (err) {
+      setManagerError(err instanceof Error ? err.message : String(err));
+      setManagerStatus("");
+    }
+  };
+
+  const saveCurrentConfig = () => {
+    const name = configName.trim();
+    if (!name) {
+      setManagerError("Config name is required");
+      setManagerStatus("");
+      return;
+    }
+    void runConfigManagerAction(async () => {
+      await onSaveCurrentConfig(name);
+      setSelectedConfigName(name);
+    }, `Saved ${name}`);
+  };
+
+  const loadSelectedConfig = () => {
+    if (!selectedConfigName) {
+      setManagerError("Select a saved config to load");
+      setManagerStatus("");
+      return;
+    }
+    void runConfigManagerAction(
+      () => onLoadSavedConfig(selectedConfigName),
+      `Loaded ${selectedConfigName}`,
+    );
+  };
+
+  const deleteSelectedConfig = () => {
+    if (!selectedConfigName) {
+      setManagerError("Select a saved config to delete");
+      setManagerStatus("");
+      return;
+    }
+    void runConfigManagerAction(
+      () => onDeleteSavedConfig(selectedConfigName),
+      `Deleted ${selectedConfigName}`,
+    );
   };
 
   const loadConfigFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -281,13 +362,67 @@ export function BaseloadView({
         </button>
       </form>
 
-      <p className={`summary${error || backendError ? " error" : ""}`}>
-        {error || backendError || downloadStatus || `${config.workers.length} workers configured`}
+      <p className={`summary${error || backendError || displayedConfigManagerError ? " error" : ""}`}>
+        {error ||
+          backendError ||
+          displayedConfigManagerError ||
+          managerStatus ||
+          downloadStatus ||
+          `${config.workers.length} workers configured`}
       </p>
+
+      <div className="baseload-config-manager">
+        <label>
+          Saved config
+          <select
+            value={selectedConfigName}
+            onChange={(event) => setSelectedConfigName(event.target.value)}
+            disabled={savedConfigs.length === 0}
+          >
+            {savedConfigs.length === 0 ? (
+              <option value="">No saved configs</option>
+            ) : (
+              savedConfigs.map((saved) => (
+                <option key={saved.name} value={saved.name}>
+                  {saved.name} ({saved.workerCount})
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <button type="button" className="secondary" onClick={loadSelectedConfig} disabled={!selectedConfigName}>
+          Load selected
+        </button>
+        <button type="button" className="secondary" onClick={deleteSelectedConfig} disabled={!selectedConfigName}>
+          Delete saved
+        </button>
+        <label>
+          Config name
+          <input
+            type="text"
+            value={configName}
+            onChange={(event) => setConfigName(event.target.value)}
+            placeholder="mainnet low gas"
+          />
+        </label>
+        <button type="button" className="secondary" onClick={saveCurrentConfig}>
+          Save current
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() =>
+            void runConfigManagerAction(onRefreshSavedConfigs, "Refreshed saved configs")
+          }
+        >
+          Refresh
+        </button>
+      </div>
 
       <ErrorBanner
         formError={error}
         backendError={backendError}
+        configManagerError={displayedConfigManagerError}
         workers={config.workers}
         taskStatuses={taskStatuses}
         balances={balances}
@@ -490,12 +625,14 @@ function TaskStatusCell({ status }: { status: BaseloadTaskStatus | undefined }) 
 function ErrorBanner({
   formError,
   backendError,
+  configManagerError,
   workers,
   taskStatuses,
   balances,
 }: {
   formError: string | null;
   backendError: string | null;
+  configManagerError: string | null;
   workers: readonly BaseloadWorkerConfig[];
   taskStatuses: Record<string, BaseloadTaskStatus>;
   balances: Record<string, BaseloadWorkerBalance>;
@@ -525,7 +662,7 @@ function ErrorBanner({
     return entries;
   });
 
-  if (!formError && !backendError && workerErrors.length === 0) return null;
+  if (!formError && !backendError && !configManagerError && workerErrors.length === 0) return null;
 
   return (
     <div className="error-banner" role="alert">
@@ -539,6 +676,11 @@ function ErrorBanner({
         {backendError ? (
           <li>
             <strong>Backend:</strong> <span className="error-detail">{backendError}</span>
+          </li>
+        ) : null}
+        {configManagerError ? (
+          <li>
+            <strong>Saved configs:</strong> <span className="error-detail">{configManagerError}</span>
           </li>
         ) : null}
         {workerErrors.map((entry, index) => (

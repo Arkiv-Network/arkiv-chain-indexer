@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { fetchBaseloadState, updateBaseloadConfig } from "./src/api";
+import {
+  deleteBaseloadConfig,
+  fetchBaseloadConfigs,
+  fetchBaseloadState,
+  loadBaseloadConfig,
+  saveBaseloadConfig,
+  updateBaseloadConfig,
+} from "./src/api";
 import { EMPTY_BASELOAD_CONFIG } from "./src/baseloadConfig";
 
 const originalFetch = globalThis.fetch;
@@ -42,5 +49,48 @@ describe("frontend API helpers", () => {
 
     expect(observedHeaders?.get("authorization")).toBe("Bearer secret");
     expect(observedHeaders?.get("content-type")).toBe("application/json");
+  });
+
+  test("attaches admin bearer tokens to saved config management requests", async () => {
+    const observed: Array<{ input: string; method: string; authorization: string | null }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      observed.push({
+        input: String(input),
+        method: init?.method ?? "GET",
+        authorization: headers.get("authorization"),
+      });
+      if (String(input).endsWith("/baseload/configs")) {
+        return Response.json({ configs: [] });
+      }
+      if (String(input).endsWith("/load")) {
+        return Response.json({
+          enabled: true,
+          config: EMPTY_BASELOAD_CONFIG,
+          statuses: {},
+          balances: {},
+        });
+      }
+      return Response.json({
+        name: "low gas",
+        workerCount: 0,
+        config: EMPTY_BASELOAD_CONFIG,
+        createdAt: "2024-01-01T00:00:00.000Z",
+        updatedAt: "2024-01-01T00:00:00.000Z",
+        deleted: true,
+      });
+    }) as typeof fetch;
+
+    await fetchBaseloadConfigs("secret");
+    await saveBaseloadConfig("low gas", EMPTY_BASELOAD_CONFIG, "secret");
+    await loadBaseloadConfig("low gas", "secret");
+    await deleteBaseloadConfig("low gas", "secret");
+
+    expect(observed).toEqual([
+      { input: "/api/baseload/configs", method: "GET", authorization: "Bearer secret" },
+      { input: "/api/baseload/configs/low%20gas", method: "PUT", authorization: "Bearer secret" },
+      { input: "/api/baseload/configs/low%20gas/load", method: "PUT", authorization: "Bearer secret" },
+      { input: "/api/baseload/configs/low%20gas", method: "DELETE", authorization: "Bearer secret" },
+    ]);
   });
 });
