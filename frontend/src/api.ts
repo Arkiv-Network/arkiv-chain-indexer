@@ -211,10 +211,15 @@ async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function putJson<T>(path: string, body: unknown): Promise<T> {
+async function putJson<T>(path: string, body: unknown, bearerToken?: string): Promise<T> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (bearerToken) {
+    headers.authorization = `Bearer ${bearerToken}`;
+  }
+
   const response = await fetch(`/api${path}`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   if (!response.ok) {
@@ -248,6 +253,9 @@ export function fetchBaseloadState(): Promise<BaseloadStateResponse> {
   return getJson<BaseloadStateResponse>("/baseload", new URLSearchParams());
 }
 
-export function updateBaseloadConfig(config: BaseloadConfig): Promise<BaseloadStateResponse> {
-  return putJson<BaseloadStateResponse>("/baseload", config);
+export function updateBaseloadConfig(
+  config: BaseloadConfig,
+  adminBearerToken?: string,
+): Promise<BaseloadStateResponse> {
+  return putJson<BaseloadStateResponse>("/baseload", config, adminBearerToken);
 }

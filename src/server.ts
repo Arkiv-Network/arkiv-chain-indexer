@@ -22,6 +22,7 @@ export interface BlockServerOptions {
   hostname?: string;
   transactionDataEnabled?: boolean;
   baseloadRuntime?: BaseloadRuntime;
+  baseloadAdminBearerToken?: string;
 }
 
 export interface BlocksResponseBody {
@@ -93,7 +94,7 @@ export interface HealthResponseBody {
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -126,7 +127,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/baseload") {
-    return handleBaseloadRequest(request, options.baseloadRuntime);
+    return handleBaseloadRequest(request, options.baseloadRuntime, options.baseloadAdminBearerToken);
   }
 
   if (request.method !== "GET") {
@@ -166,6 +167,7 @@ export async function handleRequest(
 async function handleBaseloadRequest(
   request: Request,
   baseloadRuntime: BaseloadRuntime | undefined,
+  adminBearerToken: string | undefined,
 ): Promise<Response> {
   if (!baseloadRuntime) {
     return jsonError(503, "Baseload runtime is unavailable");
@@ -176,6 +178,9 @@ async function handleBaseloadRequest(
   }
 
   if (request.method === "PUT") {
+    const authError = requireAdminBearerToken(request, adminBearerToken);
+    if (authError) return authError;
+
     let body: unknown;
     try {
       body = await request.json();
@@ -191,6 +196,26 @@ async function handleBaseloadRequest(
   }
 
   return jsonError(405, `Method ${request.method} is not allowed`);
+}
+
+function requireAdminBearerToken(request: Request, adminBearerToken: string | undefined): Response | null {
+  if (!adminBearerToken) return null;
+
+  const authorization = request.headers.get("authorization");
+  if (!authorization) {
+    return jsonError(401, "Admin bearer token is required");
+  }
+
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) {
+    return jsonError(401, "Authorization header must use Bearer token");
+  }
+
+  if (match[1] !== adminBearerToken) {
+    return jsonError(403, "Admin bearer token is invalid");
+  }
+
+  return null;
 }
 
 async function handleGetHealth(

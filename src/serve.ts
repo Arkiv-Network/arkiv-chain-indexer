@@ -16,6 +16,9 @@ async function main(): Promise<void> {
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
       transactionDataEnabled: config.transactionDataEnabled,
       baseloadRuntime,
+      ...(config.baseloadAdminBearerToken !== undefined
+        ? { baseloadAdminBearerToken: config.baseloadAdminBearerToken }
+        : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
 

@@ -18,6 +18,7 @@ import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
+const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
@@ -26,6 +27,9 @@ export function App() {
   const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
   const [baseloadBalances, setBaseloadBalances] = useState<Record<string, BaseloadWorkerBalance>>({});
   const [baseloadError, setBaseloadError] = useState<string | null>(null);
+  const [baseloadAdminToken, setBaseloadAdminToken] = useState(() =>
+    readStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, ""),
+  );
   const [timeZone, setTimeZone] = useState<string>(() =>
     readStoredString(
       TIME_ZONE_STORAGE_KEY,
@@ -96,9 +100,13 @@ export function App() {
     writeStoredString(TIME_ZONE_STORAGE_KEY, timeZone);
   }, [timeZone]);
 
+  useEffect(() => {
+    writeStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, baseloadAdminToken);
+  }, [baseloadAdminToken]);
+
   const updateBaseloadConfig = async (config: BaseloadConfig) => {
     try {
-      const state = await putBaseloadConfig(config);
+      const state = await putBaseloadConfig(config, baseloadAdminToken.trim() || undefined);
       setBaseloadConfig(state.config);
       setBaseloadTaskStatuses(state.statuses);
       setBaseloadBalances(state.balances ?? {});
@@ -202,6 +210,8 @@ export function App() {
             taskStatuses={baseloadTaskStatuses}
             balances={baseloadBalances}
             backendError={baseloadError}
+            adminToken={baseloadAdminToken}
+            onAdminTokenChange={setBaseloadAdminToken}
           />
         ) : (
           <HealthView timeZone={timeZone} />

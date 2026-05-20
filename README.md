@@ -28,7 +28,11 @@ Open:
 - Backend API (direct): <http://localhost:3000/blocks> and <http://localhost:3000/ranges>
 - Postgres: `postgres://gas:gas@localhost:5432/gas`
 
-The frontend container is a tiny Node `server.js` that serves the Vite-built React app from `dist/` and reverse-proxies any request starting with `/api/` to the `backend` service (the `/api` prefix is stripped). This means you don't need to expose the backend publicly — only port `23560` on the host is required for end users.
+The default Compose port mappings bind to `127.0.0.1`, so Postgres, the direct backend API, and the frontend
+portal are reachable from the host but are not published on every network interface. Override `POSTGRES_HOST`,
+`BACKEND_HOST`, or `FRONTEND_HOST` only when you intentionally need a wider bind address.
+
+The frontend container is a tiny Node `server.js` that serves the Vite-built React app from `dist/` and reverse-proxies any request starting with `/api/` to the `backend` service (the `/api` prefix is stripped). This means you don't need to expose the backend publicly. In nginx-backed deployments, leave the frontend and backend bound to loopback and publish only nginx.
 
 The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so production-style mainnet scans keep
 block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
@@ -40,6 +44,11 @@ minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
 Baseload workers run in the backend service, not in the browser. Set `BASELOAD_RPC_NODE` to the Arkiv JSON-RPC
 endpoint that should receive create transactions. The frontend only adds, edits, deletes, imports, exports, and
 monitors worker configuration through `/api/baseload`.
+
+For shared deployments, set `BASELOAD_ADMIN_BEARER_TOKEN` so mutating Baseload worker requests require
+`Authorization: Bearer <token>`. Readonly views and status APIs remain public. The Baseload tab includes an admin
+bearer token field that stores the token in browser local storage and sends it only with worker configuration
+changes.
 
 To do a quick bounded backfill instead of continuous near-head scanning, set `SCANNER_FROM_BLOCK` and
 `SCANNER_TO_BLOCK` in `.env`.
@@ -149,6 +158,7 @@ Backend configuration:
 | --- | --- | --- |
 | `BASELOAD_RPC_NODE` | unset | Arkiv JSON-RPC endpoint used by backend workers for block reads, transaction sends, and receipt polling. |
 | `BASELOAD_MNEMONIC` | deterministic development mnemonic | Mnemonic used by the backend to derive worker wallets at `m/44'/60'/0'/0/<walletNumber>`. |
+| `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token required for mutating Baseload worker configuration requests. Readonly requests stay public. |
 
 Worker behavior:
 
@@ -164,7 +174,24 @@ Backend API:
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/baseload` | Returns backend Baseload enabled state, current config, and worker statuses. |
-| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. |
+| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. Requires `Authorization: Bearer <token>` when `BASELOAD_ADMIN_BEARER_TOKEN` is set. |
+
+## Nginx Deployment
+
+The repository includes an nginx site config named `scanner.arkiv-global.net` for the public portal URL
+`https://scanner.arkiv-global.net`. It assumes the normal Compose stack is running with loopback bindings:
+
+- Frontend upstream: `http://127.0.0.1:23560`
+- Backend upstream for `/api`: `http://127.0.0.1:3000`
+
+Install the site config on the host:
+
+```sh
+./deploy-nginx
+```
+
+The script copies `scanner.arkiv-global.net` into `/etc/nginx/sites-available/`, links it from
+`/etc/nginx/sites-enabled/`, and runs `nginx -t`. After that, run certbot for TLS certificates.
 
 ## Stored Metrics
 
