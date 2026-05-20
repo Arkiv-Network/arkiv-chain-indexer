@@ -7,6 +7,7 @@ import {
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
+import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 
 interface BlocksViewProps {
   locationSearch: string;
@@ -24,6 +25,7 @@ interface Filters extends Record<string, string> {
 
 const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
 const FILTER_KEYS = ["blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
+const STORAGE_KEY = "blocks.filters";
 const EMPTY: Filters = {
   blockGt: "",
   blockLt: "",
@@ -131,7 +133,8 @@ function buildParams(filters: Filters): URLSearchParams {
 }
 
 function loadFilters(locationSearch: string): Filters {
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
+  const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
 export function BlocksView({ locationSearch, onLocationChange, timeZone }: BlocksViewProps) {
@@ -154,6 +157,10 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone }: Block
   useEffect(() => {
     load(applied);
   }, [applied, load]);
+
+  useEffect(() => {
+    writeStoredStringRecord(STORAGE_KEY, filters, FILTER_KEYS);
+  }, [filters]);
 
   useEffect(() => {
     const next = loadFilters(locationSearch);

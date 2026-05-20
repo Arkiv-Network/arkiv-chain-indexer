@@ -11,10 +11,13 @@ import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
+import { readStoredString, writeStoredString } from "./localStorage";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
+
+const TIME_ZONE_STORAGE_KEY = "timeZone";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
@@ -23,7 +26,13 @@ export function App() {
   const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
   const [baseloadBalances, setBaseloadBalances] = useState<Record<string, BaseloadWorkerBalance>>({});
   const [baseloadError, setBaseloadError] = useState<string | null>(null);
-  const [timeZone, setTimeZone] = useState<string>(detectBrowserTimeZone);
+  const [timeZone, setTimeZone] = useState<string>(() =>
+    readStoredString(
+      TIME_ZONE_STORAGE_KEY,
+      detectBrowserTimeZone(),
+      (value) => TIME_ZONE_OPTIONS.some((option) => option.value === value),
+    ),
+  );
   const view = readViewFromSearch(locationSearch);
   const activeView = transactionDataEnabled !== true && view === "transactions" ? "blocks" : view;
 
@@ -82,6 +91,10 @@ export function App() {
   const onTimeZoneChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setTimeZone(event.target.value);
   };
+
+  useEffect(() => {
+    writeStoredString(TIME_ZONE_STORAGE_KEY, timeZone);
+  }, [timeZone]);
 
   const updateBaseloadConfig = async (config: BaseloadConfig) => {
     try {

@@ -13,6 +13,7 @@ import {
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
+import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -33,6 +34,7 @@ interface ChartsFilters extends Record<string, string> {
 
 const FETCH_LIMIT = 1000;
 const FILTER_KEYS = ["zoom", "startDate", "blockStart", "blockEnd", "parameters"] as const;
+const STORAGE_KEY = "charts.filters";
 
 interface ZoomLevel {
   rangeSize: number;
@@ -311,7 +313,8 @@ function clearBlockWindow(filters: ChartsFilters): ChartsFilters {
 }
 
 function loadFilters(locationSearch: string): ChartsFilters {
-  const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
+  const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
+  const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
   return { ...merged, startDate: normalizeIsoDate(merged.startDate) };
 }
 
@@ -466,6 +469,10 @@ export function ChartsView({
   useEffect(() => {
     load(filters);
   }, [filters.zoom, filters.startDate, filters.blockStart, filters.blockEnd, load]);
+
+  useEffect(() => {
+    writeStoredStringRecord(STORAGE_KEY, filters, FILTER_KEYS);
+  }, [filters]);
 
   useEffect(() => {
     const next = loadFilters(locationSearch);
