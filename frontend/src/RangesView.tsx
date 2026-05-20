@@ -7,6 +7,7 @@ import {
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
+import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 
 interface RangesViewProps {
   locationSearch: string;
@@ -26,6 +27,7 @@ interface Filters extends Record<string, string> {
 const RANGE_SIZES = ["2", "5", "10", "20", "50", "100", "150", "200", "300", "500", "1000"];
 const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
 const FILTER_KEYS = ["rangeSize", "rangeStartGt", "rangeStartLt", "dateGt", "dateLt", "limit"] as const;
+const STORAGE_KEY = "ranges.filters";
 const EMPTY: Filters = {
   rangeSize: "100",
   rangeStartGt: "",
@@ -196,7 +198,8 @@ function buildParams(filters: Filters): URLSearchParams {
 }
 
 function loadFilters(locationSearch: string): Filters {
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
+  const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
 export function RangesView({ locationSearch, onLocationChange, timeZone }: RangesViewProps) {
@@ -219,6 +222,10 @@ export function RangesView({ locationSearch, onLocationChange, timeZone }: Range
   useEffect(() => {
     load(applied);
   }, [applied, load]);
+
+  useEffect(() => {
+    writeStoredStringRecord(STORAGE_KEY, filters, FILTER_KEYS);
+  }, [filters]);
 
   useEffect(() => {
     const next = loadFilters(locationSearch);

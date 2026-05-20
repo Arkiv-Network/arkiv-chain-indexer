@@ -14,6 +14,13 @@ import {
 } from "./baseloadConfig";
 import { type BaseloadTaskStatus, type BaseloadWorkerBalance } from "./api";
 import { fmtEth } from "./format";
+import {
+  readStoredString,
+  readStoredStringRecord,
+  removeStoredValue,
+  writeStoredString,
+  writeStoredStringRecord,
+} from "./localStorage";
 
 interface BaseloadViewProps {
   config: BaseloadConfig;
@@ -22,6 +29,31 @@ interface BaseloadViewProps {
   balances: Record<string, BaseloadWorkerBalance>;
   backendError: string | null;
 }
+
+const DRAFT_STORAGE_KEY = "baseload.workerDraft";
+const DRAFT_KEYS = [
+  "maxGasPriceGwei",
+  "createsPerMinute",
+  "singleCreatePayloadSize",
+  "singleCreateStringArgumentCount",
+  "singleCreateNumberArgumentCount",
+  "walletNumber",
+  "startBlock",
+  "endBlock",
+  "durationSeconds",
+  "ttlSeconds",
+] as const;
+const EDITABLE_WORKER_KEYS = [
+  "maxGasPriceGwei",
+  "createsPerMinute",
+  "singleCreatePayloadSize",
+  "singleCreateStringArgumentCount",
+  "singleCreateNumberArgumentCount",
+  "startBlock",
+  "endBlock",
+  "durationSeconds",
+  "ttlSeconds",
+] as const;
 
 export function BaseloadView({
   config,
@@ -32,7 +64,11 @@ export function BaseloadView({
 }: BaseloadViewProps) {
   const availableWallets = useMemo(() => getAvailableWalletNumbers(config.workers), [config.workers]);
   const [draft, setDraft] = useState<BaseloadWorkerDraft>(() =>
-    createBaseloadWorkerDraft(availableWallets[0] ?? 0),
+    readStoredStringRecord(
+      DRAFT_STORAGE_KEY,
+      createBaseloadWorkerDraft(availableWallets[0] ?? 0),
+      DRAFT_KEYS,
+    ),
   );
   const [error, setError] = useState<string | null>(null);
   const [downloadStatus, setDownloadStatus] = useState("");
@@ -43,6 +79,10 @@ export function BaseloadView({
       setDraft((current) => ({ ...current, walletNumber: String(availableWallets[0]) }));
     }
   }, [availableWallets, draft.walletNumber]);
+
+  useEffect(() => {
+    writeStoredStringRecord(DRAFT_STORAGE_KEY, draft, DRAFT_KEYS);
+  }, [draft]);
 
   const onDraftChange = (key: keyof BaseloadWorkerDraft) => (
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
@@ -82,6 +122,7 @@ export function BaseloadView({
   };
 
   const deleteWorker = (workerId: string) => {
+    clearEditableStorage(workerId);
     void onConfigChange(removeBaseloadWorker(config, workerId));
     setError(null);
     setDownloadStatus("");
@@ -274,6 +315,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "maxGasPriceGwei")}
                       value={worker.maxGasPriceGwei}
                       min={0}
                       step="0.1"
@@ -284,6 +326,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "createsPerMinute")}
                       value={worker.createsPerMinute}
                       min={0}
                       step="1"
@@ -294,6 +337,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "singleCreatePayloadSize")}
                       value={worker.singleCreatePayloadSize}
                       min={0}
                       step="1"
@@ -305,6 +349,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "singleCreateStringArgumentCount")}
                       value={worker.singleCreateStringArgumentCount}
                       min={0}
                       step="1"
@@ -316,6 +361,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "singleCreateNumberArgumentCount")}
                       value={worker.singleCreateNumberArgumentCount}
                       min={0}
                       step="1"
@@ -327,6 +373,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "startBlock")}
                       value={worker.startBlock}
                       min={0}
                       step="1"
@@ -338,6 +385,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "endBlock")}
                       value={worker.endBlock}
                       min={0}
                       step="1"
@@ -348,6 +396,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "durationSeconds")}
                       value={worker.durationSeconds}
                       min={1}
                       step="1"
@@ -357,6 +406,7 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
+                      storageKey={editableStorageKey(worker.id, "ttlSeconds")}
                       value={worker.ttlSeconds}
                       min={1}
                       step="1"
@@ -494,7 +544,18 @@ function shortHash(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
+function editableStorageKey(workerId: string, field: keyof BaseloadWorkerConfig): string {
+  return `baseload.workerEdit.${workerId}.${field}`;
+}
+
+function clearEditableStorage(workerId: string): void {
+  for (const field of EDITABLE_WORKER_KEYS) {
+    removeStoredValue(editableStorageKey(workerId, field));
+  }
+}
+
 function EditableNumber({
+  storageKey,
   value,
   min,
   step,
@@ -502,6 +563,7 @@ function EditableNumber({
   placeholder,
   onChange,
 }: {
+  storageKey: string;
   value: number | null;
   min: number;
   step: string;
@@ -509,23 +571,31 @@ function EditableNumber({
   placeholder?: string;
   onChange: (value: number | null) => void;
 }) {
-  const [text, setText] = useState(value === null ? "" : String(value));
+  const [text, setText] = useState(() => readStoredString(storageKey, value === null ? "" : String(value)));
 
   useEffect(() => {
-    setText(value === null ? "" : String(value));
-  }, [value]);
+    setText(readStoredString(storageKey, value === null ? "" : String(value)));
+  }, [storageKey, value]);
 
   const commit = () => {
     if (text.trim() === "") {
+      removeStoredValue(storageKey);
       onChange(null);
       return;
     }
     const next = Number(text);
     if (!Number.isFinite(next) || next < min || (integer && !Number.isInteger(next))) {
+      removeStoredValue(storageKey);
       setText(value === null ? "" : String(value));
       return;
     }
+    removeStoredValue(storageKey);
     onChange(next);
+  };
+
+  const updateText = (value: string) => {
+    setText(value);
+    writeStoredString(storageKey, value);
   };
 
   return (
@@ -536,7 +606,7 @@ function EditableNumber({
       step={step}
       placeholder={placeholder}
       value={text}
-      onChange={(event) => setText(event.target.value)}
+      onChange={(event) => updateText(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
         if (event.key === "Enter") {

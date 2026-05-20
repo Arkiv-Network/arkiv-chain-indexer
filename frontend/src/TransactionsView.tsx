@@ -8,6 +8,7 @@ import {
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
+import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 
 interface TransactionsViewProps {
   locationSearch: string;
@@ -62,6 +63,7 @@ interface Column {
 }
 
 const FILTER_KEYS = ["block", "blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
+const STORAGE_KEY = "transactions.filters";
 const EMPTY: TransactionFilters = {
   block: "",
   blockGt: "",
@@ -212,7 +214,8 @@ function transactionColumns(timeZone: string): Column[] {
 }
 
 function loadFilters(locationSearch: string): TransactionFilters {
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
+  const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
+  return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
 export function TransactionsView({ locationSearch, onLocationChange, timeZone }: TransactionsViewProps) {
@@ -246,6 +249,10 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
   useEffect(() => {
     load(applied);
   }, [applied, load]);
+
+  useEffect(() => {
+    writeStoredStringRecord(STORAGE_KEY, filters, FILTER_KEYS);
+  }, [filters]);
 
   useEffect(() => {
     const next = loadFilters(locationSearch);
