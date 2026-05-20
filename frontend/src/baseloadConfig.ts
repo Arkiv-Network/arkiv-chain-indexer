@@ -55,6 +55,16 @@ export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerD
   };
 }
 
+export function moveDraftToNextAvailableWallet(
+  draft: BaseloadWorkerDraft,
+  workers: readonly BaseloadWorkerConfig[],
+): BaseloadWorkerDraft {
+  return {
+    ...draft,
+    walletNumber: String(getAvailableWalletNumbers(workers)[0] ?? MIN_WALLET_NUMBER),
+  };
+}
+
 export function createBaseloadWorkerFromDraft(draft: BaseloadWorkerDraft): BaseloadWorkerConfig {
   return normalizeBaseloadWorker({
     ...DEFAULT_BASELOAD_WORKER_VALUES,
