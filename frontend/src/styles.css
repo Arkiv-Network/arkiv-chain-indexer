@@ -581,6 +581,36 @@ td.num {
   min-width: 2rem;
 }
 
+.axis-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem;
+}
+
+.axis-mode-toggle button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.82rem;
+}
+
+.axis-mode-toggle button:hover {
+  border-color: var(--accent);
+}
+
+.axis-mode-toggle button.active {
+  background: rgba(46, 99, 216, 0.1);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 button.secondary:disabled {
   opacity: 0.4;
   cursor: not-allowed;
