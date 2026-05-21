@@ -9,6 +9,7 @@ import {
   writePermalink,
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
+import { addressSearchHref, transactionExplorerHref } from "./transactionLinks";
 
 interface TransactionsViewProps {
   locationSearch: string;
@@ -119,7 +120,13 @@ function transactionColumns(timeZone: string): Column[] {
     label: "Hash",
     width: "16rem",
     render: (row) => (
-      <CopyCell value={row.hash} label={shortHash(row.hash)} copyLabel="transaction hash" />
+      <CopyCell
+        value={row.hash}
+        label={shortHash(row.hash)}
+        copyLabel="transaction hash"
+        href={transactionExplorerHref(row.hash)}
+        external
+      />
     ),
   },
   {
@@ -470,7 +477,13 @@ function AddressCell({ address }: { address: string | null | undefined }) {
   const display = addressDisplay(address);
   const value = address?.trim() || null;
   return (
-    <CopyCell value={value} label={display.label} title={display.title} copyLabel="address" />
+    <CopyCell
+      value={value}
+      label={display.label}
+      title={display.title}
+      copyLabel="address"
+      href={addressSearchHref(value)}
+    />
   );
 }
 
@@ -479,11 +492,15 @@ function CopyCell({
   label,
   title,
   copyLabel,
+  href,
+  external = false,
 }: {
   value: string | null | undefined;
   label: string;
   title?: string;
   copyLabel: string;
+  href?: string | null;
+  external?: boolean;
 }) {
   const copyValue = value?.trim();
   const [copied, setCopied] = useState(false);
@@ -508,11 +525,25 @@ function CopyCell({
     }
   };
 
+  const text = href ? (
+    <a
+      className="mono truncate copy-cell-link"
+      title={title ?? copyValue}
+      href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noreferrer" : undefined}
+    >
+      {label}
+    </a>
+  ) : (
+    <span className="mono truncate" title={title ?? copyValue}>
+      {label}
+    </span>
+  );
+
   return (
     <span className="copy-cell">
-      <span className="mono truncate" title={title ?? copyValue}>
-        {label}
-      </span>
+      {text}
       <button
         type="button"
         className="copy-cell-button"
