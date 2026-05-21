@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
+import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import {
   buildPermalinkHref,
@@ -93,14 +94,16 @@ const EMPTY: TransactionFilters = {
   page: "1",
 };
 
-function transactionColumns(timeZone: string): Column[] {
+function transactionColumns(timeZone: string, onLocationChange: () => void): Column[] {
   return [
   {
     key: "blockNumber",
     label: "Block",
     className: "num",
     width: "8rem",
-    render: (row) => row.blockNumberDecimal,
+    render: (row) => (
+      <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
+    ),
   },
   {
     key: "blockDate",
@@ -313,7 +316,7 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
     if (sort === null) return transactions;
     return transactions.slice().sort((a, b) => compareRows(a, b, sort));
   }, [data, sort]);
-  const columns = useMemo(() => transactionColumns(timeZone), [timeZone]);
+  const columns = useMemo(() => transactionColumns(timeZone, onLocationChange), [timeZone, onLocationChange]);
 
   const setSortKey = (key: SortKey) => {
     setSort((current) => {

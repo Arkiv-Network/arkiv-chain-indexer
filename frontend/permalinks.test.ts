@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readViewFromSearch } from "./src/permalinks";
 
 describe("frontend permalink helpers", () => {
-  test("maps old block inspector links to the transactions view", () => {
-    expect(readViewFromSearch("?view=block&block=42")).toBe("transactions");
+  test("reads the block view", () => {
+    expect(readViewFromSearch("?view=block&block=42")).toBe("block");
   });
 
   test("reads the transactions view", () => {

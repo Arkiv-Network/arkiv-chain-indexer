@@ -1,4 +1,4 @@
-export type View = "blocks" | "transactions" | "senders" | "ranges" | "charts" | "health" | "baseload";
+export type View = "blocks" | "block" | "transactions" | "senders" | "ranges" | "charts" | "health" | "baseload";
 
 const VIEW_PARAM = "view";
 
@@ -10,7 +10,8 @@ export function getCurrentSearch(): string {
 export function readViewFromSearch(search: string): View {
   const params = new URLSearchParams(search);
   const value = params.get(VIEW_PARAM);
-  if (value === "block" || value === "transactions") return "transactions";
+  if (value === "block") return "block";
+  if (value === "transactions") return "transactions";
   if (value === "senders") return "senders";
   if (value === "ranges") return "ranges";
   if (value === "charts") return "charts";

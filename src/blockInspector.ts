@@ -31,6 +31,14 @@ export interface InspectedBlock {
   totalGasUsed: string;
   maxGasInBlock: string;
   transactionCount: number;
+  blockRewardWei?: string;
+  burntFeesWei?: string;
+  totalTransactionFeeWei?: string;
+  averageFeePriceWei?: string;
+  averageTransactionFeeWei?: string;
+  averageTransactionGasUsed?: string;
+  averagePriorityFeeWeightedWei?: string;
+  averagePriorityFeeWei?: string;
   transactions: InspectedTransaction[];
 }
 
