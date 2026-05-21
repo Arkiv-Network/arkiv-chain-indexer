@@ -14,6 +14,7 @@ import {
 } from "./api";
 import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
+import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
@@ -48,7 +49,9 @@ export function App() {
   );
   const view = readViewFromSearch(locationSearch);
   const activeView =
-    transactionDataEnabled !== true && (view === "transactions" || view === "senders") ? "blocks" : view;
+    transactionDataEnabled !== true && (view === "block" || view === "transactions" || view === "senders")
+      ? "blocks"
+      : view;
 
   useEffect(() => {
     const onPopState = () => setLocationSearch(getCurrentSearch());
@@ -111,7 +114,7 @@ export function App() {
   useEffect(() => {
     if (
       transactionDataEnabled === false &&
-      (view === "transactions" || view === "senders") &&
+      (view === "block" || view === "transactions" || view === "senders") &&
       writePermalink("blocks", {})
     ) {
       setLocationSearch(getCurrentSearch());
@@ -210,6 +213,13 @@ export function App() {
             <>
               <button
                 type="button"
+                className={activeView === "block" ? "active" : ""}
+                onClick={() => setView("block")}
+              >
+                Block
+              </button>
+              <button
+                type="button"
                 className={activeView === "transactions" ? "active" : ""}
                 onClick={() => setView("transactions")}
               >
@@ -267,6 +277,12 @@ export function App() {
       <main className={activeView === "charts" ? "fullscreen" : ""}>
         {activeView === "blocks" ? (
           <BlocksView
+            locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+          />
+        ) : activeView === "block" ? (
+          <BlockView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}

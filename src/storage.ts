@@ -941,6 +941,14 @@ export class ScannerStorage {
       totalGasUsed: block.totalGasUsed,
       maxGasInBlock: block.maxGasInBlock,
       transactionCount: block.transactionCount,
+      blockRewardWei: block.blockRewardWei,
+      burntFeesWei: block.burntFeesWei,
+      totalTransactionFeeWei: block.totalTransactionFeeWei,
+      averageFeePriceWei: block.averageFeePriceWei,
+      averageTransactionFeeWei: block.averageTransactionFeeWei,
+      averageTransactionGasUsed: block.averageTransactionGasUsed,
+      averagePriorityFeeWeightedWei: block.averagePriorityFeeWeightedWei,
+      averagePriorityFeeWei: block.averagePriorityFeeWei,
       transactions: transactions.map(stripStoredTransactionContext),
     };
   }

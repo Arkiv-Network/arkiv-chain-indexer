@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { BlockNumberLink } from "./blockLinks";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -42,14 +43,14 @@ interface Column<T> {
   render: (row: T) => ReactNode;
 }
 
-function blockColumns(timeZone: string): Column<StoredBlock>[] {
+function blockColumns(timeZone: string, onLocationChange: () => void): Column<StoredBlock>[] {
   return [
   {
     key: "block",
     label: "Block",
     className: "num",
     width: "7.5rem",
-    render: (row) => row.blockNumber,
+    render: (row) => <BlockNumberLink blockNumber={row.blockNumber} onLocationChange={onLocationChange} />,
   },
   {
     key: "date",
@@ -199,7 +200,7 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone }: Block
   const sorted = data
     ? data.blocks.slice().sort((a, b) => b.blockNumber - a.blockNumber)
     : [];
-  const columns = useMemo(() => blockColumns(timeZone), [timeZone]);
+  const columns = useMemo(() => blockColumns(timeZone, onLocationChange), [timeZone, onLocationChange]);
 
   return (
     <section className="view">

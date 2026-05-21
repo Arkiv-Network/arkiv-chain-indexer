@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   deleteBaseloadConfig,
+  fetchBlockInspect,
   fetchBaseloadConfigs,
   fetchBaseloadState,
   fetchSenders,
@@ -111,5 +112,29 @@ describe("frontend API helpers", () => {
     await fetchSenders(new URLSearchParams("limit=25&order=desc"));
 
     expect(observedInput).toBe("/api/senders?limit=25&order=desc");
+  });
+
+  test("fetches a block inspection by block number", async () => {
+    let observedInput = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      observedInput = String(input);
+      return Response.json({
+        cached: false,
+        block: {
+          blockNumber: 42,
+          blockNumberDecimal: "42",
+          blockDate: "2024-01-01T00:00:00.000Z",
+          baseBlockFeeWei: "0",
+          totalGasUsed: "0",
+          maxGasInBlock: "0",
+          transactionCount: 0,
+          transactions: [],
+        },
+      });
+    }) as typeof fetch;
+
+    await fetchBlockInspect("42");
+
+    expect(observedInput).toBe("/api/block/42");
   });
 });

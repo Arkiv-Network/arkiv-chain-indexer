@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchSenders, type SendersResponse } from "./api";
+import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtInteger } from "./format";
 import { buildPermalinkHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
@@ -139,10 +140,10 @@ export function SendersView({ locationSearch, onLocationChange, timeZone }: Send
               <th scope="col" className="num">Value sent (ETH)</th>
               <th scope="col" className="num">Avg gas</th>
               <th scope="col" className="num">Avg fee (ETH)</th>
-              <th scope="col" className="num">First block</th>
-              <th scope="col">First seen</th>
-              <th scope="col" className="num">Last block</th>
-              <th scope="col">Last seen</th>
+              <th scope="col" className="num">First tx block</th>
+              <th scope="col">First tx date</th>
+              <th scope="col" className="num">Last tx block</th>
+              <th scope="col">Last tx date</th>
             </tr>
           </thead>
           <tbody>
@@ -158,10 +159,32 @@ export function SendersView({ locationSearch, onLocationChange, timeZone }: Send
                 <td className="num" data-label="Value sent (ETH)">{fmtEth(row.totalValueWei)}</td>
                 <td className="num" data-label="Avg gas">{fmtInteger(row.averageGasUsed)}</td>
                 <td className="num" data-label="Avg fee (ETH)">{fmtEth(row.averageTransactionFeeWei)}</td>
-                <td className="num" data-label="First block">{row.firstBlockNumberDecimal}</td>
-                <td data-label="First seen">{fmtDate(row.firstBlockDate, timeZone)}</td>
-                <td className="num" data-label="Last block">{row.lastBlockNumberDecimal}</td>
-                <td data-label="Last seen">{fmtDate(row.lastBlockDate, timeZone)}</td>
+                <td className="num" data-label="First tx block">
+                  <BlockNumberLink
+                    blockNumber={row.firstBlockNumberDecimal}
+                    onLocationChange={onLocationChange}
+                  />
+                </td>
+                <td data-label="First tx date">
+                  <BlockNumberLink
+                    blockNumber={row.firstBlockNumberDecimal}
+                    label={fmtDate(row.firstBlockDate, timeZone)}
+                    onLocationChange={onLocationChange}
+                  />
+                </td>
+                <td className="num" data-label="Last tx block">
+                  <BlockNumberLink
+                    blockNumber={row.lastBlockNumberDecimal}
+                    onLocationChange={onLocationChange}
+                  />
+                </td>
+                <td data-label="Last tx date">
+                  <BlockNumberLink
+                    blockNumber={row.lastBlockNumberDecimal}
+                    label={fmtDate(row.lastBlockDate, timeZone)}
+                    onLocationChange={onLocationChange}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

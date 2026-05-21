@@ -655,6 +655,25 @@ button.secondary:disabled {
   overflow-wrap: anywhere;
 }
 
+.block-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.block-link:hover,
+.block-link:focus-visible {
+  text-decoration: underline;
+}
+
+.block-view .table-wrap {
+  margin-top: 0.9rem;
+}
+
+.block-transactions-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sort-header {
   display: flex;
   align-items: center;
