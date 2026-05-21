@@ -183,6 +183,16 @@ describe("parseTransactionFilterFromQuery", () => {
     expect(filter.order).toBe("desc");
   });
 
+  test("defaults transaction queries to newest first", () => {
+    const filter = parseTransactionFilterFromQuery(new URLSearchParams(""));
+    expect(filter.order).toBe("desc");
+  });
+
+  test("honors explicit ascending transaction order", () => {
+    const filter = parseTransactionFilterFromQuery(new URLSearchParams("order=asc"));
+    expect(filter.order).toBe("asc");
+  });
+
   test("rejects transaction limits above 1000", () => {
     expect(() =>
       parseTransactionFilterFromQuery(new URLSearchParams("limit=1001")),
@@ -543,33 +553,37 @@ describe("Baseload API", () => {
 
 describe("GET /transactions", () => {
   test("returns stored transactions and echoes filters", async () => {
+    let queryFilter: unknown;
     const storage = {
-      queryTransactions: async () => [
-        {
-          blockNumber: 42,
-          blockNumberDecimal: "42",
-          blockDate: "2024-01-01T00:00:00.000Z",
-          baseBlockFeeWei: "100",
-          position: 0,
-          hash: "0xaaa",
-          from: "0x111",
-          to: "0x222",
-          type: "2",
-          nonce: "1",
-          valueWei: "0",
-          gasLimit: "21000",
-          gasUsed: "21000",
-          cumulativeGasUsed: "21000",
-          gasPriceWei: "110",
-          maxFeePerGasWei: "200",
-          maxPriorityFeePerGasWei: "10",
-          effectiveGasPriceWei: "110",
-          priorityFeeWei: "10",
-          transactionFeeWei: "2310000",
-          status: "1",
-          contractAddress: null,
-        },
-      ],
+      queryTransactions: async (filter: unknown) => {
+        queryFilter = filter;
+        return [
+          {
+            blockNumber: 42,
+            blockNumberDecimal: "42",
+            blockDate: "2024-01-01T00:00:00.000Z",
+            baseBlockFeeWei: "100",
+            position: 0,
+            hash: "0xaaa",
+            from: "0x111",
+            to: "0x222",
+            type: "2",
+            nonce: "1",
+            valueWei: "0",
+            gasLimit: "21000",
+            gasUsed: "21000",
+            cumulativeGasUsed: "21000",
+            gasPriceWei: "110",
+            maxFeePerGasWei: "200",
+            maxPriorityFeePerGasWei: "10",
+            effectiveGasPriceWei: "110",
+            priorityFeeWei: "10",
+            transactionFeeWei: "2310000",
+            status: "1",
+            contractAddress: null,
+          },
+        ];
+      },
       countTransactions: async () => 51,
     } as unknown as ScannerStorage;
 
@@ -595,6 +609,7 @@ describe("GET /transactions", () => {
     expect(body.filters.nonceLt).toBe("5");
     expect(body.transactions[0]?.blockNumber).toBe(42);
     expect(body.transactions[0]?.position).toBe(0);
+    expect(queryFilter).toMatchObject({ order: "desc" });
   });
 
   test("rejects invalid transaction filters", async () => {

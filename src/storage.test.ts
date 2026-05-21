@@ -456,6 +456,26 @@ if (!hasPostgresForTests()) {
       expect(inspected?.transactions.map((row) => row.hash)).toEqual(["0xaaa", "0xbbb"]);
     });
 
+    test("queryTransactions can return the newest matching transactions first", async () => {
+      const storage = await withStorage();
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 100n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xaaa" })],
+      );
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 101n, transactionCount: 2 }),
+        { kind: "lastSuccessfulBlock" },
+        [
+          transactionFixture({ position: 0, hash: "0xbbb" }),
+          transactionFixture({ position: 1, hash: "0xccc" }),
+        ],
+      );
+
+      const rows = await storage.queryTransactions({ limit: 2, order: "desc" });
+      expect(rows.map((row) => row.hash)).toEqual(["0xccc", "0xbbb"]);
+    });
+
     test("replaces transactions when a block is re-saved", async () => {
       const storage = await withStorage();
       const metrics = blockMetricsFixture({ blockNumber: 42n });
@@ -511,6 +531,13 @@ if (!hasPostgresForTests()) {
 
       const secondPage = await storage.queryTransactions({ fromAddress: address, limit: 1, page: 2 });
       expect(secondPage.map((row) => row.hash)).toEqual(["0xddd"]);
+
+      const newestOutgoing = await storage.queryTransactions({
+        fromAddress: address,
+        limit: 2,
+        order: "desc",
+      });
+      expect(newestOutgoing.map((row) => row.nonce)).toEqual(["10", "3"]);
     });
 
     test("aggregates and isolates rows for multiple range sizes", async () => {
