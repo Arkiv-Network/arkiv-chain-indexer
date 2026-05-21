@@ -17,12 +17,16 @@ interface TransactionsViewProps {
 }
 
 interface TransactionFilters extends Record<string, string> {
+  address: string;
   block: string;
   blockGt: string;
   blockLt: string;
+  nonceGt: string;
+  nonceLt: string;
   dateGt: string;
   dateLt: string;
   limit: string;
+  page: string;
 }
 
 type SortDirection = "asc" | "desc";
@@ -62,15 +66,30 @@ interface Column {
   render: (row: StoredTransaction) => ReactNode;
 }
 
-const FILTER_KEYS = ["block", "blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
+const FILTER_KEYS = [
+  "address",
+  "block",
+  "blockGt",
+  "blockLt",
+  "nonceGt",
+  "nonceLt",
+  "dateGt",
+  "dateLt",
+  "limit",
+  "page",
+] as const;
 const STORAGE_KEY = "transactions.filters";
 const EMPTY: TransactionFilters = {
+  address: "",
   block: "",
   blockGt: "",
   blockLt: "",
+  nonceGt: "",
+  nonceLt: "",
   dateGt: "",
   dateLt: "",
-  limit: "1000",
+  limit: "100",
+  page: "1",
 };
 
 function transactionColumns(timeZone: string): Column[] {
@@ -225,7 +244,7 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
-  const [sort, setSort] = useState<SortState>({ key: "blockNumber", direction: "asc" });
+  const [sort, setSort] = useState<SortState>({ key: "nonce", direction: "asc" });
 
   const load = useCallback((f: TransactionFilters) => {
     if (!hasScopedFilters(f)) {
@@ -296,15 +315,32 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
   };
 
   const setFilter = (key: keyof TransactionFilters) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilters({ ...filters, [key]: e.target.value });
+    const next = { ...filters, [key]: e.target.value };
+    if (key !== "page") next.page = "1";
+    setFilters(next);
+  };
+
+  const goToPage = (page: number) => {
+    const next = { ...applied, page: String(Math.max(1, page)) };
+    setFilters(next);
+    if (writePermalink("transactions", permalinkFilters(next))) {
+      onLocationChange();
+    } else {
+      setApplied(next);
+    }
   };
 
   const hasAppliedFilters = hasScopedFilters(applied);
+  const transactionLabel = applied.address.trim() ? "outgoing transactions" : "transactions";
 
   return (
     <section className="view transactions-view">
-      <h2>Transactions</h2>
+      <h2>Address transactions</h2>
       <form onSubmit={onSubmit} className="transactions-form">
+        <label className="wide-field">
+          address
+          <input type="text" value={filters.address} onChange={setFilter("address")} />
+        </label>
         <label>
           block
           <input type="text" inputMode="numeric" value={filters.block} onChange={setFilter("block")} />
@@ -330,6 +366,14 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
           />
         </label>
         <label>
+          nonce &gt;
+          <input type="text" inputMode="numeric" value={filters.nonceGt} onChange={setFilter("nonceGt")} />
+        </label>
+        <label>
+          nonce &lt;
+          <input type="text" inputMode="numeric" value={filters.nonceLt} onChange={setFilter("nonceLt")} />
+        </label>
+        <label>
           date &gt;
           <input type="text" value={filters.dateGt} onChange={setFilter("dateGt")} />
         </label>
@@ -338,8 +382,12 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
           <input type="text" value={filters.dateLt} onChange={setFilter("dateLt")} />
         </label>
         <label>
-          limit
+          page size
           <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
+        </label>
+        <label>
+          page
+          <input type="text" inputMode="numeric" value={filters.page} onChange={setFilter("page")} />
         </label>
         <button type="submit">Query</button>
       </form>
@@ -350,13 +398,31 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
           : error
             ? `Failed to query transactions: ${error}`
             : data
-              ? `${data.count} transactions${data.truncated ? `, capped at ${data.limit}` : ""}`
-              : "Enter a block or date range to query stored transactions."}
+              ? `${data.totalCount} ${transactionLabel}; showing ${data.count} on page ${data.page}${
+                  data.totalPages ? ` of ${data.totalPages}` : ""
+                }`
+              : "Enter an address, block, or date range to query stored transactions."}
       </p>
 
-      <div className="permalink-row">
+      <div className="permalink-row transactions-actions">
         <button type="button" className="secondary" onClick={copyPermalink} disabled={!hasAppliedFilters}>
           Copy link
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => goToPage((data?.page ?? toPositiveInteger(applied.page, 1)) - 1)}
+          disabled={!data?.hasPreviousPage || loading}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => goToPage((data?.page ?? toPositiveInteger(applied.page, 1)) + 1)}
+          disabled={!data?.hasNextPage || loading}
+        >
+          Next
         </button>
         {copyStatus ? <span>{copyStatus}</span> : null}
       </div>
@@ -409,12 +475,16 @@ function AddressCell({ address }: { address: string | null | undefined }) {
 function filtersToParams(filters: TransactionFilters): URLSearchParams {
   const normalized = permalinkFilters(filters);
   const params = new URLSearchParams();
+  addParam(params, "address", normalized.address);
   addParam(params, "block", normalized.block);
   addParam(params, "blockGt", normalized.blockGt);
   addParam(params, "blockLt", normalized.blockLt);
+  addParam(params, "nonceGt", normalized.nonceGt);
+  addParam(params, "nonceLt", normalized.nonceLt);
   addParam(params, "dateGt", normalized.dateGt);
   addParam(params, "dateLt", normalized.dateLt);
   addParam(params, "limit", normalized.limit);
+  addParam(params, "page", normalized.page);
   return params;
 }
 
@@ -437,9 +507,12 @@ function permalinkFilters(filters: TransactionFilters): TransactionFilters {
 
 function hasScopedFilters(filters: TransactionFilters): boolean {
   return Boolean(
-    filters.block.trim() ||
+    filters.address.trim() ||
+      filters.block.trim() ||
       filters.blockGt.trim() ||
       filters.blockLt.trim() ||
+      filters.nonceGt.trim() ||
+      filters.nonceLt.trim() ||
       filters.dateGt.trim() ||
       filters.dateLt.trim(),
   );
@@ -496,6 +569,11 @@ function toBigInt(value: string | number | null): bigint {
   } catch {
     return 0n;
   }
+}
+
+function toPositiveInteger(value: string, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function defaultDirection(key: SortKey): SortDirection {

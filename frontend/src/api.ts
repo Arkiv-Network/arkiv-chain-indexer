@@ -107,10 +107,19 @@ export interface TransactionsResponse {
   count: number;
   limit: number;
   truncated: boolean;
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
   filters: {
     block: string | null;
     blockGt: string | null;
     blockLt: string | null;
+    address: string | null;
+    nonceGt: string | null;
+    nonceLt: string | null;
     dateGt: string | null;
     dateLt: string | null;
   };

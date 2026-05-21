@@ -206,7 +206,7 @@ export function App() {
               className={activeView === "transactions" ? "active" : ""}
               onClick={() => setView("transactions")}
             >
-              Transactions
+              Address
             </button>
           ) : null}
           <button

@@ -471,6 +471,48 @@ if (!hasPostgresForTests()) {
       expect(rows.map((row) => row.hash)).toEqual(["0xbbb"]);
     });
 
+    test("queries outgoing address transactions by nonce with pagination", async () => {
+      const storage = await withStorage();
+      const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 100n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xaaa", from: address, nonce: "10" })],
+      );
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 101n, transactionCount: 2 }),
+        { kind: "lastSuccessfulBlock" },
+        [
+          transactionFixture({ position: 0, hash: "0xbbb", from: address, nonce: "2" }),
+          transactionFixture({
+            position: 1,
+            hash: "0xccc",
+            from: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            nonce: "1",
+          }),
+        ],
+      );
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 102n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xddd", from: address, nonce: "3" })],
+      );
+
+      const rows = await storage.queryTransactions({ fromAddress: address.toUpperCase(), limit: 10 });
+      expect(rows.map((row) => row.nonce)).toEqual(["2", "3", "10"]);
+
+      const filteredCount = await storage.countTransactions({
+        fromAddress: address,
+        nonceGt: 2n,
+        nonceLt: 11n,
+      });
+      expect(filteredCount).toBe(2);
+
+      const secondPage = await storage.queryTransactions({ fromAddress: address, limit: 1, page: 2 });
+      expect(secondPage.map((row) => row.hash)).toEqual(["0xddd"]);
+    });
+
     test("aggregates and isolates rows for multiple range sizes", async () => {
       const storage = await withStorage();
       for (let blockNumber = 0n; blockNumber < 200n; blockNumber += 1n) {
