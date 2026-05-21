@@ -59,10 +59,19 @@ export interface TransactionsResponseBody {
   count: number;
   limit: number;
   truncated: boolean;
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
   filters: {
     block: string | null;
     blockGt: string | null;
     blockLt: string | null;
+    address: string | null;
+    nonceGt: string | null;
+    nonceLt: string | null;
     dateGt: string | null;
     dateLt: string | null;
   };
@@ -460,20 +469,38 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
     return jsonError(400, error instanceof Error ? error.message : String(error));
   }
 
-  const transactions = await storage.queryTransactions(filter);
   const effectiveLimit = Math.min(
     filter.limit ?? MAX_TRANSACTIONS_PER_QUERY,
     MAX_TRANSACTIONS_PER_QUERY,
   );
+  const page = filter.page ?? 1;
+  if (!Number.isSafeInteger((page - 1) * effectiveLimit)) {
+    return jsonError(400, "page is too large");
+  }
+
+  const [transactions, totalCount] = await Promise.all([
+    storage.queryTransactions(filter),
+    storage.countTransactions(filter),
+  ]);
+  const totalPages = Math.ceil(totalCount / effectiveLimit);
 
   const body: TransactionsResponseBody = {
     count: transactions.length,
     limit: effectiveLimit,
-    truncated: transactions.length >= effectiveLimit,
+    truncated: page * effectiveLimit < totalCount,
+    page,
+    pageSize: effectiveLimit,
+    totalCount,
+    totalPages,
+    hasPreviousPage: page > 1,
+    hasNextPage: page < totalPages,
     filters: {
       block: filter.blockNumber !== undefined ? filter.blockNumber.toString() : null,
       blockGt: filter.blockGt !== undefined ? filter.blockGt.toString() : null,
       blockLt: filter.blockLt !== undefined ? filter.blockLt.toString() : null,
+      address: filter.fromAddress ?? null,
+      nonceGt: filter.nonceGt !== undefined ? filter.nonceGt.toString() : null,
+      nonceLt: filter.nonceLt !== undefined ? filter.nonceLt.toString() : null,
       dateGt: filter.dateGt ?? null,
       dateLt: filter.dateLt ?? null,
     },
@@ -584,6 +611,21 @@ export function parseTransactionFilterFromQuery(params: URLSearchParams): Transa
     filter.blockLt = parseBlockParam("blockLt", blockLt);
   }
 
+  const address = params.get("address");
+  if (address !== null) {
+    filter.fromAddress = parseAddressParam("address", address);
+  }
+
+  const nonceGt = params.get("nonceGt");
+  if (nonceGt !== null) {
+    filter.nonceGt = parseBlockParam("nonceGt", nonceGt);
+  }
+
+  const nonceLt = params.get("nonceLt");
+  if (nonceLt !== null) {
+    filter.nonceLt = parseBlockParam("nonceLt", nonceLt);
+  }
+
   const dateGt = params.get("dateGt");
   if (dateGt !== null) {
     filter.dateGt = parseDateParam("dateGt", dateGt);
@@ -597,6 +639,11 @@ export function parseTransactionFilterFromQuery(params: URLSearchParams): Transa
   const limit = params.get("limit");
   if (limit !== null) {
     filter.limit = parseLimitParam(limit, MAX_TRANSACTIONS_PER_QUERY);
+  }
+
+  const page = params.get("page");
+  if (page !== null) {
+    filter.page = parsePageParam(page);
   }
 
   const order = params.get("order");
@@ -621,11 +668,30 @@ function parseLimitParam(value: string, hardMax: number): number {
   return parsed;
 }
 
+function parsePageParam(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`page must be a positive integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`page must be a positive integer`);
+  }
+  return parsed;
+}
+
 function parseBlockParam(name: string, value: string): bigint {
   if (!/^\d+$/.test(value)) {
     throw new Error(`${name} must be a non-negative integer`);
   }
   return BigInt(value);
+}
+
+function parseAddressParam(name: string, value: string): string {
+  const trimmed = value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+    throw new Error(`${name} must be a 20-byte hex address`);
+  }
+  return trimmed.toLowerCase();
 }
 
 function parseDateParam(name: string, value: string): string {

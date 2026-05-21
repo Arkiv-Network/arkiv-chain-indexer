@@ -54,9 +54,13 @@ export interface TransactionQueryFilter {
   blockNumber?: bigint;
   blockGt?: bigint;
   blockLt?: bigint;
+  fromAddress?: string;
+  nonceGt?: bigint;
+  nonceLt?: bigint;
   dateGt?: string;
   dateLt?: string;
   limit?: number;
+  page?: number;
   order?: QueryOrder;
 }
 
@@ -301,6 +305,14 @@ export class ScannerStorage {
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_hash_idx")}
        ON ${this.qTransactions} (hash)`,
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_from_address_nonce_idx")}
+       ON ${this.qTransactions} (LOWER(from_address), (nonce::numeric), block_number, position)`,
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_from_address_block_idx")}
+       ON ${this.qTransactions} (LOWER(from_address), block_number, position)`,
     );
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBlockRanges} (
@@ -777,37 +789,19 @@ export class ScannerStorage {
   }
 
   async queryTransactions(filter: TransactionQueryFilter = {}): Promise<StoredTransaction[]> {
-    const clauses: string[] = [];
-    const params: Array<string | number> = [];
-
-    if (filter.blockNumber !== undefined) {
-      params.push(filter.blockNumber.toString());
-      clauses.push(`block_number = $${params.length}`);
-    }
-
-    if (filter.blockGt !== undefined) {
-      params.push(filter.blockGt.toString());
-      clauses.push(`block_number > $${params.length}`);
-    }
-
-    if (filter.blockLt !== undefined) {
-      params.push(filter.blockLt.toString());
-      clauses.push(`block_number < $${params.length}`);
-    }
-
-    if (filter.dateGt !== undefined) {
-      params.push(filter.dateGt);
-      clauses.push(`block_date > $${params.length}`);
-    }
-
-    if (filter.dateLt !== undefined) {
-      params.push(filter.dateLt);
-      clauses.push(`block_date < $${params.length}`);
-    }
-
-    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    params.push(resolveLimit(filter.limit, MAX_TRANSACTIONS_PER_QUERY));
+    const { where, params } = buildTransactionWhereClause(filter);
+    const limit = resolveLimit(filter.limit, MAX_TRANSACTIONS_PER_QUERY);
+    const offset = resolvePageOffset(filter.page, limit);
+    params.push(limit);
+    const limitParam = params.length;
+    params.push(offset);
+    const offsetParam = params.length;
     const order = resolveQueryOrder(filter.order);
+    const primaryOrder = filter.fromAddress === undefined ? "block_number" : "nonce::numeric";
+    const secondaryOrder =
+      filter.fromAddress === undefined
+        ? `position ${order}`
+        : `block_number ${order}, position ${order}`;
     const sql = `
       SELECT
         block_number,
@@ -833,8 +827,9 @@ export class ScannerStorage {
         contract_address
       FROM ${this.qTransactions}
       ${where}
-      ORDER BY block_number ${order}, position ${order}
-      LIMIT $${params.length}
+      ORDER BY ${primaryOrder} ${order}, ${secondaryOrder}
+      LIMIT $${limitParam}
+      OFFSET $${offsetParam}
     `;
 
     const result = await this.pool.query<{
@@ -862,6 +857,17 @@ export class ScannerStorage {
     }>(sql, params);
 
     return result.rows.map(mapTransactionRow);
+  }
+
+  async countTransactions(filter: TransactionQueryFilter = {}): Promise<number> {
+    const { where, params } = buildTransactionWhereClause(filter);
+    const result = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+       FROM ${this.qTransactions}
+       ${where}`,
+      params,
+    );
+    return Number(result.rows[0]?.count ?? "0");
   }
 
   async getInspectedBlock(blockNumber: bigint): Promise<InspectedBlock | undefined> {
@@ -1204,8 +1210,69 @@ function resolveLimit(requested: number | undefined, hardMax: number): number {
   return Math.min(Math.floor(requested), hardMax);
 }
 
+function resolvePageOffset(page: number | undefined, limit: number): number {
+  if (page === undefined || !Number.isFinite(page) || page < 1) return 0;
+  const offset = (Math.floor(page) - 1) * limit;
+  if (!Number.isSafeInteger(offset)) {
+    throw new Error("Transaction page offset is too large");
+  }
+  return offset;
+}
+
 function resolveQueryOrder(order: QueryOrder | undefined): "ASC" | "DESC" {
   return order === "desc" ? "DESC" : "ASC";
+}
+
+function buildTransactionWhereClause(
+  filter: TransactionQueryFilter,
+): { where: string; params: Array<string | number> } {
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (filter.blockNumber !== undefined) {
+    params.push(filter.blockNumber.toString());
+    clauses.push(`block_number = $${params.length}`);
+  }
+
+  if (filter.blockGt !== undefined) {
+    params.push(filter.blockGt.toString());
+    clauses.push(`block_number > $${params.length}`);
+  }
+
+  if (filter.blockLt !== undefined) {
+    params.push(filter.blockLt.toString());
+    clauses.push(`block_number < $${params.length}`);
+  }
+
+  if (filter.fromAddress !== undefined) {
+    params.push(filter.fromAddress.toLowerCase());
+    clauses.push(`LOWER(from_address) = $${params.length}`);
+  }
+
+  if (filter.nonceGt !== undefined) {
+    params.push(filter.nonceGt.toString());
+    clauses.push(`nonce::numeric > $${params.length}::numeric`);
+  }
+
+  if (filter.nonceLt !== undefined) {
+    params.push(filter.nonceLt.toString());
+    clauses.push(`nonce::numeric < $${params.length}::numeric`);
+  }
+
+  if (filter.dateGt !== undefined) {
+    params.push(filter.dateGt);
+    clauses.push(`block_date > $${params.length}`);
+  }
+
+  if (filter.dateLt !== undefined) {
+    params.push(filter.dateLt);
+    clauses.push(`block_date < $${params.length}`);
+  }
+
+  return {
+    where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "",
+    params,
+  };
 }
 
 function quoteIdent(name: string): string {

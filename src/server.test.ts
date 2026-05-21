@@ -166,16 +166,20 @@ describe("parseTransactionFilterFromQuery", () => {
   test("parses exact block, range, date, limit, and order filters", () => {
     const filter = parseTransactionFilterFromQuery(
       new URLSearchParams(
-        "block=42&blockGt=10&blockLt=50&dateGt=2024-01-01T00:00:00Z&dateLt=2024-01-02T00:00:00Z&limit=25&order=desc",
+        "block=42&blockGt=10&blockLt=50&address=0xAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&nonceGt=3&nonceLt=9&dateGt=2024-01-01T00:00:00Z&dateLt=2024-01-02T00:00:00Z&limit=25&page=2&order=desc",
       ),
     );
 
     expect(filter.blockNumber).toBe(42n);
     expect(filter.blockGt).toBe(10n);
     expect(filter.blockLt).toBe(50n);
+    expect(filter.fromAddress).toBe("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(filter.nonceGt).toBe(3n);
+    expect(filter.nonceLt).toBe(9n);
     expect(filter.dateGt).toBe("2024-01-01T00:00:00.000Z");
     expect(filter.dateLt).toBe("2024-01-02T00:00:00.000Z");
     expect(filter.limit).toBe(25);
+    expect(filter.page).toBe(2);
     expect(filter.order).toBe("desc");
   });
 
@@ -183,6 +187,15 @@ describe("parseTransactionFilterFromQuery", () => {
     expect(() =>
       parseTransactionFilterFromQuery(new URLSearchParams("limit=1001")),
     ).toThrow(/limit must be at most 1000/);
+  });
+
+  test("rejects invalid address and page filters", () => {
+    expect(() =>
+      parseTransactionFilterFromQuery(new URLSearchParams("address=0x1234")),
+    ).toThrow(/address must be a 20-byte hex address/);
+    expect(() =>
+      parseTransactionFilterFromQuery(new URLSearchParams("page=0")),
+    ).toThrow(/page must be a positive integer/);
   });
 });
 
@@ -557,10 +570,13 @@ describe("GET /transactions", () => {
           contractAddress: null,
         },
       ],
+      countTransactions: async () => 51,
     } as unknown as ScannerStorage;
 
     const response = await handleRequest(
-      new Request("http://example.test/transactions?block=42&limit=25"),
+      new Request(
+        "http://example.test/transactions?block=42&address=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&nonceGt=0&nonceLt=5&limit=25&page=2",
+      ),
       storage,
     );
     const body = (await response.json()) as TransactionsResponseBody;
@@ -568,7 +584,15 @@ describe("GET /transactions", () => {
     expect(response.status).toBe(200);
     expect(body.count).toBe(1);
     expect(body.limit).toBe(25);
+    expect(body.page).toBe(2);
+    expect(body.totalCount).toBe(51);
+    expect(body.totalPages).toBe(3);
+    expect(body.hasPreviousPage).toBe(true);
+    expect(body.hasNextPage).toBe(true);
     expect(body.filters.block).toBe("42");
+    expect(body.filters.address).toBe("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(body.filters.nonceGt).toBe("0");
+    expect(body.filters.nonceLt).toBe("5");
     expect(body.transactions[0]?.blockNumber).toBe(42);
     expect(body.transactions[0]?.position).toBe(0);
   });

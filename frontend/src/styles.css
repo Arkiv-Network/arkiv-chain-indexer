@@ -203,6 +203,14 @@ button.secondary {
   overflow-wrap: anywhere;
 }
 
+.transactions-form .wide-field {
+  grid-column: 1 / -1;
+}
+
+.transactions-actions {
+  flex-wrap: wrap;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
