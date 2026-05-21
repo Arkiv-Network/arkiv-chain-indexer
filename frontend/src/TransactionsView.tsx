@@ -118,7 +118,9 @@ function transactionColumns(timeZone: string): Column[] {
     key: "hash",
     label: "Hash",
     width: "16rem",
-    render: (row) => <span className="mono truncate">{shortHash(row.hash)}</span>,
+    render: (row) => (
+      <CopyCell value={row.hash} label={shortHash(row.hash)} copyLabel="transaction hash" />
+    ),
   },
   {
     key: "from",
@@ -465,11 +467,89 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
 
 function AddressCell({ address }: { address: string | null | undefined }) {
   const display = addressDisplay(address);
+  const value = address?.trim() || null;
   return (
-    <span className="mono truncate" title={display.title}>
-      {display.label}
+    <CopyCell value={value} label={display.label} title={display.title} copyLabel="address" />
+  );
+}
+
+function CopyCell({
+  value,
+  label,
+  title,
+  copyLabel,
+}: {
+  value: string | null | undefined;
+  label: string;
+  title?: string;
+  copyLabel: string;
+}) {
+  const copyValue = value?.trim();
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 1200);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  if (!copyValue) {
+    return (
+      <span className="mono truncate" title={title}>
+        {label}
+      </span>
+    );
+  }
+
+  const onCopy = async () => {
+    if (await copyText(copyValue)) {
+      setCopied(true);
+    }
+  };
+
+  return (
+    <span className="copy-cell">
+      <span className="mono truncate" title={title ?? copyValue}>
+        {label}
+      </span>
+      <button
+        type="button"
+        className="copy-cell-button"
+        aria-label={`Copy ${copyLabel}`}
+        title={copied ? "Copied" : `Copy ${copyLabel}`}
+        onClick={onCopy}
+      >
+        <span aria-hidden="true" className="copy-cell-icon" />
+      </button>
     </span>
   );
+}
+
+async function copyText(value: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return copyTextFallback(value);
+  }
+}
+
+function copyTextFallback(value: string): boolean {
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textArea);
+  }
 }
 
 function filtersToParams(filters: TransactionFilters): URLSearchParams {
