@@ -29,12 +29,18 @@ interface ChartsFilters extends Record<string, string> {
   startDate: string;
   blockStart: string;
   blockEnd: string;
+  xAxisMode: string;
   parameters: string;
 }
 
 const FETCH_LIMIT = 1000;
-const FILTER_KEYS = ["zoom", "startDate", "blockStart", "blockEnd", "parameters"] as const;
+const FILTER_KEYS = ["zoom", "startDate", "blockStart", "blockEnd", "xAxisMode", "parameters"] as const;
 const STORAGE_KEY = "charts.filters";
+type XAxisMode = "blocks" | "dates";
+const X_AXIS_MODES: { value: XAxisMode; label: string }[] = [
+  { value: "blocks", label: "Blocks" },
+  { value: "dates", label: "Dates" },
+];
 
 interface ZoomLevel {
   rangeSize: number;
@@ -267,6 +273,7 @@ const EMPTY: ChartsFilters = {
   startDate: "",
   blockStart: "",
   blockEnd: "",
+  xAxisMode: "blocks",
   parameters: DEFAULT_PARAMETERS.join(","),
 };
 
@@ -293,6 +300,10 @@ function normalizeIsoDate(value: string): string {
   return d.toISOString();
 }
 
+function parseXAxisMode(value: string): XAxisMode {
+  return value === "dates" ? "dates" : "blocks";
+}
+
 interface BlockWindow {
   start: number;
   end: number;
@@ -315,7 +326,11 @@ function clearBlockWindow(filters: ChartsFilters): ChartsFilters {
 function loadFilters(locationSearch: string): ChartsFilters {
   const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
   const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
-  return { ...merged, startDate: normalizeIsoDate(merged.startDate) };
+  return {
+    ...merged,
+    startDate: normalizeIsoDate(merged.startDate),
+    xAxisMode: parseXAxisMode(merged.xAxisMode),
+  };
 }
 
 interface ChartPoint {
@@ -324,6 +339,8 @@ interface ChartPoint {
   rangeSize: number;
   midBlock: number;
   midDate: string;
+  startDate: string;
+  endDate: string;
   values: Record<string, string | number | undefined>;
 }
 
@@ -334,6 +351,8 @@ function blockToPoint(b: StoredBlock): ChartPoint {
     rangeSize: 1,
     midBlock: b.blockNumber,
     midDate: b.blockDate,
+    startDate: b.blockDate,
+    endDate: b.blockDate,
     values: {
       minBaseFeeWei: b.baseBlockFeeWei,
       maxBaseFeeWei: b.baseBlockFeeWei,
@@ -365,6 +384,8 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
     rangeSize: r.rangeSize,
     midBlock: mid,
     midDate: Number.isFinite(midTs) ? new Date(midTs).toISOString() : r.minBlockDate,
+    startDate: r.minBlockDate,
+    endDate: r.maxBlockDate,
     values: {
       minBaseFeeWei: r.minBaseFeeWei,
       maxBaseFeeWei: r.maxBaseFeeWei,
@@ -404,6 +425,7 @@ export function ChartsView({
   const [selectedPointKey, setSelectedPointKey] = useState<string | null>(null);
 
   const zoomIndex = clampZoomIndex(filters.zoom);
+  const xAxisMode = parseXAxisMode(filters.xAxisMode);
   const selected = useMemo(() => parseSelected(filters.parameters), [filters.parameters]);
   const startDate = filters.startDate.trim();
   const blockWindow = useMemo(() => parseBlockWindow(filters), [filters]);
@@ -539,6 +561,11 @@ export function ChartsView({
     updateFilters({ ...filters, parameters: next.join(",") });
   };
 
+  const setXAxisMode = (next: XAxisMode) => {
+    if (next === xAxisMode) return;
+    updateFilters({ ...filters, xAxisMode: next });
+  };
+
   const copyPermalink = async () => {
     const href = buildPermalinkHref("charts", filters);
     try {
@@ -585,8 +612,8 @@ export function ChartsView({
   };
 
   const { traces, layout } = useMemo(
-    () => buildPlot(points, selected, selectedPoint, timeZone),
-    [points, selected, selectedPoint, timeZone],
+    () => buildPlot(points, selected, selectedPoint, timeZone, xAxisMode),
+    [points, selected, selectedPoint, timeZone, xAxisMode],
   );
 
   const windowInfo = useMemo(() => {
@@ -698,6 +725,22 @@ export function ChartsView({
                 >
                   +
                 </button>
+              </div>
+            </div>
+
+            <div className="sidebar-section">
+              <span className="toolbar-label">X axis</span>
+              <div className="axis-mode-toggle" role="group" aria-label="X axis mode">
+                {X_AXIS_MODES.map((mode) => (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    className={xAxisMode === mode.value ? "active" : ""}
+                    onClick={() => setXAxisMode(mode.value)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -854,6 +897,7 @@ function buildPlot(
   selectedKeys: string[],
   selectedPoint: ChartPoint | null,
   timeZone: string,
+  xAxisMode: XAxisMode,
 ): PlotBuildResult {
   const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
 
@@ -869,7 +913,7 @@ function buildPlot(
     axisRef[a.axis] = i === 0 ? "y" : `y${i + 1}`;
   });
 
-  const xs = points.map((pt) => pt.midBlock);
+  const xs = points.map((pt) => getPointXValue(pt, xAxisMode));
   const customdata = points.map(
     (pt) => [pt.rangeStart, pt.rangeEnd, fmtShortDate(pt.midDate, timeZone)] as [number, number, string],
   );
@@ -901,7 +945,7 @@ function buildPlot(
   const sidePad = 0.06;
   const domainStart = leftSideCount * sidePad;
   const domainEnd = 1 - rightSideCount * sidePad;
-  const xRange = getPlotXRange(points);
+  const xRange = getPlotXRange(points, xAxisMode);
 
   const layout: Partial<Plotly.Layout> = {
     autosize: true,
@@ -917,8 +961,8 @@ function buildPlot(
     },
     hovermode: "x unified",
     xaxis: {
-      type: "linear",
-      title: { text: "Block range" } as Plotly.DataTitle,
+      type: xAxisMode === "dates" ? "date" : "linear",
+      title: { text: xAxisMode === "dates" ? "Date" : "Block range" } as Plotly.DataTitle,
       domain: [domainStart, domainEnd],
       range: xRange,
       gridcolor: getCssColor("--border", "#d6d9df"),
@@ -927,12 +971,7 @@ function buildPlot(
   };
 
   if (selectedPoint) {
-    const selectedStart = selectedPoint.rangeSize === 1
-      ? selectedPoint.rangeStart - 0.5
-      : selectedPoint.rangeStart;
-    const selectedEnd = selectedPoint.rangeSize === 1
-      ? selectedPoint.rangeEnd + 0.5
-      : selectedPoint.rangeEnd;
+    const [selectedStart, selectedEnd] = getSelectionXRange(selectedPoint, xAxisMode);
     layout.shapes = [
       {
         type: "rect",
@@ -987,15 +1026,57 @@ function buildPlot(
   return { traces, layout };
 }
 
-function getPlotXRange(points: ChartPoint[]): [number, number] | undefined {
+function getPointXValue(point: ChartPoint, xAxisMode: XAxisMode): number | string {
+  return xAxisMode === "dates" ? point.midDate : point.midBlock;
+}
+
+function getPlotXRange(points: ChartPoint[], xAxisMode: XAxisMode): [number, number] | [string, string] | undefined {
   if (points.length === 0) return undefined;
   const first = points[0];
   const last = points[points.length - 1];
   if (!first || !last) return undefined;
+  if (xAxisMode === "dates") {
+    const start = Date.parse(first.startDate);
+    const end = Date.parse(last.endDate);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return undefined;
+    if (start === end) {
+      return [
+        new Date(start - 30_000).toISOString(),
+        new Date(end + 30_000).toISOString(),
+      ];
+    }
+    return [new Date(start).toISOString(), new Date(end).toISOString()];
+  }
   if (first.rangeStart === last.rangeEnd) {
     return [first.rangeStart - 0.5, last.rangeEnd + 0.5];
   }
   return [first.rangeStart, last.rangeEnd];
+}
+
+function getSelectionXRange(point: ChartPoint, xAxisMode: XAxisMode): [number, number] | [string, string] {
+  if (xAxisMode === "blocks") {
+    const selectedStart = point.rangeSize === 1 ? point.rangeStart - 0.5 : point.rangeStart;
+    const selectedEnd = point.rangeSize === 1 ? point.rangeEnd + 0.5 : point.rangeEnd;
+    return [selectedStart, selectedEnd];
+  }
+
+  const start = Date.parse(point.startDate);
+  const end = Date.parse(point.endDate);
+  const mid = Date.parse(point.midDate);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    const fallback = Number.isFinite(mid) ? mid : Date.now();
+    return [
+      new Date(fallback - 30_000).toISOString(),
+      new Date(fallback + 30_000).toISOString(),
+    ];
+  }
+  if (start === end) {
+    return [
+      new Date(start - 30_000).toISOString(),
+      new Date(end + 30_000).toISOString(),
+    ];
+  }
+  return [new Date(start).toISOString(), new Date(end).toISOString()];
 }
 
 function SelectionDetails({
