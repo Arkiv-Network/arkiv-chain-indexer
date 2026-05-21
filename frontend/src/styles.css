@@ -696,6 +696,61 @@ th:not(.num) .sort-header {
   text-overflow: ellipsis;
 }
 
+.copy-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.45rem;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.copy-cell .truncate {
+  min-width: 0;
+}
+
+.copy-cell-button {
+  position: relative;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.72;
+}
+
+.copy-cell-button:hover,
+.copy-cell-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 1;
+}
+
+.copy-cell-icon,
+.copy-cell-icon::before {
+  position: absolute;
+  width: 0.56rem;
+  height: 0.66rem;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.copy-cell-icon {
+  top: 0.27rem;
+  left: 0.44rem;
+}
+
+.copy-cell-icon::before {
+  content: "";
+  top: -0.2rem;
+  left: -0.24rem;
+  background: var(--bg);
+}
+
 .charts-status {
   font-size: 0.82rem;
   color: var(--fg);
