@@ -473,7 +473,7 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
   );
 }
 
-function AddressCell({ address }: { address: string | null | undefined }) {
+export function AddressCell({ address }: { address: string | null | undefined }) {
   const display = addressDisplay(address);
   const value = address?.trim() || null;
   return (

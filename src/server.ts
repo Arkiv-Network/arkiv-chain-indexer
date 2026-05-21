@@ -6,16 +6,19 @@ import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
+  MAX_SENDERS_PER_QUERY,
   MAX_TRANSACTIONS_PER_QUERY,
   ScannerStorage,
   type BlockQueryFilter,
   type BlockRangeQueryFilter,
   type DatabaseStats,
   type QueryOrder,
+  type SenderStatsQueryFilter,
   type StoredBlock,
   type StoredBlockRange,
   type StoredBaseloadConfig,
   type StoredBaseloadConfigSummary,
+  type StoredSenderStats,
   type StoredTransaction,
   type TransactionQueryFilter,
 } from "./storage";
@@ -76,6 +79,16 @@ export interface TransactionsResponseBody {
     dateLt: string | null;
   };
   transactions: StoredTransaction[];
+}
+
+export interface SendersResponseBody {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  filters: {
+    order: QueryOrder;
+  };
+  senders: StoredSenderStats[];
 }
 
 export interface BaseloadConfigsResponseBody {
@@ -190,6 +203,13 @@ export async function handleRequest(
       return jsonError(404, "Transaction data is disabled");
     }
     return handleGetTransactions(url, storage);
+  }
+
+  if (url.pathname === "/senders") {
+    if (!transactionDataEnabled) {
+      return jsonError(404, "Transaction data is disabled");
+    }
+    return handleGetSenders(url, storage);
   }
 
   return jsonError(404, `Not found: ${url.pathname}`);
@@ -510,6 +530,29 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
   return jsonResponse(body);
 }
 
+async function handleGetSenders(url: URL, storage: ScannerStorage): Promise<Response> {
+  let filter: SenderStatsQueryFilter;
+  try {
+    filter = parseSenderStatsFilterFromQuery(url.searchParams);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  const senders = await storage.querySenderStats(filter);
+  const effectiveLimit = Math.min(filter.limit ?? MAX_SENDERS_PER_QUERY, MAX_SENDERS_PER_QUERY);
+  const order = filter.order ?? "desc";
+
+  const body: SendersResponseBody = {
+    count: senders.length,
+    limit: effectiveLimit,
+    truncated: senders.length >= effectiveLimit,
+    filters: { order },
+    senders,
+  };
+
+  return jsonResponse(body);
+}
+
 export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter {
   const filter: BlockQueryFilter = {};
 
@@ -651,6 +694,22 @@ export function parseTransactionFilterFromQuery(params: URLSearchParams): Transa
     filter.order = parseOrderParam(order);
   } else {
     filter.order = "desc";
+  }
+
+  return filter;
+}
+
+export function parseSenderStatsFilterFromQuery(params: URLSearchParams): SenderStatsQueryFilter {
+  const filter: SenderStatsQueryFilter = { order: "desc" };
+
+  const limit = params.get("limit");
+  if (limit !== null) {
+    filter.limit = parseLimitParam(limit, MAX_SENDERS_PER_QUERY);
+  }
+
+  const order = params.get("order");
+  if (order !== null) {
+    filter.order = parseOrderParam(order);
   }
 
   return filter;

@@ -62,6 +62,23 @@ services:
     extra_hosts: *extra-hosts
     command: ["bun", "run", "aggregate-all"]
 
+  sender-aggregator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      SENDER_AGGREGATE_INTERVAL_MS: ${SENDER_AGGREGATE_INTERVAL_MS:-60000}
+    extra_hosts: *extra-hosts
+    command: ["bun", "run", "aggregate-senders"]
+
   backend:
     build:
       context: .
