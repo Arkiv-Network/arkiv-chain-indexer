@@ -126,6 +126,34 @@ export interface TransactionsResponse {
   transactions: StoredTransaction[];
 }
 
+export interface StoredSenderStats {
+  address: string;
+  latestNonce: string | null;
+  transactionCount: string;
+  totalGasUsed: string;
+  totalTransactionFeeWei: string;
+  totalValueWei: string;
+  averageGasUsed: string;
+  averageTransactionFeeWei: string;
+  firstBlockNumber: number;
+  firstBlockNumberDecimal: string;
+  lastBlockNumber: number;
+  lastBlockNumberDecimal: string;
+  firstBlockDate: string;
+  lastBlockDate: string;
+  aggregatedAt: string;
+}
+
+export interface SendersResponse {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  filters: {
+    order: "asc" | "desc";
+  };
+  senders: StoredSenderStats[];
+}
+
 export interface DatabaseTableStats {
   tableName: string;
   rowCount: string;
@@ -298,6 +326,10 @@ export function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResp
 
 export function fetchTransactions(params: URLSearchParams): Promise<TransactionsResponse> {
   return getJson<TransactionsResponse>("/transactions", params);
+}
+
+export function fetchSenders(params: URLSearchParams): Promise<SendersResponse> {
+  return getJson<SendersResponse>("/senders", params);
 }
 
 export function fetchHealth(): Promise<HealthResponse> {

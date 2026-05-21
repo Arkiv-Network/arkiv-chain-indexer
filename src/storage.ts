@@ -23,6 +23,7 @@ const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
 export const MAX_BLOCKS_PER_QUERY = 10_000;
 export const MAX_RANGES_PER_QUERY = 10_000;
 export const MAX_TRANSACTIONS_PER_QUERY = 1_000;
+export const MAX_SENDERS_PER_QUERY = 10_000;
 
 export type QueryOrder = "asc" | "desc";
 
@@ -64,6 +65,11 @@ export interface TransactionQueryFilter {
   order?: QueryOrder;
 }
 
+export interface SenderStatsQueryFilter {
+  limit?: number;
+  order?: QueryOrder;
+}
+
 export interface StoredBlock {
   blockNumber: number;
   blockDate: string;
@@ -90,6 +96,24 @@ export interface StoredTransaction extends InspectedTransaction {
   blockNumberDecimal: string;
   blockDate: string;
   baseBlockFeeWei: string;
+}
+
+export interface StoredSenderStats {
+  address: string;
+  latestNonce: string | null;
+  transactionCount: string;
+  totalGasUsed: string;
+  totalTransactionFeeWei: string;
+  totalValueWei: string;
+  averageGasUsed: string;
+  averageTransactionFeeWei: string;
+  firstBlockNumber: number;
+  firstBlockNumberDecimal: string;
+  lastBlockNumber: number;
+  lastBlockNumberDecimal: string;
+  firstBlockDate: string;
+  lastBlockDate: string;
+  aggregatedAt: string;
 }
 
 export interface StoredBlockRange {
@@ -160,6 +184,7 @@ export class ScannerStorage {
   private readonly qScannerState: string;
   private readonly qBlockRanges: string;
   private readonly qTransactions: string;
+  private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
 
   private constructor(
@@ -171,6 +196,7 @@ export class ScannerStorage {
     this.qScannerState = `${quoteIdent(this.schema)}.scanner_state`;
     this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
     this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
+    this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
   }
 
@@ -315,6 +341,27 @@ export class ScannerStorage {
        ON ${this.qTransactions} (LOWER(from_address), block_number, position)`,
     );
     await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qSenderStats} (
+        address TEXT PRIMARY KEY,
+        latest_nonce TEXT,
+        transaction_count BIGINT NOT NULL,
+        total_gas_used TEXT NOT NULL,
+        total_transaction_fee_wei TEXT NOT NULL,
+        total_value_wei TEXT NOT NULL,
+        average_gas_used TEXT NOT NULL,
+        average_transaction_fee_wei TEXT NOT NULL,
+        first_block_number BIGINT NOT NULL,
+        last_block_number BIGINT NOT NULL,
+        first_block_date TEXT NOT NULL,
+        last_block_date TEXT NOT NULL,
+        aggregated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("sender_stats_activity_idx")}
+       ON ${this.qSenderStats} (transaction_count DESC, last_block_number DESC, address ASC)`,
+    );
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBlockRanges} (
         range_size BIGINT NOT NULL,
         range_start BIGINT NOT NULL,
@@ -445,6 +492,11 @@ export class ScannerStorage {
         name: "block_ranges",
         qualifiedName: this.qBlockRanges,
         regclassName: regclassName(this.schema, "block_ranges"),
+      },
+      {
+        name: "sender_stats",
+        qualifiedName: this.qSenderStats,
+        regclassName: regclassName(this.schema, "sender_stats"),
       },
       {
         name: "scanner_state",
@@ -893,6 +945,82 @@ export class ScannerStorage {
     };
   }
 
+  async aggregateSenderStats(): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM ${this.qSenderStats}`);
+      const result = await client.query(
+        `INSERT INTO ${this.qSenderStats} (
+          address,
+          latest_nonce,
+          transaction_count,
+          total_gas_used,
+          total_transaction_fee_wei,
+          total_value_wei,
+          average_gas_used,
+          average_transaction_fee_wei,
+          first_block_number,
+          last_block_number,
+          first_block_date,
+          last_block_date,
+          aggregated_at
+        )
+        SELECT
+          LOWER(from_address) AS address,
+          MAX(nonce::numeric)::text AS latest_nonce,
+          COUNT(*) AS transaction_count,
+          SUM(gas_used::numeric)::text AS total_gas_used,
+          SUM(transaction_fee_wei::numeric)::text AS total_transaction_fee_wei,
+          SUM(value_wei::numeric)::text AS total_value_wei,
+          TRUNC(SUM(gas_used::numeric) / COUNT(*), 0)::text AS average_gas_used,
+          TRUNC(SUM(transaction_fee_wei::numeric) / COUNT(*), 0)::text AS average_transaction_fee_wei,
+          MIN(block_number) AS first_block_number,
+          MAX(block_number) AS last_block_number,
+          (ARRAY_AGG(block_date ORDER BY block_number ASC, position ASC))[1] AS first_block_date,
+          (ARRAY_AGG(block_date ORDER BY block_number DESC, position DESC))[1] AS last_block_date,
+          NOW() AS aggregated_at
+        FROM ${this.qTransactions}
+        WHERE from_address IS NOT NULL
+        GROUP BY LOWER(from_address)`,
+      );
+      await client.query("COMMIT");
+      return result.rowCount ?? 0;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async querySenderStats(filter: SenderStatsQueryFilter = {}): Promise<StoredSenderStats[]> {
+    const limit = resolveLimit(filter.limit, MAX_SENDERS_PER_QUERY);
+    const order = resolveQueryOrder(filter.order);
+    const tieOrder = order === "DESC" ? "DESC" : "ASC";
+    const result = await this.pool.query<SenderStatsRow>(
+      `SELECT
+         address,
+         latest_nonce,
+         transaction_count::text AS transaction_count,
+         total_gas_used,
+         total_transaction_fee_wei,
+         total_value_wei,
+         average_gas_used,
+         average_transaction_fee_wei,
+         first_block_number::text AS first_block_number,
+         last_block_number::text AS last_block_number,
+         first_block_date,
+         last_block_date,
+         to_char(aggregated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS aggregated_at_utc
+       FROM ${this.qSenderStats}
+       ORDER BY transaction_count ${order}, last_block_number ${tieOrder}, address ASC
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map(mapSenderStatsRow);
+  }
+
   async listBaseloadConfigs(): Promise<StoredBaseloadConfigSummary[]> {
     const result = await this.pool.query<{
       name: string;
@@ -1315,6 +1443,22 @@ interface BaseloadConfigRow extends BaseloadConfigSummaryRow {
   config_json: string;
 }
 
+interface SenderStatsRow {
+  address: string;
+  latest_nonce: string | null;
+  transaction_count: string;
+  total_gas_used: string;
+  total_transaction_fee_wei: string;
+  total_value_wei: string;
+  average_gas_used: string;
+  average_transaction_fee_wei: string;
+  first_block_number: string;
+  last_block_number: string;
+  first_block_date: string;
+  last_block_date: string;
+  aggregated_at_utc: string;
+}
+
 function mapBaseloadConfigSummaryRow(row: BaseloadConfigSummaryRow): StoredBaseloadConfigSummary {
   return {
     name: row.name,
@@ -1328,6 +1472,26 @@ function mapBaseloadConfigRow(row: BaseloadConfigRow): StoredBaseloadConfig {
   return {
     ...mapBaseloadConfigSummaryRow(row),
     config: JSON.parse(row.config_json) as BaseloadConfig,
+  };
+}
+
+function mapSenderStatsRow(row: SenderStatsRow): StoredSenderStats {
+  return {
+    address: row.address,
+    latestNonce: row.latest_nonce,
+    transactionCount: row.transaction_count,
+    totalGasUsed: row.total_gas_used,
+    totalTransactionFeeWei: row.total_transaction_fee_wei,
+    totalValueWei: row.total_value_wei,
+    averageGasUsed: row.average_gas_used,
+    averageTransactionFeeWei: row.average_transaction_fee_wei,
+    firstBlockNumber: Number(row.first_block_number),
+    firstBlockNumberDecimal: row.first_block_number,
+    lastBlockNumber: Number(row.last_block_number),
+    lastBlockNumberDecimal: row.last_block_number,
+    firstBlockDate: row.first_block_date,
+    lastBlockDate: row.last_block_date,
+    aggregatedAt: row.aggregated_at_utc,
   };
 }
 

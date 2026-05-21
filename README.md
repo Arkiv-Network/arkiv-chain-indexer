@@ -7,14 +7,14 @@ The scanner reads blocks sequentially, fetches every transaction receipt in each
 block at a time, and resumes from the last successfully stored block after restart or failure. Failed block reads
 are retried and never skipped.
 
-A standalone aggregator computes fixed-size window aggregates (2 / 5 / 10 / 20 / 50 / 100 / 200 / 500 / 1000
-blocks). The HTTP backend serves both per-block rows and aggregated ranges, and a small static frontend lets you
-browse them in a browser.
+Standalone aggregators compute fixed-size window aggregates (2 / 5 / 10 / 20 / 50 / 100 / 200 / 500 / 1000
+blocks) and sender-address activity summaries. The HTTP backend serves per-block rows, aggregated ranges, sender
+stats, and optional transaction rows; a small static frontend lets you browse them in a browser.
 
 ## Quick start with Docker Compose
 
-The supplied compose stack spins up Postgres, the scanner, the aggregator loop, the backend, and the static
-frontend.
+The supplied compose stack spins up Postgres, the scanner, the range aggregator loop, the sender aggregator loop,
+the backend, and the static frontend.
 
 ```sh
 cp .env.example .env
@@ -36,10 +36,13 @@ The frontend container is a tiny Node `server.js` that serves the Vite-built Rea
 
 The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so production-style mainnet scans keep
 block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
-`SAVE_TRANSACTION_DATA=true` if you want the `/transactions` and `/block/:blockNumber` APIs.
+`SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
 
 The aggregator container runs `bun run aggregate-all` which walks every supported range size and sleeps for one
 minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
+
+The sender aggregator container runs `bun run aggregate-senders` which rebuilds address-level stats from stored
+transaction rows and sleeps for one minute between rebuilds (configurable via `SENDER_AGGREGATE_INTERVAL_MS`).
 
 Baseload workers run in the backend service, not in the browser. Set `BASELOAD_RPC_NODE` to the Arkiv JSON-RPC
 endpoint that should receive create transactions. The frontend only adds, edits, deletes, imports, exports, and
@@ -259,6 +262,14 @@ Two aggregation runners are available:
   bun run aggregate-all -- --once
   ```
 
+- **Sender address stats** (used by the compose `sender-aggregator` service):
+
+  ```sh
+  bun run aggregate-senders
+  # or, in a one-shot rebuild:
+  bun run aggregate-senders -- --once
+  ```
+
 Each aggregator run walks every aligned window from `floor(min_stored_block / M) * M` up through the highest
 stored block, and writes a row only for windows where all `M` blocks are present in `blocks`. Incomplete windows
 are skipped (and can be re-aggregated later once the missing blocks are scanned).
@@ -293,6 +304,19 @@ When `total_gas_used` or `transaction_count` for the window is `0` the correspon
 | `--to-block` | `AGGREGATE_TO_BLOCK` | unset | Optional upper bound on the windows to consider. |
 | `--interval-ms` | `AGGREGATE_INTERVAL_MS` | `60000` | (aggregate-all) sleep between full sweeps. |
 | `--once` | n/a | unset | (aggregate-all) run one sweep then exit. |
+
+#### Sender aggregator
+
+The sender aggregator rebuilds `sender_stats` from stored rows in `transactions`, grouping by normalized
+`from_address`. This requires transaction storage to have been enabled while scanning. Each sender row stores the
+latest found nonce, found transaction count, total gas used, total transaction fees, total sent value, average gas
+used, average transaction fee, first/last seen block/date, and aggregation timestamp.
+
+| CLI flag | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
+| `--interval-ms` | `SENDER_AGGREGATE_INTERVAL_MS` | `60000` | Sleep between full sender-stat rebuilds. |
+| `--once` | n/a | unset | Run one rebuild then exit. |
 
 ## Resume Behavior
 
@@ -381,6 +405,22 @@ Example:
 
 ```sh
 curl 'http://localhost:3000/transactions?dateGt=2024-01-01T00:00:00Z&dateLt=2024-01-02T00:00:00Z&limit=1000'
+```
+
+### `GET /senders`
+
+Returns precomputed sender-address stats ordered from most active to least active by default. When transaction
+data is disabled this endpoint returns `404`. Responses are capped at **10,000 sender addresses**.
+
+| Query parameter | Description |
+| --- | --- |
+| `limit` | Maximum rows to return, up to `10000`. |
+| `order` | `asc` or `desc`; defaults to `desc` by found transaction count. |
+
+Example:
+
+```sh
+curl 'http://localhost:3000/senders?limit=100'
 ```
 
 ### `GET /ranges`

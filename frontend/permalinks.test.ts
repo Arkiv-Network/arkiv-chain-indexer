@@ -10,6 +10,10 @@ describe("frontend permalink helpers", () => {
     expect(readViewFromSearch("?view=transactions&block=42")).toBe("transactions");
   });
 
+  test("reads the senders view", () => {
+    expect(readViewFromSearch("?view=senders")).toBe("senders");
+  });
+
   test("reads the health view", () => {
     expect(readViewFromSearch("?view=health")).toBe("health");
   });

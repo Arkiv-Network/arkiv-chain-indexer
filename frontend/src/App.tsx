@@ -20,6 +20,7 @@ import { HealthView } from "./HealthView";
 import { readStoredString, writeStoredString } from "./localStorage";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
+import { SendersView } from "./SendersView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
 
@@ -46,7 +47,8 @@ export function App() {
     ),
   );
   const view = readViewFromSearch(locationSearch);
-  const activeView = transactionDataEnabled !== true && view === "transactions" ? "blocks" : view;
+  const activeView =
+    transactionDataEnabled !== true && (view === "transactions" || view === "senders") ? "blocks" : view;
 
   useEffect(() => {
     const onPopState = () => setLocationSearch(getCurrentSearch());
@@ -107,7 +109,11 @@ export function App() {
   }, [baseloadAdminToken]);
 
   useEffect(() => {
-    if (transactionDataEnabled === false && view === "transactions" && writePermalink("blocks", {})) {
+    if (
+      transactionDataEnabled === false &&
+      (view === "transactions" || view === "senders") &&
+      writePermalink("blocks", {})
+    ) {
       setLocationSearch(getCurrentSearch());
     }
   }, [transactionDataEnabled, view]);
@@ -201,13 +207,22 @@ export function App() {
             Blocks
           </button>
           {transactionDataEnabled === true ? (
-            <button
-              type="button"
-              className={activeView === "transactions" ? "active" : ""}
-              onClick={() => setView("transactions")}
-            >
-              Address
-            </button>
+            <>
+              <button
+                type="button"
+                className={activeView === "transactions" ? "active" : ""}
+                onClick={() => setView("transactions")}
+              >
+                Address
+              </button>
+              <button
+                type="button"
+                className={activeView === "senders" ? "active" : ""}
+                onClick={() => setView("senders")}
+              >
+                Senders
+              </button>
+            </>
           ) : null}
           <button
             type="button"
@@ -258,6 +273,12 @@ export function App() {
           />
         ) : activeView === "transactions" ? (
           <TransactionsView
+            locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+          />
+        ) : activeView === "senders" ? (
+          <SendersView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}

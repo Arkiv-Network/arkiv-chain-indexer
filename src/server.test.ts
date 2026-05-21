@@ -4,11 +4,13 @@ import {
   handleRequest,
   parseFilterFromQuery,
   parseRangeFilterFromQuery,
+  parseSenderStatsFilterFromQuery,
   parseTransactionFilterFromQuery,
   type BlockInspectResponseBody,
   type BlocksResponseBody,
   type HealthResponseBody,
   type RangesResponseBody,
+  type SendersResponseBody,
   type TransactionsResponseBody,
 } from "./server";
 import { BaseloadRuntime } from "./baseloadRuntime";
@@ -206,6 +208,25 @@ describe("parseTransactionFilterFromQuery", () => {
     expect(() =>
       parseTransactionFilterFromQuery(new URLSearchParams("page=0")),
     ).toThrow(/page must be a positive integer/);
+  });
+});
+
+describe("parseSenderStatsFilterFromQuery", () => {
+  test("defaults sender stats to most active first", () => {
+    const filter = parseSenderStatsFilterFromQuery(new URLSearchParams(""));
+    expect(filter.order).toBe("desc");
+  });
+
+  test("parses sender stats limit and order", () => {
+    const filter = parseSenderStatsFilterFromQuery(new URLSearchParams("limit=25&order=asc"));
+    expect(filter.limit).toBe(25);
+    expect(filter.order).toBe("asc");
+  });
+
+  test("rejects sender stats limits above the hard cap", () => {
+    expect(() =>
+      parseSenderStatsFilterFromQuery(new URLSearchParams("limit=10001")),
+    ).toThrow(/limit must be at most 10000/);
   });
 });
 
@@ -624,6 +645,73 @@ describe("GET /transactions", () => {
   test("returns 404 when transaction data is disabled", async () => {
     const response = await handleRequest(
       new Request("http://example.test/transactions?block=42"),
+      {} as ScannerStorage,
+      { transactionDataEnabled: false },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Transaction data is disabled",
+    });
+  });
+});
+
+describe("GET /senders", () => {
+  test("returns sender stats ordered by activity and echoes filters", async () => {
+    let queryFilter: unknown;
+    const storage = {
+      querySenderStats: async (filter: unknown) => {
+        queryFilter = filter;
+        return [
+          {
+            address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            latestNonce: "8",
+            transactionCount: "2",
+            totalGasUsed: "63000",
+            totalTransactionFeeWei: "6930000",
+            totalValueWei: "3000",
+            averageGasUsed: "31500",
+            averageTransactionFeeWei: "3465000",
+            firstBlockNumber: 100,
+            firstBlockNumberDecimal: "100",
+            lastBlockNumber: 101,
+            lastBlockNumberDecimal: "101",
+            firstBlockDate: "2024-01-01T00:00:00.000Z",
+            lastBlockDate: "2024-01-02T00:00:00.000Z",
+            aggregatedAt: "2024-01-02T00:00:01.000Z",
+          },
+        ];
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/senders?limit=25"),
+      storage,
+    );
+    const body = (await response.json()) as SendersResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.count).toBe(1);
+    expect(body.limit).toBe(25);
+    expect(body.truncated).toBe(false);
+    expect(body.filters.order).toBe("desc");
+    expect(body.senders[0]?.address).toBe("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(body.senders[0]?.transactionCount).toBe("2");
+    expect(queryFilter).toEqual({ limit: 25, order: "desc" });
+  });
+
+  test("rejects invalid sender filters", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/senders?limit=10001"),
+      {} as ScannerStorage,
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  test("returns 404 when transaction data is disabled", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/senders"),
       {} as ScannerStorage,
       { transactionDataEnabled: false },
     );

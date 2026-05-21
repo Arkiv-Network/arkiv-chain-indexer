@@ -3,6 +3,7 @@ import {
   deleteBaseloadConfig,
   fetchBaseloadConfigs,
   fetchBaseloadState,
+  fetchSenders,
   loadBaseloadConfig,
   saveBaseloadConfig,
   updateBaseloadConfig,
@@ -92,5 +93,23 @@ describe("frontend API helpers", () => {
       { input: "/api/baseload/configs/low%20gas/load", method: "PUT", authorization: "Bearer secret" },
       { input: "/api/baseload/configs/low%20gas", method: "DELETE", authorization: "Bearer secret" },
     ]);
+  });
+
+  test("fetches sender stats with query parameters", async () => {
+    let observedInput = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      observedInput = String(input);
+      return Response.json({
+        count: 0,
+        limit: 25,
+        truncated: false,
+        filters: { order: "desc" },
+        senders: [],
+      });
+    }) as typeof fetch;
+
+    await fetchSenders(new URLSearchParams("limit=25&order=desc"));
+
+    expect(observedInput).toBe("/api/senders?limit=25&order=desc");
   });
 });

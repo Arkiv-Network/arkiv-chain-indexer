@@ -691,7 +691,8 @@ th:not(.num) .sort-header {
   vertical-align: bottom;
 }
 
-.tx-table td {
+.tx-table td,
+.sender-table td {
   overflow: hidden;
   text-overflow: ellipsis;
 }
