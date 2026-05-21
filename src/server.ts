@@ -649,6 +649,8 @@ export function parseTransactionFilterFromQuery(params: URLSearchParams): Transa
   const order = params.get("order");
   if (order !== null) {
     filter.order = parseOrderParam(order);
+  } else {
+    filter.order = "desc";
   }
 
   return filter;

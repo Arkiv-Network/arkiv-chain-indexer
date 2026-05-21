@@ -246,7 +246,7 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
-  const [sort, setSort] = useState<SortState>({ key: "nonce", direction: "asc" });
+  const [sort, setSort] = useState<SortState | null>(null);
 
   const load = useCallback((f: TransactionFilters) => {
     if (!hasScopedFilters(f)) {
@@ -303,13 +303,14 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
 
   const rows = useMemo(() => {
     const transactions = data?.transactions ?? [];
+    if (sort === null) return transactions;
     return transactions.slice().sort((a, b) => compareRows(a, b, sort));
   }, [data, sort]);
   const columns = useMemo(() => transactionColumns(timeZone), [timeZone]);
 
   const setSortKey = (key: SortKey) => {
     setSort((current) => {
-      if (current.key === key) {
+      if (current?.key === key) {
         return { key, direction: current.direction === "asc" ? "desc" : "asc" };
       }
       return { key, direction: defaultDirection(key) };
@@ -442,7 +443,7 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
                 <th key={column.key} scope="col" className={column.className}>
                   <button type="button" className="sort-header" onClick={() => setSortKey(column.key)}>
                     <span>{column.label}</span>
-                    <span aria-hidden="true">{sort.key === column.key ? sortIcon(sort.direction) : ""}</span>
+                    <span aria-hidden="true">{sort?.key === column.key ? sortIcon(sort.direction) : ""}</span>
                   </button>
                 </th>
               ))}
@@ -565,6 +566,7 @@ function filtersToParams(filters: TransactionFilters): URLSearchParams {
   addParam(params, "dateLt", normalized.dateLt);
   addParam(params, "limit", normalized.limit);
   addParam(params, "page", normalized.page);
+  params.set("order", "desc");
   return params;
 }
 

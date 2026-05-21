@@ -363,7 +363,7 @@ If transaction data is disabled, or if the block has not been scanned into Postg
 
 ### `GET /transactions`
 
-Returns stored transaction rows ordered by block number and position. When transaction data is disabled this
+Returns stored transaction rows ordered by block number and position, newest first by default. When transaction data is disabled this
 endpoint returns `404`. Responses are capped at **1,000
 transactions**. Use `block` for an exact block query, or combine date and block range filters additively.
 
@@ -375,7 +375,7 @@ transactions**. Use `block` for an exact block query, or combine date and block 
 | `dateGt` | ISO-8601 timestamp; only transactions in blocks newer than this. |
 | `dateLt` | ISO-8601 timestamp; only transactions in blocks older than this. |
 | `limit` | Maximum rows to return, up to `1000`. |
-| `order` | `asc` or `desc`; defaults to `asc`. |
+| `order` | `asc` or `desc`; defaults to `desc`. |
 
 Example:
 
