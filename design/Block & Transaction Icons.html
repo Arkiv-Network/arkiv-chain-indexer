@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Block & Transaction Icons — Arkiv-inspired</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --arkiv-blue: #181EA9;
+    --arkiv-orange: #FE7446;
+    --ink: #111111;
+    --sand: #F6F4EF;
+    --stone: #E9E6DE;
+    --stone-2: #DCD7CB;
+    --muted: #6B665C;
+  }
+  html, body { margin: 0; padding: 0; background: var(--sand); color: var(--ink); font-family: 'Inter', system-ui, sans-serif; }
+  body { font-feature-settings: "ss01"; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  /* === Card scaffold === */
+  .card {
+    background: var(--sand);
+    height: 100%;
+    box-sizing: border-box;
+    padding: 28px 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--stone-2);
+  }
+  .card-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .card-name::before { content: "[ "; color: var(--arkiv-orange); }
+  .card-name::after { content: " ]"; color: var(--arkiv-orange); }
+  .card-title {
+    font-family: 'Inter', sans-serif;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .card-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* Icon presentation row */
+  .icon-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--stone-2);
+    border-radius: 2px;
+    overflow: hidden;
+    background: white;
+  }
+  .icon-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 12px 14px;
+    gap: 10px;
+    background: var(--sand);
+    border-right: 1px solid var(--stone-2);
+  }
+  .icon-cell:last-child { border-right: none; }
+  .icon-cell.dark { background: var(--ink); }
+  .icon-cell.dark .scale-label { color: rgba(246,244,239,0.5); }
+  .scale-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+  }
+  .icon-bg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 72px;
+  }
+
+  /* Usage row */
+  .usage-row {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 12px 14px;
+    background: white;
+    border: 1px solid var(--stone-2);
+    border-radius: 2px;
+  }
+  .usage-mock {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+  }
+  .usage-mock .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+  }
+  .usage-mock .pill-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .usage-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--stone-2);
+  }
+
+  .notes {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted);
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px dashed var(--stone-2);
+  }
+  .notes strong { color: var(--ink); font-weight: 600; }
+
+  /* Section header card style */
+  .section-card {
+    height: 100%;
+    box-sizing: border-box;
+    padding: 28px;
+    background: var(--ink);
+    color: var(--sand);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .section-card .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+  .section-card h1 {
+    font-family: 'Inter', sans-serif;
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 0.95;
+    margin: 18px 0 0;
+  }
+  .section-card .b { color: var(--arkiv-orange); }
+  .section-card .desc {
+    font-size: 14px;
+    line-height: 1.55;
+    margin-top: 16px;
+    max-width: 28ch;
+    opacity: 0.85;
+  }
+  .section-card .swatches {
+    display: flex;
+    gap: 6px;
+    margin-top: 22px;
+  }
+  .section-card .swatches span {
+    width: 28px;
+    height: 28px;
+    display: block;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+
+  /* Cover */
+  .cover {
+    height: 100%;
+    box-sizing: border-box;
+    padding: 48px 56px;
+    background: var(--sand);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .cover .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    color: var(--arkiv-orange);
+    text-transform: uppercase;
+  }
+  .cover h1 {
+    font-family: 'Inter', sans-serif;
+    font-size: 84px;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 0.92;
+    margin: 0;
+    color: var(--ink);
+  }
+  .cover h1 .accent { color: var(--arkiv-blue); }
+  .cover .lede {
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 56ch;
+    margin-top: 24px;
+  }
+  .cover .footer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .cover .legend {
+    display: flex;
+    gap: 24px;
+  }
+  .cover .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cover .legend-item .sw {
+    width: 14px;
+    height: 14px;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="icons.jsx"></script>
+
+  <script type="text/babel">
+    const BLUE = "#181EA9";
+    const ORANGE = "#FE7446";
+    const INK = "#111111";
+    const SAND = "#F6F4EF";
+    const STONE = "#E9E6DE";
+
+    function IconCard({ name, codename, kind, Component, notes, sample }) {
+      return (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-name">{codename}</div>
+              <h3 className="card-title">{name}</h3>
+            </div>
+            <div className="card-meta">{kind}</div>
+          </div>
+
+          <div className="icon-row">
+            <div className="icon-cell">
+              <div className="icon-bg"><Component size={64} color={INK} accent={ORANGE}/></div>
+              <div className="scale-label">64</div>
+            </div>
+            <div className="icon-cell">
+              <div className="icon-bg"><Component size={32} color={INK} accent={ORANGE}/></div>
+              <div className="scale-label">32</div>
+            </div>
+            <div className="icon-cell dark">
+              <div className="icon-bg"><Component size={48} color={SAND} accent={ORANGE}/></div>
+              <div className="scale-label">48 · INVERSE</div>
+            </div>
+          </div>
+
+          <div className="usage-row">
+            <div className="usage-mock">
+              <Component size={20} color={INK} accent={ORANGE}/>
+              <span className="pill">{sample.label}</span>
+              <span className="pill-meta">{sample.meta}</span>
+            </div>
+            <div className="usage-divider"></div>
+            <div className="usage-mock" style={{flex: 0}}>
+              <Component size={16} color={INK} accent={ORANGE}/>
+            </div>
+          </div>
+
+          <div className="notes">{notes}</div>
+        </div>
+      );
+    }
+
+    function Cover() {
+      return (
+        <div className="cover">
+          <div>
+            <div className="tag">[ Etherscan · Icon study ]</div>
+            <h1 style={{marginTop: 24}}>Block <span className="accent">&</span><br/>Transaction.</h1>
+            <p className="lede">
+              Eight directions each for the two primitives of a blockchain explorer,
+              built on Arkiv’s visual grammar: bracket framing, two-tone ink + orange,
+              architectural geometry, sand &amp; stone neutrals.
+            </p>
+          </div>
+          <div className="footer-row">
+            <div className="legend">
+              <div className="legend-item"><span className="sw" style={{background: BLUE}}></span> Arkiv blue</div>
+              <div className="legend-item"><span className="sw" style={{background: ORANGE}}></span> Arkiv orange</div>
+              <div className="legend-item"><span className="sw" style={{background: INK}}></span> Ink</div>
+              <div className="legend-item"><span className="sw" style={{background: SAND, border: "1px solid #ccc"}}></span> Sand</div>
+            </div>
+            <div>v01 · 16 icons</div>
+          </div>
+        </div>
+      );
+    }
+
+    function SectionCover({ label, title, accent, desc, count }) {
+      return (
+        <div className="section-card">
+          <div>
+            <div className="label">{label}</div>
+            <h1>{title}<span className="b">.</span></h1>
+            <p className="desc">{desc}</p>
+          </div>
+          <div>
+            <div className="swatches">
+              <span style={{background: ORANGE}}></span>
+              <span style={{background: SAND}}></span>
+              <span style={{background: STONE}}></span>
+              <span style={{background: BLUE}}></span>
+            </div>
+            <div className="label" style={{marginTop: 20}}>{count} variants →</div>
+          </div>
+        </div>
+      );
+    }
+
+    // === Block & Tx specs ===
+    const blockSamples = { label: "Block", meta: "#21847301" };
+    const txSamples = { label: "Tx", meta: "0x7a9c…f4e1" };
+
+    const blockIcons = [
+      { name: "Bracketed Cube", codename: "B-01 · BRACKETED", kind: "Outline + solid",
+        Component: BlockBracketed,
+        notes: <><strong>Most Arkiv.</strong> The signature [ ] frame embraces a small isometric cube. Reads instantly as “contained record.” Use as the canonical block glyph in nav and titles.</> },
+      { name: "Layered Stack", codename: "B-02 · LAYERED", kind: "Solid",
+        Component: BlockLayered,
+        notes: <><strong>Echoes Arkiv’s L1/L2/L3 stack.</strong> Three slabs with orange topmost — newest block on top. Great for block lists and block height displays.</> },
+      { name: "Iso Outline", codename: "B-03 · ISO", kind: "Outline",
+        Component: BlockIsoOutline,
+        notes: <>Classic isometric cube, all hairline. Quietest of the set — works in dense tables where the icon shouldn’t shout.</> },
+      { name: "Solid Cube", codename: "B-04 · SOLID", kind: "Solid",
+        Component: BlockSolid,
+        notes: <>Heavy two-tone cube. Use sparingly — section headers, empty states, hero blocks. Highest visual weight in the family.</> },
+      { name: "Ledger", codename: "B-05 · LEDGER", kind: "Outline + chip",
+        Component: BlockLedger,
+        notes: <>Block read as ledger of records. Reinforces the “database” framing Arkiv leans into. Strong fit for transaction-count cells.</> },
+      { name: "Hash Tile", codename: "B-06 · TILE", kind: "Solid",
+        Component: BlockHashtag,
+        notes: <>Block-as-byte: dense hash pattern inside a solid tile. Reads as “raw data.” Pairs with hex strings.</> },
+      { name: "Wire + Edge", codename: "B-07 · EDGE", kind: "Outline accented",
+        Component: BlockWireAccent,
+        notes: <>Hairline cube with a single orange edge denoting the “fresh” seal. Useful for distinguishing latest block in a list.</> },
+      { name: "Archive Stack", codename: "B-08 · ARCHIVE", kind: "Outline",
+        Component: BlockArchive,
+        notes: <><strong>Literal Arkiv pun.</strong> Three drawers stacked, newest highlighted. Reads more “archive cabinet” than “cube” — best for indexing UI.</> },
+    ];
+
+    const txIcons = [
+      { name: "Bracketed Arrow", codename: "T-01 · BRACKETED", kind: "Outline",
+        Component: TxBracketed,
+        notes: <><strong>Sibling of B-01.</strong> Same [ ] frame, contents become an arrow. Pairs perfectly with Bracketed Cube as a matched set.</> },
+      { name: "Two Nodes", codename: "T-02 · NODES", kind: "Mixed",
+        Component: TxNodes,
+        notes: <>Sender → receiver, made literal. Filled-to-outline weight encodes direction. Use in transaction tables next to from/to addresses.</> },
+      { name: "Swap", codename: "T-03 · SWAP", kind: "Outline",
+        Component: TxSwap,
+        notes: <>Two opposing arrows for exchanges, swaps, internal txs. Orange marks the reverse leg. Avoid for vanilla transfers.</> },
+      { name: "Receipt", codename: "T-04 · RECEIPT", kind: "Outline",
+        Component: TxReceipt,
+        notes: <>Tx as cryptographic line-item: hash, address, value. Best when the metaphor needs to be unmistakable (history pages, exports).</> },
+      { name: "Flow", codename: "T-05 · FLOW", kind: "Solid + outline",
+        Component: TxFlow,
+        notes: <>Cube → arrow → cube. Says “value leaves one block, lands in another.” Heavier than nodes; works at 24px+.</> },
+      { name: "Tx in Block", codename: "T-06 · IN-BLOCK", kind: "Outline",
+        Component: TxInBlock,
+        notes: <>Arrow sitting on the top face of a block. Use when you specifically need to communicate <em>this</em> tx is mined into <em>that</em> block.</> },
+      { name: "Bolt", codename: "T-07 · BOLT", kind: "Solid",
+        Component: TxBolt,
+        notes: <>Faded brackets, dominant lightning bolt. Energetic, fast — fits pending / accelerated / L2 transactions specifically.</> },
+      { name: "Diagonal", codename: "T-08 · DIAGONAL", kind: "Mixed",
+        Component: TxDiagonal,
+        notes: <>Orange origin → ink destination, on diagonal. Most abstract of the set. Good for small chips and dashboard summaries.</> },
+    ];
+
+    function App() {
+      return (
+        <DesignCanvas
+          title="Block & Transaction Icons"
+          subtitle="Arkiv-inspired iconography for an Etherscan-style explorer"
+          sectionGap={56}
+        >
+          <DCSection id="intro" title="Overview">
+            <DCArtboard id="cover" label="Cover" width={760} height={520}>
+              <Cover/>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="blocks" title="Block · 8 directions">
+            <DCArtboard id="b-cover" label="Block — overview" width={420} height={520}>
+              <SectionCover
+                label="[ Primitive · 01 ]"
+                title="Block"
+                desc="A sealed, ordered container of state. The glyph should feel built, indexed, archival."
+                count="8"
+              />
+            </DCArtboard>
+            {blockIcons.map((spec) => (
+              <DCArtboard key={spec.codename} id={spec.codename} label={spec.name} width={460} height={520}>
+                <IconCard {...spec} sample={blockSamples}/>
+              </DCArtboard>
+            ))}
+          </DCSection>
+
+          <DCSection id="txs" title="Transaction · 8 directions">
+            <DCArtboard id="t-cover" label="Transaction — overview" width={420} height={520}>
+              <SectionCover
+                label="[ Primitive · 02 ]"
+                title="Transaction"
+                desc="A directed event between addresses. The glyph should feel like motion, exchange, signed intent."
+                count="8"
+              />
+            </DCArtboard>
+            {txIcons.map((spec) => (
+              <DCArtboard key={spec.codename} id={spec.codename} label={spec.name} width={460} height={520}>
+                <IconCard {...spec} sample={txSamples}/>
+              </DCArtboard>
+            ))}
+          </DCSection>
+
+          <DCSection id="pairs" title="In context · paired use">
+            <DCArtboard id="pair-1" label="Recommended pairing — bracketed set" width={760} height={420}>
+              <PairCard pairing="bracketed"/>
+            </DCArtboard>
+            <DCArtboard id="pair-2" label="Recommended pairing — layered + nodes" width={760} height={420}>
+              <PairCard pairing="layered"/>
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    // === Pair / context demo ===
+    function PairCard({ pairing }) {
+      const BlockGlyph = pairing === "bracketed" ? BlockBracketed : BlockLayered;
+      const TxGlyph    = pairing === "bracketed" ? TxBracketed    : TxNodes;
+      const note = pairing === "bracketed"
+        ? "Bracketed set: B-01 + T-01 share the same [ ] frame, reading as a matched type family. Best for headers, nav, and brand-forward surfaces."
+        : "Working set: B-02 + T-02 are quieter and denser — built for tables, lists, and the kind of dense data Etherscan pages serve.";
+
+      return (
+        <div className="card" style={{padding: 32}}>
+          <div className="card-header">
+            <div>
+              <div className="card-name">{pairing === "bracketed" ? "Pair · 01 — Branded set" : "Pair · 02 — Working set"}</div>
+              <h3 className="card-title">{pairing === "bracketed" ? "Bracketed family" : "Layered + Nodes"}</h3>
+            </div>
+            <div className="card-meta">In context</div>
+          </div>
+
+          {/* Mock Etherscan-style table */}
+          <div style={{
+            border: "1px solid var(--stone-2)",
+            background: "white",
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            color: "var(--ink)",
+          }}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "26px 90px 1fr 80px 80px",
+              gap: 14,
+              padding: "10px 16px",
+              borderBottom: "1px solid var(--stone-2)",
+              background: "var(--stone)",
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "var(--muted)",
+            }}>
+              <span></span><span>Block</span><span>Hash</span><span>Txns</span><span>Age</span>
+            </div>
+            {[
+              { n: "21847301", h: "0x7a9c4f…12e1f4", t: 142, age: "12 s" },
+              { n: "21847300", h: "0xc081a2…993ab0", t: 198, age: "24 s" },
+              { n: "21847299", h: "0xee44d1…0a72c8", t:  87, age: "36 s" },
+            ].map(r => (
+              <div key={r.n} style={{
+                display: "grid",
+                gridTemplateColumns: "26px 90px 1fr 80px 80px",
+                gap: 14,
+                padding: "12px 16px",
+                borderBottom: "1px solid var(--stone-2)",
+                alignItems: "center",
+              }}>
+                <BlockGlyph size={20} color={INK} accent={ORANGE}/>
+                <span style={{color: BLUE}}>{r.n}</span>
+                <span style={{color: "var(--muted)"}}>{r.h}</span>
+                <span>{r.t}</span>
+                <span style={{color: "var(--muted)"}}>{r.age}</span>
+              </div>
+            ))}
+            {[
+              { hash: "0x7a9c4f…f4e1", from: "0x2a…91c", to: "0xb5…ee2", v: "0.42 ETH" },
+              { hash: "0xc081a2…3ab0", from: "0xff…010", to: "0x09…7a3", v: "1.10 ETH" },
+            ].map(r => (
+              <div key={r.hash} style={{
+                display: "grid",
+                gridTemplateColumns: "26px 110px 1fr 80px",
+                gap: 14,
+                padding: "12px 16px",
+                borderBottom: "1px solid var(--stone-2)",
+                alignItems: "center",
+                background: "var(--sand)",
+              }}>
+                <TxGlyph size={20} color={INK} accent={ORANGE}/>
+                <span style={{color: BLUE}}>{r.hash}</span>
+                <span style={{color: "var(--muted)"}}>{r.from} → {r.to}</span>
+                <span>{r.v}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="notes" style={{marginTop: 4}}>{note}</div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
