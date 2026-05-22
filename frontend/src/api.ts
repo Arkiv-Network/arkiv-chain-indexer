@@ -17,6 +17,12 @@ export interface StoredBlock {
   averageTransactionGasUsed: string;
   totalGasUsed: string;
   maxGasInBlock: string;
+  batcherQueueSize?: string | null;
+  batcherIntensity?: string | null;
+  batcherLowerThreshold?: string | null;
+  batcherUpperThreshold?: string | null;
+  batcherMaxBlockSize?: string | null;
+  batcherMaxTxSize?: string | null;
 }
 
 export interface StoredBlockRange {
@@ -41,6 +47,14 @@ export interface StoredBlockRange {
   totalMaxGas: string;
   minMaxGasInBlock: string;
   maxMaxGasInBlock: string;
+  minBatcherQueueSize?: string | null;
+  maxBatcherQueueSize?: string | null;
+  averageBatcherQueueSize?: string | null;
+  averageBatcherIntensity?: string | null;
+  averageBatcherLowerThreshold?: string | null;
+  averageBatcherUpperThreshold?: string | null;
+  averageBatcherMaxBlockSize?: string | null;
+  averageBatcherMaxTxSize?: string | null;
 }
 
 export interface BlocksResponse {
@@ -98,6 +112,12 @@ export interface InspectedBlock {
   averageTransactionGasUsed?: string;
   averagePriorityFeeWeightedWei?: string;
   averagePriorityFeeWei?: string;
+  batcherQueueSize?: string | null;
+  batcherIntensity?: string | null;
+  batcherLowerThreshold?: string | null;
+  batcherUpperThreshold?: string | null;
+  batcherMaxBlockSize?: string | null;
+  batcherMaxTxSize?: string | null;
   transactions: InspectedTransaction[];
 }
 

@@ -188,4 +188,20 @@ describe("parseConfig", () => {
       }),
     ).toThrow("--disable-backfill must be a boolean");
   });
+
+  test("reads batcher collector URL from env and lets CLI override it", () => {
+    expect(
+      parseConfig([], {
+        ...baseEnv,
+        BATCHER_COLLECTOR_URL: "https://collector.example",
+      }).batcherCollectorUrl,
+    ).toBe("https://collector.example");
+
+    expect(
+      parseConfig(["--batcher-collector-url", "https://cli.example"], {
+        ...baseEnv,
+        BATCHER_COLLECTOR_URL: "https://collector.example",
+      }).batcherCollectorUrl,
+    ).toBe("https://cli.example");
+  });
 });

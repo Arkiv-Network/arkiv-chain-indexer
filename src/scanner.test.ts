@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { backfillDownForSlice, scanForwardToSafeHead, scanOneBlock } from "./scanner";
+import {
+  backfillDownForSlice,
+  fillRecentMissingBatcherMetrics,
+  scanForwardToSafeHead,
+  scanOneBlock,
+} from "./scanner";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
+import type { BatcherMetrics, BatcherMetricsSource } from "./batcher";
 import type { BlockProgressUpdate, ScannerStorage } from "./storage";
 import type { InspectedTransaction } from "./blockInspector";
 import type { BlockMetrics, Hex, RpcBlock, RpcReceipt } from "./types";
@@ -82,6 +88,40 @@ describe("scanOneBlock", () => {
     expect(storage.lastSuccessfulBlock).toBe(1n);
   });
 
+  test("adds batcher collector metrics to stored block metrics when available", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    const batcher = new FakeBatcherCollector({
+      batcherQueueSize: "906",
+      batcherIntensity: "0",
+      batcherLowerThreshold: "10000000",
+      batcherUpperThreshold: "50000000",
+      batcherMaxBlockSize: "10000000",
+      batcherMaxTxSize: "0",
+    });
+
+    await scanOneBlock(
+      1n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+      { kind: "lastSuccessfulBlock" },
+      {},
+      true,
+      batcher,
+    );
+
+    expect(batcher.requestedDates).toEqual(["2024-01-12T06:13:20.000Z"]);
+    expect(storage.savedMetrics[0]).toMatchObject({
+      batcherQueueSize: "906",
+      batcherIntensity: "0",
+      batcherLowerThreshold: "10000000",
+      batcherUpperThreshold: "50000000",
+      batcherMaxBlockSize: "10000000",
+      batcherMaxTxSize: "0",
+    });
+  });
+
   test("skips receipts and stored rows for transactions from the configured dead sender address", async () => {
     const block = blockWithTransactions(3);
     block.transactions[1] = {
@@ -131,6 +171,27 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics).toHaveLength(0);
     expect(storage.savedTransactions).toHaveLength(0);
     expect(rpc.requestedReceipts).toEqual([txHash(0)]);
+  });
+});
+
+describe("fillRecentMissingBatcherMetrics", () => {
+  test("fills stored recent blocks without changing scanner progress", async () => {
+    const storage = new FakeStorage();
+    storage.recentBlocksMissingBatcherMetrics = [
+      blockMetricsFixture({ blockNumber: 10n, blockDate: "2026-05-22T15:17:01.000Z" }),
+    ];
+    const batcher = new FakeBatcherCollector({ batcherQueueSize: "906" });
+
+    const updated = await fillRecentMissingBatcherMetrics(
+      storage as unknown as ScannerStorage,
+      batcher,
+    );
+
+    expect(updated).toBe(1);
+    expect(storage.savedBatcherMetrics).toEqual([
+      { blockNumber: 10n, metrics: { batcherQueueSize: "906" } },
+    ]);
+    expect(storage.lastSuccessfulBlock).toBeUndefined();
   });
 });
 
@@ -322,6 +383,8 @@ class ControlledReceiptRpc {
 class FakeStorage {
   savedMetrics: BlockMetrics[] = [];
   savedTransactions: InspectedTransaction[][] = [];
+  savedBatcherMetrics: Array<{ blockNumber: bigint; metrics: BatcherMetrics }> = [];
+  recentBlocksMissingBatcherMetrics: BlockMetrics[] = [];
   aggregatedRanges: bigint[] = [];
   lastSuccessfulBlock: bigint | undefined;
   backfillNextBlock: bigint | undefined;
@@ -356,6 +419,26 @@ class FakeStorage {
     }
   }
 
+  async queryRecentBlocksMissingBatcherMetrics(): Promise<BlockMetrics[]> {
+    return this.recentBlocksMissingBatcherMetrics;
+  }
+
+  async saveBatcherMetricsForBlock(blockNumber: bigint, metrics: BatcherMetrics): Promise<boolean> {
+    this.savedBatcherMetrics.push({ blockNumber, metrics });
+    return true;
+  }
+
+}
+
+class FakeBatcherCollector implements BatcherMetricsSource {
+  requestedDates: string[] = [];
+
+  constructor(private readonly metrics: BatcherMetrics | undefined) {}
+
+  async getMetricsForBlockDate(blockDate: string): Promise<BatcherMetrics | undefined> {
+    this.requestedDates.push(blockDate);
+    return this.metrics;
+  }
 }
 
 class SimpleRpc {
@@ -437,6 +520,30 @@ function receiptFor(hash: Hex): RpcReceipt {
 
 function txHash(index: number): Hex {
   return `0x${index.toString(16).padStart(64, "0")}`;
+}
+
+function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetrics {
+  return {
+    blockDate: "2024-01-01T00:00:00.000Z",
+    blockNumber: 1n,
+    baseBlockFeeWei: "1",
+    totalGasUsed: "0",
+    maxGasInBlock: "0",
+    transactionCount: 0,
+    blockRewardWei: "0",
+    burntFeesWei: "0",
+    totalTransactionFeeWei: "0",
+    feePriceSumWei: "0",
+    priorityFeeSumWei: "0",
+    priorityFeeWeightedNumeratorWei: "0",
+    priorityFeeGasWeightedNumeratorWei: "0",
+    averageFeePriceWei: "0",
+    averageTransactionFeeWei: "0",
+    averageTransactionGasUsed: "0",
+    averagePriorityFeeWeightedWei: "0",
+    averagePriorityFeeWei: "0",
+    ...overrides,
+  };
 }
 
 function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> = {}): Parameters<typeof backfillDownForSlice>[1] {
