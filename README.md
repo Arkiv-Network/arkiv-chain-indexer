@@ -13,8 +13,8 @@ stats, and optional transaction rows; a small static frontend lets you browse th
 
 ## Quick start with Docker Compose
 
-The supplied compose stack spins up Postgres, the scanner, the range aggregator loop, the sender aggregator loop,
-the backend, and the static frontend.
+The supplied compose stack spins up Postgres, the scanner, the batcher collector enrichment loop, the range
+aggregator loop, the sender aggregator loop, the backend, and the static frontend.
 
 ```sh
 cp .env.example .env
@@ -44,6 +44,12 @@ minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
 The sender aggregator container runs `bun run aggregate-senders` which rebuilds address-level stats from stored
 transaction rows and sleeps for one minute between rebuilds (configurable via `SENDER_AGGREGATE_INTERVAL_MS`).
 
+The batcher collector container runs `bun run collect-batcher` which enriches already stored recent blocks with
+batcher queue/threshold metrics and sleeps for ten seconds between sweeps (configurable via
+`BATCHER_COLLECTOR_INTERVAL_MS`). Set `BATCHER_COLLECTOR_URL` in `.env` to enable the service; its logs are
+separate from the main scanner container so collector failures can be debugged independently.
+If the URL is unset, the container logs that collector enrichment is disabled and stays idle.
+
 Baseload workers run in the backend service, not in the browser. Set `BASELOAD_RPC_NODE` to the Arkiv JSON-RPC
 endpoint that should receive create transactions. The frontend only adds, edits, deletes, imports, exports, and
 monitors worker configuration through `/api/baseload`.
@@ -57,8 +63,8 @@ To do a quick bounded backfill instead of continuous near-head scanning, set `SC
 `SCANNER_TO_BLOCK` in `.env`.
 
 Set `BATCHER_COLLECTOR_URL` to attach recent batcher queue/threshold metadata to stored blocks. The collector
-only serves recent seconds, so the scanner requests batcher data for blocks between two seconds and one hour old
-and also fills stored recent blocks that are missing those fields.
+only serves recent seconds, so the dedicated batcher collector service requests batcher data for stored blocks
+between two seconds and one hour old that are still missing those fields.
 
 ## Arkiv test Docker Compose
 
@@ -146,7 +152,6 @@ Configuration can be passed through CLI flags or environment variables.
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
-| `--batcher-collector-url` | `BATCHER_COLLECTOR_URL` or `SCANNER_BATCHER_COLLECTOR_URL` | unset | Optional batcher collector base URL for recent block queue/threshold metrics. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Show help:
@@ -154,6 +159,27 @@ Show help:
 ```sh
 bun run scan -- --help
 ```
+
+#### Batcher collector worker
+
+The Docker Compose `batcher-collector` service runs separately from the scanner:
+
+```sh
+DATABASE_URL=postgres://gas:gas@localhost:5432/gas \
+  BATCHER_COLLECTOR_URL=https://batcher-collector.example \
+  bun run collect-batcher
+```
+
+It does not read blocks from RPC. It queries PostgreSQL for stored blocks whose `batcher_queue_size` is still
+empty and whose timestamps are inside the collector's recent-data window, then updates only the nullable batcher
+metric columns.
+
+| CLI flag | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--database-url` | `DATABASE_URL` | **required** | PostgreSQL connection string. |
+| `--batcher-collector-url` | `BATCHER_COLLECTOR_URL` or `SCANNER_BATCHER_COLLECTOR_URL` | **required** | Batcher collector base URL for recent block queue/threshold metrics. |
+| `--interval-ms` | `BATCHER_COLLECTOR_INTERVAL_MS` | `10000` | Delay between collector sweeps. |
+| `--once` | n/a | unset | Run one collector sweep and exit. |
 
 ## Baseload Backend Workers
 
