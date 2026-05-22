@@ -12,6 +12,7 @@ import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { transactionExplorerHref } from "./transactionLinks";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
+import { BlockBracketed, TxBracketed } from "./icons";
 
 interface HomeViewProps {
   transactionDataEnabled: boolean | null;
@@ -186,7 +187,9 @@ function BlockFeedItem({
 }) {
   return (
     <article className="home-feed-item">
-      <div className="home-feed-icon" aria-hidden="true">Bk</div>
+      <div className="home-feed-icon" aria-hidden="true">
+        <BlockBracketed size={28} color="currentColor" />
+      </div>
       <div className="home-feed-main">
         <div className="home-feed-title">
           <BlockNumberLink blockNumber={block.blockNumber} onLocationChange={onLocationChange} />
@@ -218,7 +221,9 @@ function TransactionFeedItem({
 
   return (
     <article className="home-feed-item">
-      <div className="home-feed-icon tx" aria-hidden="true">Tx</div>
+      <div className="home-feed-icon tx" aria-hidden="true">
+        <TxBracketed size={28} color="currentColor" />
+      </div>
       <div className="home-feed-main">
         <div className="home-feed-title">
           {txHref ? (
