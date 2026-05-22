@@ -78,6 +78,7 @@ describe("frontend format helpers", () => {
   test("formats timestamps in selected timezones and UTC", () => {
     expect(fmtUtcDate("2024-01-01T00:00:00.000Z")).toBe("2024-01-01 00:00:00Z");
     expect(fmtDate("2024-01-01T00:00:00.000Z", "UTC")).toContain("UTC");
+    expect(fmtDate("2024-07-01T00:00:00.000Z", "Europe/Berlin")).toMatch(/\sCET$/);
     expect(fmtDate("not-a-date", "UTC")).toBe("not-a-date");
   });
 

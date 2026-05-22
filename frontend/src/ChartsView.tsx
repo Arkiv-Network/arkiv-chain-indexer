@@ -14,6 +14,7 @@ import {
   writePermalink,
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
+import { fmtDate } from "./format";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -939,19 +940,7 @@ export function ChartsView({
 }
 
 function fmtShortDate(value: string, timeZone = "UTC"): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZoneName: "short",
-  }).format(d);
+  return fmtDate(value, timeZone);
 }
 
 interface PlotBuildResult {

@@ -5,6 +5,10 @@ const MAX_DECIMALS = 9;
 const ZERO_THRESHOLD = 1e-8;
 const LARGE_THRESHOLD = 1000;
 const PRECISION_SCALE = 1_000_000_000_000n; // 1e12 — enough headroom for MAX_DECIMALS
+const TIME_ZONE_LABELS: Record<string, string> = {
+  "Europe/Berlin": "CET",
+  "Europe/Warsaw": "CET",
+};
 
 export function fmtGwei(weiStr: string | null | undefined): string {
   if (weiStr === undefined || weiStr === null) return "—";
@@ -104,7 +108,7 @@ export function fmtDate(value: string | null | undefined, timeZone = "UTC"): str
   try {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return value;
-    return new Intl.DateTimeFormat("en-CA", {
+    const formatted = new Intl.DateTimeFormat("en-CA", {
       timeZone,
       year: "numeric",
       month: "2-digit",
@@ -115,9 +119,16 @@ export function fmtDate(value: string | null | undefined, timeZone = "UTC"): str
       hour12: false,
       timeZoneName: "short",
     }).format(d);
+    return normalizeTimeZoneLabel(formatted, timeZone);
   } catch {
     return value;
   }
+}
+
+function normalizeTimeZoneLabel(formatted: string, timeZone: string): string {
+  const label = TIME_ZONE_LABELS[timeZone];
+  if (!label) return formatted;
+  return formatted.replace(/\sGMT[+-]\d{1,2}(?::\d{2})?$/, ` ${label}`);
 }
 
 export function fmtUtcDate(value: string | null | undefined): string {
