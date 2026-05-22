@@ -554,7 +554,7 @@ async function handleGetSenders(url: URL, storage: ScannerStorage): Promise<Resp
 }
 
 export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter {
-  const filter: BlockQueryFilter = {};
+  const filter: BlockQueryFilter = { order: "desc" };
 
   const blockGt = params.get("blockGt");
   if (blockGt !== null) {
@@ -590,7 +590,7 @@ export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter 
 }
 
 export function parseRangeFilterFromQuery(params: URLSearchParams): BlockRangeQueryFilter {
-  const filter: BlockRangeQueryFilter = {};
+  const filter: BlockRangeQueryFilter = { order: "desc" };
 
   const rangeSize = params.get("rangeSize");
   if (rangeSize !== null) {
