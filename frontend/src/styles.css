@@ -367,17 +367,11 @@ button.secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  background: rgba(46, 99, 216, 0.1);
-  color: var(--accent);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  color: var(--fg);
 }
 
-.home-feed-icon.tx {
-  background: rgba(22, 163, 74, 0.1);
-  color: #16803f;
+.home-feed-icon svg {
+  display: block;
 }
 
 .home-feed-main {
