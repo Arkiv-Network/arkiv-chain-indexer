@@ -2,6 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { readViewFromSearch } from "./src/permalinks";
 
 describe("frontend permalink helpers", () => {
+  test("reads the home view", () => {
+    expect(readViewFromSearch("?view=home")).toBe("home");
+  });
+
+  test("defaults to the home view", () => {
+    expect(readViewFromSearch("")).toBe("home");
+  });
+
   test("reads the block view", () => {
     expect(readViewFromSearch("?view=block&block=42")).toBe("block");
   });
@@ -22,7 +30,7 @@ describe("frontend permalink helpers", () => {
     expect(readViewFromSearch("?view=baseload")).toBe("baseload");
   });
 
-  test("falls back to blocks for unknown views", () => {
-    expect(readViewFromSearch("?view=unknown")).toBe("blocks");
+  test("falls back to home for unknown views", () => {
+    expect(readViewFromSearch("?view=unknown")).toBe("home");
   });
 });

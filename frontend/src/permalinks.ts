@@ -1,4 +1,13 @@
-export type View = "blocks" | "block" | "transactions" | "senders" | "ranges" | "charts" | "health" | "baseload";
+export type View =
+  | "home"
+  | "blocks"
+  | "block"
+  | "transactions"
+  | "senders"
+  | "ranges"
+  | "charts"
+  | "health"
+  | "baseload";
 
 const VIEW_PARAM = "view";
 
@@ -10,6 +19,7 @@ export function getCurrentSearch(): string {
 export function readViewFromSearch(search: string): View {
   const params = new URLSearchParams(search);
   const value = params.get(VIEW_PARAM);
+  if (value === "home") return "home";
   if (value === "block") return "block";
   if (value === "transactions") return "transactions";
   if (value === "senders") return "senders";
@@ -17,7 +27,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "charts") return "charts";
   if (value === "health") return "health";
   if (value === "baseload") return "baseload";
-  return "blocks";
+  return "home";
 }
 
 export function readFiltersFromSearch<T extends Record<string, string>>(
