@@ -58,9 +58,9 @@ describe("parseFilterFromQuery", () => {
     expect(filter.dateLt).toBe("2024-12-31T00:00:00.000Z");
   });
 
-  test("omits absent filters", () => {
+  test("defaults block queries to newest first when filters are absent", () => {
     const filter = parseFilterFromQuery(new URLSearchParams(""));
-    expect(filter).toEqual({});
+    expect(filter).toEqual({ order: "desc" });
   });
 
   test("rejects non-numeric block params", () => {
@@ -80,9 +80,9 @@ describe("parseFilterFromQuery", () => {
     expect(filter.limit).toBe(250);
   });
 
-  test("parses a valid order", () => {
-    const filter = parseFilterFromQuery(new URLSearchParams("order=desc"));
-    expect(filter.order).toBe("desc");
+  test("honors explicit ascending block order", () => {
+    const filter = parseFilterFromQuery(new URLSearchParams("order=asc"));
+    expect(filter.order).toBe("asc");
   });
 
   test("rejects an invalid order", () => {
@@ -124,9 +124,10 @@ describe("parseRangeFilterFromQuery", () => {
     expect(filter.dateLt).toBe("2024-12-31T00:00:00.000Z");
   });
 
-  test("omits rangeSize when absent", () => {
+  test("defaults range queries to newest first and omits rangeSize when absent", () => {
     const filter = parseRangeFilterFromQuery(new URLSearchParams(""));
     expect(filter.rangeSize).toBeUndefined();
+    expect(filter.order).toBe("desc");
   });
 
   test("rejects non-numeric range params", () => {
@@ -146,9 +147,9 @@ describe("parseRangeFilterFromQuery", () => {
     expect(filter.limit).toBe(42);
   });
 
-  test("parses a valid order", () => {
-    const filter = parseRangeFilterFromQuery(new URLSearchParams("order=desc"));
-    expect(filter.order).toBe("desc");
+  test("honors explicit ascending range order", () => {
+    const filter = parseRangeFilterFromQuery(new URLSearchParams("order=asc"));
+    expect(filter.order).toBe("asc");
   });
 
   test("rejects an invalid order", () => {
@@ -802,7 +803,7 @@ if (!hasPostgresForTests()) {
   });
 } else {
   describe("createBlockServer", () => {
-    test("returns smallest stored blocks when no filters are supplied", async () => {
+    test("returns newest stored blocks when no filters are supplied", async () => {
       const storage = await openStorageWithBlocks([1n, 2n, 3n]);
       await withServer(storage, async (url) => {
         const response = await fetch(`${url}/blocks`);
@@ -811,7 +812,7 @@ if (!hasPostgresForTests()) {
         expect(body.count).toBe(3);
         expect(body.limit).toBe(10_000);
         expect(body.truncated).toBe(false);
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2, 3]);
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([3, 2, 1]);
         expect(body.filters).toEqual({ blockGt: null, blockLt: null, dateGt: null, dateLt: null });
       });
     });
@@ -825,17 +826,17 @@ if (!hasPostgresForTests()) {
         expect(body.count).toBe(2);
         expect(body.limit).toBe(2);
         expect(body.truncated).toBe(true);
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2]);
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([5, 4]);
       });
     });
 
-    test("honors descending block order for limited windows", async () => {
+    test("honors ascending block order for limited windows", async () => {
       const storage = await openStorageWithBlocks([1n, 2n, 3n, 4n, 5n]);
       await withServer(storage, async (url) => {
-        const response = await fetch(`${url}/blocks?limit=2&order=desc`);
+        const response = await fetch(`${url}/blocks?limit=2&order=asc`);
         expect(response.status).toBe(200);
         const body = (await response.json()) as BlocksResponseBody;
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([5, 4]);
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2]);
       });
     });
 
@@ -863,7 +864,7 @@ if (!hasPostgresForTests()) {
         );
         expect(response.status).toBe(200);
         const body = (await response.json()) as BlocksResponseBody;
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([11, 12]);
+        expect(body.blocks.map((row) => row.blockNumber)).toEqual([12, 11]);
         expect(body.filters).toEqual({
           blockGt: "10",
           blockLt: "13",
@@ -954,20 +955,20 @@ if (!hasPostgresForTests()) {
         const response = await fetch(`${url}/ranges?rangeSize=50`);
         expect(response.status).toBe(200);
         const body = (await response.json()) as RangesResponseBody;
-        expect(body.ranges.map((row) => row.rangeStart)).toEqual([0, 50, 100]);
+        expect(body.ranges.map((row) => row.rangeStart)).toEqual([100, 50, 0]);
         expect(body.ranges.every((row) => row.rangeSize === 50)).toBe(true);
         expect(body.filters.rangeSize).toBe("50");
       });
     });
 
-    test("honors descending range order for limited windows", async () => {
+    test("returns newest ranges first for limited windows", async () => {
       const storage = await withStorage();
       await saveCompleteRange(storage, 0n);
       await saveCompleteRange(storage, 100n);
       await saveCompleteRange(storage, 200n);
 
       await withServer(storage, async (url) => {
-        const response = await fetch(`${url}/ranges?limit=2&order=desc`);
+        const response = await fetch(`${url}/ranges?limit=2`);
         expect(response.status).toBe(200);
         const body = (await response.json()) as RangesResponseBody;
         expect(body.ranges.map((row) => row.rangeStart)).toEqual([200, 100]);

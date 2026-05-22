@@ -204,24 +204,24 @@ if (!hasPostgresForTests()) {
   });
 
   describe("ScannerStorage.queryBlocks", () => {
-    test("returns blocks ordered ascending by block number", async () => {
+    test("returns newest blocks first by default", async () => {
       const storage = await withStorage();
       for (const blockNumber of [3n, 1n, 2n]) {
         await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
       }
 
       const result = await storage.queryBlocks();
-      expect(result.map((row) => row.blockNumber)).toEqual([1, 2, 3]);
+      expect(result.map((row) => row.blockNumber)).toEqual([3, 2, 1]);
     });
 
-    test("can return the newest matching blocks first", async () => {
+    test("can return the oldest matching blocks first", async () => {
       const storage = await withStorage();
       for (const blockNumber of [1n, 2n, 3n, 4n]) {
         await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
       }
 
-      const result = await storage.queryBlocks({ limit: 2, order: "desc" });
-      expect(result.map((row) => row.blockNumber)).toEqual([4, 3]);
+      const result = await storage.queryBlocks({ limit: 2, order: "asc" });
+      expect(result.map((row) => row.blockNumber)).toEqual([1, 2]);
     });
 
     test("returns all stored fields in camelCase", async () => {
@@ -291,7 +291,7 @@ if (!hasPostgresForTests()) {
       }
 
       const result = await storage.queryBlocks({ blockGt: 12n, blockLt: 16n });
-      expect(result.map((row) => row.blockNumber)).toEqual([13, 14, 15]);
+      expect(result.map((row) => row.blockNumber)).toEqual([15, 14, 13]);
     });
 
     test("filters by dateGt and dateLt exclusively", async () => {
@@ -310,7 +310,7 @@ if (!hasPostgresForTests()) {
         dateGt: "2024-01-01T00:00:00.000Z",
         dateLt: "2024-01-04T00:00:00.000Z",
       });
-      expect(result.map((row) => row.blockNumber)).toEqual([2, 3]);
+      expect(result.map((row) => row.blockNumber)).toEqual([3, 2]);
     });
 
     test("treats date and block filters additively", async () => {
@@ -329,7 +329,7 @@ if (!hasPostgresForTests()) {
         blockGt: 1n,
         dateLt: "2024-01-04T00:00:00.000Z",
       });
-      expect(result.map((row) => row.blockNumber)).toEqual([2, 3]);
+      expect(result.map((row) => row.blockNumber)).toEqual([3, 2]);
     });
 
     test("returns empty array when no blocks match", async () => {
@@ -428,17 +428,17 @@ if (!hasPostgresForTests()) {
       }
 
       const result = await storage.queryBlockRanges({ rangeStartGt: 0n, rangeStartLt: 300n });
-      expect(result.map((row) => row.rangeStart)).toEqual([100, 200]);
+      expect(result.map((row) => row.rangeStart)).toEqual([200, 100]);
     });
 
-    test("queryBlockRanges can return the newest matching ranges first", async () => {
+    test("queryBlockRanges can return the oldest matching ranges first", async () => {
       const storage = await withStorage();
       for (const rangeStart of [0n, 100n, 200n, 300n]) {
         await saveCompleteRange(storage, rangeStart, "2024-01-01T00:00:00.000Z");
       }
 
-      const result = await storage.queryBlockRanges({ limit: 2, order: "desc" });
-      expect(result.map((row) => row.rangeStart)).toEqual([300, 200]);
+      const result = await storage.queryBlockRanges({ limit: 2, order: "asc" });
+      expect(result.map((row) => row.rangeStart)).toEqual([0, 100]);
     });
 
     test("queryBlockRanges caps results at MAX_RANGES_PER_QUERY", () => {
@@ -558,7 +558,7 @@ if (!hasPostgresForTests()) {
         ],
       );
 
-      const rows = await storage.queryTransactions({ blockNumber: 42n });
+      const rows = await storage.queryTransactions({ blockNumber: 42n, order: "asc" });
       expect(rows.map((row) => row.hash)).toEqual(["0xaaa", "0xbbb"]);
       expect(rows[0]).toMatchObject({
         blockNumber: 42,
@@ -574,7 +574,7 @@ if (!hasPostgresForTests()) {
       expect(inspected?.transactions.map((row) => row.hash)).toEqual(["0xaaa", "0xbbb"]);
     });
 
-    test("queryTransactions can return the newest matching transactions first", async () => {
+    test("queryTransactions returns newest matching transactions first by default", async () => {
       const storage = await withStorage();
       await storage.saveBlockMetrics(
         blockMetricsFixture({ blockNumber: 100n, transactionCount: 1 }),
@@ -590,7 +590,7 @@ if (!hasPostgresForTests()) {
         ],
       );
 
-      const rows = await storage.queryTransactions({ limit: 2, order: "desc" });
+      const rows = await storage.queryTransactions({ limit: 2 });
       expect(rows.map((row) => row.hash)).toEqual(["0xccc", "0xbbb"]);
     });
 
@@ -605,7 +605,7 @@ if (!hasPostgresForTests()) {
         transactionFixture({ position: 0, hash: "0xbbb" }),
       ]);
 
-      const rows = await storage.queryTransactions({ blockNumber: 42n });
+      const rows = await storage.queryTransactions({ blockNumber: 42n, order: "asc" });
       expect(rows.map((row) => row.hash)).toEqual(["0xbbb"]);
     });
 
@@ -637,7 +637,11 @@ if (!hasPostgresForTests()) {
         [transactionFixture({ position: 0, hash: "0xddd", from: address, nonce: "3" })],
       );
 
-      const rows = await storage.queryTransactions({ fromAddress: address.toUpperCase(), limit: 10 });
+      const rows = await storage.queryTransactions({
+        fromAddress: address.toUpperCase(),
+        limit: 10,
+        order: "asc",
+      });
       expect(rows.map((row) => row.nonce)).toEqual(["2", "3", "10"]);
 
       const filteredCount = await storage.countTransactions({
@@ -647,7 +651,12 @@ if (!hasPostgresForTests()) {
       });
       expect(filteredCount).toBe(2);
 
-      const secondPage = await storage.queryTransactions({ fromAddress: address, limit: 1, page: 2 });
+      const secondPage = await storage.queryTransactions({
+        fromAddress: address,
+        limit: 1,
+        page: 2,
+        order: "asc",
+      });
       expect(secondPage.map((row) => row.hash)).toEqual(["0xddd"]);
 
       const newestOutgoing = await storage.queryTransactions({
@@ -671,11 +680,11 @@ if (!hasPostgresForTests()) {
       expect((await storage.aggregateRangeIfComplete(100n, 100n))?.rangeSize).toBe(100n);
 
       const fifties = await storage.queryBlockRanges({ rangeSize: 50n });
-      expect(fifties.map((row) => row.rangeStart)).toEqual([0, 50, 100]);
+      expect(fifties.map((row) => row.rangeStart)).toEqual([100, 50, 0]);
       expect(fifties.every((row) => row.rangeSize === 50)).toBe(true);
 
       const hundreds = await storage.queryBlockRanges({ rangeSize: 100n });
-      expect(hundreds.map((row) => row.rangeStart)).toEqual([0, 100]);
+      expect(hundreds.map((row) => row.rangeStart)).toEqual([100, 0]);
       expect(hundreds.every((row) => row.rangeSize === 100)).toBe(true);
 
       const twos = await storage.queryBlockRanges({ rangeSize: 2n });

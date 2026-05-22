@@ -1070,6 +1070,7 @@ export class ScannerStorage {
     const transactions = await this.queryTransactions({
       blockNumber,
       limit: MAX_TRANSACTIONS_PER_QUERY,
+      order: "asc",
     });
 
     return {
@@ -1565,7 +1566,7 @@ function resolvePageOffset(page: number | undefined, limit: number): number {
 }
 
 function resolveQueryOrder(order: QueryOrder | undefined): "ASC" | "DESC" {
-  return order === "desc" ? "DESC" : "ASC";
+  return order === "asc" ? "ASC" : "DESC";
 }
 
 function buildTransactionWhereClause(

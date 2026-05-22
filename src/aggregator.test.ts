@@ -64,7 +64,7 @@ if (!hasPostgresForTests()) {
         { rangeStart: 100n, status: "incomplete" },
       ]);
 
-      const stored = await storage.queryBlockRanges({ rangeSize: 50n });
+      const stored = await storage.queryBlockRanges({ rangeSize: 50n, order: "asc" });
       expect(stored.map((row) => row.rangeStart)).toEqual([0, 50]);
     });
 
@@ -77,8 +77,8 @@ if (!hasPostgresForTests()) {
       await aggregateRanges(storage, { rangeSize: 10n });
       await aggregateRanges(storage, { rangeSize: 100n });
 
-      const tens = await storage.queryBlockRanges({ rangeSize: 10n });
-      const hundreds = await storage.queryBlockRanges({ rangeSize: 100n });
+      const tens = await storage.queryBlockRanges({ rangeSize: 10n, order: "asc" });
+      const hundreds = await storage.queryBlockRanges({ rangeSize: 100n, order: "asc" });
       expect(tens.map((row) => row.rangeStart)).toEqual([
         0, 10, 20, 30, 40, 50, 60, 70, 80, 90,
       ]);
