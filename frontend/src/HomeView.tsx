@@ -99,69 +99,88 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     <section className="home-view">
       <div className="home-hero">
         <div>
-          <p className="home-kicker">Arkiv chain explorer</p>
-          <h2>Latest blocks</h2>
-          <p className="home-lede">Newest indexed blocks and transactions.</p>
+          <p className="home-kicker">arkiv chain explorer</p>
+          <h2>Explore the Arkiv chain.</h2>
+          <p className="home-lede">
+            Newest indexed blocks and transactions on the Arkiv data layer — searchable, time‑scoped,
+            verifiable.
+          </p>
         </div>
         <div className="home-status" aria-live="polite">
-          <span>{blocksLoading ? "Refreshing..." : lastUpdatedLabel}</span>
+          <span>{blocksLoading ? "Refreshing…" : lastUpdatedLabel}</span>
           <a href={blocksHref} onClick={openBlocksView}>
             View all blocks
           </a>
         </div>
       </div>
 
-      <div className="home-stats">
-        <MetricCard label="Latest block" value={latestBlock ? latestBlock.blockNumber.toString() : "-"} />
-        <MetricCard label="Base fee" value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "-"} />
-        <MetricCard label="Transactions" value={latestBlock ? fmtInteger(latestBlock.transactionCount) : "-"} />
-        <MetricCard
-          label="Gas used"
-          value={latestBlock ? fmtRatio(latestBlock.totalGasUsed, latestBlock.maxGasInBlock) : "-"}
-        />
+      <div>
+        <div className="home-section-head">
+          <div>
+            <p className="home-kicker">network at a glance</p>
+            <h3>Live statistics</h3>
+          </div>
+        </div>
+        <div className="home-stats">
+          <MetricCard label="Latest block" value={latestBlock ? latestBlock.blockNumber.toString() : "—"} />
+          <MetricCard label="Base fee" value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "—"} />
+          <MetricCard label="Transactions" value={latestBlock ? fmtInteger(latestBlock.transactionCount) : "—"} />
+          <MetricCard
+            label="Gas used"
+            value={latestBlock ? fmtRatio(latestBlock.totalGasUsed, latestBlock.maxGasInBlock) : "—"}
+          />
+        </div>
       </div>
 
-      <div className={`home-feed-grid${showTransactions ? "" : " single"}`}>
-        <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
-          <div className="home-panel-heading">
-            <h3 id="home-latest-blocks">Latest blocks</h3>
-            <span>{blocksData ? `${blocksData.count} shown` : blocksLoading ? "Loading" : "No data"}</span>
+      <div>
+        <div className="home-section-head">
+          <div>
+            <p className="home-kicker">live feed</p>
+            <h3>Latest blocks &amp; transactions</h3>
           </div>
-          {blocksError ? (
-            <p className="summary error">Failed to load blocks: {blocksError}</p>
-          ) : (
-            <div className="home-feed-list">
-              {blocks.map((block) => (
-                <BlockFeedItem
-                  key={block.blockNumber}
-                  block={block}
-                  onLocationChange={onLocationChange}
-                  timeZone={timeZone}
-                />
-              ))}
-              {!blocksLoading && blocks.length === 0 ? <p className="home-empty">No stored blocks yet.</p> : null}
-            </div>
-          )}
-        </section>
-
-        {showTransactions ? (
-          <section className="home-feed-panel" aria-labelledby="home-latest-transactions">
+        </div>
+        <div className={`home-feed-grid${showTransactions ? "" : " single"}`}>
+          <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
             <div className="home-panel-heading">
-              <h3 id="home-latest-transactions">Latest transactions</h3>
-              <span>{transactionsData ? `${transactionsData.count} shown` : "Loading"}</span>
+              <h3 id="home-latest-blocks">Latest blocks</h3>
+              <span>{blocksData ? `${blocksData.count} shown` : blocksLoading ? "Loading" : "No data"}</span>
             </div>
-            <div className="home-feed-list">
-              {transactions.map((transaction) => (
-                <TransactionFeedItem
-                  key={`${transaction.blockNumberDecimal}:${transaction.position}:${transaction.hash}`}
-                  transaction={transaction}
-                  onLocationChange={onLocationChange}
-                  timeZone={timeZone}
-                />
-              ))}
-            </div>
+            {blocksError ? (
+              <p className="summary error">Failed to load blocks: {blocksError}</p>
+            ) : (
+              <div className="home-feed-list">
+                {blocks.map((block) => (
+                  <BlockFeedItem
+                    key={block.blockNumber}
+                    block={block}
+                    onLocationChange={onLocationChange}
+                    timeZone={timeZone}
+                  />
+                ))}
+                {!blocksLoading && blocks.length === 0 ? <p className="home-empty">No stored blocks yet.</p> : null}
+              </div>
+            )}
           </section>
-        ) : null}
+
+          {showTransactions ? (
+            <section className="home-feed-panel" aria-labelledby="home-latest-transactions">
+              <div className="home-panel-heading">
+                <h3 id="home-latest-transactions">Latest transactions</h3>
+                <span>{transactionsData ? `${transactionsData.count} shown` : "Loading"}</span>
+              </div>
+              <div className="home-feed-list">
+                {transactions.map((transaction) => (
+                  <TransactionFeedItem
+                    key={`${transaction.blockNumberDecimal}:${transaction.position}:${transaction.hash}`}
+                    transaction={transaction}
+                    onLocationChange={onLocationChange}
+                    timeZone={timeZone}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
       </div>
     </section>
   );
@@ -188,7 +207,7 @@ function BlockFeedItem({
   return (
     <article className="home-feed-item">
       <div className="home-feed-icon" aria-hidden="true">
-        <BlockBracketed size={28} color="currentColor" />
+        <BlockBracketed size={22} color="currentColor" accent="currentColor" />
       </div>
       <div className="home-feed-main">
         <div className="home-feed-title">
@@ -196,8 +215,12 @@ function BlockFeedItem({
           <span>{fmtDate(block.blockDate, timeZone)}</span>
         </div>
         <div className="home-feed-meta">
-          <span>{fmtInteger(block.transactionCount)} txns</span>
-          <span>{fmtGwei(block.averageFeePriceWei)} gwei avg fee</span>
+          <span>
+            <b>{fmtInteger(block.transactionCount)}</b> txns
+          </span>
+          <span>
+            <b>{fmtGwei(block.averageFeePriceWei)}</b> gwei avg fee
+          </span>
         </div>
       </div>
       <div className="home-feed-side">
@@ -222,7 +245,7 @@ function TransactionFeedItem({
   return (
     <article className="home-feed-item">
       <div className="home-feed-icon tx" aria-hidden="true">
-        <TxBracketed size={28} color="currentColor" />
+        <TxBracketed size={22} color="currentColor" accent="currentColor" />
       </div>
       <div className="home-feed-main">
         <div className="home-feed-title">

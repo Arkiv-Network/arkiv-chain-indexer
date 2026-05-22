@@ -204,7 +204,10 @@ export function App() {
     <>
       <header>
         <div className="header-inner">
-          <h1>Arkiv Explorer</h1>
+          <h1>
+            <span className="brand-name">Arkiv</span>
+            <span className="brand-sub">Scanner</span>
+          </h1>
           <nav>
             <button
               type="button"
