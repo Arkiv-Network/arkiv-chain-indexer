@@ -18,6 +18,7 @@ import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
+import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
@@ -200,8 +201,15 @@ export function App() {
   return (
     <>
       <header>
-        <h1>Gas price tracker</h1>
+        <h1>Arkiv Explorer</h1>
         <nav>
+          <button
+            type="button"
+            className={activeView === "home" ? "active" : ""}
+            onClick={() => setView("home")}
+          >
+            Home
+          </button>
           <button
             type="button"
             className={activeView === "blocks" ? "active" : ""}
@@ -275,7 +283,13 @@ export function App() {
         </label>
       </header>
       <main className={activeView === "charts" ? "fullscreen" : ""}>
-        {activeView === "blocks" ? (
+        {activeView === "home" ? (
+          <HomeView
+            transactionDataEnabled={transactionDataEnabled}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+          />
+        ) : activeView === "blocks" ? (
           <BlocksView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
