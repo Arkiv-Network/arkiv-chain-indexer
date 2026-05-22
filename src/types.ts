@@ -1,3 +1,5 @@
+import type { BatcherMetrics } from "./batcher";
+
 export type Hex = `0x${string}`;
 
 export interface RpcTransaction {
@@ -31,7 +33,7 @@ export interface RpcReceipt {
   contractAddress?: Hex | null;
 }
 
-export interface BlockMetrics {
+export interface BlockMetrics extends BatcherMetrics {
   blockDate: string;
   blockNumber: bigint;
   baseBlockFeeWei: string;

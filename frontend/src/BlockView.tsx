@@ -135,6 +135,12 @@ export function BlockView({ locationSearch, onLocationChange, timeZone }: BlockV
               label="Gas-weighted priority"
               value={`${fmtGwei(block.averagePriorityFeeWeightedWei)} gwei`}
             />
+            <Metric label="Batcher queue" value={fmtInteger(block.batcherQueueSize)} />
+            <Metric label="Batcher intensity" value={fmtInteger(block.batcherIntensity)} />
+            <Metric label="Batcher lower" value={fmtInteger(block.batcherLowerThreshold)} />
+            <Metric label="Batcher upper" value={fmtInteger(block.batcherUpperThreshold)} />
+            <Metric label="Batcher max block" value={fmtInteger(block.batcherMaxBlockSize)} />
+            <Metric label="Batcher max tx" value={fmtInteger(block.batcherMaxTxSize)} />
           </dl>
 
           <div className="table-wrap">

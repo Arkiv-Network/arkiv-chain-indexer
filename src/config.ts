@@ -10,6 +10,7 @@ export interface ScannerConfig {
   txReceiptConcurrency: number;
   saveTransactionData: boolean;
   disableBackfill: boolean;
+  batcherCollectorUrl?: string;
 }
 
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
@@ -41,6 +42,8 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
   if (toBlockRaw && !fromBlockRaw) {
     throw new Error("--from-block is required when --to-block is set");
   }
+  const batcherCollectorUrl =
+    parsed.values["batcher-collector-url"] ?? env.BATCHER_COLLECTOR_URL ?? env.SCANNER_BATCHER_COLLECTOR_URL;
 
   return {
     rpcUrl,
@@ -86,6 +89,7 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
         env.SCANNER_DISABLE_BACKFILL ??
         "false",
     ),
+    ...(batcherCollectorUrl ? { batcherCollectorUrl } : {}),
   };
 }
 
@@ -186,5 +190,6 @@ Options:
   --tx-receipt-concurrency <n>      Legacy setting accepted for compatibility; receipts are fetched sequentially.
   --save-transaction-data <bool>    Store inspected transaction rows. Defaults to true (or SCANNER_SAVE_TRANSACTION_DATA / SAVE_TRANSACTION_DATA).
   --disable-backfill <bool>         Skip the historical backfill phase and only scan forward from the safe head. Defaults to false.
+  --batcher-collector-url <url>     Optional BATCHER_COLLECTOR_URL base for recent block batcher metrics.
   --help                            Show this message.`;
 }

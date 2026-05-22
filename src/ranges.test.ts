@@ -275,6 +275,50 @@ describe("computeBlockRange", () => {
     expect(range.transactionCount).toBe(0);
   });
 
+  test("aggregates nullable batcher metrics from available blocks", () => {
+    const blocks = makeBlocks(0n, 2n, (offset) =>
+      offset === 0n
+        ? {
+            batcherQueueSize: "10",
+            batcherIntensity: "2",
+            batcherLowerThreshold: "100",
+            batcherUpperThreshold: "500",
+            batcherMaxBlockSize: "1000",
+            batcherMaxTxSize: "50",
+          }
+        : {
+            batcherQueueSize: "30",
+            batcherIntensity: "4",
+            batcherLowerThreshold: "200",
+            batcherUpperThreshold: "700",
+            batcherMaxBlockSize: "3000",
+            batcherMaxTxSize: "150",
+          },
+    );
+
+    const range = computeBlockRange(0n, 2n, blocks);
+
+    expect(range.minBatcherQueueSize).toBe("10");
+    expect(range.maxBatcherQueueSize).toBe("30");
+    expect(range.averageBatcherQueueSize).toBe("20");
+    expect(range.averageBatcherIntensity).toBe("3");
+    expect(range.averageBatcherLowerThreshold).toBe("150");
+    expect(range.averageBatcherUpperThreshold).toBe("600");
+    expect(range.averageBatcherMaxBlockSize).toBe("2000");
+    expect(range.averageBatcherMaxTxSize).toBe("100");
+  });
+
+  test("uses null batcher range values when no block has collector data", () => {
+    const blocks = makeBlocks(0n, 2n, () => ({}));
+
+    const range = computeBlockRange(0n, 2n, blocks);
+
+    expect(range.minBatcherQueueSize).toBeNull();
+    expect(range.maxBatcherQueueSize).toBeNull();
+    expect(range.averageBatcherQueueSize).toBeNull();
+    expect(range.averageBatcherIntensity).toBeNull();
+  });
+
   test("rejects ranges that are not aligned to rangeSize", () => {
     const blocks = makeBlocks(245_650n, 100n, () => ({}));
     expect(() => computeBlockRange(245_650n, 100n, blocks)).toThrow();

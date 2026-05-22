@@ -9,6 +9,7 @@ import {
 import type { BlockMetrics, Hex } from "./types";
 import type { InspectedBlock, InspectedTransaction } from "./blockInspector";
 import type { BaseloadConfig } from "./baseloadConfig";
+import type { BatcherMetrics } from "./batcher";
 
 const { Pool, types } = pg;
 
@@ -89,6 +90,12 @@ export interface StoredBlock {
   averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
+  batcherQueueSize?: string | null;
+  batcherIntensity?: string | null;
+  batcherLowerThreshold?: string | null;
+  batcherUpperThreshold?: string | null;
+  batcherMaxBlockSize?: string | null;
+  batcherMaxTxSize?: string | null;
 }
 
 export interface StoredTransaction extends InspectedTransaction {
@@ -138,6 +145,14 @@ export interface StoredBlockRange {
   averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
+  minBatcherQueueSize?: string | null;
+  maxBatcherQueueSize?: string | null;
+  averageBatcherQueueSize?: string | null;
+  averageBatcherIntensity?: string | null;
+  averageBatcherLowerThreshold?: string | null;
+  averageBatcherUpperThreshold?: string | null;
+  averageBatcherMaxBlockSize?: string | null;
+  averageBatcherMaxTxSize?: string | null;
 }
 
 export interface ScannerStorageOptions {
@@ -243,6 +258,12 @@ export class ScannerStorage {
         average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
+        batcher_queue_size TEXT,
+        batcher_intensity TEXT,
+        batcher_lower_threshold TEXT,
+        batcher_upper_threshold TEXT,
+        batcher_max_block_size TEXT,
+        batcher_max_tx_size TEXT,
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
@@ -282,6 +303,12 @@ export class ScannerStorage {
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
     );
+    await this.addNullableTextColumn(this.qBlocks, "batcher_queue_size");
+    await this.addNullableTextColumn(this.qBlocks, "batcher_intensity");
+    await this.addNullableTextColumn(this.qBlocks, "batcher_lower_threshold");
+    await this.addNullableTextColumn(this.qBlocks, "batcher_upper_threshold");
+    await this.addNullableTextColumn(this.qBlocks, "batcher_max_block_size");
+    await this.addNullableTextColumn(this.qBlocks, "batcher_max_tx_size");
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qScannerState} (
         key TEXT PRIMARY KEY,
@@ -384,6 +411,14 @@ export class ScannerStorage {
         average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
+        min_batcher_queue_size TEXT,
+        max_batcher_queue_size TEXT,
+        average_batcher_queue_size TEXT,
+        average_batcher_intensity TEXT,
+        average_batcher_lower_threshold TEXT,
+        average_batcher_upper_threshold TEXT,
+        average_batcher_max_block_size TEXT,
+        average_batcher_max_tx_size TEXT,
         aggregated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (range_size, range_start)
       )
@@ -412,6 +447,18 @@ export class ScannerStorage {
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
     );
+    await this.addNullableTextColumn(this.qBlockRanges, "min_batcher_queue_size");
+    await this.addNullableTextColumn(this.qBlockRanges, "max_batcher_queue_size");
+    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_queue_size");
+    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_intensity");
+    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_lower_threshold");
+    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_upper_threshold");
+    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_block_size");
+    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_tx_size");
+  }
+
+  private async addNullableTextColumn(table: string, column: string): Promise<void> {
+    await this.pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT`);
   }
 
   async getLastSuccessfulBlock(): Promise<bigint | undefined> {
@@ -581,7 +628,7 @@ export class ScannerStorage {
     try {
       await client.query("BEGIN");
       await client.query(
-        `INSERT INTO ${this.qBlocks} (
+        `INSERT INTO ${this.qBlocks} AS existing (
           block_number,
           block_date,
           base_block_fee_wei,
@@ -600,8 +647,14 @@ export class ScannerStorage {
           average_transaction_gas_used,
           average_priority_fee_weighted_wei,
           average_priority_fee_wei,
+          batcher_queue_size,
+          batcher_intensity,
+          batcher_lower_threshold,
+          batcher_upper_threshold,
+          batcher_max_block_size,
+          batcher_max_tx_size,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
           base_block_fee_wei = EXCLUDED.base_block_fee_wei,
@@ -620,6 +673,12 @@ export class ScannerStorage {
           average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
           average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
           average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
+          batcher_queue_size = COALESCE(EXCLUDED.batcher_queue_size, existing.batcher_queue_size),
+          batcher_intensity = COALESCE(EXCLUDED.batcher_intensity, existing.batcher_intensity),
+          batcher_lower_threshold = COALESCE(EXCLUDED.batcher_lower_threshold, existing.batcher_lower_threshold),
+          batcher_upper_threshold = COALESCE(EXCLUDED.batcher_upper_threshold, existing.batcher_upper_threshold),
+          batcher_max_block_size = COALESCE(EXCLUDED.batcher_max_block_size, existing.batcher_max_block_size),
+          batcher_max_tx_size = COALESCE(EXCLUDED.batcher_max_tx_size, existing.batcher_max_tx_size),
           scanned_at = NOW()`,
         [
           metrics.blockNumber.toString(),
@@ -640,6 +699,12 @@ export class ScannerStorage {
           metrics.averageTransactionGasUsed,
           metrics.averagePriorityFeeWeightedWei,
           metrics.averagePriorityFeeWei,
+          metrics.batcherQueueSize ?? null,
+          metrics.batcherIntensity ?? null,
+          metrics.batcherLowerThreshold ?? null,
+          metrics.batcherUpperThreshold ?? null,
+          metrics.batcherMaxBlockSize ?? null,
+          metrics.batcherMaxTxSize ?? null,
         ],
       );
       if (transactions !== undefined) {
@@ -776,7 +841,13 @@ export class ScannerStorage {
         average_transaction_fee_wei,
         average_transaction_gas_used,
         average_priority_fee_weighted_wei,
-        average_priority_fee_wei
+        average_priority_fee_wei,
+        batcher_queue_size,
+        batcher_intensity,
+        batcher_lower_threshold,
+        batcher_upper_threshold,
+        batcher_max_block_size,
+        batcher_max_tx_size
       FROM ${this.qBlocks}
       ${where}
       ORDER BY block_number ${order}
@@ -802,6 +873,12 @@ export class ScannerStorage {
       average_transaction_gas_used: string;
       average_priority_fee_weighted_wei: string;
       average_priority_fee_wei: string;
+      batcher_queue_size: string | null;
+      batcher_intensity: string | null;
+      batcher_lower_threshold: string | null;
+      batcher_upper_threshold: string | null;
+      batcher_max_block_size: string | null;
+      batcher_max_tx_size: string | null;
     }>(sql, params);
 
     return result.rows.map((row) => ({
@@ -823,6 +900,12 @@ export class ScannerStorage {
       averageTransactionGasUsed: row.average_transaction_gas_used,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
+      batcherQueueSize: row.batcher_queue_size,
+      batcherIntensity: row.batcher_intensity,
+      batcherLowerThreshold: row.batcher_lower_threshold,
+      batcherUpperThreshold: row.batcher_upper_threshold,
+      batcherMaxBlockSize: row.batcher_max_block_size,
+      batcherMaxTxSize: row.batcher_max_tx_size,
     }));
   }
 
@@ -838,6 +921,62 @@ export class ScannerStorage {
       blockGt: rangeStart - 1n,
       blockLt: rangeEnd + 1n,
     });
+  }
+
+  async queryRecentBlocksMissingBatcherMetrics(now: Date = new Date(), limit = 100): Promise<StoredBlock[]> {
+    const newestEligible = new Date(now.getTime() - 2_000).toISOString();
+    const oldestEligible = new Date(now.getTime() - 60 * 60 * 1_000).toISOString();
+    const resolvedLimit = resolveLimit(limit, MAX_BLOCKS_PER_QUERY);
+    const result = await this.pool.query<{ block_number: string }>(
+      `SELECT block_number
+       FROM ${this.qBlocks}
+       WHERE block_date > $1
+         AND block_date < $2
+         AND batcher_queue_size IS NULL
+       ORDER BY block_number DESC
+       LIMIT $3`,
+      [oldestEligible, newestEligible, resolvedLimit],
+    );
+
+    if (result.rows.length === 0) {
+      return [];
+    }
+
+    const blockNumbers = result.rows.map((row) => BigInt(row.block_number));
+    const blocks = await Promise.all(
+      blockNumbers.map((blockNumber) =>
+        this.queryBlocks({
+          blockGt: blockNumber - 1n,
+          blockLt: blockNumber + 1n,
+          limit: 1,
+        }),
+      ),
+    );
+    return blocks.flatMap((rows) => rows);
+  }
+
+  async saveBatcherMetricsForBlock(blockNumber: bigint, metrics: BatcherMetrics): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ${this.qBlocks}
+       SET
+         batcher_queue_size = COALESCE($2, batcher_queue_size),
+         batcher_intensity = COALESCE($3, batcher_intensity),
+         batcher_lower_threshold = COALESCE($4, batcher_lower_threshold),
+         batcher_upper_threshold = COALESCE($5, batcher_upper_threshold),
+         batcher_max_block_size = COALESCE($6, batcher_max_block_size),
+         batcher_max_tx_size = COALESCE($7, batcher_max_tx_size)
+       WHERE block_number = $1`,
+      [
+        blockNumber.toString(),
+        metrics.batcherQueueSize ?? null,
+        metrics.batcherIntensity ?? null,
+        metrics.batcherLowerThreshold ?? null,
+        metrics.batcherUpperThreshold ?? null,
+        metrics.batcherMaxBlockSize ?? null,
+        metrics.batcherMaxTxSize ?? null,
+      ],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async queryTransactions(filter: TransactionQueryFilter = {}): Promise<StoredTransaction[]> {
@@ -941,14 +1080,36 @@ export class ScannerStorage {
       totalGasUsed: block.totalGasUsed,
       maxGasInBlock: block.maxGasInBlock,
       transactionCount: block.transactionCount,
-      blockRewardWei: block.blockRewardWei,
-      burntFeesWei: block.burntFeesWei,
-      totalTransactionFeeWei: block.totalTransactionFeeWei,
-      averageFeePriceWei: block.averageFeePriceWei,
-      averageTransactionFeeWei: block.averageTransactionFeeWei,
-      averageTransactionGasUsed: block.averageTransactionGasUsed,
-      averagePriorityFeeWeightedWei: block.averagePriorityFeeWeightedWei,
-      averagePriorityFeeWei: block.averagePriorityFeeWei,
+      ...(block.blockRewardWei != null ? { blockRewardWei: block.blockRewardWei } : {}),
+      ...(block.burntFeesWei != null ? { burntFeesWei: block.burntFeesWei } : {}),
+      ...(block.totalTransactionFeeWei != null
+        ? { totalTransactionFeeWei: block.totalTransactionFeeWei }
+        : {}),
+      ...(block.averageFeePriceWei != null ? { averageFeePriceWei: block.averageFeePriceWei } : {}),
+      ...(block.averageTransactionFeeWei != null
+        ? { averageTransactionFeeWei: block.averageTransactionFeeWei }
+        : {}),
+      ...(block.averageTransactionGasUsed != null
+        ? { averageTransactionGasUsed: block.averageTransactionGasUsed }
+        : {}),
+      ...(block.averagePriorityFeeWeightedWei != null
+        ? { averagePriorityFeeWeightedWei: block.averagePriorityFeeWeightedWei }
+        : {}),
+      ...(block.averagePriorityFeeWei != null
+        ? { averagePriorityFeeWei: block.averagePriorityFeeWei }
+        : {}),
+      ...(block.batcherQueueSize != null ? { batcherQueueSize: block.batcherQueueSize } : {}),
+      ...(block.batcherIntensity != null ? { batcherIntensity: block.batcherIntensity } : {}),
+      ...(block.batcherLowerThreshold != null
+        ? { batcherLowerThreshold: block.batcherLowerThreshold }
+        : {}),
+      ...(block.batcherUpperThreshold != null
+        ? { batcherUpperThreshold: block.batcherUpperThreshold }
+        : {}),
+      ...(block.batcherMaxBlockSize != null
+        ? { batcherMaxBlockSize: block.batcherMaxBlockSize }
+        : {}),
+      ...(block.batcherMaxTxSize != null ? { batcherMaxTxSize: block.batcherMaxTxSize } : {}),
       transactions: transactions.map(stripStoredTransactionContext),
     };
   }
@@ -1130,8 +1291,16 @@ export class ScannerStorage {
         average_transaction_gas_used,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
+        min_batcher_queue_size,
+        max_batcher_queue_size,
+        average_batcher_queue_size,
+        average_batcher_intensity,
+        average_batcher_lower_threshold,
+        average_batcher_upper_threshold,
+        average_batcher_max_block_size,
+        average_batcher_max_tx_size,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -1152,6 +1321,14 @@ export class ScannerStorage {
         average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
         average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
         average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
+        min_batcher_queue_size = EXCLUDED.min_batcher_queue_size,
+        max_batcher_queue_size = EXCLUDED.max_batcher_queue_size,
+        average_batcher_queue_size = EXCLUDED.average_batcher_queue_size,
+        average_batcher_intensity = EXCLUDED.average_batcher_intensity,
+        average_batcher_lower_threshold = EXCLUDED.average_batcher_lower_threshold,
+        average_batcher_upper_threshold = EXCLUDED.average_batcher_upper_threshold,
+        average_batcher_max_block_size = EXCLUDED.average_batcher_max_block_size,
+        average_batcher_max_tx_size = EXCLUDED.average_batcher_max_tx_size,
         aggregated_at = NOW()`,
       [
         metrics.rangeSize.toString(),
@@ -1175,6 +1352,14 @@ export class ScannerStorage {
         metrics.averageTransactionGasUsed,
         metrics.averagePriorityFeeWeightedWei,
         metrics.averagePriorityFeeWei,
+        metrics.minBatcherQueueSize ?? null,
+        metrics.maxBatcherQueueSize ?? null,
+        metrics.averageBatcherQueueSize ?? null,
+        metrics.averageBatcherIntensity ?? null,
+        metrics.averageBatcherLowerThreshold ?? null,
+        metrics.averageBatcherUpperThreshold ?? null,
+        metrics.averageBatcherMaxBlockSize ?? null,
+        metrics.averageBatcherMaxTxSize ?? null,
       ],
     );
   }
@@ -1233,7 +1418,15 @@ export class ScannerStorage {
         average_fee_price_wei,
         average_transaction_gas_used,
         average_priority_fee_weighted_wei,
-        average_priority_fee_wei
+        average_priority_fee_wei,
+        min_batcher_queue_size,
+        max_batcher_queue_size,
+        average_batcher_queue_size,
+        average_batcher_intensity,
+        average_batcher_lower_threshold,
+        average_batcher_upper_threshold,
+        average_batcher_max_block_size,
+        average_batcher_max_tx_size
       FROM ${this.qBlockRanges}
       WHERE ${clauses.join(" AND ")}
       ORDER BY range_start ${order}
@@ -1262,6 +1455,14 @@ export class ScannerStorage {
       average_transaction_gas_used: string;
       average_priority_fee_weighted_wei: string;
       average_priority_fee_wei: string;
+      min_batcher_queue_size: string | null;
+      max_batcher_queue_size: string | null;
+      average_batcher_queue_size: string | null;
+      average_batcher_intensity: string | null;
+      average_batcher_lower_threshold: string | null;
+      average_batcher_upper_threshold: string | null;
+      average_batcher_max_block_size: string | null;
+      average_batcher_max_tx_size: string | null;
     }>(sql, params);
 
     return result.rows.map((row) => ({
@@ -1286,6 +1487,14 @@ export class ScannerStorage {
       averageTransactionGasUsed: row.average_transaction_gas_used,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
+      minBatcherQueueSize: row.min_batcher_queue_size,
+      maxBatcherQueueSize: row.max_batcher_queue_size,
+      averageBatcherQueueSize: row.average_batcher_queue_size,
+      averageBatcherIntensity: row.average_batcher_intensity,
+      averageBatcherLowerThreshold: row.average_batcher_lower_threshold,
+      averageBatcherUpperThreshold: row.average_batcher_upper_threshold,
+      averageBatcherMaxBlockSize: row.average_batcher_max_block_size,
+      averageBatcherMaxTxSize: row.average_batcher_max_tx_size,
     }));
   }
 

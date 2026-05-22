@@ -1,5 +1,6 @@
 import { hexToBigInt } from "./math";
 import { shouldIgnoreTransaction } from "./transactionFilter";
+import type { BatcherMetrics } from "./batcher";
 import type { Hex, RpcBlock, RpcReceipt, RpcTransaction } from "./types";
 
 export interface InspectedTransaction {
@@ -23,7 +24,7 @@ export interface InspectedTransaction {
   contractAddress: Hex | null;
 }
 
-export interface InspectedBlock {
+export interface InspectedBlock extends BatcherMetrics {
   blockNumber: number;
   blockNumberDecimal: string;
   blockDate: string;

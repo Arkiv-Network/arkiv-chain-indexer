@@ -246,6 +246,12 @@ if (!hasPostgresForTests()) {
           averageTransactionGasUsed: "4200",
           averagePriorityFeeWeightedWei: "11",
           averagePriorityFeeWei: "7",
+          batcherQueueSize: "906",
+          batcherIntensity: "0",
+          batcherLowerThreshold: "10000000",
+          batcherUpperThreshold: "50000000",
+          batcherMaxBlockSize: "10000000",
+          batcherMaxTxSize: "0",
         }),
       );
 
@@ -269,6 +275,12 @@ if (!hasPostgresForTests()) {
         averageTransactionGasUsed: "4200",
         averagePriorityFeeWeightedWei: "11",
         averagePriorityFeeWei: "7",
+        batcherQueueSize: "906",
+        batcherIntensity: "0",
+        batcherLowerThreshold: "10000000",
+        batcherUpperThreshold: "50000000",
+        batcherMaxBlockSize: "10000000",
+        batcherMaxTxSize: "0",
       });
     });
 
@@ -358,6 +370,12 @@ if (!hasPostgresForTests()) {
             averageTransactionGasUsed: "500",
             averagePriorityFeeWeightedWei: "7",
             averagePriorityFeeWei: "5",
+            batcherQueueSize: (900n + offset).toString(),
+            batcherIntensity: "0",
+            batcherLowerThreshold: "10000000",
+            batcherUpperThreshold: "50000000",
+            batcherMaxBlockSize: "10000000",
+            batcherMaxTxSize: "0",
           }),
         );
       }
@@ -392,6 +410,14 @@ if (!hasPostgresForTests()) {
         averageTransactionGasUsed: "500",
         averagePriorityFeeWeightedWei: "7",
         averagePriorityFeeWei: "5",
+        minBatcherQueueSize: "900",
+        maxBatcherQueueSize: "999",
+        averageBatcherQueueSize: "949",
+        averageBatcherIntensity: "0",
+        averageBatcherLowerThreshold: "10000000",
+        averageBatcherUpperThreshold: "50000000",
+        averageBatcherMaxBlockSize: "10000000",
+        averageBatcherMaxTxSize: "0",
       });
     });
 

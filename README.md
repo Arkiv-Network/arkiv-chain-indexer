@@ -56,6 +56,10 @@ changes.
 To do a quick bounded backfill instead of continuous near-head scanning, set `SCANNER_FROM_BLOCK` and
 `SCANNER_TO_BLOCK` in `.env`.
 
+Set `BATCHER_COLLECTOR_URL` to attach recent batcher queue/threshold metadata to stored blocks. The collector
+only serves recent seconds, so the scanner requests batcher data for blocks between two seconds and one hour old
+and also fills stored recent blocks that are missing those fields.
+
 ## Arkiv test Docker Compose
 
 For Arkiv test runs where the JSON-RPC node is running on the Docker host, use the dedicated compose file:
@@ -142,6 +146,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
+| `--batcher-collector-url` | `BATCHER_COLLECTOR_URL` or `SCANNER_BATCHER_COLLECTOR_URL` | unset | Optional batcher collector base URL for recent block queue/threshold metrics. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Show help:
@@ -219,6 +224,12 @@ lose precision.
 | `average_transaction_gas_used` | Average transaction gas used: `sum(receipt.gasUsed) / transaction_count`. |
 | `average_priority_fee_weighted_wei` | Average priority fee weighted by transaction gas used. |
 | `average_priority_fee_wei` | Simple average priority fee across transactions. |
+| `batcher_queue_size` | Optional batcher collector `current_load` for the block timestamp. |
+| `batcher_intensity` | Optional batcher collector `intensity`. |
+| `batcher_lower_threshold` | Optional batcher collector `lower_threshold`. |
+| `batcher_upper_threshold` | Optional batcher collector `upper_threshold`. |
+| `batcher_max_block_size` | Optional batcher collector `max_block_size`. |
+| `batcher_max_tx_size` | Optional batcher collector `max_tx_size`. |
 
 Priority fee is computed as:
 

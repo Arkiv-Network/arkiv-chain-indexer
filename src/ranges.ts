@@ -38,6 +38,14 @@ export interface BlockRangeMetrics {
   averageTransactionGasUsed: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
+  minBatcherQueueSize?: string | null;
+  maxBatcherQueueSize?: string | null;
+  averageBatcherQueueSize?: string | null;
+  averageBatcherIntensity?: string | null;
+  averageBatcherLowerThreshold?: string | null;
+  averageBatcherUpperThreshold?: string | null;
+  averageBatcherMaxBlockSize?: string | null;
+  averageBatcherMaxTxSize?: string | null;
 }
 
 export function isSupportedRangeSize(rangeSize: bigint): boolean {
@@ -127,6 +135,12 @@ export function computeBlockRange(
   let feePriceNumerator = 0n;
   let transactionGasNumerator = 0n;
   let txWeightedPriorityFeeNumerator = 0n;
+  const batcherQueueSizes: bigint[] = [];
+  const batcherIntensities: bigint[] = [];
+  const batcherLowerThresholds: bigint[] = [];
+  const batcherUpperThresholds: bigint[] = [];
+  const batcherMaxBlockSizes: bigint[] = [];
+  const batcherMaxTxSizes: bigint[] = [];
 
   for (const block of blocks) {
     if (block.blockDate < minBlockDate) minBlockDate = block.blockDate;
@@ -160,6 +174,12 @@ export function computeBlockRange(
       block.averagePriorityFeeWei,
       block.transactionCount,
     );
+    pushOptionalBigInt(batcherQueueSizes, block.batcherQueueSize);
+    pushOptionalBigInt(batcherIntensities, block.batcherIntensity);
+    pushOptionalBigInt(batcherLowerThresholds, block.batcherLowerThreshold);
+    pushOptionalBigInt(batcherUpperThresholds, block.batcherUpperThreshold);
+    pushOptionalBigInt(batcherMaxBlockSizes, block.batcherMaxBlockSize);
+    pushOptionalBigInt(batcherMaxTxSizes, block.batcherMaxTxSize);
   }
 
   const averageBaseFee = baseFeeSum / rangeSize;
@@ -198,6 +218,45 @@ export function computeBlockRange(
     averageTransactionGasUsed: averageTransactionGasUsed.toString(),
     averagePriorityFeeWeightedWei: averagePriorityFeeWeighted.toString(),
     averagePriorityFeeWei: averagePriorityFee.toString(),
+    ...rangeStats("BatcherQueueSize", batcherQueueSizes, true),
+    ...rangeStats("BatcherIntensity", batcherIntensities),
+    ...rangeStats("BatcherLowerThreshold", batcherLowerThresholds),
+    ...rangeStats("BatcherUpperThreshold", batcherUpperThresholds),
+    ...rangeStats("BatcherMaxBlockSize", batcherMaxBlockSizes),
+    ...rangeStats("BatcherMaxTxSize", batcherMaxTxSizes),
+  };
+}
+
+function pushOptionalBigInt(values: bigint[], value: string | null | undefined): void {
+  if (value === undefined || value === null) return;
+  values.push(BigInt(value));
+}
+
+function rangeStats(
+  fieldSuffix: string,
+  values: bigint[],
+  includeMinMax = false,
+): Record<string, string | null> {
+  if (values.length === 0) {
+    return includeMinMax
+      ? {
+          [`min${fieldSuffix}`]: null,
+          [`max${fieldSuffix}`]: null,
+          [`average${fieldSuffix}`]: null,
+        }
+      : { [`average${fieldSuffix}`]: null };
+  }
+
+  const sum = values.reduce((acc, value) => acc + value, 0n);
+  const average = (sum / BigInt(values.length)).toString();
+  if (!includeMinMax) {
+    return { [`average${fieldSuffix}`]: average };
+  }
+
+  return {
+    [`min${fieldSuffix}`]: values.reduce((acc, value) => (value < acc ? value : acc), values[0]!).toString(),
+    [`max${fieldSuffix}`]: values.reduce((acc, value) => (value > acc ? value : acc), values[0]!).toString(),
+    [`average${fieldSuffix}`]: average,
   };
 }
 

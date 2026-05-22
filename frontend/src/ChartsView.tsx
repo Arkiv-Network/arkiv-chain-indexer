@@ -81,6 +81,7 @@ const ETH_IN_WEI = 1_000_000_000_000_000_000;
 
 const AXIS_GAS_PRICE = "gas-price";
 const AXIS_BLOCK_GAS_LIMIT = "block-gas-limit";
+const AXIS_BATCHER = "batcher";
 
 interface ParameterDef {
   key: string;
@@ -263,6 +264,60 @@ const PARAMETERS: ParameterDef[] = [
     color: "#34495e",
     toNumber: plainNumber,
   },
+  {
+    key: "averageBatcherQueueSize",
+    label: "Batcher queue",
+    axis: AXIS_BATCHER,
+    axisLabel: "Batcher value",
+    unit: "count",
+    color: "#b83280",
+    toNumber: plainNumber,
+  },
+  {
+    key: "averageBatcherIntensity",
+    label: "Batcher intensity",
+    axis: AXIS_BATCHER,
+    axisLabel: "Batcher value",
+    unit: "count",
+    color: "#6f42c1",
+    toNumber: plainNumber,
+  },
+  {
+    key: "averageBatcherLowerThreshold",
+    label: "Batcher lower",
+    axis: AXIS_BATCHER,
+    axisLabel: "Batcher value",
+    unit: "count",
+    color: "#0f766e",
+    toNumber: plainNumber,
+  },
+  {
+    key: "averageBatcherUpperThreshold",
+    label: "Batcher upper",
+    axis: AXIS_BATCHER,
+    axisLabel: "Batcher value",
+    unit: "count",
+    color: "#be123c",
+    toNumber: plainNumber,
+  },
+  {
+    key: "averageBatcherMaxBlockSize",
+    label: "Batcher max block",
+    axis: AXIS_BATCHER,
+    axisLabel: "Batcher value",
+    unit: "gas",
+    color: "#ca8a04",
+    toNumber: plainNumber,
+  },
+  {
+    key: "averageBatcherMaxTxSize",
+    label: "Batcher max tx",
+    axis: AXIS_BATCHER,
+    axisLabel: "Batcher value",
+    unit: "gas",
+    color: "#475569",
+    toNumber: plainNumber,
+  },
 ];
 
 const PARAMETER_KEYS = new Set(PARAMETERS.map((p) => p.key));
@@ -341,7 +396,7 @@ interface ChartPoint {
   midDate: string;
   startDate: string;
   endDate: string;
-  values: Record<string, string | number | undefined>;
+  values: Record<string, string | number | null | undefined>;
 }
 
 function blockToPoint(b: StoredBlock): ChartPoint {
@@ -369,6 +424,12 @@ function blockToPoint(b: StoredBlock): ChartPoint {
       averageBurntFeesWei: b.burntFeesWei,
       transactionCount: b.transactionCount,
       averageTransactionGasUsed: b.averageTransactionGasUsed,
+      averageBatcherQueueSize: b.batcherQueueSize,
+      averageBatcherIntensity: b.batcherIntensity,
+      averageBatcherLowerThreshold: b.batcherLowerThreshold,
+      averageBatcherUpperThreshold: b.batcherUpperThreshold,
+      averageBatcherMaxBlockSize: b.batcherMaxBlockSize,
+      averageBatcherMaxTxSize: b.batcherMaxTxSize,
     },
   };
 }
@@ -402,6 +463,12 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
       averageBurntFeesWei: r.averageBurntFeesWei,
       transactionCount: r.transactionCount,
       averageTransactionGasUsed: r.averageTransactionGasUsed,
+      averageBatcherQueueSize: r.averageBatcherQueueSize,
+      averageBatcherIntensity: r.averageBatcherIntensity,
+      averageBatcherLowerThreshold: r.averageBatcherLowerThreshold,
+      averageBatcherUpperThreshold: r.averageBatcherUpperThreshold,
+      averageBatcherMaxBlockSize: r.averageBatcherMaxBlockSize,
+      averageBatcherMaxTxSize: r.averageBatcherMaxTxSize,
     },
   };
 }

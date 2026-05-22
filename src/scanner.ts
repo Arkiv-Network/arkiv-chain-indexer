@@ -3,6 +3,7 @@ import { inspectBlockFromRpc } from "./blockInspector";
 import { readBuildInfo } from "./buildInfo";
 import { computeBlockMetrics } from "./metrics";
 import { shouldIgnoreTransaction } from "./transactionFilter";
+import type { BatcherMetricsSource } from "./batcher";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { ScannerConfig } from "./config";
@@ -25,15 +26,16 @@ export async function runScanner(
   rpc: EthereumRpcClient,
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
+  batcherCollector?: BatcherMetricsSource,
 ): Promise<void> {
   logBuildInfo();
   console.log(`Transaction row storage: ${config.saveTransactionData ? "enabled" : "disabled"}`);
   if (config.toBlock !== undefined) {
-    await runBoundedForwardScanner(config, rpc, storage, runtime);
+    await runBoundedForwardScanner(config, rpc, storage, runtime, batcherCollector);
     return;
   }
 
-  await runNearHeadBackfillScanner(config, rpc, storage, runtime);
+  await runNearHeadBackfillScanner(config, rpc, storage, runtime, batcherCollector);
 }
 
 function logBuildInfo(): void {
@@ -48,6 +50,7 @@ async function runBoundedForwardScanner(
   rpc: EthereumRpcClient,
   storage: ScannerStorage,
   runtime: ScannerRuntime,
+  batcherCollector: BatcherMetricsSource | undefined,
 ): Promise<void> {
   if (config.fromBlock === undefined) {
     throw new Error("--from-block is required when --to-block is set");
@@ -95,7 +98,9 @@ async function runBoundedForwardScanner(
         { kind: "lastSuccessfulBlock" },
         { latestBlock, safeHead },
         config.saveTransactionData,
+        batcherCollector,
       );
+      await fillRecentMissingBatcherMetrics(storage, batcherCollector);
       nextBlock += 1n;
     } catch (error) {
       console.error(
@@ -112,6 +117,7 @@ async function runNearHeadBackfillScanner(
   rpc: EthereumRpcClient,
   storage: ScannerStorage,
   runtime: ScannerRuntime,
+  batcherCollector: BatcherMetricsSource | undefined,
 ): Promise<void> {
   if (config.disableBackfill) {
     console.log("Starting near-head scanner with backfill disabled");
@@ -131,6 +137,7 @@ async function runNearHeadBackfillScanner(
         rpc,
         storage,
         runtime,
+        batcherCollector,
       );
     }
 
@@ -142,7 +149,9 @@ async function runNearHeadBackfillScanner(
       rpc,
       storage,
       runtime,
+      batcherCollector,
     );
+    await fillRecentMissingBatcherMetrics(storage, batcherCollector);
 
     if (!scannedForward) {
       await runtime.sleep(config.pollMs);
@@ -175,6 +184,7 @@ export async function backfillDownForSlice(
   rpc: EthereumRpcClient,
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
+  batcherCollector?: BatcherMetricsSource,
 ): Promise<bigint | undefined> {
   let nextBackfillBlock = await storage.getBackfillNextBlock();
   if (nextBackfillBlock === undefined || nextBackfillBlock > safeHead) {
@@ -195,6 +205,7 @@ export async function backfillDownForSlice(
       { kind: "backfillNextBlock", nextBlock: blockToScan - 1n },
       "backfill",
       { safeHead },
+      batcherCollector,
     );
 
     lowestBackfilledBlock = blockToScan;
@@ -211,6 +222,7 @@ export async function scanForwardToSafeHead(
   rpc: EthereumRpcClient,
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
+  batcherCollector?: BatcherMetricsSource,
 ): Promise<boolean> {
   const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
   let nextBlock = lastSuccessfulBlock === undefined ? initialLowerBound : lastSuccessfulBlock + 1n;
@@ -226,6 +238,7 @@ export async function scanForwardToSafeHead(
       { kind: "lastSuccessfulBlock" },
       "forward",
       { safeHead },
+      batcherCollector,
     );
 
     scanned = true;
@@ -244,6 +257,7 @@ async function scanBlockWithRetry(
   progressUpdate: BlockProgressUpdate,
   direction: "backfill" | "forward",
   summaryContext: BlockSummaryContext = {},
+  batcherCollector?: BatcherMetricsSource,
 ): Promise<void> {
   while (true) {
     try {
@@ -255,6 +269,7 @@ async function scanBlockWithRetry(
         progressUpdate,
         summaryContext,
         config.saveTransactionData,
+        batcherCollector,
       );
       return;
     } catch (error) {
@@ -275,13 +290,17 @@ export async function scanOneBlock(
   progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
   summaryContext: BlockSummaryContext = {},
   saveTransactionData = true,
+  batcherCollector?: BatcherMetricsSource,
 ): Promise<void> {
   const startedAt = performance.now();
   const rpcStatsBefore = rpc.getStatsSnapshot();
   const block = await rpc.getBlockWithTransactions(blockNumber);
   const receipts = await getTransactionReceipts(block, rpc, txReceiptConcurrency);
 
-  const metrics = computeBlockMetrics(block, receipts);
+  const metrics = await enrichWithBatcherMetrics(
+    computeBlockMetrics(block, receipts),
+    batcherCollector,
+  );
   const transactions = saveTransactionData
     ? inspectBlockFromRpc(block, receipts).transactions
     : undefined;
@@ -289,6 +308,50 @@ export async function scanOneBlock(
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats, summaryContext));
+}
+
+export async function fillRecentMissingBatcherMetrics(
+  storage: ScannerStorage,
+  batcherCollector: BatcherMetricsSource | undefined,
+): Promise<number> {
+  if (!batcherCollector) return 0;
+
+  let updated = 0;
+  let blocks: Awaited<ReturnType<ScannerStorage["queryRecentBlocksMissingBatcherMetrics"]>>;
+  try {
+    blocks = await storage.queryRecentBlocksMissingBatcherMetrics();
+  } catch (error) {
+    console.error("Failed to query blocks missing batcher metrics", error);
+    return 0;
+  }
+
+  for (const block of blocks) {
+    try {
+      const metrics = await batcherCollector.getMetricsForBlockDate(block.blockDate);
+      if (!metrics) continue;
+      if (await storage.saveBatcherMetricsForBlock(BigInt(block.blockNumber), metrics)) {
+        updated += 1;
+      }
+    } catch (error) {
+      console.error(`Failed to fetch batcher metrics for block ${block.blockNumber}`, error);
+    }
+  }
+  return updated;
+}
+
+async function enrichWithBatcherMetrics(
+  metrics: BlockMetrics,
+  batcherCollector: BatcherMetricsSource | undefined,
+): Promise<BlockMetrics> {
+  if (!batcherCollector) return metrics;
+
+  try {
+    const batcherMetrics = await batcherCollector.getMetricsForBlockDate(metrics.blockDate);
+    return batcherMetrics ? { ...metrics, ...batcherMetrics } : metrics;
+  } catch (error) {
+    console.error(`Failed to fetch batcher metrics for block ${metrics.blockNumber.toString()}`, error);
+    return metrics;
+  }
 }
 
 interface BlockSummaryContext {
