@@ -628,7 +628,7 @@ export class ScannerStorage {
     try {
       await client.query("BEGIN");
       await client.query(
-        `INSERT INTO ${this.qBlocks} (
+        `INSERT INTO ${this.qBlocks} AS existing (
           block_number,
           block_date,
           base_block_fee_wei,
@@ -673,12 +673,12 @@ export class ScannerStorage {
           average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
           average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
           average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
-          batcher_queue_size = EXCLUDED.batcher_queue_size,
-          batcher_intensity = EXCLUDED.batcher_intensity,
-          batcher_lower_threshold = EXCLUDED.batcher_lower_threshold,
-          batcher_upper_threshold = EXCLUDED.batcher_upper_threshold,
-          batcher_max_block_size = EXCLUDED.batcher_max_block_size,
-          batcher_max_tx_size = EXCLUDED.batcher_max_tx_size,
+          batcher_queue_size = COALESCE(EXCLUDED.batcher_queue_size, existing.batcher_queue_size),
+          batcher_intensity = COALESCE(EXCLUDED.batcher_intensity, existing.batcher_intensity),
+          batcher_lower_threshold = COALESCE(EXCLUDED.batcher_lower_threshold, existing.batcher_lower_threshold),
+          batcher_upper_threshold = COALESCE(EXCLUDED.batcher_upper_threshold, existing.batcher_upper_threshold),
+          batcher_max_block_size = COALESCE(EXCLUDED.batcher_max_block_size, existing.batcher_max_block_size),
+          batcher_max_tx_size = COALESCE(EXCLUDED.batcher_max_tx_size, existing.batcher_max_tx_size),
           scanned_at = NOW()`,
         [
           metrics.blockNumber.toString(),
