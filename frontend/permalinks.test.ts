@@ -10,6 +10,10 @@ describe("frontend permalink helpers", () => {
     expect(readViewFromSearch("")).toBe("home");
   });
 
+  test("reads the blocks view", () => {
+    expect(readViewFromSearch("?view=blocks&limit=100")).toBe("blocks");
+  });
+
   test("reads the block view", () => {
     expect(readViewFromSearch("?view=block&block=42")).toBe("block");
   });

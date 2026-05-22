@@ -198,91 +198,95 @@ export function App() {
     }
   };
 
+  const mainClassName = activeView === "charts" ? "fullscreen" : activeView === "home" ? "contained" : undefined;
+
   return (
     <>
       <header>
-        <h1>Arkiv Explorer</h1>
-        <nav>
-          <button
-            type="button"
-            className={activeView === "home" ? "active" : ""}
-            onClick={() => setView("home")}
-          >
-            Home
-          </button>
-          <button
-            type="button"
-            className={activeView === "blocks" ? "active" : ""}
-            onClick={() => setView("blocks")}
-          >
-            Blocks
-          </button>
-          {transactionDataEnabled === true ? (
-            <>
-              <button
-                type="button"
-                className={activeView === "block" ? "active" : ""}
-                onClick={() => setView("block")}
-              >
-                Block
-              </button>
-              <button
-                type="button"
-                className={activeView === "transactions" ? "active" : ""}
-                onClick={() => setView("transactions")}
-              >
-                Address
-              </button>
-              <button
-                type="button"
-                className={activeView === "senders" ? "active" : ""}
-                onClick={() => setView("senders")}
-              >
-                Senders
-              </button>
-            </>
-          ) : null}
-          <button
-            type="button"
-            className={activeView === "ranges" ? "active" : ""}
-            onClick={() => setView("ranges")}
-          >
-            Ranges
-          </button>
-          <button
-            type="button"
-            className={activeView === "charts" ? "active" : ""}
-            onClick={() => setView("charts")}
-          >
-            Charts
-          </button>
-          <button
-            type="button"
-            className={activeView === "health" ? "active" : ""}
-            onClick={() => setView("health")}
-          >
-            Health
-          </button>
-          <button
-            type="button"
-            className={activeView === "baseload" ? "active" : ""}
-            onClick={() => setView("baseload")}
-          >
-            Baseload
-          </button>
-        </nav>
-        <label className="timezone-select">
-          Time zone
-          <select value={timeZone} onChange={onTimeZoneChange}>
-            {TIME_ZONE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="header-inner">
+          <h1>Arkiv Explorer</h1>
+          <nav>
+            <button
+              type="button"
+              className={activeView === "home" ? "active" : ""}
+              onClick={() => setView("home")}
+            >
+              Home
+            </button>
+            <button
+              type="button"
+              className={activeView === "blocks" ? "active" : ""}
+              onClick={() => setView("blocks")}
+            >
+              Blocks
+            </button>
+            {transactionDataEnabled === true ? (
+              <>
+                <button
+                  type="button"
+                  className={activeView === "block" ? "active" : ""}
+                  onClick={() => setView("block")}
+                >
+                  Block
+                </button>
+                <button
+                  type="button"
+                  className={activeView === "transactions" ? "active" : ""}
+                  onClick={() => setView("transactions")}
+                >
+                  Address
+                </button>
+                <button
+                  type="button"
+                  className={activeView === "senders" ? "active" : ""}
+                  onClick={() => setView("senders")}
+                >
+                  Senders
+                </button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              className={activeView === "ranges" ? "active" : ""}
+              onClick={() => setView("ranges")}
+            >
+              Ranges
+            </button>
+            <button
+              type="button"
+              className={activeView === "charts" ? "active" : ""}
+              onClick={() => setView("charts")}
+            >
+              Charts
+            </button>
+            <button
+              type="button"
+              className={activeView === "health" ? "active" : ""}
+              onClick={() => setView("health")}
+            >
+              Health
+            </button>
+            <button
+              type="button"
+              className={activeView === "baseload" ? "active" : ""}
+              onClick={() => setView("baseload")}
+            >
+              Baseload
+            </button>
+          </nav>
+          <label className="timezone-select">
+            Time zone
+            <select value={timeZone} onChange={onTimeZoneChange}>
+              {TIME_ZONE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </header>
-      <main className={activeView === "charts" ? "fullscreen" : ""}>
+      <main className={mainClassName}>
         {activeView === "home" ? (
           <HomeView
             transactionDataEnabled={transactionDataEnabled}

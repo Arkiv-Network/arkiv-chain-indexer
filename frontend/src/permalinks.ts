@@ -20,6 +20,7 @@ export function readViewFromSearch(search: string): View {
   const params = new URLSearchParams(search);
   const value = params.get(VIEW_PARAM);
   if (value === "home") return "home";
+  if (value === "blocks") return "blocks";
   if (value === "block") return "block";
   if (value === "transactions") return "transactions";
   if (value === "senders") return "senders";
