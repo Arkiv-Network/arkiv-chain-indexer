@@ -344,6 +344,16 @@ export function fetchBlocks(params: URLSearchParams): Promise<BlocksResponse> {
   return getJson<BlocksResponse>("/blocks", params);
 }
 
+export async function fetchBlockByNumber(blockNumber: number): Promise<StoredBlock | null> {
+  const response = await fetch(`/api/blocks/${encodeURIComponent(blockNumber)}`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return (await response.json()) as StoredBlock;
+}
+
 export function fetchRanges(params: URLSearchParams): Promise<RangesResponse> {
   return getJson<RangesResponse>("/ranges", params);
 }

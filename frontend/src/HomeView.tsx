@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  fetchBlockByNumber,
   fetchBlocks,
   fetchTransactions,
   type BlocksResponse,
@@ -16,7 +17,8 @@ import { BlockBracketed, BlockBracketedEmpty, TxBracketed } from "./icons";
 
 const BLOCK_TIME_MS = 2_000;
 const STUB_TICK_MS = 500;
-const MAX_STUB_BLOCKS = 3;
+const MAX_STUB_BLOCKS = 1;
+const NEXT_BLOCK_PING_MS = 600;
 
 type BlockSlot =
   | { kind: "real"; block: StoredBlock }
@@ -118,6 +120,38 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     () => [...stubSlots, ...blocks.map((block) => ({ kind: "real" as const, block }))],
     [stubSlots, blocks],
   );
+
+  const nextExpectedBlockNumber = latestBlock ? latestBlock.blockNumber + 1 : null;
+
+  useEffect(() => {
+    if (nextExpectedBlockNumber === null || blocksError) return;
+    let cancelled = false;
+
+    const ping = async () => {
+      try {
+        const block = await fetchBlockByNumber(nextExpectedBlockNumber);
+        if (cancelled || !block) return;
+        setBlocksData((previous) => {
+          if (!previous) return previous;
+          if (previous.blocks.some((existing) => existing.blockNumber === block.blockNumber)) {
+            return previous;
+          }
+          const merged = [block, ...previous.blocks].slice(0, previous.limit);
+          return { ...previous, blocks: merged, count: merged.length };
+        });
+        setLastUpdatedAt(new Date());
+      } catch {
+        // Block not yet indexed — keep polling on the interval.
+      }
+    };
+
+    void ping();
+    const interval = window.setInterval(ping, NEXT_BLOCK_PING_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [nextExpectedBlockNumber, blocksError]);
 
   const transactions = transactionsData?.transactions ?? [];
   const showTransactions = transactionDataEnabled === true && !transactionsUnavailable && transactions.length > 0;

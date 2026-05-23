@@ -186,6 +186,11 @@ export async function handleRequest(
     return handleGetBlocks(url, storage);
   }
 
+  const singleBlockMatch = url.pathname.match(/^\/blocks\/(\d+)$/);
+  if (singleBlockMatch?.[1]) {
+    return handleGetBlockByNumber(singleBlockMatch[1], storage);
+  }
+
   const blockInspectMatch = url.pathname.match(/^\/block\/(\d+)$/);
   if (blockInspectMatch?.[1]) {
     if (!transactionDataEnabled) {
@@ -401,6 +406,32 @@ async function handleGetHealth(
   };
 
   return jsonResponse(body);
+}
+
+async function handleGetBlockByNumber(
+  rawBlockNumber: string,
+  storage: ScannerStorage,
+): Promise<Response> {
+  let blockNumber: bigint;
+  try {
+    blockNumber = parseBlockParam("blockNumber", rawBlockNumber);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  try {
+    const [block] = await storage.queryBlocks({
+      blockGt: blockNumber - 1n,
+      blockLt: blockNumber + 1n,
+      limit: 1,
+    });
+    if (!block) {
+      return jsonError(404, `Block ${blockNumber.toString()} was not found in storage`);
+    }
+    return jsonResponse(block);
+  } catch (error) {
+    return jsonError(500, error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function handleGetBlockInspect(

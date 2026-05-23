@@ -231,6 +231,61 @@ describe("parseSenderStatsFilterFromQuery", () => {
   });
 });
 
+describe("GET /blocks/:blockNumber", () => {
+  test("returns 404 when the block is not stored", async () => {
+    const storage = {
+      queryBlocks: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/blocks/42"),
+      storage,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Block 42 was not found in storage",
+    });
+  });
+
+  test("returns the single stored block when present", async () => {
+    const storage = {
+      queryBlocks: async (filter: { blockGt?: bigint; blockLt?: bigint; limit?: number }) => {
+        expect(filter.blockGt).toBe(41n);
+        expect(filter.blockLt).toBe(43n);
+        expect(filter.limit).toBe(1);
+        return [
+          {
+            blockNumber: 42,
+            blockDate: "2024-01-01T00:00:00.000Z",
+            baseBlockFeeWei: "100",
+            totalGasUsed: "21000",
+            maxGasInBlock: "30000000",
+            transactionCount: 0,
+          },
+        ];
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/blocks/42"),
+      storage,
+    );
+    const body = (await response.json()) as { blockNumber: number };
+
+    expect(response.status).toBe(200);
+    expect(body.blockNumber).toBe(42);
+  });
+
+  test("rejects non-numeric block numbers via the catch-all 404", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/blocks/not-a-number"),
+      {} as ScannerStorage,
+    );
+    expect(response.status).toBe(404);
+  });
+});
+
 describe("GET /block/:blockNumber", () => {
   test("returns 404 when the block is not stored", async () => {
     const storage = {
