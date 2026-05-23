@@ -207,7 +207,7 @@ function BlockFeedItem({
   return (
     <article className="home-feed-item">
       <div className="home-feed-icon" aria-hidden="true">
-        <BlockBracketed size={22} color="currentColor" accent="currentColor" />
+        <BlockBracketed size={22} />
       </div>
       <div className="home-feed-main">
         <div className="home-feed-title">
@@ -245,7 +245,7 @@ function TransactionFeedItem({
   return (
     <article className="home-feed-item">
       <div className="home-feed-icon tx" aria-hidden="true">
-        <TxBracketed size={22} color="currentColor" accent="currentColor" />
+        <TxBracketed size={22} />
       </div>
       <div className="home-feed-main">
         <div className="home-feed-title">
