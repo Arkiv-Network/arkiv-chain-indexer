@@ -200,6 +200,12 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     if (!lastUpdatedAt) return "Waiting for data";
     return `Updated ${lastUpdatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
   }, [lastUpdatedAt]);
+  const latestBlockBehindLabel = useMemo(() => {
+    if (!latestBlock) return null;
+    const latestTimeMs = new Date(latestBlock.blockDate).getTime();
+    if (!Number.isFinite(latestTimeMs)) return null;
+    return `${formatBehind(Math.max(0, nowMs - latestTimeMs))} behind`;
+  }, [latestBlock, nowMs]);
 
   const openBlocksView = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -267,10 +273,8 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
             <div className="home-panel-heading">
               <h3 id="home-latest-blocks">Latest blocks</h3>
               <div className="home-panel-heading-meta">
-                {latestBlock ? (
-                  <span className="home-panel-latest-time">
-                    latest {fmtDate(latestBlock.blockDate, timeZone)}
-                  </span>
+                {latestBlockBehindLabel ? (
+                  <span className="home-panel-latest-time">{latestBlockBehindLabel}</span>
                 ) : null}
                 <span>{blocksData ? `${blocksData.count} shown` : blocksLoading ? "Loading" : "No data"}</span>
               </div>
@@ -450,4 +454,17 @@ function shortHash(value: string | null | undefined): string {
   if (!value) return "-";
   if (value.length <= 18) return value;
   return `${value.slice(0, 10)}...${value.slice(-8)}`;
+}
+
+function formatBehind(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds} ${totalSeconds === 1 ? "second" : "seconds"}`;
+  }
+  if (totalSeconds < 3600) {
+    const minutes = Math.floor(totalSeconds / 60);
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  return `${hours} ${hours === 1 ? "hour" : "hours"}`;
 }
