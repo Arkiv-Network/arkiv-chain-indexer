@@ -3,6 +3,7 @@
 
 import blockArchiveSvg from "./icons/block-archive.svg?raw";
 import blockBracketedSvg from "./icons/block-bracketed.svg?raw";
+import blockBracketedEmptySvg from "./icons/block-bracketed-empty.svg?raw";
 import blockHashtagSvg from "./icons/block-hashtag.svg?raw";
 import blockIsoOutlineSvg from "./icons/block-iso-outline.svg?raw";
 import blockLayeredSvg from "./icons/block-layered.svg?raw";
@@ -54,6 +55,7 @@ function makeIcon(raw: string) {
 
 export const BlockArchive = makeIcon(blockArchiveSvg);
 export const BlockBracketed = makeIcon(blockBracketedSvg);
+export const BlockBracketedEmpty = makeIcon(blockBracketedEmptySvg);
 export const BlockHashtag = makeIcon(blockHashtagSvg);
 export const BlockIsoOutline = makeIcon(blockIsoOutlineSvg);
 export const BlockLayered = makeIcon(blockLayeredSvg);

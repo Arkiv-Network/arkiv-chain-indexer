@@ -652,6 +652,37 @@ button.secondary {
   animation: home-feed-item-fade-in 2s ease both;
 }
 
+.home-feed-item--stub {
+  color: var(--ink-muted);
+  background: color-mix(in oklab, var(--stone) 35%, transparent);
+}
+
+.home-feed-item--stub .home-feed-title .mono,
+.home-feed-item--stub .home-feed-title span {
+  color: var(--ink-muted);
+}
+
+.home-feed-item--stub:hover {
+  background: color-mix(in oklab, var(--stone) 35%, transparent);
+}
+
+.home-stub-tag {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+  padding: 0.15rem 0.45rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  animation: home-stub-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes home-stub-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
 @keyframes home-feed-item-fade-in {
   from {
     opacity: 0;

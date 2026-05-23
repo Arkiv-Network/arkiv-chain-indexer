@@ -12,7 +12,15 @@ import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { transactionExplorerHref } from "./transactionLinks";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
-import { BlockBracketed, TxBracketed } from "./icons";
+import { BlockBracketed, BlockBracketedEmpty, TxBracketed } from "./icons";
+
+const BLOCK_TIME_MS = 2_000;
+const STUB_TICK_MS = 500;
+const MAX_STUB_BLOCKS = 3;
+
+type BlockSlot =
+  | { kind: "real"; block: StoredBlock }
+  | { kind: "stub"; blockNumber: number; estimatedDate: string };
 
 interface HomeViewProps {
   transactionDataEnabled: boolean | null;
@@ -80,6 +88,37 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
 
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!latestBlock || blocksError) return;
+    const tick = () => setNowMs(Date.now());
+    tick();
+    const interval = window.setInterval(tick, STUB_TICK_MS);
+    return () => window.clearInterval(interval);
+  }, [latestBlock?.blockNumber, blocksError]);
+
+  const stubSlots = useMemo<BlockSlot[]>(() => {
+    if (!latestBlock || blocksError) return [];
+    const latestTimeMs = new Date(latestBlock.blockDate).getTime();
+    if (!Number.isFinite(latestTimeMs)) return [];
+    const elapsed = nowMs - latestTimeMs;
+    const slotCount = Math.min(MAX_STUB_BLOCKS, Math.max(0, Math.floor(elapsed / BLOCK_TIME_MS)));
+    return Array.from({ length: slotCount }, (_, idx) => {
+      const offset = slotCount - idx;
+      return {
+        kind: "stub" as const,
+        blockNumber: latestBlock.blockNumber + offset,
+        estimatedDate: new Date(latestTimeMs + offset * BLOCK_TIME_MS).toISOString(),
+      };
+    });
+  }, [latestBlock, nowMs, blocksError]);
+
+  const blockSlots = useMemo<BlockSlot[]>(
+    () => [...stubSlots, ...blocks.map((block) => ({ kind: "real" as const, block }))],
+    [stubSlots, blocks],
+  );
+
   const transactions = transactionsData?.transactions ?? [];
   const showTransactions = transactionDataEnabled === true && !transactionsUnavailable && transactions.length > 0;
   const blocksHref = buildPermalinkHref("blocks", { limit: "100" });
@@ -149,10 +188,10 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
               <p className="summary error">Failed to load blocks: {blocksError}</p>
             ) : (
               <div className="home-feed-list">
-                {blocks.map((block) => (
+                {blockSlots.map((slot) => (
                   <BlockFeedItem
-                    key={block.blockNumber}
-                    block={block}
+                    key={slot.kind === "real" ? slot.block.blockNumber : slot.blockNumber}
+                    slot={slot}
                     onLocationChange={onLocationChange}
                     timeZone={timeZone}
                   />
@@ -196,14 +235,37 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 }
 
 function BlockFeedItem({
-  block,
+  slot,
   onLocationChange,
   timeZone,
 }: {
-  block: StoredBlock;
+  slot: BlockSlot;
   onLocationChange: () => void;
   timeZone: string;
 }) {
+  if (slot.kind === "stub") {
+    return (
+      <article className="home-feed-item home-feed-item--stub" aria-busy="true">
+        <div className="home-feed-icon" aria-hidden="true">
+          <BlockBracketedEmpty size={22} />
+        </div>
+        <div className="home-feed-main">
+          <div className="home-feed-title">
+            <span className="mono">{slot.blockNumber}</span>
+            <span>~{fmtDate(slot.estimatedDate, timeZone)}</span>
+          </div>
+          <div className="home-feed-meta">
+            <span>Awaiting block…</span>
+          </div>
+        </div>
+        <div className="home-feed-side">
+          <span className="home-stub-tag">pending</span>
+        </div>
+      </article>
+    );
+  }
+
+  const { block } = slot;
   return (
     <article className="home-feed-item">
       <div className="home-feed-icon" aria-hidden="true">
