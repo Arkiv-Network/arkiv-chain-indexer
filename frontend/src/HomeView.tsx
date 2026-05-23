@@ -22,6 +22,7 @@ const STUB_VISIBLE_AGE_MS = 6000;
 const PING_START_AGE_MS = 9000;
 const LOADING_METADATA_LEAD_MS = 1_000;
 const NEXT_BLOCK_PING_MS = 100;
+const PING_MIN_INTERVAL_MS = 1_500;
 
 type BlockSlot =
   | { kind: "real"; block: StoredBlock }
@@ -157,8 +158,12 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
 
     let cancelled = false;
     let intervalId: number | undefined;
+    let lastPingAtMs = 0;
 
     const ping = async () => {
+      const now = Date.now();
+      if (now - lastPingAtMs < PING_MIN_INTERVAL_MS) return;
+      lastPingAtMs = now;
       try {
         const block = await fetchBlockByNumber(nextExpectedBlockNumber);
         if (cancelled || !block) return;
