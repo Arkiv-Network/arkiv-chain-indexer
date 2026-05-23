@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   readStoredString,
   readStoredStringRecord,
+  removeStoredSection,
   removeStoredValue,
   type StorageLike,
   writeStoredString,
@@ -11,6 +12,14 @@ import { readFiltersFromSearch } from "./src/permalinks";
 
 class MemoryStorage implements StorageLike {
   private values = new Map<string, string>();
+
+  get length(): number {
+    return this.values.size;
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.values.keys())[index] ?? null;
+  }
 
   getItem(key: string): string | null {
     return this.values.get(key) ?? null;
@@ -102,6 +111,21 @@ describe("frontend localStorage helpers", () => {
     removeStoredValue("tableEdit", storage);
 
     expect(readStoredString("tableEdit", "fallback", undefined, storage)).toBe("fallback");
+  });
+
+  test("removes only values from the requested stored section", () => {
+    const storage = new MemoryStorage();
+    writeStoredStringRecord("charts.filters", { blockGt: "10", blockLt: "20", limit: "500" }, FILTER_KEYS, storage);
+    writeStoredString("charts.sidebarCollapsed", "true", storage);
+    writeStoredString("blocks.tableDensity", "compact", storage);
+    writeStoredString("timeZone", "UTC", storage);
+
+    removeStoredSection("charts.", storage);
+
+    expect(readStoredStringRecord("charts.filters", FALLBACK, FILTER_KEYS, storage)).toEqual(FALLBACK);
+    expect(readStoredString("charts.sidebarCollapsed", "false", undefined, storage)).toBe("false");
+    expect(readStoredString("blocks.tableDensity", "comfortable", undefined, storage)).toBe("compact");
+    expect(readStoredString("timeZone", "America/New_York", undefined, storage)).toBe("UTC");
   });
 
   test("query string filters override stored defaults", () => {

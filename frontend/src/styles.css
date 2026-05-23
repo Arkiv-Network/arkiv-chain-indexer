@@ -1092,6 +1092,12 @@ td.num {
   margin-top: 0.25rem;
 }
 
+.chart-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .anchor-info {
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;

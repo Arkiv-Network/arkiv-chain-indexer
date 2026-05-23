@@ -13,7 +13,14 @@ import {
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
-import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
+import {
+  readStoredString,
+  readStoredStringRecord,
+  removeStoredSection,
+  removeStoredValue,
+  writeStoredString,
+  writeStoredStringRecord,
+} from "./localStorage";
 import { fmtDate } from "./format";
 
 const Plot = createPlotlyComponent(Plotly);
@@ -36,7 +43,9 @@ interface ChartsFilters extends Record<string, string> {
 
 const FETCH_LIMIT = 1000;
 const FILTER_KEYS = ["zoom", "startDate", "blockStart", "blockEnd", "xAxisMode", "parameters"] as const;
-const STORAGE_KEY = "charts.filters";
+const STORAGE_SECTION = "charts.";
+const FILTERS_STORAGE_KEY = `${STORAGE_SECTION}filters`;
+const SIDEBAR_COLLAPSED_STORAGE_KEY = `${STORAGE_SECTION}sidebarCollapsed`;
 type XAxisMode = "blocks" | "dates";
 const X_AXIS_MODES: { value: XAxisMode; label: string }[] = [
   { value: "blocks", label: "Blocks" },
@@ -324,8 +333,8 @@ const PARAMETERS: ParameterDef[] = [
 const PARAMETER_KEYS = new Set(PARAMETERS.map((p) => p.key));
 const DEFAULT_PARAMETERS = ["averageBaseFeeWei", "averagePriorityFeeWei"];
 
-const EMPTY: ChartsFilters = {
-  zoom: "6",
+const DEFAULT_FILTERS: ChartsFilters = {
+  zoom: "0",
   startDate: "",
   blockStart: "",
   blockEnd: "",
@@ -380,13 +389,21 @@ function clearBlockWindow(filters: ChartsFilters): ChartsFilters {
 }
 
 function loadFilters(locationSearch: string): ChartsFilters {
-  const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
+  const stored = readStoredStringRecord(FILTERS_STORAGE_KEY, DEFAULT_FILTERS, FILTER_KEYS);
   const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
   return {
     ...merged,
     startDate: normalizeIsoDate(merged.startDate),
     xAxisMode: parseXAxisMode(merged.xAxisMode),
   };
+}
+
+function loadSidebarCollapsed(): boolean {
+  return readStoredString(
+    SIDEBAR_COLLAPSED_STORAGE_KEY,
+    "false",
+    (value) => value === "true" || value === "false",
+  ) === "true";
 }
 
 interface ChartPoint {
@@ -489,7 +506,7 @@ export function ChartsView({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => loadSidebarCollapsed());
   const [selectedPointKey, setSelectedPointKey] = useState<string | null>(null);
 
   const zoomIndex = clampZoomIndex(filters.zoom);
@@ -561,8 +578,20 @@ export function ChartsView({
   }, [filters.zoom, filters.startDate, filters.blockStart, filters.blockEnd, load]);
 
   useEffect(() => {
-    writeStoredStringRecord(STORAGE_KEY, filters, FILTER_KEYS);
+    if (filtersEqual(filters, DEFAULT_FILTERS, FILTER_KEYS)) {
+      removeStoredValue(FILTERS_STORAGE_KEY);
+      return;
+    }
+    writeStoredStringRecord(FILTERS_STORAGE_KEY, filters, FILTER_KEYS);
   }, [filters]);
+
+  useEffect(() => {
+    if (sidebarCollapsed) {
+      writeStoredString(SIDEBAR_COLLAPSED_STORAGE_KEY, "true");
+      return;
+    }
+    removeStoredValue(SIDEBAR_COLLAPSED_STORAGE_KEY);
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     const next = loadFilters(locationSearch);
@@ -632,6 +661,17 @@ export function ChartsView({
   const setXAxisMode = (next: XAxisMode) => {
     if (next === xAxisMode) return;
     updateFilters({ ...filters, xAxisMode: next });
+  };
+
+  const resetChartSettings = () => {
+    removeStoredSection(STORAGE_SECTION);
+    setSidebarCollapsed(false);
+    setSelectedPointKey(null);
+    setCopyStatus("");
+    setFilters(DEFAULT_FILTERS);
+    if (writePermalink("charts", {})) {
+      onLocationChange();
+    }
   };
 
   const copyPermalink = async () => {
@@ -864,9 +904,14 @@ export function ChartsView({
             </div>
 
             <div className="sidebar-section">
-              <button type="button" className="secondary" onClick={copyPermalink}>
-                Copy link
-              </button>
+              <div className="chart-link-actions">
+                <button type="button" className="secondary" onClick={copyPermalink}>
+                  Copy link
+                </button>
+                <button type="button" className="secondary" onClick={resetChartSettings}>
+                  Reset to defaults
+                </button>
+              </div>
               {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
             </div>
           </aside>
