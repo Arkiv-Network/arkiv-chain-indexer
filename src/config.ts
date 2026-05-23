@@ -15,7 +15,7 @@ export interface ScannerConfig {
 
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
 const DEFAULT_OLDEST_BACKFILL_BLOCK = 25_000_000n;
-const DEFAULT_POLL_MS = 12_000;
+const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_RETRY_MS = 5_000;
 const DEFAULT_TX_RECEIPT_CONCURRENCY = 20;
 
@@ -185,7 +185,7 @@ Options:
   --to-block <number>               Optional inclusive block to stop at.
   --oldest-backfill-block <number>  Oldest block to backfill to. Defaults to 25000000.
   --confirmation-depth <number>     Blocks to stay behind latest head. Defaults to 3.
-  --poll-ms <number>                Delay while waiting for new safe blocks. Defaults to 12000.
+  --poll-ms <number>                Delay while waiting for new safe blocks. Defaults to 2000.
   --retry-ms <number>               Delay before retrying a failed block. Defaults to 5000.
   --tx-receipt-concurrency <n>      Legacy setting accepted for compatibility; receipts are fetched sequentially.
   --save-transaction-data <bool>    Store inspected transaction rows. Defaults to true (or SCANNER_SAVE_TRANSACTION_DATA / SAVE_TRANSACTION_DATA).
