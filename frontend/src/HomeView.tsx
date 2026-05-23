@@ -1,19 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import createPlotlyComponent from "react-plotly.js/factory";
+import Plotly from "plotly.js-dist-min";
 import {
   fetchBlockByNumber,
   fetchBlocks,
-  fetchTransactions,
   type BlocksResponse,
   type StoredBlock,
-  type StoredTransaction,
-  type TransactionsResponse,
 } from "./api";
-import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
-import { transactionExplorerHref } from "./transactionLinks";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
-import { BlockEmpty, BlockFilled, BlockList, TxBracketed } from "./icons";
+import { BlockEmpty, BlockFilled, BlockList } from "./icons";
+
+const Plot = createPlotlyComponent(Plotly);
 
 const BLOCK_TIME_MS = 2_000;
 const STUB_TICK_MS = 500;
@@ -25,27 +24,28 @@ const NEXT_BLOCK_PING_MS = 100;
 const PING_MIN_INTERVAL_MS = 1_500;
 const SCANNER_DELAY_WARNING_AGE_MS = 60_000;
 
+const HISTOGRAM_WINDOW_MINUTES = 60;
+const HISTOGRAM_FETCH_LIMIT = 2400;
+const HISTOGRAM_REFRESH_MS = 5_000;
+const HISTOGRAM_CLOCK_TICK_MS = 1_000;
+
 type BlockSlot =
   | { kind: "real"; block: StoredBlock }
   | { kind: "stub"; blockNumber: number; estimatedDate: string; pinging: boolean };
 
 interface HomeViewProps {
-  transactionDataEnabled: boolean | null;
   onLocationChange: () => void;
   timeZone: string;
 }
 
 const LATEST_BLOCK_LIMIT = "20";
-const LATEST_TRANSACTION_LIMIT = "10";
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
-export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }: HomeViewProps) {
+export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
   const [blocksData, setBlocksData] = useState<BlocksResponse | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const [blocksLoading, setBlocksLoading] = useState(true);
-  const [transactionsData, setTransactionsData] = useState<TransactionsResponse | null>(null);
-  const [transactionsUnavailable, setTransactionsUnavailable] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [simulateOffline, setSimulateOffline] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -95,22 +95,7 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     } finally {
       setBlocksLoading(false);
     }
-
-    if (transactionDataEnabled !== true) {
-      setTransactionsData(null);
-      setTransactionsUnavailable(true);
-      return;
-    }
-
-    try {
-      const nextTransactions = await fetchTransactions(latestTransactionsParams());
-      setTransactionsData(nextTransactions);
-      setTransactionsUnavailable(nextTransactions.transactions.length === 0);
-    } catch {
-      setTransactionsData(null);
-      setTransactionsUnavailable(true);
-    }
-  }, [transactionDataEnabled]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,8 +203,6 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     };
   }, [nextExpectedBlockNumber, latestBlock?.blockDate]);
 
-  const transactions = transactionsData?.transactions ?? [];
-  const showTransactions = transactionDataEnabled === true && !transactionsUnavailable && transactions.length > 0;
   const blocksHref = buildPermalinkHref("blocks", { limit: "100" });
   const lastUpdatedLabel = useMemo(() => {
     if (!lastUpdatedAt) return "Waiting for data";
@@ -332,10 +315,10 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
         <div className="home-section-head">
           <div>
             <p className="home-kicker">live feed</p>
-            <h3>Latest blocks &amp; transactions</h3>
+            <h3>Latest blocks &amp; last 60 minutes</h3>
           </div>
         </div>
-        <div className={`home-feed-grid${showTransactions ? "" : " single"}`}>
+        <div className="home-feed-grid">
           <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
             <div className="home-panel-heading">
               <h3 id="home-latest-blocks" className="home-panel-heading-title">
@@ -374,24 +357,7 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
             )}
           </section>
 
-          {showTransactions ? (
-            <section className="home-feed-panel" aria-labelledby="home-latest-transactions">
-              <div className="home-panel-heading">
-                <h3 id="home-latest-transactions">Latest transactions</h3>
-                <span>{transactionsData ? `${transactionsData.count} shown` : "Loading"}</span>
-              </div>
-              <div className="home-feed-list">
-                {transactions.map((transaction) => (
-                  <TransactionFeedItem
-                    key={`${transaction.blockNumberDecimal}:${transaction.position}:${transaction.hash}`}
-                    transaction={transaction}
-                    onLocationChange={onLocationChange}
-                    timeZone={timeZone}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
+          <LiveHistograms timeZone={timeZone} />
         </div>
       </div>
     </section>
@@ -478,72 +444,11 @@ function BlockFeedItem({
   );
 }
 
-function TransactionFeedItem({
-  transaction,
-  onLocationChange,
-  timeZone,
-}: {
-  transaction: StoredTransaction;
-  onLocationChange: () => void;
-  timeZone: string;
-}) {
-  const txHref = transactionExplorerHref(transaction.hash);
-
-  return (
-    <article className="home-feed-item">
-      <div className="home-feed-icon tx" aria-hidden="true">
-        <TxBracketed size={22} />
-      </div>
-      <div className="home-feed-main">
-        <div className="home-feed-title">
-          {txHref ? (
-            <a className="mono block-link" href={txHref} target="_blank" rel="noreferrer">
-              {shortHash(transaction.hash)}
-            </a>
-          ) : (
-            <span className="mono">{shortHash(transaction.hash)}</span>
-          )}
-          <span>{fmtDate(transaction.blockDate, timeZone)}</span>
-        </div>
-        <div className="home-feed-meta compact">
-          <span>
-            Block <BlockNumberLink blockNumber={transaction.blockNumberDecimal} onLocationChange={onLocationChange} />
-          </span>
-          <span>Fee {fmtEth(transaction.transactionFeeWei)} ETH</span>
-        </div>
-        <div className="home-address-row">
-          <span>From</span>
-          <AddressCell address={transaction.from} />
-          <span>To</span>
-          <AddressCell address={transaction.to ?? transaction.contractAddress} />
-        </div>
-      </div>
-      <div className="home-feed-side">
-        <strong>{fmtEth(transaction.valueWei)} ETH</strong>
-        <span>{fmtInteger(transaction.gasUsed)} gas</span>
-      </div>
-    </article>
-  );
-}
-
 function latestBlocksParams(): URLSearchParams {
   const params = new URLSearchParams();
   params.set("limit", LATEST_BLOCK_LIMIT);
   params.set("order", "desc");
   return params;
-}
-
-function latestTransactionsParams(): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set("limit", LATEST_TRANSACTION_LIMIT);
-  params.set("order", "desc");
-  return params;
-}
-
-function shortHash(value: string | null | undefined): string {
-  if (!value) return "-";
-  if (value.length <= 18) return value;
-  return `${value.slice(0, 10)}...${value.slice(-8)}`;
 }
 
 function formatBehind(ms: number): string {
@@ -557,4 +462,262 @@ function formatBehind(ms: number): string {
   }
   const hours = Math.floor(totalSeconds / 3600);
   return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+}
+
+interface MinuteBucket {
+  minuteMs: number;
+  gasUsed: number;
+  transactionCount: number;
+}
+
+type HistogramMetric = "gasUsed" | "transactionCount";
+
+function LiveHistograms({ timeZone }: { timeZone: string }) {
+  const [blocks, setBlocks] = useState<StoredBlock[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [currentMinuteMs, setCurrentMinuteMs] = useState(
+    () => Math.floor(Date.now() / 60_000) * 60_000,
+  );
+
+  // Re-render every second so the window shifts when the wall clock crosses
+  // into a new minute.
+  useEffect(() => {
+    const tick = () => {
+      const next = Math.floor(Date.now() / 60_000) * 60_000;
+      setCurrentMinuteMs((prev) => (prev !== next ? next : prev));
+    };
+    const interval = window.setInterval(tick, HISTOGRAM_CLOCK_TICK_MS);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  // Pull the last ~60 minutes of blocks on a short cadence so the current
+  // minute's bar keeps growing as new blocks arrive.
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const cutoff = new Date(
+          Date.now() - (HISTOGRAM_WINDOW_MINUTES + 1) * 60_000,
+        ).toISOString();
+        const params = new URLSearchParams();
+        params.set("dateGt", cutoff);
+        params.set("limit", String(HISTOGRAM_FETCH_LIMIT));
+        params.set("order", "desc");
+        const response = await fetchBlocks(params);
+        if (cancelled) return;
+        setBlocks(response.blocks);
+        setLoaded(true);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    };
+
+    void load();
+    const interval = window.setInterval(load, HISTOGRAM_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const buckets = useMemo<MinuteBucket[]>(() => {
+    const map = new Map<number, MinuteBucket>();
+    for (let i = 0; i < HISTOGRAM_WINDOW_MINUTES; i++) {
+      const ms = currentMinuteMs - (HISTOGRAM_WINDOW_MINUTES - 1 - i) * 60_000;
+      map.set(ms, { minuteMs: ms, gasUsed: 0, transactionCount: 0 });
+    }
+    for (const block of blocks) {
+      const ts = Date.parse(block.blockDate);
+      if (!Number.isFinite(ts)) continue;
+      const minute = Math.floor(ts / 60_000) * 60_000;
+      const bucket = map.get(minute);
+      if (!bucket) continue;
+      const gas = Number(block.totalGasUsed);
+      if (Number.isFinite(gas)) bucket.gasUsed += gas;
+      bucket.transactionCount += block.transactionCount;
+    }
+    return Array.from(map.values()).sort((a, b) => a.minuteMs - b.minuteMs);
+  }, [blocks, currentMinuteMs]);
+
+  return (
+    <div className="home-histograms">
+      <HistogramPanel
+        title="Gas used"
+        subtitle={`per minute · last ${HISTOGRAM_WINDOW_MINUTES} min`}
+        buckets={buckets}
+        currentMinuteMs={currentMinuteMs}
+        colorVar="--ark-blue"
+        colorFallback="#181ea9"
+        metric="gasUsed"
+        unitLabel="gas"
+        timeZone={timeZone}
+        error={error}
+        loaded={loaded}
+      />
+      <HistogramPanel
+        title="Transactions"
+        subtitle={`per minute · last ${HISTOGRAM_WINDOW_MINUTES} min`}
+        buckets={buckets}
+        currentMinuteMs={currentMinuteMs}
+        colorVar="--ark-orange"
+        colorFallback="#fe7446"
+        metric="transactionCount"
+        unitLabel="txns"
+        timeZone={timeZone}
+        error={error}
+        loaded={loaded}
+      />
+    </div>
+  );
+}
+
+function HistogramPanel({
+  title,
+  subtitle,
+  buckets,
+  currentMinuteMs,
+  colorVar,
+  colorFallback,
+  metric,
+  unitLabel,
+  timeZone,
+  error,
+  loaded,
+}: {
+  title: string;
+  subtitle: string;
+  buckets: MinuteBucket[];
+  currentMinuteMs: number;
+  colorVar: string;
+  colorFallback: string;
+  metric: HistogramMetric;
+  unitLabel: string;
+  timeZone: string;
+  error: string | null;
+  loaded: boolean;
+}) {
+  const baseColor = getCssColor(colorVar, colorFallback);
+  const gridColor = getCssColor("--line-strong", "#1111111a");
+  const textColor = getCssColor("--ink-muted", "#6b6b6b");
+
+  const { traces, layout } = useMemo<{
+    traces: Partial<Plotly.PlotData>[];
+    layout: Partial<Plotly.Layout>;
+  }>(() => {
+    const xs = buckets.map((b) => new Date(b.minuteMs).toISOString());
+    const ys = buckets.map((b) => b[metric]);
+    const opacities = buckets.map((b) => (b.minuteMs === currentMinuteMs ? 0.55 : 0.95));
+    const labels = buckets.map((b) =>
+      new Date(b.minuteMs).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone,
+      }),
+    );
+    const customdata = buckets.map((b, i) =>
+      [labels[i], b.minuteMs === currentMinuteMs ? "in progress" : "complete"] as [string, string],
+    );
+
+    const firstMs = buckets[0]?.minuteMs ?? currentMinuteMs - (HISTOGRAM_WINDOW_MINUTES - 1) * 60_000;
+    const lastMs = buckets[buckets.length - 1]?.minuteMs ?? currentMinuteMs;
+
+    const trace: Partial<Plotly.PlotData> = {
+      type: "bar",
+      x: xs,
+      y: ys,
+      marker: {
+        color: baseColor,
+        opacity: opacities as unknown as number,
+        line: { width: 0 },
+      },
+      customdata: customdata as unknown as Plotly.Datum[],
+      hovertemplate:
+        `<b>${title}</b><br>` +
+        "%{customdata[0]} %{customdata[1]}<br>" +
+        `%{y:,.0f} ${unitLabel}<extra></extra>`,
+    };
+
+    const layout: Partial<Plotly.Layout> = {
+      autosize: true,
+      margin: { l: 48, r: 16, t: 8, b: 28 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      font: { color: textColor, size: 11 },
+      bargap: 0.15,
+      showlegend: false,
+      hovermode: "x unified",
+      hoverlabel: {
+        bgcolor: getCssColor("--sand", "#f6f4ef"),
+        bordercolor: gridColor,
+        font: { color: getCssColor("--ink", "#111111"), size: 12 },
+      },
+      xaxis: {
+        type: "date",
+        range: [
+          new Date(firstMs - 30_000).toISOString(),
+          new Date(lastMs + 30_000).toISOString(),
+        ],
+        gridcolor: "rgba(0,0,0,0)",
+        zerolinecolor: "rgba(0,0,0,0)",
+        tickfont: { size: 10, color: textColor },
+        nticks: 6,
+        fixedrange: true,
+      },
+      yaxis: {
+        gridcolor: gridColor,
+        zerolinecolor: gridColor,
+        tickfont: { size: 10, color: textColor },
+        rangemode: "tozero",
+        fixedrange: true,
+      },
+    };
+
+    return { traces: [trace], layout };
+  }, [buckets, currentMinuteMs, baseColor, gridColor, textColor, metric, title, unitLabel, timeZone]);
+
+  return (
+    <section className="home-feed-panel home-histogram-panel">
+      <div className="home-panel-heading">
+        <h3 className="home-panel-heading-title home-histogram-title">
+          <span
+            className="home-histogram-swatch"
+            aria-hidden="true"
+            style={{ background: baseColor }}
+          />
+          {title}
+        </h3>
+        <span>{subtitle}</span>
+      </div>
+      <div className="home-histogram-chart">
+        {error && !loaded ? (
+          <div className="home-feed-empty-state">
+            <strong>Unable to load histogram.</strong>
+            <span>{error}</span>
+          </div>
+        ) : (
+          <Plot
+            data={traces}
+            layout={layout}
+            useResizeHandler
+            style={{ width: "100%", height: "100%" }}
+            config={{ displayModeBar: false, responsive: true, staticPlot: false }}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function getCssColor(varName: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+    return v || fallback;
+  } catch {
+    return fallback;
+  }
 }

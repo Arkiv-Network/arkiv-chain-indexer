@@ -292,7 +292,6 @@ export function App() {
       <main className={mainClassName}>
         {activeView === "home" ? (
           <HomeView
-            transactionDataEnabled={transactionDataEnabled}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
           />
