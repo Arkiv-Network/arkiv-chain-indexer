@@ -17,12 +17,15 @@ import { BlockBracketed, BlockBracketedEmpty, TxBracketed } from "./icons";
 
 const BLOCK_TIME_MS = 2_000;
 const STUB_TICK_MS = 500;
-const MAX_STUB_BLOCKS = 1;
-const NEXT_BLOCK_PING_MS = 600;
+const MAX_STUB_BLOCKS = 3;
+const STUB_VISIBLE_AGE_MS = 6000;
+const PING_START_AGE_MS = 9000;
+const LOADING_METADATA_LEAD_MS = 1_000;
+const NEXT_BLOCK_PING_MS = 100;
 
 type BlockSlot =
   | { kind: "real"; block: StoredBlock }
-  | { kind: "stub"; blockNumber: number; estimatedDate: string };
+  | { kind: "stub"; blockNumber: number; estimatedDate: string; pinging: boolean };
 
 interface HomeViewProps {
   transactionDataEnabled: boolean | null;
@@ -33,6 +36,7 @@ interface HomeViewProps {
 const LATEST_BLOCK_LIMIT = "10";
 const LATEST_TRANSACTION_LIMIT = "10";
 const REFRESH_INTERVAL_MS = 12_000;
+const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
 export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }: HomeViewProps) {
   const [blocksData, setBlocksData] = useState<BlocksResponse | null>(null);
@@ -41,8 +45,21 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
   const [transactionsData, setTransactionsData] = useState<TransactionsResponse | null>(null);
   const [transactionsUnavailable, setTransactionsUnavailable] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [simulateOffline, setSimulateOffline] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIMULATE_OFFLINE_STORAGE_KEY) === "true";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIMULATE_OFFLINE_STORAGE_KEY, String(simulateOffline));
+  }, [simulateOffline]);
 
   const loadLatest = useCallback(async () => {
+    if (simulateOffline) {
+      setBlocksLoading(false);
+      return;
+    }
     setBlocksLoading(true);
     setBlocksError(null);
 
@@ -70,7 +87,7 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
       setTransactionsData(null);
       setTransactionsUnavailable(true);
     }
-  }, [transactionDataEnabled]);
+  }, [transactionDataEnabled, simulateOffline]);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,16 +122,22 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
     if (!Number.isFinite(latestTimeMs)) return [];
     const elapsed = nowMs - latestTimeMs;
-    const slotCount = Math.min(MAX_STUB_BLOCKS, Math.max(0, Math.floor(elapsed / BLOCK_TIME_MS)));
+    const slotCount = Math.min(
+      MAX_STUB_BLOCKS,
+      Math.max(0, Math.floor((elapsed - STUB_VISIBLE_AGE_MS) / BLOCK_TIME_MS)),
+    );
+    const loadingLabelElapsed = BLOCK_TIME_MS + PING_START_AGE_MS - LOADING_METADATA_LEAD_MS;
+    const pingingActive = !simulateOffline;
     return Array.from({ length: slotCount }, (_, idx) => {
       const offset = slotCount - idx;
       return {
         kind: "stub" as const,
         blockNumber: latestBlock.blockNumber + offset,
         estimatedDate: new Date(latestTimeMs + offset * BLOCK_TIME_MS).toISOString(),
+        pinging: pingingActive && offset === 1 && elapsed >= loadingLabelElapsed,
       };
     });
-  }, [latestBlock, nowMs, blocksError]);
+  }, [latestBlock, nowMs, blocksError, simulateOffline]);
 
   const blockSlots = useMemo<BlockSlot[]>(
     () => [...stubSlots, ...blocks.map((block) => ({ kind: "real" as const, block }))],
@@ -124,8 +147,16 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
   const nextExpectedBlockNumber = latestBlock ? latestBlock.blockNumber + 1 : null;
 
   useEffect(() => {
-    if (nextExpectedBlockNumber === null || blocksError) return;
+    if (nextExpectedBlockNumber === null || blocksError || simulateOffline || !latestBlock) return;
+    const latestTimeMs = new Date(latestBlock.blockDate).getTime();
+    if (!Number.isFinite(latestTimeMs)) return;
+
+    const predictedNextTimeMs = latestTimeMs + BLOCK_TIME_MS;
+    const startAtMs = predictedNextTimeMs + PING_START_AGE_MS;
+    const initialDelayMs = Math.max(0, startAtMs - Date.now());
+
     let cancelled = false;
+    let intervalId: number | undefined;
 
     const ping = async () => {
       try {
@@ -145,13 +176,18 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
       }
     };
 
-    void ping();
-    const interval = window.setInterval(ping, NEXT_BLOCK_PING_MS);
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      void ping();
+      intervalId = window.setInterval(ping, NEXT_BLOCK_PING_MS);
+    }, initialDelayMs);
+
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      window.clearTimeout(timeoutId);
+      if (intervalId !== undefined) window.clearInterval(intervalId);
     };
-  }, [nextExpectedBlockNumber, blocksError]);
+  }, [nextExpectedBlockNumber, blocksError, simulateOffline, latestBlock?.blockDate]);
 
   const transactions = transactionsData?.transactions ?? [];
   const showTransactions = transactionDataEnabled === true && !transactionsUnavailable && transactions.length > 0;
@@ -180,10 +216,20 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
           </p>
         </div>
         <div className="home-status" aria-live="polite">
-          <span>{blocksLoading ? "Refreshing…" : lastUpdatedLabel}</span>
+          <span className={simulateOffline ? "home-status-indicator offline" : "home-status-indicator"}>
+            {simulateOffline ? "Simulated offline" : blocksLoading ? "Refreshing…" : lastUpdatedLabel}
+          </span>
           <a href={blocksHref} onClick={openBlocksView}>
             View all blocks
           </a>
+          <button
+            type="button"
+            className={`home-debug-toggle${simulateOffline ? " active" : ""}`}
+            onClick={() => setSimulateOffline((value) => !value)}
+            title="Debug: pretend the backend is unreachable"
+          >
+            {simulateOffline ? "● simulated offline (debug)" : "○ simulate offline (debug)"}
+          </button>
         </div>
       </div>
 
@@ -289,11 +335,11 @@ function BlockFeedItem({
             <span>~{fmtDate(slot.estimatedDate, timeZone)}</span>
           </div>
           <div className="home-feed-meta">
-            <span>Awaiting block…</span>
+            <span>{slot.pinging ? "Loading metadata" : "Next block"}</span>
           </div>
         </div>
         <div className="home-feed-side">
-          <span className="home-stub-tag">pending</span>
+          <span className="home-stub-tag">{slot.pinging ? "loading" : "next"}</span>
         </div>
       </article>
     );

@@ -406,7 +406,7 @@ button.secondary {
   align-items: flex-end;
   justify-content: space-between;
   gap: 2rem;
-  padding: 1.5rem 0 1.75rem;
+  padding: 0rem 0 1.75rem;
   border-bottom: 1px solid var(--line);
   position: relative;
 }
@@ -478,6 +478,42 @@ button.secondary {
   background: var(--ok);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--ok) 18%, transparent);
   animation: home-status-pulse 1.6s ease-in-out infinite;
+}
+
+.home-status > span.home-status-indicator.offline::before {
+  background: var(--ark-orange);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ark-orange) 22%, transparent);
+}
+
+.home-status > span.home-status-indicator.offline {
+  color: var(--ark-orange);
+}
+
+.home-debug-toggle {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 0.2rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.home-debug-toggle:hover,
+.home-debug-toggle:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.home-debug-toggle.active {
+  color: var(--ark-orange);
+  border-color: var(--ark-orange);
+  border-style: solid;
+  background: color-mix(in oklab, var(--ark-orange) 8%, transparent);
 }
 
 @keyframes home-status-pulse {
