@@ -648,6 +648,25 @@ button.secondary {
   transition: background 0.15s ease;
 }
 
+[aria-labelledby="home-latest-blocks"] .home-feed-item {
+  animation: home-feed-item-fade-in 2s ease both;
+}
+
+@keyframes home-feed-item-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [aria-labelledby="home-latest-blocks"] .home-feed-item {
+    animation: none;
+  }
+}
+
 .home-feed-item:last-child {
   border-bottom: 0;
 }
