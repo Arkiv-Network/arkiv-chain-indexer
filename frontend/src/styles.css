@@ -165,8 +165,9 @@ header h1 {
   font-weight: 600;
   letter-spacing: 0.02em;
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.4rem;
+  line-height: 1.6;
 }
 
 header h1::before,
@@ -197,8 +198,11 @@ header h1 .brand-sub {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   border-left: 1px solid var(--line-strong);
-  padding-left: 0.55rem;
+  padding: 0.2rem 0 0.2rem 0.55rem;
   margin-left: 0.25rem;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
 }
 
 nav {
@@ -571,7 +575,7 @@ button.secondary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.25rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 .home-feed-grid.single {
@@ -584,6 +588,12 @@ button.secondary {
   border-radius: var(--r-md);
   background: var(--sand);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-feed-panel .home-feed-list {
+  flex: 1;
 }
 
 .home-panel-heading {
