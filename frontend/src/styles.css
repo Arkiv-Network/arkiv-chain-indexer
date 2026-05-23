@@ -660,6 +660,22 @@ button.secondary {
   animation: home-status-pulse 1.4s ease-in-out infinite;
 }
 
+/* When the heading carries its own icon, suppress the default pulsing dot. */
+.home-panel-heading h3.home-panel-heading-title::before {
+  display: none;
+}
+
+.home-panel-heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+}
+
+.home-panel-heading-icon .svg-icon {
+  display: inline-flex;
+}
+
 .home-panel-heading span {
   color: var(--ink-muted);
   font-family: var(--font-mono);
@@ -681,6 +697,91 @@ button.secondary {
   color: var(--ink-2);
 }
 
+.home-panel-error-tag {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ark-orange);
+  border: 1px solid var(--ark-orange);
+  background: color-mix(in oklab, var(--ark-orange) 8%, transparent);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--r-sm);
+  font-size: 0.7rem;
+  animation: home-status-pulse 1.6s ease-in-out infinite;
+  cursor: help;
+}
+
+.home-connection-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 0.95rem 1.15rem;
+  border: 1px solid var(--ark-orange);
+  border-left-width: 4px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ark-orange) 10%, var(--sand));
+  color: var(--ink);
+}
+
+.home-connection-alert__icon {
+  font-size: 1.2rem;
+  line-height: 1.2;
+  color: var(--ark-orange);
+  animation: home-status-pulse 1.6s ease-in-out infinite;
+}
+
+.home-connection-alert__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.home-connection-alert__body strong {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--ark-orange);
+}
+
+.home-connection-alert__body span {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+.home-connection-alert.home-connection-alert--warn {
+  border-color: color-mix(in oklab, var(--ark-orange) 70%, var(--stone-2));
+  background: color-mix(in oklab, var(--ark-orange) 6%, var(--sand));
+}
+
+.home-connection-alert--warn .home-connection-alert__icon {
+  color: color-mix(in oklab, var(--ark-orange) 80%, var(--ink));
+}
+
+.home-connection-alert--warn .home-connection-alert__body strong {
+  color: color-mix(in oklab, var(--ark-orange) 80%, var(--ink));
+}
+
+.home-feed-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+  padding: 2rem 1.5rem 2.25rem;
+  margin: 0;
+  text-align: left;
+}
+
+.home-feed-empty-state strong {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.home-feed-empty-state span {
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  max-width: 48ch;
+}
+
 .home-feed-list {
   display: flex;
   flex-direction: column;
@@ -688,7 +789,7 @@ button.secondary {
 
 .home-feed-item {
   display: grid;
-  grid-template-columns: 2.45rem minmax(0, 1fr) minmax(8rem, auto);
+  grid-template-columns: 2.85rem minmax(0, 1fr) minmax(8rem, auto);
   gap: 0.85rem;
   align-items: center;
   padding: 0.85rem 1.25rem;
@@ -755,19 +856,20 @@ button.secondary {
 }
 
 .home-feed-icon {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2.75rem;
+  height: 2.75rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--r-sm);
-  background: color-mix(in oklab, var(--ark-blue) 10%, var(--stone));
   color: var(--ark-blue);
 }
 
 .home-feed-icon.tx {
   background: color-mix(in oklab, var(--ark-orange) 14%, var(--stone));
   color: var(--ark-orange);
+  border-radius: var(--r-sm);
+  width: 2.25rem;
+  height: 2.25rem;
 }
 
 .home-feed-icon svg {
@@ -1693,7 +1795,7 @@ th:not(.num) .sort-header {
   }
 
   .home-feed-item {
-    grid-template-columns: 2.45rem minmax(0, 1fr);
+    grid-template-columns: 2.85rem minmax(0, 1fr);
   }
 
   .home-feed-side {

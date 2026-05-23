@@ -3,11 +3,13 @@
 
 import blockArchiveSvg from "./icons/block-archive.svg?raw";
 import blockBracketedSvg from "./icons/block-bracketed.svg?raw";
-import blockBracketedEmptySvg from "./icons/block-bracketed-empty.svg?raw";
+import blockEmptySvg from "./icons/block-empty.svg?raw";
+import blockFilledSvg from "./icons/block-filled.svg?raw";
 import blockHashtagSvg from "./icons/block-hashtag.svg?raw";
 import blockIsoOutlineSvg from "./icons/block-iso-outline.svg?raw";
 import blockLayeredSvg from "./icons/block-layered.svg?raw";
 import blockLedgerSvg from "./icons/block-ledger.svg?raw";
+import blockListSvg from "./icons/block-list.svg?raw";
 import blockSolidSvg from "./icons/block-solid.svg?raw";
 import blockWireAccentSvg from "./icons/block-wire-accent.svg?raw";
 import txBoltSvg from "./icons/tx-bolt.svg?raw";
@@ -55,11 +57,13 @@ function makeIcon(raw: string) {
 
 export const BlockArchive = makeIcon(blockArchiveSvg);
 export const BlockBracketed = makeIcon(blockBracketedSvg);
-export const BlockBracketedEmpty = makeIcon(blockBracketedEmptySvg);
+export const BlockEmpty = makeIcon(blockEmptySvg);
+export const BlockFilled = makeIcon(blockFilledSvg);
 export const BlockHashtag = makeIcon(blockHashtagSvg);
 export const BlockIsoOutline = makeIcon(blockIsoOutlineSvg);
 export const BlockLayered = makeIcon(blockLayeredSvg);
 export const BlockLedger = makeIcon(blockLedgerSvg);
+export const BlockList = makeIcon(blockListSvg);
 export const BlockSolid = makeIcon(blockSolidSvg);
 export const BlockWireAccent = makeIcon(blockWireAccentSvg);
 export const TxBolt = makeIcon(txBoltSvg);

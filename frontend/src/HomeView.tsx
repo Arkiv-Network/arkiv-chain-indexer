@@ -13,7 +13,7 @@ import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { transactionExplorerHref } from "./transactionLinks";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
-import { BlockBracketed, BlockBracketedEmpty, TxBracketed } from "./icons";
+import { BlockEmpty, BlockFilled, BlockList, TxBracketed } from "./icons";
 
 const BLOCK_TIME_MS = 2_000;
 const STUB_TICK_MS = 500;
@@ -23,6 +23,7 @@ const PING_START_AGE_MS = 9000;
 const LOADING_METADATA_LEAD_MS = 1_000;
 const NEXT_BLOCK_PING_MS = 100;
 const PING_MIN_INTERVAL_MS = 1_500;
+const SCANNER_DELAY_WARNING_AGE_MS = 60_000;
 
 type BlockSlot =
   | { kind: "real"; block: StoredBlock }
@@ -56,17 +57,38 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     window.localStorage.setItem(SIMULATE_OFFLINE_STORAGE_KEY, String(simulateOffline));
   }, [simulateOffline]);
 
+  // Debug only: when the simulate-offline toggle is on, fail all /api/blocks*
+  // requests at the fetch boundary. The rest of the component is unaware of
+  // the toggle and just sees a real connection failure.
+  useEffect(() => {
+    if (typeof window === "undefined" || !simulateOffline) return;
+    const originalFetch = window.fetch;
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input instanceof Request
+              ? input.url
+              : String(input);
+      if (url.includes("/api/blocks")) {
+        throw new Error("Simulated offline (debug)");
+      }
+      return originalFetch(input, init);
+    }) as typeof window.fetch;
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [simulateOffline]);
+
   const loadLatest = useCallback(async () => {
-    if (simulateOffline) {
-      setBlocksLoading(false);
-      return;
-    }
     setBlocksLoading(true);
-    setBlocksError(null);
 
     try {
       const nextBlocks = await fetchBlocks(latestBlocksParams());
       setBlocksData(nextBlocks);
+      setBlocksError(null);
       setLastUpdatedAt(new Date());
     } catch (error) {
       setBlocksError(error instanceof Error ? error.message : String(error));
@@ -88,7 +110,7 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
       setTransactionsData(null);
       setTransactionsUnavailable(true);
     }
-  }, [transactionDataEnabled, simulateOffline]);
+  }, [transactionDataEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,15 +133,15 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!latestBlock || blocksError) return;
+    if (!latestBlock) return;
     const tick = () => setNowMs(Date.now());
     tick();
     const interval = window.setInterval(tick, STUB_TICK_MS);
     return () => window.clearInterval(interval);
-  }, [latestBlock?.blockNumber, blocksError]);
+  }, [latestBlock?.blockNumber]);
 
   const stubSlots = useMemo<BlockSlot[]>(() => {
-    if (!latestBlock || blocksError) return [];
+    if (!latestBlock) return [];
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
     if (!Number.isFinite(latestTimeMs)) return [];
     const elapsed = nowMs - latestTimeMs;
@@ -137,7 +159,7 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
         pinging: offset === 1 && elapsed >= loadingLabelElapsed,
       };
     });
-  }, [latestBlock, nowMs, blocksError]);
+  }, [latestBlock, nowMs]);
 
   const blockSlots = useMemo<BlockSlot[]>(
     () => [...stubSlots, ...blocks.map((block) => ({ kind: "real" as const, block }))],
@@ -147,7 +169,7 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
   const nextExpectedBlockNumber = latestBlock ? latestBlock.blockNumber + 1 : null;
 
   useEffect(() => {
-    if (nextExpectedBlockNumber === null || blocksError || simulateOffline || !latestBlock) return;
+    if (nextExpectedBlockNumber === null || !latestBlock) return;
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
     if (!Number.isFinite(latestTimeMs)) return;
 
@@ -165,7 +187,9 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
       lastPingAtMs = now;
       try {
         const block = await fetchBlockByNumber(nextExpectedBlockNumber);
-        if (cancelled || !block) return;
+        if (cancelled) return;
+        setBlocksError(null);
+        if (!block) return;
         setBlocksData((previous) => {
           if (!previous) return previous;
           if (previous.blocks.some((existing) => existing.blockNumber === block.blockNumber)) {
@@ -175,8 +199,9 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
           return { ...previous, blocks: merged, count: merged.length };
         });
         setLastUpdatedAt(new Date());
-      } catch {
-        // Block not yet indexed — keep polling on the interval.
+      } catch (error) {
+        if (cancelled) return;
+        setBlocksError(error instanceof Error ? error.message : String(error));
       }
     };
 
@@ -191,7 +216,7 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
       window.clearTimeout(timeoutId);
       if (intervalId !== undefined) window.clearInterval(intervalId);
     };
-  }, [nextExpectedBlockNumber, blocksError, simulateOffline, latestBlock?.blockDate]);
+  }, [nextExpectedBlockNumber, latestBlock?.blockDate]);
 
   const transactions = transactionsData?.transactions ?? [];
   const showTransactions = transactionDataEnabled === true && !transactionsUnavailable && transactions.length > 0;
@@ -206,6 +231,12 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
     if (!Number.isFinite(latestTimeMs)) return null;
     return `${formatBehind(Math.max(0, nowMs - latestTimeMs))} behind`;
   }, [latestBlock, nowMs]);
+  const scannerDelayed = useMemo(() => {
+    if (blocksError || !latestBlock) return false;
+    const latestTimeMs = new Date(latestBlock.blockDate).getTime();
+    if (!Number.isFinite(latestTimeMs)) return false;
+    return nowMs - latestTimeMs >= SCANNER_DELAY_WARNING_AGE_MS;
+  }, [latestBlock, nowMs, blocksError]);
 
   const openBlocksView = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -226,8 +257,15 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
           </p>
         </div>
         <div className="home-status" aria-live="polite">
-          <span className={simulateOffline ? "home-status-indicator offline" : "home-status-indicator"}>
-            {simulateOffline ? "Simulated offline" : blocksLoading ? "Refreshing…" : lastUpdatedLabel}
+          <span
+            className={blocksError ? "home-status-indicator offline" : "home-status-indicator"}
+            title={blocksError ?? undefined}
+          >
+            {blocksError
+              ? "No connection to scanner"
+              : blocksLoading
+                ? "Refreshing…"
+                : lastUpdatedLabel}
           </span>
           <a href={blocksHref} onClick={openBlocksView}>
             View all blocks
@@ -242,6 +280,35 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
           </button>
         </div>
       </div>
+
+      {blocksError ? (
+        <div className="home-connection-alert" role="alert" aria-live="polite">
+          <span className="home-connection-alert__icon" aria-hidden="true">
+            ⚠
+          </span>
+          <div className="home-connection-alert__body">
+            <strong>No connection to the scanner</strong>
+            <span>Showing the last received data — automatic retry in progress.</span>
+          </div>
+        </div>
+      ) : scannerDelayed ? (
+        <div
+          className="home-connection-alert home-connection-alert--warn"
+          role="alert"
+          aria-live="polite"
+        >
+          <span className="home-connection-alert__icon" aria-hidden="true">
+            ⚠
+          </span>
+          <div className="home-connection-alert__body">
+            <strong>Scanner is delayed</strong>
+            <span>
+              The latest indexed block is more than a minute old — the data shown may not
+              represent the current state of the network.
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div>
         <div className="home-section-head">
@@ -271,7 +338,12 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
         <div className={`home-feed-grid${showTransactions ? "" : " single"}`}>
           <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
             <div className="home-panel-heading">
-              <h3 id="home-latest-blocks">Latest blocks</h3>
+              <h3 id="home-latest-blocks" className="home-panel-heading-title">
+                <span className="home-panel-heading-icon" aria-hidden="true">
+                  <BlockList size={40} />
+                </span>
+                Latest blocks
+              </h3>
               <div className="home-panel-heading-meta">
                 {latestBlockBehindLabel ? (
                   <span className="home-panel-latest-time">{latestBlockBehindLabel}</span>
@@ -279,8 +351,14 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
                 <span>{blocksData ? `${blocksData.count} shown` : blocksLoading ? "Loading" : "No data"}</span>
               </div>
             </div>
-            {blocksError ? (
-              <p className="summary error">Failed to load blocks: {blocksError}</p>
+            {blocksError && blocks.length === 0 ? (
+              <div className="home-feed-empty-state">
+                <strong>Unable to load blocks right now.</strong>
+                <span>
+                  We can't reach the scanner. The page will refresh automatically once the
+                  connection is restored.
+                </span>
+              </div>
             ) : (
               <div className="home-feed-list">
                 {blockSlots.map((slot) => (
@@ -342,7 +420,7 @@ function BlockFeedItem({
     return (
       <article className="home-feed-item home-feed-item--stub" aria-busy="true">
         <div className="home-feed-icon" aria-hidden="true">
-          <BlockBracketedEmpty size={22} />
+          <BlockEmpty size={40} />
         </div>
         <div className="home-feed-main">
           <div className="home-feed-title">
@@ -364,7 +442,7 @@ function BlockFeedItem({
   return (
     <article className="home-feed-item">
       <div className="home-feed-icon" aria-hidden="true">
-        <BlockBracketed size={22} />
+        <BlockFilled size={40} />
       </div>
       <div className="home-feed-main">
         <div className="home-feed-title">
