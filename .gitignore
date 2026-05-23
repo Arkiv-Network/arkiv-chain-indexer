@@ -5,3 +5,8 @@ arkiv-sdk-js/
 .env.*.local
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
+/.playwright-mcp/
+.idea
+bun.lock
+# Debug screenshots from local Playwright / dev runs (root only, not recursive).
+/*.png
