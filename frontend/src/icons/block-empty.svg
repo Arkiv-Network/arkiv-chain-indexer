@@ -6,7 +6,7 @@
    fill="none"
    version="1.1"
    id="svg5"
-   sodipodi:docname="block-empty - Copy.svg"
+   sodipodi:docname="block-empty.svg"
    inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -24,7 +24,7 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="18.234375"
-     inkscape:cx="10.858612"
+     inkscape:cx="10.913453"
      inkscape:cy="20.538132"
      inkscape:window-width="3440"
      inkscape:window-height="1369"
@@ -39,7 +39,8 @@
      stroke-linejoin="miter"
      fill="none"
      opacity="0.45"
-     id="path3" />
+     id="path3"
+     style="opacity:1;fill:none;stroke:#999999;stroke-opacity:1" />
   <path
      d="M 1.5356684,8.6688837 14.765049,14.192802 V 28.923261 L 1.5356684,23.399341 Z"
      stroke="#111111"
@@ -48,7 +49,7 @@
      fill="none"
      opacity="0.45"
      id="path4"
-     style="fill:#cccccc" />
+     style="fill:#ececec;opacity:1;stroke:#989898;stroke-opacity:1" />
   <path
      d="M 30.545487,8.6919173 17.297941,14.201242 v 14.691534 l 13.247546,-5.509325 z"
      stroke="#111111"
@@ -57,5 +58,5 @@
      fill="none"
      opacity="0.45"
      id="path5"
-     style="fill:#808080" />
+     style="fill:#cccccc;opacity:1;stroke:#9a9a9a;stroke-opacity:1" />
 </svg>
