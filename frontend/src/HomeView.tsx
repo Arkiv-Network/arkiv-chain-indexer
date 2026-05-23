@@ -34,7 +34,7 @@ interface HomeViewProps {
   timeZone: string;
 }
 
-const LATEST_BLOCK_LIMIT = "10";
+const LATEST_BLOCK_LIMIT = "20";
 const LATEST_TRANSACTION_LIMIT = "10";
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
@@ -128,17 +128,16 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
       Math.max(0, Math.floor((elapsed - STUB_VISIBLE_AGE_MS) / BLOCK_TIME_MS)),
     );
     const loadingLabelElapsed = BLOCK_TIME_MS + PING_START_AGE_MS - LOADING_METADATA_LEAD_MS;
-    const pingingActive = !simulateOffline;
     return Array.from({ length: slotCount }, (_, idx) => {
       const offset = slotCount - idx;
       return {
         kind: "stub" as const,
         blockNumber: latestBlock.blockNumber + offset,
         estimatedDate: new Date(latestTimeMs + offset * BLOCK_TIME_MS).toISOString(),
-        pinging: pingingActive && offset === 1 && elapsed >= loadingLabelElapsed,
+        pinging: offset === 1 && elapsed >= loadingLabelElapsed,
       };
     });
-  }, [latestBlock, nowMs, blocksError, simulateOffline]);
+  }, [latestBlock, nowMs, blocksError]);
 
   const blockSlots = useMemo<BlockSlot[]>(
     () => [...stubSlots, ...blocks.map((block) => ({ kind: "real" as const, block }))],
@@ -267,7 +266,14 @@ export function HomeView({ transactionDataEnabled, onLocationChange, timeZone }:
           <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
             <div className="home-panel-heading">
               <h3 id="home-latest-blocks">Latest blocks</h3>
-              <span>{blocksData ? `${blocksData.count} shown` : blocksLoading ? "Loading" : "No data"}</span>
+              <div className="home-panel-heading-meta">
+                {latestBlock ? (
+                  <span className="home-panel-latest-time">
+                    latest {fmtDate(latestBlock.blockDate, timeZone)}
+                  </span>
+                ) : null}
+                <span>{blocksData ? `${blocksData.count} shown` : blocksLoading ? "Loading" : "No data"}</span>
+              </div>
             </div>
             {blocksError ? (
               <p className="summary error">Failed to load blocks: {blocksError}</p>

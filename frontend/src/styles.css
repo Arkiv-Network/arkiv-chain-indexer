@@ -669,6 +669,18 @@ button.secondary {
   white-space: nowrap;
 }
 
+.home-panel-heading-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.home-panel-heading-meta .home-panel-latest-time {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-2);
+}
+
 .home-feed-list {
   display: flex;
   flex-direction: column;
