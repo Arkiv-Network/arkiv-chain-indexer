@@ -876,6 +876,13 @@ button.secondary {
   display: block;
 }
 
+/* The isometric block cubes read a bit squashed — stretch them 20% taller. */
+.home-feed-icon:not(.tx) .svg-icon > svg,
+.home-panel-heading-icon .svg-icon > svg {
+  transform: scaleY(1.2);
+  transform-origin: center;
+}
+
 .svg-icon {
   display: inline-flex;
   line-height: 0;
