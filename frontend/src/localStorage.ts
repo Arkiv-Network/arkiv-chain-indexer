@@ -6,8 +6,18 @@ export interface StorageLike {
   removeItem(key: string): void;
 }
 
+interface EnumerableStorageLike extends StorageLike {
+  readonly length: number;
+  key(index: number): string | null;
+}
+
 function storageKey(key: string): string {
   return `${PREFIX}${key}`;
+}
+
+function isEnumerableStorage(storage: StorageLike): storage is EnumerableStorageLike {
+  return typeof (storage as Partial<EnumerableStorageLike>).length === "number" &&
+    typeof (storage as Partial<EnumerableStorageLike>).key === "function";
 }
 
 function getBrowserStorage(): StorageLike | null {
@@ -55,6 +65,27 @@ export function removeStoredValue(
   if (!storage) return;
   try {
     storage.removeItem(storageKey(key));
+  } catch {
+    // localStorage may be unavailable. Persistence is best-effort.
+  }
+}
+
+export function removeStoredSection(
+  keyPrefix: string,
+  storage: StorageLike | null = getBrowserStorage(),
+): void {
+  if (!storage || !isEnumerableStorage(storage)) return;
+
+  try {
+    const prefix = storageKey(keyPrefix);
+    const keys: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key?.startsWith(prefix)) keys.push(key);
+    }
+    for (const key of keys) {
+      storage.removeItem(key);
+    }
   } catch {
     // localStorage may be unavailable. Persistence is best-effort.
   }
