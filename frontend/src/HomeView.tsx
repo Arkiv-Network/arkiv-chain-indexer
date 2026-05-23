@@ -407,6 +407,22 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function BlockMorphIcon({ filled }: { filled: boolean }) {
+  return (
+    <div
+      className={`home-feed-icon home-feed-icon--block${filled ? " is-filled" : ""}`}
+      aria-hidden="true"
+    >
+      <span className="home-feed-icon__layer home-feed-icon__layer--empty">
+        <BlockEmpty size={40} />
+      </span>
+      <span className="home-feed-icon__layer home-feed-icon__layer--filled">
+        <BlockFilled size={40} />
+      </span>
+    </div>
+  );
+}
+
 function BlockFeedItem({
   slot,
   onLocationChange,
@@ -419,9 +435,7 @@ function BlockFeedItem({
   if (slot.kind === "stub") {
     return (
       <article className="home-feed-item home-feed-item--stub" aria-busy="true">
-        <div className="home-feed-icon" aria-hidden="true">
-          <BlockEmpty size={40} />
-        </div>
+        <BlockMorphIcon filled={false} />
         <div className="home-feed-main">
           <div className="home-feed-title">
             <span className="mono">{slot.blockNumber}</span>
@@ -441,9 +455,7 @@ function BlockFeedItem({
   const { block } = slot;
   return (
     <article className="home-feed-item">
-      <div className="home-feed-icon" aria-hidden="true">
-        <BlockFilled size={40} />
-      </div>
+      <BlockMorphIcon filled={true} />
       <div className="home-feed-main">
         <div className="home-feed-title">
           <BlockNumberLink blockNumber={block.blockNumber} onLocationChange={onLocationChange} />

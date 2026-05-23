@@ -883,6 +883,37 @@ button.secondary {
   transform-origin: center;
 }
 
+.home-feed-icon--block {
+  position: relative;
+}
+
+.home-feed-icon__layer {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.55s ease;
+}
+
+.home-feed-icon__layer--filled {
+  opacity: 0;
+}
+
+.home-feed-icon--block.is-filled .home-feed-icon__layer--empty {
+  opacity: 0;
+}
+
+.home-feed-icon--block.is-filled .home-feed-icon__layer--filled {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-feed-icon__layer {
+    transition: none;
+  }
+}
+
 .svg-icon {
   display: inline-flex;
   line-height: 0;
