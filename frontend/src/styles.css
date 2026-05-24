@@ -398,6 +398,111 @@ button.secondary {
   font-weight: 600;
 }
 
+.admin-view {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-view-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-view-header h2 {
+  margin: 0;
+  font-size: 1.8rem;
+  line-height: 1.1;
+}
+
+.admin-view-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.admin-view-status strong {
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+}
+
+.admin-settings-form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  margin: 0;
+}
+
+.admin-settings-table {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: color-mix(in oklab, var(--stone) 42%, transparent);
+}
+
+.admin-settings-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(140px, 0.8fr) minmax(230px, 1fr) minmax(150px, 0.8fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.7rem 0.85rem;
+  border-top: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 0.86rem;
+}
+
+.admin-settings-row:first-child {
+  border-top: 0;
+}
+
+.admin-settings-row--head {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--stone-2) 48%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-settings-row strong {
+  display: block;
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.admin-settings-row small {
+  display: block;
+  margin-top: 0.15rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.admin-settings-row input {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--sand);
+  color: var(--ink);
+  font: inherit;
+}
+
+.admin-settings-row input[type="number"] {
+  font-family: var(--font-mono);
+}
+
 .permalink-row {
   display: flex;
   align-items: center;
@@ -1919,6 +2024,15 @@ th:not(.num) .sort-header {
   .home-stats,
   .home-feed-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-settings-row {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+  }
+
+  .admin-settings-row--head {
+    display: none;
   }
 
   .home-feed-item {

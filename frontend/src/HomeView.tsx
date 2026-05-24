@@ -11,23 +11,9 @@ import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
+import type { PageSettings } from "./pageSettings";
 
 const Plot = createPlotlyComponent(Plotly);
-
-const BLOCK_TIME_MS = 2_000;
-const STUB_TICK_MS = 500;
-const MAX_STUB_BLOCKS = 3;
-const STUB_VISIBLE_AGE_MS = 6000;
-const PING_START_AGE_MS = 9000;
-const LOADING_METADATA_LEAD_MS = 1_000;
-const NEXT_BLOCK_PING_MS = 100;
-const PING_MIN_INTERVAL_MS = 1_500;
-const SCANNER_DELAY_WARNING_AGE_MS = 60_000;
-
-const HISTOGRAM_WINDOW_MINUTES = 60;
-const HISTOGRAM_FETCH_LIMIT = 2400;
-const HISTOGRAM_REFRESH_MS = 5_000;
-const HISTOGRAM_CLOCK_TICK_MS = 1_000;
 
 type BlockSlot =
   | { kind: "real"; block: StoredBlock }
@@ -35,6 +21,7 @@ type BlockSlot =
 
 interface HomeViewProps {
   onLocationChange: () => void;
+  settings: PageSettings;
   timeZone: string;
 }
 
@@ -42,7 +29,7 @@ const LATEST_BLOCK_LIMIT = "20";
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
-export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
+export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps) {
   const [blocksData, setBlocksData] = useState<BlocksResponse | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const [blocksLoading, setBlocksLoading] = useState(true);
@@ -125,9 +112,9 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     if (!latestBlock) return;
     const tick = () => setNowMs(Date.now());
     tick();
-    const interval = window.setInterval(tick, STUB_TICK_MS);
+    const interval = window.setInterval(tick, settings.stubTickMs);
     return () => window.clearInterval(interval);
-  }, [latestBlock?.blockNumber]);
+  }, [latestBlock?.blockNumber, settings.stubTickMs]);
 
   const stubSlots = useMemo<BlockSlot[]>(() => {
     if (!latestBlock) return [];
@@ -135,20 +122,21 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     if (!Number.isFinite(latestTimeMs)) return [];
     const elapsed = nowMs - latestTimeMs;
     const slotCount = Math.min(
-      MAX_STUB_BLOCKS,
-      Math.max(0, Math.floor((elapsed - STUB_VISIBLE_AGE_MS) / BLOCK_TIME_MS)),
+      settings.maxStubBlocks,
+      Math.max(0, Math.floor((elapsed - settings.stubVisibleAgeMs) / settings.blockTimeMs)),
     );
-    const loadingLabelElapsed = BLOCK_TIME_MS + PING_START_AGE_MS - LOADING_METADATA_LEAD_MS;
+    const loadingLabelElapsed =
+      settings.blockTimeMs + settings.pingStartAgeMs - settings.loadingMetadataLeadMs;
     return Array.from({ length: slotCount }, (_, idx) => {
       const offset = slotCount - idx;
       return {
         kind: "stub" as const,
         blockNumber: latestBlock.blockNumber + offset,
-        estimatedDate: new Date(latestTimeMs + offset * BLOCK_TIME_MS).toISOString(),
+        estimatedDate: new Date(latestTimeMs + offset * settings.blockTimeMs).toISOString(),
         pinging: offset === 1 && elapsed >= loadingLabelElapsed,
       };
     });
-  }, [latestBlock, nowMs]);
+  }, [latestBlock, nowMs, settings]);
 
   const blockSlots = useMemo<BlockSlot[]>(
     () => [...stubSlots, ...blocks.map((block) => ({ kind: "real" as const, block }))],
@@ -162,8 +150,8 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
     if (!Number.isFinite(latestTimeMs)) return;
 
-    const predictedNextTimeMs = latestTimeMs + BLOCK_TIME_MS;
-    const startAtMs = predictedNextTimeMs + PING_START_AGE_MS;
+    const predictedNextTimeMs = latestTimeMs + settings.blockTimeMs;
+    const startAtMs = predictedNextTimeMs + settings.pingStartAgeMs;
     const initialDelayMs = Math.max(0, startAtMs - Date.now());
 
     let cancelled = false;
@@ -174,7 +162,7 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     const ping = async () => {
       if (inFlight) return;
       const now = Date.now();
-      if (now - lastPingAtMs < PING_MIN_INTERVAL_MS) return;
+      if (now - lastPingAtMs < settings.pingMinIntervalMs) return;
       lastPingAtMs = now;
       inFlight = true;
       try {
@@ -202,7 +190,7 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     const timeoutId = window.setTimeout(() => {
       if (cancelled) return;
       void ping();
-      intervalId = window.setInterval(ping, NEXT_BLOCK_PING_MS);
+      intervalId = window.setInterval(ping, settings.nextBlockPingMs);
     }, initialDelayMs);
 
     return () => {
@@ -210,7 +198,14 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
       window.clearTimeout(timeoutId);
       if (intervalId !== undefined) window.clearInterval(intervalId);
     };
-  }, [nextExpectedBlockNumber, latestBlock?.blockDate]);
+  }, [
+    nextExpectedBlockNumber,
+    latestBlock?.blockDate,
+    settings.blockTimeMs,
+    settings.nextBlockPingMs,
+    settings.pingMinIntervalMs,
+    settings.pingStartAgeMs,
+  ]);
 
   const blocksHref = buildPermalinkHref("blocks", { limit: "100" });
   const lastUpdatedLabel = useMemo(() => {
@@ -227,8 +222,8 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     if (blocksError || !latestBlock) return false;
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
     if (!Number.isFinite(latestTimeMs)) return false;
-    return nowMs - latestTimeMs >= SCANNER_DELAY_WARNING_AGE_MS;
-  }, [latestBlock, nowMs, blocksError]);
+    return nowMs - latestTimeMs >= settings.scannerDelayWarningAgeMs;
+  }, [latestBlock, nowMs, blocksError, settings.scannerDelayWarningAgeMs]);
 
   const openBlocksView = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -241,10 +236,10 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     <section className="home-view">
       <div className="home-hero">
         <div>
-          <p className="home-kicker">arkiv chain explorer</p>
-          <h2>Explore the Arkiv chain.</h2>
+          <p className="home-kicker">{settings.chainName} chain explorer</p>
+          <h2>Explore the {settings.chainName} chain.</h2>
           <p className="home-lede">
-            Newest indexed blocks and transactions on the Arkiv data layer — searchable, time‑scoped,
+            Newest indexed blocks and transactions on the {settings.chainName} data layer — searchable, time‑scoped,
             verifiable.
           </p>
         </div>
@@ -324,7 +319,7 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
         <div className="home-section-head">
           <div>
             <p className="home-kicker">live feed</p>
-            <h3>Latest blocks &amp; last 60 minutes</h3>
+            <h3>Latest blocks &amp; last {settings.histogramWindowMinutes} minutes</h3>
           </div>
         </div>
         <div className="home-feed-grid">
@@ -366,7 +361,7 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
             )}
           </section>
 
-          <LiveHistograms timeZone={timeZone} />
+          <LiveHistograms settings={settings} timeZone={timeZone} />
         </div>
       </div>
     </section>
@@ -481,7 +476,7 @@ interface MinuteBucket {
 
 type HistogramMetric = "gasUsed" | "transactionCount";
 
-function LiveHistograms({ timeZone }: { timeZone: string }) {
+function LiveHistograms({ settings, timeZone }: { settings: PageSettings; timeZone: string }) {
   const [blocks, setBlocks] = useState<StoredBlock[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -496,9 +491,9 @@ function LiveHistograms({ timeZone }: { timeZone: string }) {
       const next = Math.floor(Date.now() / 60_000) * 60_000;
       setCurrentMinuteMs((prev) => (prev !== next ? next : prev));
     };
-    const interval = window.setInterval(tick, HISTOGRAM_CLOCK_TICK_MS);
+    const interval = window.setInterval(tick, settings.histogramClockTickMs);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [settings.histogramClockTickMs]);
 
   // Pull the last ~60 minutes of blocks on a short cadence so the current
   // minute's bar keeps growing as new blocks arrive.
@@ -511,11 +506,11 @@ function LiveHistograms({ timeZone }: { timeZone: string }) {
       inFlight = true;
       try {
         const cutoff = new Date(
-          Date.now() - (HISTOGRAM_WINDOW_MINUTES + 1) * 60_000,
+          Date.now() - (settings.histogramWindowMinutes + 1) * 60_000,
         ).toISOString();
         const params = new URLSearchParams();
         params.set("dateGt", cutoff);
-        params.set("limit", String(HISTOGRAM_FETCH_LIMIT));
+        params.set("limit", String(settings.histogramFetchLimit));
         params.set("order", "desc");
         const response = await fetchBlocks(params);
         if (cancelled) return;
@@ -531,17 +526,17 @@ function LiveHistograms({ timeZone }: { timeZone: string }) {
     };
 
     void load();
-    const interval = window.setInterval(load, HISTOGRAM_REFRESH_MS);
+    const interval = window.setInterval(load, settings.histogramRefreshMs);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [settings.histogramFetchLimit, settings.histogramRefreshMs, settings.histogramWindowMinutes]);
 
   const buckets = useMemo<MinuteBucket[]>(() => {
     const map = new Map<number, MinuteBucket>();
-    for (let i = 0; i < HISTOGRAM_WINDOW_MINUTES; i++) {
-      const ms = currentMinuteMs - (HISTOGRAM_WINDOW_MINUTES - 1 - i) * 60_000;
+    for (let i = 0; i < settings.histogramWindowMinutes; i++) {
+      const ms = currentMinuteMs - (settings.histogramWindowMinutes - 1 - i) * 60_000;
       map.set(ms, { minuteMs: ms, gasUsed: 0, transactionCount: 0 });
     }
     for (const block of blocks) {
@@ -555,15 +550,16 @@ function LiveHistograms({ timeZone }: { timeZone: string }) {
       bucket.transactionCount += block.transactionCount;
     }
     return Array.from(map.values()).sort((a, b) => a.minuteMs - b.minuteMs);
-  }, [blocks, currentMinuteMs]);
+  }, [blocks, currentMinuteMs, settings.histogramWindowMinutes]);
 
   return (
     <div className="home-histograms">
       <HistogramPanel
         title="Gas used"
-        subtitle={`per minute · last ${HISTOGRAM_WINDOW_MINUTES} min`}
+        subtitle={`per minute · last ${settings.histogramWindowMinutes} min`}
         buckets={buckets}
         currentMinuteMs={currentMinuteMs}
+        histogramWindowMinutes={settings.histogramWindowMinutes}
         colorVar="--ark-blue"
         colorFallback="#181ea9"
         metric="gasUsed"
@@ -574,9 +570,10 @@ function LiveHistograms({ timeZone }: { timeZone: string }) {
       />
       <HistogramPanel
         title="Transactions"
-        subtitle={`per minute · last ${HISTOGRAM_WINDOW_MINUTES} min`}
+        subtitle={`per minute · last ${settings.histogramWindowMinutes} min`}
         buckets={buckets}
         currentMinuteMs={currentMinuteMs}
+        histogramWindowMinutes={settings.histogramWindowMinutes}
         colorVar="--ark-orange"
         colorFallback="#fe7446"
         metric="transactionCount"
@@ -594,6 +591,7 @@ function HistogramPanel({
   subtitle,
   buckets,
   currentMinuteMs,
+  histogramWindowMinutes,
   colorVar,
   colorFallback,
   metric,
@@ -606,6 +604,7 @@ function HistogramPanel({
   subtitle: string;
   buckets: MinuteBucket[];
   currentMinuteMs: number;
+  histogramWindowMinutes: number;
   colorVar: string;
   colorFallback: string;
   metric: HistogramMetric;
@@ -636,7 +635,7 @@ function HistogramPanel({
       [labels[i], b.minuteMs === currentMinuteMs ? "in progress" : "complete"] as [string, string],
     );
 
-    const firstMs = buckets[0]?.minuteMs ?? currentMinuteMs - (HISTOGRAM_WINDOW_MINUTES - 1) * 60_000;
+    const firstMs = buckets[0]?.minuteMs ?? currentMinuteMs - (histogramWindowMinutes - 1) * 60_000;
     const lastMs = buckets[buckets.length - 1]?.minuteMs ?? currentMinuteMs;
 
     const trace: Partial<Plotly.PlotData> = {
@@ -691,7 +690,18 @@ function HistogramPanel({
     };
 
     return { traces: [trace], layout };
-  }, [buckets, currentMinuteMs, baseColor, gridColor, textColor, metric, title, unitLabel, timeZone]);
+  }, [
+    buckets,
+    currentMinuteMs,
+    baseColor,
+    gridColor,
+    textColor,
+    histogramWindowMinutes,
+    metric,
+    title,
+    unitLabel,
+    timeZone,
+  ]);
 
   return (
     <section className="home-feed-panel home-histogram-panel">
