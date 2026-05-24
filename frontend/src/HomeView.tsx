@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import {
@@ -82,7 +82,10 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     };
   }, [simulateOffline]);
 
+  const latestInFlightRef = useRef(false);
   const loadLatest = useCallback(async () => {
+    if (latestInFlightRef.current) return;
+    latestInFlightRef.current = true;
     setBlocksLoading(true);
 
     try {
@@ -93,6 +96,7 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     } catch (error) {
       setBlocksError(error instanceof Error ? error.message : String(error));
     } finally {
+      latestInFlightRef.current = false;
       setBlocksLoading(false);
     }
   }, []);
@@ -165,11 +169,14 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
     let cancelled = false;
     let intervalId: number | undefined;
     let lastPingAtMs = 0;
+    let inFlight = false;
 
     const ping = async () => {
+      if (inFlight) return;
       const now = Date.now();
       if (now - lastPingAtMs < PING_MIN_INTERVAL_MS) return;
       lastPingAtMs = now;
+      inFlight = true;
       try {
         const block = await fetchBlockByNumber(nextExpectedBlockNumber);
         if (cancelled) return;
@@ -187,6 +194,8 @@ export function HomeView({ onLocationChange, timeZone }: HomeViewProps) {
       } catch (error) {
         if (cancelled) return;
         setBlocksError(error instanceof Error ? error.message : String(error));
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -495,8 +504,11 @@ function LiveHistograms({ timeZone }: { timeZone: string }) {
   // minute's bar keeps growing as new blocks arrive.
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
 
     const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const cutoff = new Date(
           Date.now() - (HISTOGRAM_WINDOW_MINUTES + 1) * 60_000,
@@ -513,6 +525,8 @@ function LiveHistograms({ timeZone }: { timeZone: string }) {
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        inFlight = false;
       }
     };
 
