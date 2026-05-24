@@ -7,6 +7,7 @@ import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
   MAX_SENDERS_PER_QUERY,
+  DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY,
   MAX_TRANSACTIONS_PER_QUERY,
   ScannerStorage,
   type BlockQueryFilter,
@@ -20,7 +21,9 @@ import {
   type StoredBaseloadConfigSummary,
   type StoredSenderStats,
   type StoredTransaction,
+  type StoredTransactionRecordsByCategory,
   type TransactionQueryFilter,
+  type TransactionRecordsQueryFilter,
 } from "./storage";
 
 export interface BlockServerOptions {
@@ -79,6 +82,11 @@ export interface TransactionsResponseBody {
     dateLt: string | null;
   };
   transactions: StoredTransaction[];
+}
+
+export interface TransactionRecordsResponseBody {
+  limit: number;
+  records: StoredTransactionRecordsByCategory;
 }
 
 export interface SendersResponseBody {
@@ -208,6 +216,10 @@ export async function handleRequest(
       return jsonError(404, "Transaction data is disabled");
     }
     return handleGetTransactions(url, storage);
+  }
+
+  if (url.pathname === "/transaction-records") {
+    return handleGetTransactionRecords(url, storage);
   }
 
   if (url.pathname === "/senders") {
@@ -561,6 +573,27 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
   return jsonResponse(body);
 }
 
+async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): Promise<Response> {
+  let filter: TransactionRecordsQueryFilter;
+  try {
+    filter = parseTransactionRecordsFilterFromQuery(url.searchParams);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  const limit = Math.min(
+    filter.limit ?? DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY,
+    DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY,
+  );
+
+  const body: TransactionRecordsResponseBody = {
+    limit,
+    records: await storage.queryTransactionRecords({ limit }),
+  };
+
+  return jsonResponse(body);
+}
+
 async function handleGetSenders(url: URL, storage: ScannerStorage): Promise<Response> {
   let filter: SenderStatsQueryFilter;
   try {
@@ -725,6 +758,19 @@ export function parseTransactionFilterFromQuery(params: URLSearchParams): Transa
     filter.order = parseOrderParam(order);
   } else {
     filter.order = "desc";
+  }
+
+  return filter;
+}
+
+export function parseTransactionRecordsFilterFromQuery(
+  params: URLSearchParams,
+): TransactionRecordsQueryFilter {
+  const filter: TransactionRecordsQueryFilter = {};
+
+  const limit = params.get("limit");
+  if (limit !== null) {
+    filter.limit = parseLimitParam(limit, DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY);
   }
 
   return filter;

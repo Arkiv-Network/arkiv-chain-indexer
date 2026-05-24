@@ -22,6 +22,10 @@ describe("frontend permalink helpers", () => {
     expect(readViewFromSearch("?view=transactions&block=42")).toBe("transactions");
   });
 
+  test("reads the transaction records view", () => {
+    expect(readViewFromSearch("?view=transaction-records")).toBe("transaction-records");
+  });
+
   test("reads the senders view", () => {
     expect(readViewFromSearch("?view=senders")).toBe("senders");
   });

@@ -24,9 +24,18 @@ const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
 export const MAX_BLOCKS_PER_QUERY = 10_000;
 export const MAX_RANGES_PER_QUERY = 10_000;
 export const MAX_TRANSACTIONS_PER_QUERY = 1_000;
+export const MAX_TRANSACTION_RECORDS_PER_CATEGORY = 100;
+export const DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY = 20;
 export const MAX_SENDERS_PER_QUERY = 10_000;
 
 export type QueryOrder = "asc" | "desc";
+export type TransactionRecordCategory = "gas_used" | "transaction_fee" | "effective_fee";
+
+export const TRANSACTION_RECORD_CATEGORIES: readonly TransactionRecordCategory[] = [
+  "gas_used",
+  "transaction_fee",
+  "effective_fee",
+];
 
 export type BlockProgressUpdate =
   | { kind: "lastSuccessfulBlock" }
@@ -71,6 +80,10 @@ export interface SenderStatsQueryFilter {
   order?: QueryOrder;
 }
 
+export interface TransactionRecordsQueryFilter {
+  limit?: number;
+}
+
 export interface StoredBlock {
   blockNumber: number;
   blockDate: string;
@@ -104,6 +117,18 @@ export interface StoredTransaction extends InspectedTransaction {
   blockDate: string;
   baseBlockFeeWei: string;
 }
+
+export interface StoredTransactionRecord extends StoredTransaction {
+  category: TransactionRecordCategory;
+  recordValueWei: string;
+  rank: number;
+  recordedAt: string;
+}
+
+export type StoredTransactionRecordsByCategory = Record<
+  TransactionRecordCategory,
+  StoredTransactionRecord[]
+>;
 
 export interface StoredSenderStats {
   address: string;
@@ -199,6 +224,7 @@ export class ScannerStorage {
   private readonly qScannerState: string;
   private readonly qBlockRanges: string;
   private readonly qTransactions: string;
+  private readonly qTransactionRecords: string;
   private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
 
@@ -211,6 +237,7 @@ export class ScannerStorage {
     this.qScannerState = `${quoteIdent(this.schema)}.scanner_state`;
     this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
     this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
+    this.qTransactionRecords = `${quoteIdent(this.schema)}.transaction_records`;
     this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
   }
@@ -368,6 +395,43 @@ export class ScannerStorage {
        ON ${this.qTransactions} (LOWER(from_address), block_number, position)`,
     );
     await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qTransactionRecords} (
+        category TEXT NOT NULL,
+        record_value_wei TEXT NOT NULL,
+        block_number BIGINT NOT NULL,
+        block_date TEXT NOT NULL,
+        base_block_fee_wei TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        hash TEXT NOT NULL,
+        from_address TEXT,
+        to_address TEXT,
+        transaction_type TEXT,
+        nonce TEXT,
+        value_wei TEXT NOT NULL,
+        gas_limit TEXT NOT NULL,
+        gas_used TEXT NOT NULL,
+        cumulative_gas_used TEXT,
+        gas_price_wei TEXT,
+        max_fee_per_gas_wei TEXT,
+        max_priority_fee_per_gas_wei TEXT,
+        effective_gas_price_wei TEXT NOT NULL,
+        priority_fee_wei TEXT NOT NULL,
+        transaction_fee_wei TEXT NOT NULL,
+        status TEXT,
+        contract_address TEXT,
+        recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (category, block_number, position)
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_category_rank_idx")}
+       ON ${this.qTransactionRecords} (category, (record_value_wei::numeric) DESC, block_number DESC, position DESC)`,
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_hash_idx")}
+       ON ${this.qTransactionRecords} (hash)`,
+    );
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qSenderStats} (
         address TEXT PRIMARY KEY,
         latest_nonce TEXT,
@@ -504,7 +568,7 @@ export class ScannerStorage {
         ],
       ],
     );
-    const state = new Map(stateResult.rows.map((row) => [row.key, row.value]));
+    const state = new Map<string, string>(stateResult.rows.map((row) => [row.key, row.value]));
 
     const lastSuccessfulBlock = parseOptionalBigInt(state.get(LAST_SUCCESSFUL_BLOCK_KEY));
     const lastSuccessfulBlockDetails =
@@ -534,6 +598,11 @@ export class ScannerStorage {
         name: "transactions",
         qualifiedName: this.qTransactions,
         regclassName: regclassName(this.schema, "transactions"),
+      },
+      {
+        name: "transaction_records",
+        qualifiedName: this.qTransactionRecords,
+        regclassName: regclassName(this.schema, "transaction_records"),
       },
       {
         name: "block_ranges",
@@ -623,6 +692,7 @@ export class ScannerStorage {
     metrics: BlockMetrics,
     progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
     transactions?: InspectedTransaction[],
+    recordCandidates: InspectedTransaction[] = transactions ?? [],
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -710,6 +780,8 @@ export class ScannerStorage {
       if (transactions !== undefined) {
         await this.replaceTransactionsForBlock(client, metrics, transactions);
       }
+      await this.deleteTransactionRecordsForBlock(client, metrics.blockNumber);
+      await this.upsertTransactionRecords(client, metrics, recordCandidates);
       await this.applyProgressUpdate(client, metrics, progressUpdate);
       await client.query("COMMIT");
     } catch (error) {
@@ -718,6 +790,180 @@ export class ScannerStorage {
     } finally {
       client.release();
     }
+  }
+
+  private async deleteTransactionRecordsForBlock(
+    client: pg.PoolClient,
+    blockNumber: bigint,
+  ): Promise<void> {
+    await client.query(`DELETE FROM ${this.qTransactionRecords} WHERE block_number = $1`, [
+      blockNumber.toString(),
+    ]);
+  }
+
+  private async upsertTransactionRecords(
+    client: pg.PoolClient,
+    metrics: BlockMetrics,
+    transactions: InspectedTransaction[],
+  ): Promise<void> {
+    if (transactions.length === 0) {
+      return;
+    }
+
+    for (const category of TRANSACTION_RECORD_CATEGORIES) {
+      const rows = transactions
+        .map((transaction) => ({
+          category,
+          recordValue: recordValueForCategory(category, transaction),
+          transaction,
+        }))
+        .sort(compareTransactionRecordCandidates)
+        .slice(0, MAX_TRANSACTION_RECORDS_PER_CATEGORY);
+      const currentMinimum = await this.getCurrentRecordMinimum(client, category);
+      const candidates = currentMinimum === undefined
+        ? rows
+        : rows.filter((row) => BigInt(row.recordValue) >= currentMinimum);
+
+      if (candidates.length === 0) {
+        continue;
+      }
+
+      await this.insertTransactionRecordRows(client, metrics, candidates);
+      await this.pruneTransactionRecords(client, category);
+    }
+  }
+
+  private async getCurrentRecordMinimum(
+    client: pg.PoolClient,
+    category: TransactionRecordCategory,
+  ): Promise<bigint | undefined> {
+    const result = await client.query<{ record_value_wei: string }>(
+      `SELECT record_value_wei
+       FROM ${this.qTransactionRecords}
+       WHERE category = $1
+       ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+       OFFSET $2
+       LIMIT 1`,
+      [category, MAX_TRANSACTION_RECORDS_PER_CATEGORY - 1],
+    );
+    const row = result.rows[0];
+    return row ? BigInt(row.record_value_wei) : undefined;
+  }
+
+  private async insertTransactionRecordRows(
+    client: pg.PoolClient,
+    metrics: BlockMetrics,
+    rows: Array<{
+      category: TransactionRecordCategory;
+      recordValue: string;
+      transaction: InspectedTransaction;
+    }>,
+  ): Promise<void> {
+    const columnsPerRow = 23;
+    const params: Array<string | number | null> = [];
+    const values = rows.map((row, rowIndex) => {
+      const offset = rowIndex * columnsPerRow;
+      const transaction = row.transaction;
+      params.push(
+        row.category,
+        row.recordValue,
+        metrics.blockNumber.toString(),
+        metrics.blockDate,
+        metrics.baseBlockFeeWei,
+        transaction.position,
+        transaction.hash,
+        transaction.from,
+        transaction.to,
+        transaction.type,
+        transaction.nonce,
+        transaction.valueWei,
+        transaction.gasLimit,
+        transaction.gasUsed,
+        transaction.cumulativeGasUsed,
+        transaction.gasPriceWei,
+        transaction.maxFeePerGasWei,
+        transaction.maxPriorityFeePerGasWei,
+        transaction.effectiveGasPriceWei,
+        transaction.priorityFeeWei,
+        transaction.transactionFeeWei,
+        transaction.status,
+        transaction.contractAddress,
+      );
+      const placeholders = Array.from(
+        { length: columnsPerRow },
+        (_unused, columnIndex) => `$${offset + columnIndex + 1}`,
+      );
+      return `(${placeholders.join(", ")})`;
+    });
+
+    await client.query(
+      `INSERT INTO ${this.qTransactionRecords} (
+        category,
+        record_value_wei,
+        block_number,
+        block_date,
+        base_block_fee_wei,
+        position,
+        hash,
+        from_address,
+        to_address,
+        transaction_type,
+        nonce,
+        value_wei,
+        gas_limit,
+        gas_used,
+        cumulative_gas_used,
+        gas_price_wei,
+        max_fee_per_gas_wei,
+        max_priority_fee_per_gas_wei,
+        effective_gas_price_wei,
+        priority_fee_wei,
+        transaction_fee_wei,
+        status,
+        contract_address
+      ) VALUES ${values.join(", ")}
+      ON CONFLICT (category, block_number, position) DO UPDATE SET
+        record_value_wei = EXCLUDED.record_value_wei,
+        block_date = EXCLUDED.block_date,
+        base_block_fee_wei = EXCLUDED.base_block_fee_wei,
+        hash = EXCLUDED.hash,
+        from_address = EXCLUDED.from_address,
+        to_address = EXCLUDED.to_address,
+        transaction_type = EXCLUDED.transaction_type,
+        nonce = EXCLUDED.nonce,
+        value_wei = EXCLUDED.value_wei,
+        gas_limit = EXCLUDED.gas_limit,
+        gas_used = EXCLUDED.gas_used,
+        cumulative_gas_used = EXCLUDED.cumulative_gas_used,
+        gas_price_wei = EXCLUDED.gas_price_wei,
+        max_fee_per_gas_wei = EXCLUDED.max_fee_per_gas_wei,
+        max_priority_fee_per_gas_wei = EXCLUDED.max_priority_fee_per_gas_wei,
+        effective_gas_price_wei = EXCLUDED.effective_gas_price_wei,
+        priority_fee_wei = EXCLUDED.priority_fee_wei,
+        transaction_fee_wei = EXCLUDED.transaction_fee_wei,
+        status = EXCLUDED.status,
+        contract_address = EXCLUDED.contract_address,
+        recorded_at = NOW()`,
+      params,
+    );
+  }
+
+  private async pruneTransactionRecords(
+    client: pg.PoolClient,
+    category: TransactionRecordCategory,
+  ): Promise<void> {
+    await client.query(
+      `DELETE FROM ${this.qTransactionRecords}
+       WHERE category = $1
+         AND (category, block_number, position) NOT IN (
+           SELECT category, block_number, position
+           FROM ${this.qTransactionRecords}
+           WHERE category = $1
+           ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+           LIMIT $2
+         )`,
+      [category, MAX_TRANSACTION_RECORDS_PER_CATEGORY],
+    );
   }
 
   private async replaceTransactionsForBlock(
@@ -1059,6 +1305,55 @@ export class ScannerStorage {
       params,
     );
     return Number(result.rows[0]?.count ?? "0");
+  }
+
+  async queryTransactionRecords(
+    filter: TransactionRecordsQueryFilter = {},
+  ): Promise<StoredTransactionRecordsByCategory> {
+    const limit = resolveLimit(filter.limit, MAX_TRANSACTION_RECORDS_PER_CATEGORY);
+    const result: StoredTransactionRecordsByCategory = emptyTransactionRecordsByCategory();
+
+    for (const category of TRANSACTION_RECORD_CATEGORIES) {
+      const rows = await this.pool.query<TransactionRecordRow>(
+        `SELECT
+           category,
+           record_value_wei,
+           ROW_NUMBER() OVER (
+             PARTITION BY category
+             ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+           )::int AS rank,
+           block_number,
+           block_date,
+           base_block_fee_wei,
+           position,
+           hash,
+           from_address,
+           to_address,
+           transaction_type,
+           nonce,
+           value_wei,
+           gas_limit,
+           gas_used,
+           cumulative_gas_used,
+           gas_price_wei,
+           max_fee_per_gas_wei,
+           max_priority_fee_per_gas_wei,
+           effective_gas_price_wei,
+           priority_fee_wei,
+           transaction_fee_wei,
+           status,
+           contract_address,
+           to_char(recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS recorded_at_utc
+         FROM ${this.qTransactionRecords}
+         WHERE category = $1
+         ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+         LIMIT $2`,
+        [category, limit],
+      );
+      result[category] = rows.rows.map(mapTransactionRecordRow);
+    }
+
+    return result;
   }
 
   async getInspectedBlock(blockNumber: bigint): Promise<InspectedBlock | undefined> {
@@ -1677,6 +1972,70 @@ interface SenderStatsRow {
   aggregated_at_utc: string;
 }
 
+type TransactionRecordRow = {
+  category: string;
+  record_value_wei: string;
+  rank: number;
+  recorded_at_utc: string;
+} & TransactionRow;
+
+interface TransactionRow {
+  block_number: string;
+  block_date: string;
+  base_block_fee_wei: string;
+  position: number;
+  hash: string;
+  from_address: string | null;
+  to_address: string | null;
+  transaction_type: string | null;
+  nonce: string | null;
+  value_wei: string;
+  gas_limit: string;
+  gas_used: string;
+  cumulative_gas_used: string | null;
+  gas_price_wei: string | null;
+  max_fee_per_gas_wei: string | null;
+  max_priority_fee_per_gas_wei: string | null;
+  effective_gas_price_wei: string;
+  priority_fee_wei: string;
+  transaction_fee_wei: string;
+  status: string | null;
+  contract_address: string | null;
+}
+
+function emptyTransactionRecordsByCategory(): StoredTransactionRecordsByCategory {
+  return {
+    gas_used: [],
+    transaction_fee: [],
+    effective_fee: [],
+  };
+}
+
+function recordValueForCategory(
+  category: TransactionRecordCategory,
+  transaction: InspectedTransaction,
+): string {
+  switch (category) {
+    case "gas_used":
+      return transaction.gasUsed;
+    case "transaction_fee":
+      return transaction.transactionFeeWei;
+    case "effective_fee":
+      return transaction.effectiveGasPriceWei;
+  }
+}
+
+function compareTransactionRecordCandidates(
+  left: { recordValue: string; transaction: InspectedTransaction },
+  right: { recordValue: string; transaction: InspectedTransaction },
+): number {
+  const leftValue = BigInt(left.recordValue);
+  const rightValue = BigInt(right.recordValue);
+  if (leftValue > rightValue) return -1;
+  if (leftValue < rightValue) return 1;
+  return right.transaction.position - left.transaction.position;
+}
+
 function mapBaseloadConfigSummaryRow(row: BaseloadConfigSummaryRow): StoredBaseloadConfigSummary {
   return {
     name: row.name,
@@ -1713,29 +2072,25 @@ function mapSenderStatsRow(row: SenderStatsRow): StoredSenderStats {
   };
 }
 
-function mapTransactionRow(row: {
-  block_number: string;
-  block_date: string;
-  base_block_fee_wei: string;
-  position: number;
-  hash: string;
-  from_address: string | null;
-  to_address: string | null;
-  transaction_type: string | null;
-  nonce: string | null;
-  value_wei: string;
-  gas_limit: string;
-  gas_used: string;
-  cumulative_gas_used: string | null;
-  gas_price_wei: string | null;
-  max_fee_per_gas_wei: string | null;
-  max_priority_fee_per_gas_wei: string | null;
-  effective_gas_price_wei: string;
-  priority_fee_wei: string;
-  transaction_fee_wei: string;
-  status: string | null;
-  contract_address: string | null;
-}): StoredTransaction {
+function mapTransactionRecordRow(row: TransactionRecordRow): StoredTransactionRecord {
+  const category = parseTransactionRecordCategory(row.category);
+  return {
+    ...mapTransactionRow(row),
+    category,
+    recordValueWei: row.record_value_wei,
+    rank: row.rank,
+    recordedAt: row.recorded_at_utc,
+  };
+}
+
+function parseTransactionRecordCategory(value: string): TransactionRecordCategory {
+  if (value === "gas_used" || value === "transaction_fee" || value === "effective_fee") {
+    return value;
+  }
+  throw new Error(`Unknown transaction record category: ${value}`);
+}
+
+function mapTransactionRow(row: TransactionRow): StoredTransaction {
   return {
     blockNumber: Number(row.block_number),
     blockNumberDecimal: row.block_number,

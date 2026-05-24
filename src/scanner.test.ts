@@ -52,6 +52,12 @@ describe("scanOneBlock", () => {
       txHash(2),
       txHash(3),
     ]);
+    expect(storage.savedRecordCandidates[0]?.map((entry) => entry.hash)).toEqual([
+      txHash(0),
+      txHash(1),
+      txHash(2),
+      txHash(3),
+    ]);
   });
 
   test("does not aggregate ranges inline after storing a block", async () => {
@@ -86,6 +92,10 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics).toHaveLength(1);
     expect(storage.savedMetrics[0]?.transactionCount).toBe(2);
     expect(storage.savedTransactions).toHaveLength(0);
+    expect(storage.savedRecordCandidates[0]?.map((entry) => entry.hash)).toEqual([
+      txHash(0),
+      txHash(1),
+    ]);
     expect(storage.lastSuccessfulBlock).toBe(1n);
   });
 
@@ -521,6 +531,7 @@ class ControlledReceiptRpc {
 class FakeStorage {
   savedMetrics: BlockMetrics[] = [];
   savedTransactions: InspectedTransaction[][] = [];
+  savedRecordCandidates: InspectedTransaction[][] = [];
   savedBatcherMetrics: Array<{ blockNumber: bigint; metrics: BatcherMetrics }> = [];
   recentBlocksMissingBatcherMetrics: BlockMetrics[] = [];
   aggregatedRanges: bigint[] = [];
@@ -540,11 +551,13 @@ class FakeStorage {
     metrics: BlockMetrics,
     progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
     transactions?: InspectedTransaction[],
+    recordCandidates: InspectedTransaction[] = transactions ?? [],
   ): Promise<void> {
     this.savedMetrics.push(metrics);
     if (transactions !== undefined) {
       this.savedTransactions.push(transactions);
     }
+    this.savedRecordCandidates.push(recordCandidates);
 
     switch (progressUpdate.kind) {
       case "lastSuccessfulBlock":

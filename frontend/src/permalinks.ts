@@ -3,6 +3,7 @@ export type View =
   | "blocks"
   | "block"
   | "transactions"
+  | "transaction-records"
   | "senders"
   | "ranges"
   | "charts"
@@ -23,6 +24,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "blocks") return "blocks";
   if (value === "block") return "block";
   if (value === "transactions") return "transactions";
+  if (value === "transaction-records") return "transaction-records";
   if (value === "senders") return "senders";
   if (value === "ranges") return "ranges";
   if (value === "charts") return "charts";

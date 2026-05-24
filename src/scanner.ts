@@ -346,10 +346,9 @@ export async function scanOneBlock(
     computeBlockMetrics(block, receipts),
     batcherCollector,
   );
-  const transactions = saveTransactionData
-    ? inspectBlockFromRpc(block, receipts).transactions
-    : undefined;
-  await storage.saveBlockMetrics(metrics, progressUpdate, transactions);
+  const inspectedTransactions = inspectBlockFromRpc(block, receipts).transactions;
+  const transactions = saveTransactionData ? inspectedTransactions : undefined;
+  await storage.saveBlockMetrics(metrics, progressUpdate, transactions, inspectedTransactions);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats, summaryContext));

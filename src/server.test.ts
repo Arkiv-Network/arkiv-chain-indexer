@@ -6,16 +6,18 @@ import {
   parseRangeFilterFromQuery,
   parseSenderStatsFilterFromQuery,
   parseTransactionFilterFromQuery,
+  parseTransactionRecordsFilterFromQuery,
   type BlockInspectResponseBody,
   type BlocksResponseBody,
   type HealthResponseBody,
   type RangesResponseBody,
   type SendersResponseBody,
+  type TransactionRecordsResponseBody,
   type TransactionsResponseBody,
 } from "./server";
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
-import { type ScannerStorage } from "./storage";
+import type { ScannerStorage, StoredTransactionRecord } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import {
   closeTestPools,
@@ -209,6 +211,19 @@ describe("parseTransactionFilterFromQuery", () => {
     expect(() =>
       parseTransactionFilterFromQuery(new URLSearchParams("page=0")),
     ).toThrow(/page must be a positive integer/);
+  });
+});
+
+describe("parseTransactionRecordsFilterFromQuery", () => {
+  test("parses record limits", () => {
+    const filter = parseTransactionRecordsFilterFromQuery(new URLSearchParams("limit=12"));
+    expect(filter.limit).toBe(12);
+  });
+
+  test("rejects record limits above the response cap", () => {
+    expect(() =>
+      parseTransactionRecordsFilterFromQuery(new URLSearchParams("limit=21")),
+    ).toThrow(/limit must be at most 20/);
   });
 });
 
@@ -712,6 +727,66 @@ describe("GET /transactions", () => {
   });
 });
 
+describe("GET /transaction-records", () => {
+  test("returns grouped record transactions while transaction data is disabled", async () => {
+    let queryFilter: unknown;
+    const storage = {
+      queryTransactionRecords: async (filter: unknown) => {
+        queryFilter = filter;
+        return {
+          gas_used: [
+            {
+              ...transactionRecordFixture(),
+              category: "gas_used",
+              recordValueWei: "30000",
+              gasUsed: "30000",
+            },
+          ],
+          transaction_fee: [
+            {
+              ...transactionRecordFixture(),
+              category: "transaction_fee",
+              recordValueWei: "9000000",
+              transactionFeeWei: "9000000",
+            },
+          ],
+          effective_fee: [
+            {
+              ...transactionRecordFixture(),
+              category: "effective_fee",
+              recordValueWei: "300",
+              effectiveGasPriceWei: "300",
+            },
+          ],
+        };
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/transaction-records?limit=10"),
+      storage,
+      { transactionDataEnabled: false },
+    );
+    const body = (await response.json()) as TransactionRecordsResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(queryFilter).toEqual({ limit: 10 });
+    expect(body.limit).toBe(10);
+    expect(body.records.gas_used[0]?.recordValueWei).toBe("30000");
+    expect(body.records.transaction_fee[0]?.recordValueWei).toBe("9000000");
+    expect(body.records.effective_fee[0]?.recordValueWei).toBe("300");
+  });
+
+  test("rejects invalid record limits", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/transaction-records?limit=21"),
+      {} as ScannerStorage,
+    );
+
+    expect(response.status).toBe(400);
+  });
+});
+
 describe("GET /senders", () => {
   test("returns sender stats ordered by activity and echoes filters", async () => {
     let queryFilter: unknown;
@@ -1124,6 +1199,40 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     averageTransactionGasUsed: "21000",
     averagePriorityFeeWeightedWei: "10",
     averagePriorityFeeWei: "10",
+    ...overrides,
+  };
+}
+
+function transactionRecordFixture(
+  overrides: Partial<StoredTransactionRecord> = {},
+): StoredTransactionRecord {
+  return {
+    category: "gas_used",
+    recordValueWei: "21000",
+    rank: 1,
+    recordedAt: "2024-01-01T00:00:01.000Z",
+    blockNumber: 42,
+    blockNumberDecimal: "42",
+    blockDate: "2024-01-01T00:00:00.000Z",
+    baseBlockFeeWei: "100",
+    position: 0,
+    hash: "0xaaa",
+    from: "0x111",
+    to: "0x222",
+    type: "2",
+    nonce: "1",
+    valueWei: "0",
+    gasLimit: "21000",
+    gasUsed: "21000",
+    cumulativeGasUsed: "21000",
+    gasPriceWei: "110",
+    maxFeePerGasWei: "200",
+    maxPriorityFeePerGasWei: "10",
+    effectiveGasPriceWei: "110",
+    priorityFeeWei: "10",
+    transactionFeeWei: "2310000",
+    status: "1",
+    contractAddress: null,
     ...overrides,
   };
 }

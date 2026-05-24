@@ -146,6 +146,7 @@ if (!hasPostgresForTests()) {
       expect(stats.tables.map((table) => table.tableName)).toEqual([
         "blocks",
         "transactions",
+        "transaction_records",
         "block_ranges",
         "sender_stats",
         "scanner_state",
@@ -153,6 +154,7 @@ if (!hasPostgresForTests()) {
       ]);
       expect(byName.get("blocks")?.rowCount).toBe("2");
       expect(byName.get("transactions")?.rowCount).toBe("2");
+      expect(byName.get("transaction_records")?.rowCount).toBe("6");
       expect(byName.get("block_ranges")?.rowCount).toBe("1");
       expect(byName.get("sender_stats")?.rowCount).toBe("0");
       expect(byName.get("scanner_state")?.rowCount).toBe("1");
@@ -607,6 +609,76 @@ if (!hasPostgresForTests()) {
 
       const rows = await storage.queryTransactions({ blockNumber: 42n, order: "asc" });
       expect(rows.map((row) => row.hash)).toEqual(["0xbbb"]);
+
+      const records = await storage.queryTransactionRecords({ limit: 20 });
+      expect(records.gas_used.map((row) => row.hash)).toEqual(["0xbbb"]);
+    });
+
+    test("stores record transactions even when full transaction rows are disabled", async () => {
+      const storage = await withStorage();
+      const transaction = transactionFixture({
+        position: 0,
+        hash: "0xrecord",
+        gasUsed: "42000",
+        effectiveGasPriceWei: "300",
+        transactionFeeWei: "12600000",
+      });
+
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 42n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        undefined,
+        [transaction],
+      );
+
+      expect(await storage.countTransactions({ blockNumber: 42n })).toBe(0);
+
+      const records = await storage.queryTransactionRecords({ limit: 20 });
+      expect(records.gas_used[0]).toMatchObject({
+        category: "gas_used",
+        recordValueWei: "42000",
+        hash: "0xrecord",
+      });
+      expect(records.transaction_fee[0]).toMatchObject({
+        category: "transaction_fee",
+        recordValueWei: "12600000",
+        hash: "0xrecord",
+      });
+      expect(records.effective_fee[0]).toMatchObject({
+        category: "effective_fee",
+        recordValueWei: "300",
+        hash: "0xrecord",
+      });
+    });
+
+    test("keeps only the top 100 records per category", async () => {
+      const storage = await withStorage();
+
+      for (let index = 0; index < 105; index += 1) {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber: BigInt(index), transactionCount: 1 }),
+          { kind: "lastSuccessfulBlock" },
+          undefined,
+          [
+            transactionFixture({
+              position: 0,
+              hash: `0x${index.toString(16)}`,
+              gasUsed: String(index),
+              effectiveGasPriceWei: String(index * 2),
+              transactionFeeWei: String(index * 3),
+            }),
+          ],
+        );
+      }
+
+      const records = await storage.queryTransactionRecords({ limit: 100 });
+      expect(records.gas_used).toHaveLength(100);
+      expect(records.gas_used[0]?.recordValueWei).toBe("104");
+      expect(records.gas_used.at(-1)?.recordValueWei).toBe("5");
+      expect(records.transaction_fee).toHaveLength(100);
+      expect(records.transaction_fee[0]?.recordValueWei).toBe("312");
+      expect(records.effective_fee).toHaveLength(100);
+      expect(records.effective_fee[0]?.recordValueWei).toBe("208");
     });
 
     test("queries outgoing address transactions by nonce with pagination", async () => {

@@ -4,6 +4,7 @@ import {
   fetchBlockInspect,
   fetchBaseloadConfigs,
   fetchBaseloadState,
+  fetchTransactionRecords,
   fetchSenders,
   loadBaseloadConfig,
   saveBaseloadConfig,
@@ -112,6 +113,25 @@ describe("frontend API helpers", () => {
     await fetchSenders(new URLSearchParams("limit=25&order=desc"));
 
     expect(observedInput).toBe("/api/senders?limit=25&order=desc");
+  });
+
+  test("fetches transaction records with query parameters", async () => {
+    let observedInput = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      observedInput = String(input);
+      return Response.json({
+        limit: 20,
+        records: {
+          gas_used: [],
+          transaction_fee: [],
+          effective_fee: [],
+        },
+      });
+    }) as typeof fetch;
+
+    await fetchTransactionRecords(new URLSearchParams("limit=20"));
+
+    expect(observedInput).toBe("/api/transaction-records?limit=20");
   });
 
   test("fetches a block inspection by block number", async () => {

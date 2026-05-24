@@ -22,6 +22,7 @@ import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
+import { RecordTransactionsView } from "./RecordTransactionsView";
 import { SendersView } from "./SendersView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
@@ -250,6 +251,13 @@ export function App() {
             ) : null}
             <button
               type="button"
+              className={activeView === "transaction-records" ? "active" : ""}
+              onClick={() => setView("transaction-records")}
+            >
+              Records
+            </button>
+            <button
+              type="button"
               className={activeView === "ranges" ? "active" : ""}
               onClick={() => setView("ranges")}
             >
@@ -310,6 +318,11 @@ export function App() {
         ) : activeView === "transactions" ? (
           <TransactionsView
             locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+          />
+        ) : activeView === "transaction-records" ? (
+          <RecordTransactionsView
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
           />
