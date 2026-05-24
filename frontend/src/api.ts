@@ -131,6 +131,22 @@ export type StoredTransaction = InspectedTransaction &
     Pick<InspectedTransaction, "blockNumber" | "blockNumberDecimal" | "blockDate" | "baseBlockFeeWei">
   >;
 
+export type TransactionRecordCategory = "gas_used" | "transaction_fee" | "effective_fee";
+
+export interface StoredTransactionRecord extends StoredTransaction {
+  category: TransactionRecordCategory;
+  recordValue: string;
+  rank: number;
+  recordedAt: string;
+}
+
+export type TransactionRecordsByCategory = Record<TransactionRecordCategory, StoredTransactionRecord[]>;
+
+export interface TransactionRecordsResponse {
+  limit: number;
+  records: TransactionRecordsByCategory;
+}
+
 export interface TransactionsResponse {
   count: number;
   limit: number;
@@ -364,6 +380,10 @@ export function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResp
 
 export function fetchTransactions(params: URLSearchParams): Promise<TransactionsResponse> {
   return getJson<TransactionsResponse>("/transactions", params);
+}
+
+export function fetchTransactionRecords(params: URLSearchParams): Promise<TransactionRecordsResponse> {
+  return getJson<TransactionRecordsResponse>("/transaction-records", params);
 }
 
 export function fetchSenders(params: URLSearchParams): Promise<SendersResponse> {

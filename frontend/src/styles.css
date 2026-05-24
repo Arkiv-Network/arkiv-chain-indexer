@@ -1057,6 +1057,38 @@ button.secondary {
   flex-wrap: wrap;
 }
 
+.record-category-stack {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.record-category {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.record-category-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.record-category-heading h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.record-category-heading span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.record-table {
+  min-width: 1100px;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
