@@ -162,6 +162,12 @@ describe("parseConfig", () => {
     expect(parseConfig([], baseEnv).disableBackfill).toBe(false);
   });
 
+  test("defaults to combined scanner mode with a 100ms backfill sleep", () => {
+    const config = parseConfig([], baseEnv);
+    expect(config.backfillOnly).toBe(false);
+    expect(config.backfillSleepMs).toBe(100);
+  });
+
   test("reads disable backfill flag from env", () => {
     expect(
       parseConfig([], {
@@ -187,6 +193,42 @@ describe("parseConfig", () => {
         SCANNER_DISABLE_BACKFILL: "maybe",
       }),
     ).toThrow("--disable-backfill must be a boolean");
+  });
+
+  test("reads backfill-only mode and backfill sleep from env", () => {
+    expect(
+      parseConfig([], {
+        ...baseEnv,
+        SCANNER_BACKFILL_ONLY: "true",
+        SCANNER_BACKFILL_SLEEP_MS: "250",
+      }),
+    ).toMatchObject({
+      backfillOnly: true,
+      backfillSleepMs: 250,
+    });
+  });
+
+  test("lets CLI backfill-only mode and sleep override env", () => {
+    expect(
+      parseConfig(["--backfill-only", "true", "--backfill-sleep-ms", "75"], {
+        ...baseEnv,
+        SCANNER_BACKFILL_ONLY: "false",
+        SCANNER_BACKFILL_SLEEP_MS: "250",
+      }),
+    ).toMatchObject({
+      backfillOnly: true,
+      backfillSleepMs: 75,
+    });
+  });
+
+  test("rejects conflicting backfill-only and disabled backfill modes", () => {
+    expect(() =>
+      parseConfig([], {
+        ...baseEnv,
+        SCANNER_BACKFILL_ONLY: "true",
+        SCANNER_DISABLE_BACKFILL: "true",
+      }),
+    ).toThrow("--backfill-only cannot be combined with --disable-backfill");
   });
 
   test("reads batcher collector URL from env and lets CLI override it", () => {
