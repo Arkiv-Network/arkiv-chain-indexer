@@ -328,6 +328,31 @@ describe("scanForwardToSafeHead", () => {
     expect(runtime.sleeps).toEqual([11]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
   });
+
+  test("logs failed forward blocks with block number and RPC endpoint", async () => {
+    const rpc = new SimpleRpc(new Map([[99n, 1]]));
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime();
+    const captured = captureConsoleError();
+
+    try {
+      await scanForwardToSafeHead(
+        99n,
+        99n,
+        config({ retryMs: 11 }),
+        rpc as unknown as EthereumRpcClient,
+        storage as unknown as ScannerStorage,
+        runtime,
+      );
+    } finally {
+      captured.restore();
+    }
+
+    expect(String(captured.calls[0]?.[0])).toContain(
+      "Failed to forward scan block 99 via RPC endpoint https://example.test",
+    );
+    expect(captured.calls[0]?.[1]).toBeInstanceOf(Error);
+  });
 });
 
 describe("runScanner", () => {
@@ -354,6 +379,31 @@ describe("runScanner", () => {
     expect(storage.backfillNextBlock).toBe(99n);
     expect(storage.lastSuccessfulBlock).toBeUndefined();
     expect(runtime.sleeps).toEqual([100]);
+  });
+
+  test("logs latest block read failures with latest block target and RPC endpoint", async () => {
+    const rpc = new LatestBlockFailureRpc();
+    const storage = new FakeStorage();
+    const runtime = new StopAfterFirstSleepRuntime();
+    const captured = captureConsoleError();
+
+    try {
+      await expect(
+        runScanner(
+          config({ retryMs: 13 }),
+          rpc as unknown as EthereumRpcClient,
+          storage as unknown as ScannerStorage,
+          runtime,
+        ),
+      ).rejects.toThrow("stop after first sleep");
+    } finally {
+      captured.restore();
+    }
+
+    expect(String(captured.calls[0]?.[0])).toContain(
+      "Failed to read latest block (block target: latest) via RPC endpoint https://example.test",
+    );
+    expect(captured.calls[0]?.[1]).toBeInstanceOf(Error);
   });
 });
 
@@ -492,6 +542,7 @@ class FakeBatcherCollector implements BatcherMetricsSource {
 }
 
 class SimpleRpc {
+  readonly rpcUrl = "https://example.test";
   requestedBlocks: bigint[] = [];
 
   constructor(
@@ -526,6 +577,30 @@ class SimpleRpc {
 
   async getTransactionReceipt(hash: Hex): Promise<RpcReceipt> {
     return receiptFor(hash);
+  }
+}
+
+class LatestBlockFailureRpc {
+  readonly rpcUrl = "https://example.test";
+
+  getStatsSnapshot(): RpcStats {
+    return { calls: 0, requestBytes: 0, responseBytes: 0 };
+  }
+
+  getStatsSince(_snapshot: RpcStats): RpcStats {
+    return { calls: 0, requestBytes: 0, responseBytes: 0 };
+  }
+
+  async getLatestBlockNumber(): Promise<bigint> {
+    throw new Error("latest block failed");
+  }
+
+  async getBlockWithTransactions(_blockNumber: bigint): Promise<RpcBlock> {
+    throw new Error("unexpected block read");
+  }
+
+  async getTransactionReceipt(_hash: Hex): Promise<RpcReceipt> {
+    throw new Error("unexpected receipt read");
   }
 }
 
@@ -622,6 +697,21 @@ function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> =
     backfillOnly: false,
     backfillSleepMs: 0,
     ...overrides,
+  };
+}
+
+function captureConsoleError(): { calls: unknown[][]; restore: () => void } {
+  const original = console.error;
+  const calls: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
+    calls.push(args);
+  };
+
+  return {
+    calls,
+    restore: () => {
+      console.error = original;
+    },
   };
 }
 

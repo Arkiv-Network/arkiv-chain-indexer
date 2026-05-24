@@ -34,7 +34,7 @@ export class EthereumRpcClient {
     responseBytes: 0,
   };
 
-  constructor(private readonly rpcUrl: string) {}
+  constructor(readonly rpcUrl: string) {}
 
   getStatsSnapshot(): RpcStats {
     return { ...this.stats };

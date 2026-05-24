@@ -74,7 +74,10 @@ async function runBoundedForwardScanner(
     try {
       latestBlock = await rpc.getLatestBlockNumber();
     } catch (error) {
-      console.error(`Failed to read latest block; retrying after ${config.retryMs}ms`, error);
+      console.error(
+        `Failed to read latest block (block target: latest) via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
+        error,
+      );
       await runtime.sleep(config.retryMs);
       continue;
     }
@@ -109,7 +112,7 @@ async function runBoundedForwardScanner(
       nextBlock += 1n;
     } catch (error) {
       console.error(
-        `Failed to scan block ${nextBlock.toString()}; retrying after ${config.retryMs}ms`,
+        `Failed to scan block ${nextBlock.toString()} via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
         error,
       );
       await runtime.sleep(config.retryMs);
@@ -206,7 +209,10 @@ async function readSafeHeadWithRetry(
       await recordChainProgress(storage, latestBlock, safeHead);
       return safeHead;
     } catch (error) {
-      console.error(`Failed to read latest block; retrying after ${config.retryMs}ms`, error);
+      console.error(
+        `Failed to read latest block (block target: latest) via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
+        error,
+      );
       await runtime.sleep(config.retryMs);
     }
   }
@@ -311,7 +317,7 @@ async function scanBlockWithRetry(
       return;
     } catch (error) {
       console.error(
-        `Failed to ${direction} scan block ${blockNumber.toString()}; retrying after ${config.retryMs}ms`,
+        `Failed to ${direction} scan block ${blockNumber.toString()} via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
         error,
       );
       await runtime.sleep(config.retryMs);
