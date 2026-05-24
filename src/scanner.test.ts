@@ -310,6 +310,25 @@ describe("scanForwardToSafeHead", () => {
     expect(storage.lastSuccessfulBlock).toBe(102n);
   });
 
+  test("does not fill stale backlog below the forward lower bound", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    storage.lastSuccessfulBlock = 90n;
+
+    const scanned = await scanForwardToSafeHead(
+      100n,
+      100n,
+      config({ disableBackfill: true }),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      new FakeRuntime(),
+    );
+
+    expect(scanned).toBe(true);
+    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(storage.lastSuccessfulBlock).toBe(100n);
+  });
+
   test("retries the same failed forward block without skipping it", async () => {
     const rpc = new SimpleRpc(new Map([[99n, 1]]));
     const storage = new FakeStorage();
@@ -356,6 +375,29 @@ describe("scanForwardToSafeHead", () => {
 });
 
 describe("runScanner", () => {
+  test("disable-backfill mode scans only the current safe head when progress is stale", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    storage.lastSuccessfulBlock = 90n;
+    const runtime = new StopAfterFirstSleepRuntime();
+
+    await expect(
+      runScanner(
+        config({
+          confirmationDepth: 0n,
+          disableBackfill: true,
+        }),
+        rpc as unknown as EthereumRpcClient,
+        storage as unknown as ScannerStorage,
+        runtime,
+      ),
+    ).rejects.toThrow("stop after first sleep");
+
+    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(storage.lastSuccessfulBlock).toBe(100n);
+    expect(storage.backfillNextBlock).toBeUndefined();
+  });
+
   test("backfill-only mode updates only the backfill cursor", async () => {
     const rpc = new SimpleRpc();
     const storage = new FakeStorage();

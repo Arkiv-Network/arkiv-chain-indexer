@@ -268,7 +268,9 @@ export async function scanForwardToSafeHead(
   batcherCollector?: BatcherMetricsSource,
 ): Promise<boolean> {
   const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
-  let nextBlock = lastSuccessfulBlock === undefined ? initialLowerBound : lastSuccessfulBlock + 1n;
+  const nextProgressBlock =
+    lastSuccessfulBlock === undefined ? initialLowerBound : lastSuccessfulBlock + 1n;
+  let nextBlock = nextProgressBlock < initialLowerBound ? initialLowerBound : nextProgressBlock;
   let scanned = false;
 
   while (nextBlock <= safeHead) {
