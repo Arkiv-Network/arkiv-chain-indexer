@@ -257,6 +257,50 @@ nav button.active::after {
   text-transform: uppercase;
 }
 
+.admin-mode-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--ark-orange, var(--line-strong));
+  border-radius: var(--r-sm);
+  color: var(--ark-orange, var(--ink));
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+footer {
+  border-top: 1px solid var(--line);
+  background: color-mix(in oklab, var(--sand) 88%, transparent);
+  flex-shrink: 0;
+}
+
+.footer-inner {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0.5rem 1.5rem;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.admin-login-link {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.admin-login-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .timezone-select select {
   padding: 0.35rem 0.55rem;
   border: 1px solid var(--line-strong);

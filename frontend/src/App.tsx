@@ -7,6 +7,7 @@ import {
   loadBaseloadConfig,
   saveBaseloadConfig,
   updateBaseloadConfig as putBaseloadConfig,
+  verifyAdminToken,
   type BaseloadStateResponse,
   type BaseloadTaskStatus,
   type BaseloadWorkerBalance,
@@ -42,6 +43,7 @@ export function App() {
   const [baseloadAdminToken, setBaseloadAdminToken] = useState(() =>
     readStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, ""),
   );
+  const [adminVerified, setAdminVerified] = useState(false);
   const [timeZone, setTimeZone] = useState<string>(() =>
     readStoredString(
       TIME_ZONE_STORAGE_KEY,
@@ -142,6 +144,50 @@ export function App() {
   useEffect(() => {
     writeStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, baseloadAdminToken);
   }, [baseloadAdminToken]);
+
+  useEffect(() => {
+    const trimmed = baseloadAdminToken.trim();
+    if (!trimmed) {
+      setAdminVerified(false);
+      return;
+    }
+    let cancelled = false;
+    verifyAdminToken(trimmed)
+      .then(() => {
+        if (!cancelled) setAdminVerified(true);
+      })
+      .catch(() => {
+        if (!cancelled) setAdminVerified(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseloadAdminToken]);
+
+  const onAdminLoginClick = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    const input = window.prompt(
+      "Enter admin credentials (leave blank to clear):",
+      baseloadAdminToken,
+    );
+    if (input === null) return;
+    const trimmed = input.trim();
+    if (!trimmed) {
+      setBaseloadAdminToken("");
+      setAdminVerified(false);
+      return;
+    }
+    try {
+      await verifyAdminToken(trimmed);
+      setBaseloadAdminToken(trimmed);
+      setAdminVerified(true);
+    } catch (error) {
+      setAdminVerified(false);
+      window.alert(
+        `Admin credentials rejected: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
 
   const updateBaseloadConfig = async (config: BaseloadConfig) => {
     try {
@@ -295,6 +341,7 @@ export function App() {
               ))}
             </select>
           </label>
+          {adminVerified ? <span className="admin-mode-indicator">ADMIN MODE</span> : null}
         </div>
       </header>
       <main className={mainClassName}>
@@ -365,6 +412,13 @@ export function App() {
           <HealthView timeZone={timeZone} />
         )}
       </main>
+      <footer>
+        <div className="footer-inner">
+          <a href="#" className="admin-login-link" onClick={onAdminLoginClick}>
+            admin login
+          </a>
+        </div>
+      </footer>
     </>
   );
 }

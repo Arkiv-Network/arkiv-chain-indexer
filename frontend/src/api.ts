@@ -394,6 +394,24 @@ export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", new URLSearchParams());
 }
 
+export interface AdminVerifyResponse {
+  authorized: true;
+}
+
+export async function verifyAdminToken(bearerToken: string): Promise<AdminVerifyResponse> {
+  const headers: Record<string, string> = {};
+  const trimmed = bearerToken.trim();
+  if (trimmed) {
+    headers.authorization = `Bearer ${trimmed}`;
+  }
+  const response = await fetch("/api/admin/verify", { headers });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<AdminVerifyResponse>;
+}
+
 export function fetchBaseloadState(): Promise<BaseloadStateResponse> {
   return getJson<BaseloadStateResponse>("/baseload", new URLSearchParams());
 }

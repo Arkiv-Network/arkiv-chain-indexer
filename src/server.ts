@@ -168,6 +168,10 @@ export async function handleRequest(
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
+  if (url.pathname === "/admin/verify") {
+    return handleAdminVerifyRequest(request, options.baseloadAdminBearerToken);
+  }
+
   if (url.pathname === "/baseload") {
     return handleBaseloadRequest(request, options.baseloadRuntime, options.baseloadAdminBearerToken);
   }
@@ -352,6 +356,21 @@ async function handleBaseloadConfigsRequest(
   }
 
   return jsonError(405, `Method ${request.method} is not allowed`);
+}
+
+async function handleAdminVerifyRequest(
+  request: Request,
+  adminBearerToken: string | undefined,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return jsonError(405, `Method ${request.method} is not allowed`);
+  }
+  if (!adminBearerToken) {
+    return jsonError(503, "Admin bearer token is not configured on the backend");
+  }
+  const authError = requireAdminBearerToken(request, adminBearerToken);
+  if (authError) return authError;
+  return jsonResponse({ authorized: true });
 }
 
 function requireAdminBearerToken(request: Request, adminBearerToken: string | undefined): Response | null {
