@@ -10,6 +10,8 @@ export interface ScannerConfig {
   txReceiptConcurrency: number;
   saveTransactionData: boolean;
   disableBackfill: boolean;
+  backfillOnly: boolean;
+  backfillSleepMs: number;
   batcherCollectorUrl?: string;
 }
 
@@ -18,6 +20,7 @@ const DEFAULT_OLDEST_BACKFILL_BLOCK = 25_000_000n;
 const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_RETRY_MS = 5_000;
 const DEFAULT_TX_RECEIPT_CONCURRENCY = 20;
+const DEFAULT_BACKFILL_SLEEP_MS = 100;
 
 export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): ScannerConfig {
   const parsed = parseArgs(args);
@@ -44,6 +47,21 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
   }
   const batcherCollectorUrl =
     parsed.values["batcher-collector-url"] ?? env.BATCHER_COLLECTOR_URL ?? env.SCANNER_BATCHER_COLLECTOR_URL;
+  const disableBackfill = parseBooleanOption(
+    "--disable-backfill",
+    parsed.values["disable-backfill"] ??
+      env.SCANNER_DISABLE_BACKFILL ??
+      "false",
+  );
+  const backfillOnly = parseBooleanOption(
+    "--backfill-only",
+    parsed.values["backfill-only"] ??
+      env.SCANNER_BACKFILL_ONLY ??
+      "false",
+  );
+  if (disableBackfill && backfillOnly) {
+    throw new Error("--backfill-only cannot be combined with --disable-backfill");
+  }
 
   return {
     rpcUrl,
@@ -83,11 +101,13 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
         env.SAVE_TRANSACTION_DATA ??
         "true",
     ),
-    disableBackfill: parseBooleanOption(
-      "--disable-backfill",
-      parsed.values["disable-backfill"] ??
-        env.SCANNER_DISABLE_BACKFILL ??
-        "false",
+    disableBackfill,
+    backfillOnly,
+    backfillSleepMs: parseNumberOption(
+      "--backfill-sleep-ms",
+      parsed.values["backfill-sleep-ms"] ??
+        env.SCANNER_BACKFILL_SLEEP_MS ??
+        DEFAULT_BACKFILL_SLEEP_MS.toString(),
     ),
     ...(batcherCollectorUrl ? { batcherCollectorUrl } : {}),
   };
@@ -190,6 +210,8 @@ Options:
   --tx-receipt-concurrency <n>      Legacy setting accepted for compatibility; receipts are fetched sequentially.
   --save-transaction-data <bool>    Store inspected transaction rows. Defaults to true (or SCANNER_SAVE_TRANSACTION_DATA / SAVE_TRANSACTION_DATA).
   --disable-backfill <bool>         Skip the historical backfill phase and only scan forward from the safe head. Defaults to false.
+  --backfill-only <bool>            Only run the historical backfill loop in continuous mode. Defaults to false.
+  --backfill-sleep-ms <number>      Delay after each successful backfill block. Defaults to 100.
   --batcher-collector-url <url>     Optional BATCHER_COLLECTOR_URL base for recent block batcher metrics.
   --help                            Show this message.`;
 }

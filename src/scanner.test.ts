@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   backfillDownForSlice,
   fillRecentMissingBatcherMetrics,
+  runScanner,
   scanForwardToSafeHead,
   scanOneBlock,
 } from "./scanner";
@@ -111,7 +112,7 @@ describe("scanOneBlock", () => {
       batcher,
     );
 
-    expect(batcher.requestedDates).toEqual(["2024-01-12T06:13:20.000Z"]);
+    expect(batcher.requestedDates).toEqual(["2024-01-12T04:09:36.000Z"]);
     expect(storage.savedMetrics[0]).toMatchObject({
       batcherQueueSize: "906",
       batcherIntensity: "0",
@@ -233,6 +234,24 @@ describe("backfillDownForSlice", () => {
     expect(storage.backfillNextBlock).toBe(98n);
   });
 
+  test("sleeps after every successful backfill block", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime();
+
+    await backfillDownForSlice(
+      100n,
+      config({ oldestBackfillBlock: 99n, backfillSleepMs: 100 }),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      runtime,
+    );
+
+    expect(rpc.requestedBlocks).toEqual([100n, 99n]);
+    expect(runtime.sleeps).toEqual([100, 100]);
+    expect(storage.backfillNextBlock).toBe(98n);
+  });
+
   test("retries the same failed backfill block without advancing the cursor", async () => {
     const rpc = new SimpleRpc(new Map([[100n, 1]]));
     const storage = new FakeStorage();
@@ -308,6 +327,33 @@ describe("scanForwardToSafeHead", () => {
     expect(rpc.requestedBlocks).toEqual([99n, 99n, 100n]);
     expect(runtime.sleeps).toEqual([11]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
+  });
+});
+
+describe("runScanner", () => {
+  test("backfill-only mode updates only the backfill cursor", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    const runtime = new StopAfterFirstSleepRuntime();
+
+    await expect(
+      runScanner(
+        config({
+          backfillOnly: true,
+          backfillSleepMs: 100,
+          confirmationDepth: 0n,
+          oldestBackfillBlock: 90n,
+        }),
+        rpc as unknown as EthereumRpcClient,
+        storage as unknown as ScannerStorage,
+        runtime,
+      ),
+    ).rejects.toThrow("stop after first sleep");
+
+    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(storage.backfillNextBlock).toBe(99n);
+    expect(storage.lastSuccessfulBlock).toBeUndefined();
+    expect(runtime.sleeps).toEqual([100]);
   });
 });
 
@@ -388,6 +434,7 @@ class FakeStorage {
   aggregatedRanges: bigint[] = [];
   lastSuccessfulBlock: bigint | undefined;
   backfillNextBlock: bigint | undefined;
+  chainProgress: Array<{ latestBlock: bigint; safeHead: bigint }> = [];
 
   async getLastSuccessfulBlock(): Promise<bigint | undefined> {
     return this.lastSuccessfulBlock;
@@ -428,6 +475,9 @@ class FakeStorage {
     return true;
   }
 
+  async saveChainProgress(latestBlock: bigint, safeHead: bigint): Promise<void> {
+    this.chainProgress.push({ latestBlock, safeHead });
+  }
 }
 
 class FakeBatcherCollector implements BatcherMetricsSource {
@@ -447,6 +497,7 @@ class SimpleRpc {
   constructor(
     private readonly failuresByBlock = new Map<bigint, number>(),
     private readonly transactionCount = 0,
+    private readonly latestBlock = 100n,
   ) {}
 
   getStatsSnapshot(): RpcStats {
@@ -455,6 +506,10 @@ class SimpleRpc {
 
   getStatsSince(_snapshot: RpcStats): RpcStats {
     return { calls: 0, requestBytes: 0, responseBytes: 0 };
+  }
+
+  async getLatestBlockNumber(): Promise<bigint> {
+    return this.latestBlock;
   }
 
   async getBlockWithTransactions(blockNumber: bigint): Promise<RpcBlock> {
@@ -485,6 +540,13 @@ class FakeRuntime {
 
   async sleep(ms: number): Promise<void> {
     this.sleeps.push(ms);
+  }
+}
+
+class StopAfterFirstSleepRuntime extends FakeRuntime {
+  override async sleep(ms: number): Promise<void> {
+    await super.sleep(ms);
+    throw new Error("stop after first sleep");
   }
 }
 
@@ -557,6 +619,8 @@ function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> =
     txReceiptConcurrency: 1,
     saveTransactionData: true,
     disableBackfill: false,
+    backfillOnly: false,
+    backfillSleepMs: 0,
     ...overrides,
   };
 }

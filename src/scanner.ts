@@ -35,6 +35,11 @@ export async function runScanner(
     return;
   }
 
+  if (config.backfillOnly) {
+    await runBackfillScanner(config, rpc, storage, runtime, batcherCollector);
+    return;
+  }
+
   await runNearHeadBackfillScanner(config, rpc, storage, runtime, batcherCollector);
 }
 
@@ -159,6 +164,35 @@ async function runNearHeadBackfillScanner(
   }
 }
 
+async function runBackfillScanner(
+  config: ScannerConfig,
+  rpc: EthereumRpcClient,
+  storage: ScannerStorage,
+  runtime: ScannerRuntime,
+  batcherCollector: BatcherMetricsSource | undefined,
+): Promise<void> {
+  console.log(
+    `Starting backfill-only scanner with oldest backfill block ${config.oldestBackfillBlock.toString()}`,
+  );
+
+  while (true) {
+    const safeHead = await readSafeHeadWithRetry(config, rpc, storage, runtime);
+    const lowestBackfilledBlock = await backfillDownForSlice(
+      safeHead,
+      config,
+      rpc,
+      storage,
+      runtime,
+      batcherCollector,
+    );
+    await fillRecentMissingBatcherMetrics(storage, batcherCollector);
+
+    if (lowestBackfilledBlock === undefined) {
+      await runtime.sleep(config.pollMs);
+    }
+  }
+}
+
 async function readSafeHeadWithRetry(
   config: ScannerConfig,
   rpc: EthereumRpcClient,
@@ -210,6 +244,9 @@ export async function backfillDownForSlice(
 
     lowestBackfilledBlock = blockToScan;
     nextBackfillBlock -= 1n;
+    if (config.backfillSleepMs > 0) {
+      await runtime.sleep(config.backfillSleepMs);
+    }
   }
 
   return lowestBackfilledBlock;

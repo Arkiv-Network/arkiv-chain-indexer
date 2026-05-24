@@ -13,8 +13,9 @@ stats, and optional transaction rows; a small static frontend lets you browse th
 
 ## Quick start with Docker Compose
 
-The supplied compose stack spins up Postgres, the scanner, the batcher collector enrichment loop, the range
-aggregator loop, the sender aggregator loop, the backend, and the static frontend.
+The supplied compose stack spins up Postgres, the forward scanner, the historical backfill scanner, the batcher
+collector enrichment loop, the range aggregator loop, the sender aggregator loop, the backend, and the static
+frontend.
 
 ```sh
 cp .env.example .env
@@ -37,6 +38,10 @@ The frontend container is a tiny Node `server.js` that serves the Vite-built Rea
 The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so production-style mainnet scans keep
 block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
+
+The main `scanner` container stays near the safe chain head with `SCANNER_DISABLE_BACKFILL=true` by default.
+Historical backfill runs in the separate `backfill-scanner` container with `SCANNER_BACKFILL_ONLY=true`; it sleeps
+for `SCANNER_BACKFILL_SLEEP_MS` after every successfully stored backfill block, defaulting to 100ms.
 
 The aggregator container runs `bun run aggregate-all` which walks every supported range size and sleeps for one
 minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
@@ -110,9 +115,9 @@ export SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/
 bun run scan
 ```
 
-In continuous mode the scanner stays near the top of the chain by scanning from the current safe head, spends 20
-seconds backfilling older blocks, and then scans forward again through the latest safe head. The oldest block it
-will backfill to defaults to `25000000`.
+In continuous mode the scanner can run the near-head forward loop, the historical backfill loop, or both. The
+Docker Compose stack runs forward scanning and backfill in separate containers by default. The backfill loop walks
+older blocks in 20-second work slices and stops at `--oldest-backfill-block`, which defaults to `25000000`.
 
 For a bounded historical scan, pass both `--from-block` and `--to-block`:
 
@@ -147,6 +152,8 @@ Configuration can be passed through CLI flags or environment variables.
 | `--to-block` | `SCANNER_TO_BLOCK` | unset | Optional inclusive block number to stop at. |
 | `--oldest-backfill-block` | `SCANNER_OLDEST_BACKFILL_BLOCK` | `25000000` | Oldest block the continuous scanner will backfill to. |
 | `--disable-backfill` | `SCANNER_DISABLE_BACKFILL` | `false` | Skip the historical backfill phase and only scan forward from the safe head. |
+| `--backfill-only` | `SCANNER_BACKFILL_ONLY` | `false` | Run only the historical backfill loop in continuous mode. |
+| `--backfill-sleep-ms` | `SCANNER_BACKFILL_SLEEP_MS` | `100` | Delay after each successfully stored backfill block. |
 | `--confirmation-depth` | `SCANNER_CONFIRMATION_DEPTH` | `3` | Number of blocks to stay behind the latest head. |
 | `--poll-ms` | `SCANNER_POLL_MS` | `2000` | Delay while waiting for new safe blocks. |
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
@@ -371,10 +378,11 @@ For bounded scans:
 For continuous scans:
 
 1. The backfill cursor starts at the current safe head when no prior cursor exists.
-2. The scanner walks backward for 20 seconds of work, updating `backfill_next_block` only with the block row.
-3. It then scans forward through the latest safe head, updating `last_successful_block` only with the block row
+2. The backfill loop walks backward for 20 seconds of work, updating `backfill_next_block` only with the block row.
+3. After each successful backfill write, the loop sleeps for `--backfill-sleep-ms`.
+4. The forward loop scans through the latest safe head, updating `last_successful_block` only with the block row
    and transaction rows committed.
-4. The backward cursor stops at `--oldest-backfill-block`.
+5. The backward cursor stops at `--oldest-backfill-block`.
 
 This means failed block reads are not skipped.
 
