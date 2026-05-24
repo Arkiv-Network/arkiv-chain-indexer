@@ -78,32 +78,6 @@ body {
   font-size: 15px;
 }
 
-/* Subtle bracket decoration that lives behind page content */
-body::before,
-body::after {
-  content: "";
-  position: fixed;
-  pointer-events: none;
-  z-index: 0;
-  width: 220px;
-  height: 220px;
-  background-repeat: no-repeat;
-  background-size: contain;
-  opacity: 0.05;
-}
-
-body::before {
-  top: 80px;
-  left: -20px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 220'><text x='0' y='200' font-family='monospace' font-size='240' fill='%23111'>[</text></svg>");
-}
-
-body::after {
-  bottom: 40px;
-  right: -20px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 220'><text x='0' y='200' font-family='monospace' font-size='240' fill='%23111'>]</text></svg>");
-}
-
 a {
   color: inherit;
 }
