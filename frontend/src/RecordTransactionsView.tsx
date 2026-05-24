@@ -25,19 +25,19 @@ const CATEGORIES: Array<{
     key: "gas_used",
     title: "Maximum gas used",
     valueLabel: "Gas used",
-    renderValue: (row) => fmtInteger(row.recordValueWei),
+    renderValue: (row) => fmtInteger(row.recordValue),
   },
   {
     key: "transaction_fee",
     title: "Maximum fee paid",
     valueLabel: "Fee paid (ETH)",
-    renderValue: (row) => fmtEth(row.recordValueWei),
+    renderValue: (row) => fmtEth(row.recordValue),
   },
   {
     key: "effective_fee",
     title: "Highest effective fee",
     valueLabel: "Effective fee (gwei)",
-    renderValue: (row) => fmtGwei(row.recordValueWei),
+    renderValue: (row) => fmtGwei(row.recordValue),
   },
 ];
 

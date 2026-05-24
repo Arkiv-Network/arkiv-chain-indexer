@@ -738,7 +738,7 @@ describe("GET /transaction-records", () => {
             {
               ...transactionRecordFixture(),
               category: "gas_used",
-              recordValueWei: "30000",
+              recordValue: "30000",
               gasUsed: "30000",
             },
           ],
@@ -746,7 +746,7 @@ describe("GET /transaction-records", () => {
             {
               ...transactionRecordFixture(),
               category: "transaction_fee",
-              recordValueWei: "9000000",
+              recordValue: "9000000",
               transactionFeeWei: "9000000",
             },
           ],
@@ -754,7 +754,7 @@ describe("GET /transaction-records", () => {
             {
               ...transactionRecordFixture(),
               category: "effective_fee",
-              recordValueWei: "300",
+              recordValue: "300",
               effectiveGasPriceWei: "300",
             },
           ],
@@ -772,9 +772,9 @@ describe("GET /transaction-records", () => {
     expect(response.status).toBe(200);
     expect(queryFilter).toEqual({ limit: 10 });
     expect(body.limit).toBe(10);
-    expect(body.records.gas_used[0]?.recordValueWei).toBe("30000");
-    expect(body.records.transaction_fee[0]?.recordValueWei).toBe("9000000");
-    expect(body.records.effective_fee[0]?.recordValueWei).toBe("300");
+    expect(body.records.gas_used[0]?.recordValue).toBe("30000");
+    expect(body.records.transaction_fee[0]?.recordValue).toBe("9000000");
+    expect(body.records.effective_fee[0]?.recordValue).toBe("300");
   });
 
   test("rejects invalid record limits", async () => {
@@ -1208,7 +1208,7 @@ function transactionRecordFixture(
 ): StoredTransactionRecord {
   return {
     category: "gas_used",
-    recordValueWei: "21000",
+    recordValue: "21000",
     rank: 1,
     recordedAt: "2024-01-01T00:00:01.000Z",
     blockNumber: 42,

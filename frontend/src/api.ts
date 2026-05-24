@@ -135,7 +135,7 @@ export type TransactionRecordCategory = "gas_used" | "transaction_fee" | "effect
 
 export interface StoredTransactionRecord extends StoredTransaction {
   category: TransactionRecordCategory;
-  recordValueWei: string;
+  recordValue: string;
   rank: number;
   recordedAt: string;
 }

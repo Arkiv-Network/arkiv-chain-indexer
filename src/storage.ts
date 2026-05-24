@@ -120,7 +120,7 @@ export interface StoredTransaction extends InspectedTransaction {
 
 export interface StoredTransactionRecord extends StoredTransaction {
   category: TransactionRecordCategory;
-  recordValueWei: string;
+  recordValue: string;
   rank: number;
   recordedAt: string;
 }
@@ -397,7 +397,7 @@ export class ScannerStorage {
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactionRecords} (
         category TEXT NOT NULL,
-        record_value_wei TEXT NOT NULL,
+        record_value TEXT NOT NULL,
         block_number BIGINT NOT NULL,
         block_date TEXT NOT NULL,
         base_block_fee_wei TEXT NOT NULL,
@@ -425,7 +425,7 @@ export class ScannerStorage {
     `);
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_category_rank_idx")}
-       ON ${this.qTransactionRecords} (category, (record_value_wei::numeric) DESC, block_number DESC, position DESC)`,
+       ON ${this.qTransactionRecords} (category, (record_value::numeric) DESC, block_number DESC, position DESC)`,
     );
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_hash_idx")}
@@ -837,17 +837,17 @@ export class ScannerStorage {
     client: pg.PoolClient,
     category: TransactionRecordCategory,
   ): Promise<bigint | undefined> {
-    const result = await client.query<{ record_value_wei: string }>(
-      `SELECT record_value_wei
+    const result = await client.query<{ record_value: string }>(
+      `SELECT record_value
        FROM ${this.qTransactionRecords}
        WHERE category = $1
-       ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+       ORDER BY record_value::numeric DESC, block_number DESC, position DESC
        OFFSET $2
        LIMIT 1`,
       [category, MAX_TRANSACTION_RECORDS_PER_CATEGORY - 1],
     );
     const row = result.rows[0];
-    return row ? BigInt(row.record_value_wei) : undefined;
+    return row ? BigInt(row.record_value) : undefined;
   }
 
   private async insertTransactionRecordRows(
@@ -899,7 +899,7 @@ export class ScannerStorage {
     await client.query(
       `INSERT INTO ${this.qTransactionRecords} (
         category,
-        record_value_wei,
+        record_value,
         block_number,
         block_date,
         base_block_fee_wei,
@@ -923,7 +923,7 @@ export class ScannerStorage {
         contract_address
       ) VALUES ${values.join(", ")}
       ON CONFLICT (category, block_number, position) DO UPDATE SET
-        record_value_wei = EXCLUDED.record_value_wei,
+        record_value = EXCLUDED.record_value,
         block_date = EXCLUDED.block_date,
         base_block_fee_wei = EXCLUDED.base_block_fee_wei,
         hash = EXCLUDED.hash,
@@ -959,7 +959,7 @@ export class ScannerStorage {
            SELECT category, block_number, position
            FROM ${this.qTransactionRecords}
            WHERE category = $1
-           ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+           ORDER BY record_value::numeric DESC, block_number DESC, position DESC
            LIMIT $2
          )`,
       [category, MAX_TRANSACTION_RECORDS_PER_CATEGORY],
@@ -1317,10 +1317,10 @@ export class ScannerStorage {
       const rows = await this.pool.query<TransactionRecordRow>(
         `SELECT
            category,
-           record_value_wei,
+           record_value,
            ROW_NUMBER() OVER (
              PARTITION BY category
-             ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+             ORDER BY record_value::numeric DESC, block_number DESC, position DESC
            )::int AS rank,
            block_number,
            block_date,
@@ -1346,7 +1346,7 @@ export class ScannerStorage {
            to_char(recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS recorded_at_utc
          FROM ${this.qTransactionRecords}
          WHERE category = $1
-         ORDER BY record_value_wei::numeric DESC, block_number DESC, position DESC
+         ORDER BY record_value::numeric DESC, block_number DESC, position DESC
          LIMIT $2`,
         [category, limit],
       );
@@ -1974,7 +1974,7 @@ interface SenderStatsRow {
 
 type TransactionRecordRow = {
   category: string;
-  record_value_wei: string;
+  record_value: string;
   rank: number;
   recorded_at_utc: string;
 } & TransactionRow;
@@ -2077,7 +2077,7 @@ function mapTransactionRecordRow(row: TransactionRecordRow): StoredTransactionRe
   return {
     ...mapTransactionRow(row),
     category,
-    recordValueWei: row.record_value_wei,
+    recordValue: row.record_value,
     rank: row.rank,
     recordedAt: row.recorded_at_utc,
   };

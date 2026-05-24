@@ -636,17 +636,17 @@ if (!hasPostgresForTests()) {
       const records = await storage.queryTransactionRecords({ limit: 20 });
       expect(records.gas_used[0]).toMatchObject({
         category: "gas_used",
-        recordValueWei: "42000",
+        recordValue: "42000",
         hash: "0xrecord",
       });
       expect(records.transaction_fee[0]).toMatchObject({
         category: "transaction_fee",
-        recordValueWei: "12600000",
+        recordValue: "12600000",
         hash: "0xrecord",
       });
       expect(records.effective_fee[0]).toMatchObject({
         category: "effective_fee",
-        recordValueWei: "300",
+        recordValue: "300",
         hash: "0xrecord",
       });
     });
@@ -673,12 +673,12 @@ if (!hasPostgresForTests()) {
 
       const records = await storage.queryTransactionRecords({ limit: 100 });
       expect(records.gas_used).toHaveLength(100);
-      expect(records.gas_used[0]?.recordValueWei).toBe("104");
-      expect(records.gas_used.at(-1)?.recordValueWei).toBe("5");
+      expect(records.gas_used[0]?.recordValue).toBe("104");
+      expect(records.gas_used.at(-1)?.recordValue).toBe("5");
       expect(records.transaction_fee).toHaveLength(100);
-      expect(records.transaction_fee[0]?.recordValueWei).toBe("312");
+      expect(records.transaction_fee[0]?.recordValue).toBe("312");
       expect(records.effective_fee).toHaveLength(100);
-      expect(records.effective_fee[0]?.recordValueWei).toBe("208");
+      expect(records.effective_fee[0]?.recordValue).toBe("208");
     });
 
     test("queries outgoing address transactions by nonce with pagination", async () => {
