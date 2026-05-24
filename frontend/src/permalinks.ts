@@ -8,6 +8,7 @@ export type View =
   | "ranges"
   | "charts"
   | "health"
+  | "admin"
   | "baseload";
 
 const VIEW_PARAM = "view";
@@ -29,6 +30,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "ranges") return "ranges";
   if (value === "charts") return "charts";
   if (value === "health") return "health";
+  if (value === "admin") return "admin";
   if (value === "baseload") return "baseload";
   return "home";
 }

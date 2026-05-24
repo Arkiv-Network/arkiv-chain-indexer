@@ -13,6 +13,7 @@ import {
   type BaseloadWorkerBalance,
   type StoredBaseloadConfigSummary,
 } from "./api";
+import { AdminView } from "./AdminView";
 import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
@@ -21,6 +22,13 @@ import { ChartsView } from "./ChartsView";
 import { HealthView } from "./HealthView";
 import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
+import {
+  BUILD_PAGE_SETTINGS,
+  readStoredPageSettings,
+  removeStoredPageSettings,
+  type PageSettings,
+  writeStoredPageSettings,
+} from "./pageSettings";
 import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
 import { RecordTransactionsView } from "./RecordTransactionsView";
@@ -42,6 +50,9 @@ export function App() {
   const [baseloadConfigManagerError, setBaseloadConfigManagerError] = useState<string | null>(null);
   const [baseloadAdminToken, setBaseloadAdminToken] = useState(() =>
     readStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, ""),
+  );
+  const [pageSettings, setPageSettings] = useState<PageSettings>(() =>
+    readStoredPageSettings(BUILD_PAGE_SETTINGS),
   );
   const [adminVerified, setAdminVerified] = useState(false);
   const [timeZone, setTimeZone] = useState<string>(() =>
@@ -245,6 +256,16 @@ export function App() {
     }
   };
 
+  const resetPageSettings = () => {
+    removeStoredPageSettings();
+    setPageSettings(BUILD_PAGE_SETTINGS);
+  };
+
+  const savePageSettings = (settings: PageSettings) => {
+    writeStoredPageSettings(settings);
+    setPageSettings(settings);
+  };
+
   const mainClassName = activeView === "charts" ? "fullscreen" : activeView === "home" ? "contained" : undefined;
 
   return (
@@ -252,7 +273,7 @@ export function App() {
       <header>
         <div className="header-inner">
           <h1>
-            <span className="brand-name">Arkiv</span>
+            <span className="brand-name">{pageSettings.chainName}</span>
             <span className="brand-sub">Scanner</span>
           </h1>
           <nav>
@@ -325,6 +346,13 @@ export function App() {
             </button>
             <button
               type="button"
+              className={activeView === "admin" ? "active" : ""}
+              onClick={() => setView("admin")}
+            >
+              Admin
+            </button>
+            <button
+              type="button"
               className={activeView === "baseload" ? "active" : ""}
               onClick={() => setView("baseload")}
             >
@@ -349,6 +377,7 @@ export function App() {
           <HomeView
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            settings={pageSettings}
           />
         ) : activeView === "blocks" ? (
           <BlocksView
@@ -407,6 +436,12 @@ export function App() {
             onSaveCurrentConfig={saveCurrentBaseloadConfig}
             onLoadSavedConfig={loadSavedBaseloadConfig}
             onDeleteSavedConfig={deleteSavedBaseloadConfig}
+          />
+        ) : activeView === "admin" ? (
+          <AdminView
+            settings={pageSettings}
+            onSettingsChange={savePageSettings}
+            onResetSettings={resetPageSettings}
           />
         ) : (
           <HealthView timeZone={timeZone} />
