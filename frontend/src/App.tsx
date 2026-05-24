@@ -157,10 +157,6 @@ export function App() {
   }, [baseloadAdminToken]);
 
   useEffect(() => {
-    writeStoredPageSettings(pageSettings);
-  }, [pageSettings]);
-
-  useEffect(() => {
     const trimmed = baseloadAdminToken.trim();
     if (!trimmed) {
       setAdminVerified(false);
@@ -263,6 +259,11 @@ export function App() {
   const resetPageSettings = () => {
     removeStoredPageSettings();
     setPageSettings(BUILD_PAGE_SETTINGS);
+  };
+
+  const savePageSettings = (settings: PageSettings) => {
+    writeStoredPageSettings(settings);
+    setPageSettings(settings);
   };
 
   const mainClassName = activeView === "charts" ? "fullscreen" : activeView === "home" ? "contained" : undefined;
@@ -439,7 +440,7 @@ export function App() {
         ) : activeView === "admin" ? (
           <AdminView
             settings={pageSettings}
-            onSettingsChange={setPageSettings}
+            onSettingsChange={savePageSettings}
             onResetSettings={resetPageSettings}
           />
         ) : (
