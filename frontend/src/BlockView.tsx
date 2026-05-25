@@ -143,6 +143,10 @@ export function BlockView({ locationSearch, onLocationChange, timeZone }: BlockV
             <Metric label="Batcher max tx" value={fmtInteger(block.batcherMaxTxSize)} />
           </dl>
 
+          {data.transactionLoadError ? (
+            <p className="summary error">Transactions unavailable: {data.transactionLoadError}</p>
+          ) : null}
+
           <div className="table-wrap">
             <table className="data-table block-transactions-table">
               <colgroup>

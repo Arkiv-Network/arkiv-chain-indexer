@@ -134,27 +134,108 @@ describe("frontend API helpers", () => {
     expect(observedInput).toBe("/api/transaction-records?limit=20");
   });
 
-  test("fetches a block inspection by block number", async () => {
-    let observedInput = "";
+  test("fetches a block inspection from the stored block and transaction APIs", async () => {
+    const observedInputs: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      observedInput = String(input);
+      observedInputs.push(String(input));
+      if (String(input) === "/api/transactions?block=42&limit=1000&order=asc") {
+        return Response.json({
+          count: 1,
+          limit: 1000,
+          truncated: false,
+          page: 1,
+          pageSize: 1000,
+          totalCount: 1,
+          totalPages: 1,
+          hasPreviousPage: false,
+          hasNextPage: false,
+          filters: {
+            block: "42",
+            blockGt: null,
+            blockLt: null,
+            address: null,
+            nonceGt: null,
+            nonceLt: null,
+            dateGt: null,
+            dateLt: null,
+          },
+          transactions: [
+            {
+              blockNumber: 42,
+              blockNumberDecimal: "42",
+              blockDate: "2024-01-01T00:00:00.000Z",
+              baseBlockFeeWei: "0",
+              position: 0,
+              hash: "0xabc",
+              from: null,
+              to: null,
+              type: null,
+              nonce: null,
+              valueWei: "0",
+              gasLimit: "0",
+              gasUsed: "0",
+              cumulativeGasUsed: null,
+              gasPriceWei: null,
+              maxFeePerGasWei: null,
+              maxPriorityFeePerGasWei: null,
+              effectiveGasPriceWei: "0",
+              priorityFeeWei: "0",
+              transactionFeeWei: "0",
+              status: null,
+              contractAddress: null,
+            },
+          ],
+        });
+      }
       return Response.json({
-        cached: false,
-        block: {
-          blockNumber: 42,
-          blockNumberDecimal: "42",
-          blockDate: "2024-01-01T00:00:00.000Z",
-          baseBlockFeeWei: "0",
-          totalGasUsed: "0",
-          maxGasInBlock: "0",
-          transactionCount: 0,
-          transactions: [],
-        },
+        blockNumber: 42,
+        blockDate: "2024-01-01T00:00:00.000Z",
+        baseBlockFeeWei: "0",
+        totalGasUsed: "0",
+        maxGasInBlock: "0",
+        transactionCount: 1,
+        averagePriorityFeeWei: "0",
+        averagePriorityFeeWeightedWei: "0",
+        averageFeePriceWei: "0",
+        averageTransactionFeeWei: "0",
+        averageTransactionGasUsed: "0",
       });
     }) as typeof fetch;
 
-    await fetchBlockInspect("42");
+    const result = await fetchBlockInspect("42");
 
-    expect(observedInput).toBe("/api/block/42");
+    expect(observedInputs).toEqual([
+      "/api/blocks/42",
+      "/api/transactions?block=42&limit=1000&order=asc",
+    ]);
+    expect(result.block.blockNumberDecimal).toBe("42");
+    expect(result.block.transactions).toHaveLength(1);
+  });
+
+  test("keeps block inspection available when transaction rows cannot be loaded", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("/api/transactions")) {
+        return Response.json({ error: "Transaction data is disabled" }, { status: 404 });
+      }
+      return Response.json({
+        blockNumber: 42,
+        blockDate: "2024-01-01T00:00:00.000Z",
+        baseBlockFeeWei: "0",
+        totalGasUsed: "0",
+        maxGasInBlock: "0",
+        transactionCount: 1,
+        averagePriorityFeeWei: "0",
+        averagePriorityFeeWeightedWei: "0",
+        averageFeePriceWei: "0",
+        averageTransactionFeeWei: "0",
+        averageTransactionGasUsed: "0",
+      });
+    }) as typeof fetch;
+
+    const result = await fetchBlockInspect("42");
+
+    expect(result.block.blockNumber).toBe(42);
+    expect(result.block.transactions).toEqual([]);
+    expect(result.transactionLoadError).toContain("HTTP 404");
   });
 });
