@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import {
@@ -25,7 +25,8 @@ interface HomeViewProps {
   timeZone: string;
 }
 
-const LATEST_BLOCK_LIMIT = "20";
+const LATEST_BLOCK_LIMIT = 20;
+const MINUTE_MS = 60_000;
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
@@ -69,43 +70,43 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     };
   }, [simulateOffline]);
 
-  const latestInFlightRef = useRef(false);
-  const loadLatest = useCallback(async () => {
-    if (latestInFlightRef.current) return;
-    latestInFlightRef.current = true;
-    setBlocksLoading(true);
-
-    try {
-      const nextBlocks = await fetchBlocks(latestBlocksParams());
-      setBlocksData(nextBlocks);
-      setBlocksError(null);
-      setLastUpdatedAt(new Date());
-    } catch (error) {
-      setBlocksError(error instanceof Error ? error.message : String(error));
-    } finally {
-      latestInFlightRef.current = false;
-      setBlocksLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
+    let intervalId: number | undefined;
 
-    const refresh = async () => {
-      if (cancelled) return;
-      await loadLatest();
+    const loadInitialBlocks = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
+      setBlocksLoading(true);
+
+      try {
+        const nextBlocks = await fetchBlocks(recentBlocksParams(settings));
+        if (cancelled) return;
+        setBlocksData(normalizeBlocksResponse(nextBlocks, settings));
+        setBlocksError(null);
+        setLastUpdatedAt(new Date());
+        if (intervalId !== undefined) window.clearInterval(intervalId);
+      } catch (error) {
+        if (cancelled) return;
+        setBlocksError(error instanceof Error ? error.message : String(error));
+      } finally {
+        inFlight = false;
+        if (!cancelled) setBlocksLoading(false);
+      }
     };
 
-    void refresh();
-    const interval = window.setInterval(refresh, REFRESH_INTERVAL_MS);
+    void loadInitialBlocks();
+    intervalId = window.setInterval(loadInitialBlocks, REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      if (intervalId !== undefined) window.clearInterval(intervalId);
     };
-  }, [loadLatest]);
+  }, [settings]);
 
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
+  const feedBlocks = useMemo(() => blocks.slice(0, LATEST_BLOCK_LIMIT), [blocks]);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -139,8 +140,8 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   }, [latestBlock, nowMs, settings]);
 
   const blockSlots = useMemo<BlockSlot[]>(
-    () => [...stubSlots, ...blocks.map((block) => ({ kind: "real" as const, block }))],
-    [stubSlots, blocks],
+    () => [...stubSlots, ...feedBlocks.map((block) => ({ kind: "real" as const, block }))],
+    [stubSlots, feedBlocks],
   );
 
   const nextExpectedBlockNumber = latestBlock ? latestBlock.blockNumber + 1 : null;
@@ -175,8 +176,10 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
           if (previous.blocks.some((existing) => existing.blockNumber === block.blockNumber)) {
             return previous;
           }
-          const merged = [block, ...previous.blocks].slice(0, previous.limit);
-          return { ...previous, blocks: merged, count: merged.length };
+          return normalizeBlocksResponse(
+            { ...previous, blocks: [block, ...previous.blocks] },
+            settings,
+          );
         });
         setLastUpdatedAt(new Date());
       } catch (error) {
@@ -205,7 +208,23 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     settings.nextBlockPingMs,
     settings.pingMinIntervalMs,
     settings.pingStartAgeMs,
+    settings.histogramFetchLimit,
+    settings.histogramWindowMinutes,
   ]);
+
+  useEffect(() => {
+    const prune = () => {
+      setBlocksData((previous) => {
+        if (!previous) return previous;
+        const next = normalizeBlocksResponse(previous, settings);
+        return next.blocks.length === previous.blocks.length ? previous : next;
+      });
+    };
+
+    prune();
+    const interval = window.setInterval(prune, settings.histogramClockTickMs);
+    return () => window.clearInterval(interval);
+  }, [settings]);
 
   const blocksHref = buildPermalinkHref("blocks", { limit: "100" });
   const lastUpdatedLabel = useMemo(() => {
@@ -335,7 +354,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
                 {latestBlockBehindLabel ? (
                   <span className="home-panel-latest-time">{latestBlockBehindLabel}</span>
                 ) : null}
-                <span>{blocksData ? `${blocksData.count} shown` : blocksLoading ? "Loading" : "No data"}</span>
+                <span>{blocksData ? `${feedBlocks.length} shown` : blocksLoading ? "Loading" : "No data"}</span>
               </div>
             </div>
             {blocksError && blocks.length === 0 ? (
@@ -361,7 +380,13 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             )}
           </section>
 
-          <LiveHistograms settings={settings} timeZone={timeZone} />
+          <LiveHistograms
+            blocks={blocks}
+            error={blocksError}
+            loaded={blocksData !== null}
+            settings={settings}
+            timeZone={timeZone}
+          />
         </div>
       </div>
     </section>
@@ -448,11 +473,41 @@ function BlockFeedItem({
   );
 }
 
-function latestBlocksParams(): URLSearchParams {
+function recentBlocksParams(settings: PageSettings): URLSearchParams {
   const params = new URLSearchParams();
-  params.set("limit", LATEST_BLOCK_LIMIT);
+  params.set("limit", String(Math.max(settings.histogramFetchLimit, LATEST_BLOCK_LIMIT)));
   params.set("order", "desc");
   return params;
+}
+
+function normalizeBlocksResponse(response: BlocksResponse, settings: PageSettings): BlocksResponse {
+  const blocks = pruneHomeBlocks(response.blocks, settings);
+  return {
+    ...response,
+    count: blocks.length,
+    limit: Math.max(response.limit, settings.histogramFetchLimit, LATEST_BLOCK_LIMIT),
+    truncated: response.truncated || blocks.length >= response.limit,
+    blocks,
+  };
+}
+
+function pruneHomeBlocks(blocks: StoredBlock[], settings: PageSettings): StoredBlock[] {
+  const currentMinuteMs = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
+  const firstMinuteMs = currentMinuteMs - Math.max(0, settings.histogramWindowMinutes - 1) * MINUTE_MS;
+  const limit = Math.max(settings.histogramFetchLimit, LATEST_BLOCK_LIMIT);
+  const seen = new Set<number>();
+
+  return blocks
+    .slice()
+    .sort((a, b) => b.blockNumber - a.blockNumber)
+    .filter((block, index) => {
+      if (seen.has(block.blockNumber)) return false;
+      seen.add(block.blockNumber);
+      if (index < LATEST_BLOCK_LIMIT) return true;
+      const ts = Date.parse(block.blockDate);
+      return Number.isFinite(ts) && ts >= firstMinuteMs;
+    })
+    .slice(0, limit);
 }
 
 function formatBehind(ms: number): string {
@@ -476,73 +531,44 @@ interface MinuteBucket {
 
 type HistogramMetric = "gasUsed" | "transactionCount";
 
-function LiveHistograms({ settings, timeZone }: { settings: PageSettings; timeZone: string }) {
-  const [blocks, setBlocks] = useState<StoredBlock[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+function LiveHistograms({
+  blocks,
+  error,
+  loaded,
+  settings,
+  timeZone,
+}: {
+  blocks: StoredBlock[];
+  error: string | null;
+  loaded: boolean;
+  settings: PageSettings;
+  timeZone: string;
+}) {
   const [currentMinuteMs, setCurrentMinuteMs] = useState(
-    () => Math.floor(Date.now() / 60_000) * 60_000,
+    () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS,
   );
 
   // Re-render every second so the window shifts when the wall clock crosses
   // into a new minute.
   useEffect(() => {
     const tick = () => {
-      const next = Math.floor(Date.now() / 60_000) * 60_000;
+      const next = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
       setCurrentMinuteMs((prev) => (prev !== next ? next : prev));
     };
     const interval = window.setInterval(tick, settings.histogramClockTickMs);
     return () => window.clearInterval(interval);
   }, [settings.histogramClockTickMs]);
 
-  // Pull the last ~60 minutes of blocks on a short cadence so the current
-  // minute's bar keeps growing as new blocks arrive.
-  useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
-
-    const load = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const cutoff = new Date(
-          Date.now() - (settings.histogramWindowMinutes + 1) * 60_000,
-        ).toISOString();
-        const params = new URLSearchParams();
-        params.set("dateGt", cutoff);
-        params.set("limit", String(settings.histogramFetchLimit));
-        params.set("order", "desc");
-        const response = await fetchBlocks(params);
-        if (cancelled) return;
-        setBlocks(response.blocks);
-        setLoaded(true);
-        setError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    void load();
-    const interval = window.setInterval(load, settings.histogramRefreshMs);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [settings.histogramFetchLimit, settings.histogramRefreshMs, settings.histogramWindowMinutes]);
-
   const buckets = useMemo<MinuteBucket[]>(() => {
     const map = new Map<number, MinuteBucket>();
     for (let i = 0; i < settings.histogramWindowMinutes; i++) {
-      const ms = currentMinuteMs - (settings.histogramWindowMinutes - 1 - i) * 60_000;
+      const ms = currentMinuteMs - (settings.histogramWindowMinutes - 1 - i) * MINUTE_MS;
       map.set(ms, { minuteMs: ms, gasUsed: 0, transactionCount: 0 });
     }
     for (const block of blocks) {
       const ts = Date.parse(block.blockDate);
       if (!Number.isFinite(ts)) continue;
-      const minute = Math.floor(ts / 60_000) * 60_000;
+      const minute = Math.floor(ts / MINUTE_MS) * MINUTE_MS;
       const bucket = map.get(minute);
       if (!bucket) continue;
       const gas = Number(block.totalGasUsed);
@@ -635,7 +661,7 @@ function HistogramPanel({
       [labels[i], b.minuteMs === currentMinuteMs ? "in progress" : "complete"] as [string, string],
     );
 
-    const firstMs = buckets[0]?.minuteMs ?? currentMinuteMs - (histogramWindowMinutes - 1) * 60_000;
+    const firstMs = buckets[0]?.minuteMs ?? currentMinuteMs - (histogramWindowMinutes - 1) * MINUTE_MS;
     const lastMs = buckets[buckets.length - 1]?.minuteMs ?? currentMinuteMs;
 
     const trace: Partial<Plotly.PlotData> = {
