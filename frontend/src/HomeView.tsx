@@ -8,7 +8,7 @@ import {
   type StoredBlock,
 } from "./api";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
@@ -26,6 +26,7 @@ interface HomeViewProps {
 }
 
 const LATEST_BLOCK_LIMIT = 20;
+const STATS_WINDOW_BLOCKS = 30;
 const MINUTE_MS = 60_000;
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
@@ -107,6 +108,34 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
   const feedBlocks = useMemo(() => blocks.slice(0, LATEST_BLOCK_LIMIT), [blocks]);
+  const statsWindow = useMemo(() => {
+    const window = blocks.slice(0, STATS_WINDOW_BLOCKS);
+    if (window.length === 0) return null;
+    let transactions = 0n;
+    let gasUsed = 0n;
+    let feesWei = 0n;
+    for (const block of window) {
+      transactions += BigInt(block.transactionCount);
+      try {
+        gasUsed += BigInt(block.totalGasUsed);
+      } catch {
+        // ignore unparseable values
+      }
+      if (block.totalTransactionFeeWei) {
+        try {
+          feesWei += BigInt(block.totalTransactionFeeWei);
+        } catch {
+          // ignore unparseable values
+        }
+      }
+    }
+    return {
+      count: window.length,
+      transactions: transactions.toString(),
+      gasUsed: gasUsed.toString(),
+      feesWei: feesWei.toString(),
+    };
+  }, [blocks]);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -326,10 +355,17 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
         <div className="home-stats">
           <MetricCard label="Latest block" value={latestBlock ? latestBlock.blockNumber.toString() : "—"} />
           <MetricCard label="Base fee" value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "—"} />
-          <MetricCard label="Transactions" value={latestBlock ? fmtInteger(latestBlock.transactionCount) : "—"} />
           <MetricCard
-            label="Gas used"
-            value={latestBlock ? fmtRatio(latestBlock.totalGasUsed, latestBlock.maxGasInBlock) : "—"}
+            label="Transactions last minute"
+            value={statsWindow ? fmtInteger(statsWindow.transactions) : "—"}
+          />
+          <MetricCard
+            label="Gas used last minute"
+            value={statsWindow ? fmtGasBillions(statsWindow.gasUsed) : "—"}
+          />
+          <MetricCard
+            label="Total fees last minute"
+            value={statsWindow ? `${fmtEth(statsWindow.feesWei)} ETH` : "—"}
           />
         </div>
       </div>
@@ -391,6 +427,23 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       </div>
     </section>
   );
+}
+
+function fmtGasBillions(gasStr: string): string {
+  try {
+    const billions = Number(BigInt(gasStr)) / 1e9;
+    if (!Number.isFinite(billions)) return "—";
+    let decimals: number;
+    if (billions >= 100) decimals = 1;
+    else if (billions >= 10) decimals = 2;
+    else if (billions >= 1) decimals = 3;
+    else if (billions >= 0.1) decimals = 4;
+    else if (billions >= 0.01) decimals = 5;
+    else decimals = 6;
+    return `${billions.toFixed(decimals)} B`;
+  } catch {
+    return "—";
+  }
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
