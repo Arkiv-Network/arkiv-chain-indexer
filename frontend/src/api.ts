@@ -123,6 +123,7 @@ export interface InspectedBlock {
 
 export interface BlockInspectResponse {
   cached: boolean;
+  transactionLoadError?: string;
   block: InspectedBlock;
 }
 
@@ -360,7 +361,7 @@ export function fetchBlocks(params: URLSearchParams): Promise<BlocksResponse> {
   return getJson<BlocksResponse>("/blocks", params);
 }
 
-export async function fetchBlockByNumber(blockNumber: number): Promise<StoredBlock | null> {
+export async function fetchBlockByNumber(blockNumber: string | number): Promise<StoredBlock | null> {
   const response = await fetch(`/api/blocks/${encodeURIComponent(blockNumber)}`);
   if (response.status === 404) return null;
   if (!response.ok) {
@@ -374,8 +375,39 @@ export function fetchRanges(params: URLSearchParams): Promise<RangesResponse> {
   return getJson<RangesResponse>("/ranges", params);
 }
 
-export function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResponse> {
-  return getJson<BlockInspectResponse>(`/block/${encodeURIComponent(blockNumber)}`, new URLSearchParams());
+export async function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResponse> {
+  const block = await fetchBlockByNumber(blockNumber);
+  if (!block) {
+    throw new Error(`Block ${blockNumber} was not found in storage`);
+  }
+
+  const transactionParams = new URLSearchParams({
+    block: blockNumber,
+    limit: "1000",
+    order: "asc",
+  });
+
+  try {
+    const transactions = await fetchTransactions(transactionParams);
+    return {
+      cached: true,
+      block: {
+        ...block,
+        blockNumberDecimal: String(block.blockNumber),
+        transactions: transactions.transactions,
+      },
+    };
+  } catch (error) {
+    return {
+      cached: true,
+      transactionLoadError: error instanceof Error ? error.message : String(error),
+      block: {
+        ...block,
+        blockNumberDecimal: String(block.blockNumber),
+        transactions: [],
+      },
+    };
+  }
 }
 
 export function fetchTransactions(params: URLSearchParams): Promise<TransactionsResponse> {
