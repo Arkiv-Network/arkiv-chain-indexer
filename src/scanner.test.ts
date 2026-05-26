@@ -320,7 +320,7 @@ describe("scanForwardToSafeHead", () => {
     expect(storage.lastSuccessfulBlock).toBe(102n);
   });
 
-  test("does not fill stale backlog below the forward lower bound", async () => {
+  test("catches up sequentially from existing progress even when the lower bound is ahead", async () => {
     const rpc = new SimpleRpc();
     const storage = new FakeStorage();
     storage.lastSuccessfulBlock = 90n;
@@ -335,7 +335,7 @@ describe("scanForwardToSafeHead", () => {
     );
 
     expect(scanned).toBe(true);
-    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(rpc.requestedBlocks).toEqual([91n, 92n, 93n, 94n, 95n, 96n, 97n, 98n, 99n, 100n]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
   });
 
@@ -385,7 +385,7 @@ describe("scanForwardToSafeHead", () => {
 });
 
 describe("runScanner", () => {
-  test("disable-backfill mode scans only the current safe head when progress is stale", async () => {
+  test("disable-backfill mode catches up sequentially when progress is behind the safe head", async () => {
     const rpc = new SimpleRpc();
     const storage = new FakeStorage();
     storage.lastSuccessfulBlock = 90n;
@@ -403,7 +403,7 @@ describe("runScanner", () => {
       ),
     ).rejects.toThrow("stop after first sleep");
 
-    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(rpc.requestedBlocks).toEqual([91n, 92n, 93n, 94n, 95n, 96n, 97n, 98n, 99n, 100n]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
     expect(storage.backfillNextBlock).toBeUndefined();
   });

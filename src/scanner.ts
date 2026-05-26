@@ -268,9 +268,12 @@ export async function scanForwardToSafeHead(
   batcherCollector?: BatcherMetricsSource,
 ): Promise<boolean> {
   const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
-  const nextProgressBlock =
+  // Cold start: no prior progress — jump to the lower bound (typically the
+  // current safe head, or the lowest block already filled by backfill in this
+  // slice). Once we have any progress, always resume strictly at
+  // lastSuccessfulBlock + 1 so we never silently skip blocks near the head.
+  let nextBlock =
     lastSuccessfulBlock === undefined ? initialLowerBound : lastSuccessfulBlock + 1n;
-  let nextBlock = nextProgressBlock < initialLowerBound ? initialLowerBound : nextProgressBlock;
   let scanned = false;
 
   while (nextBlock <= safeHead) {
