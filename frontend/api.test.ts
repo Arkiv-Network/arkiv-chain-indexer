@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  BLOCK_RESPONSE_NAMES,
   fetchBlockByNumber,
   deleteBaseloadConfig,
   fetchBlocks,
@@ -141,6 +142,8 @@ describe("frontend API helpers", () => {
       count: 0,
       limit: 1,
       truncated: false,
+      filters: { blockGt: null, blockLt: null, dateGt: null, dateLt: null },
+      names: BLOCK_RESPONSE_NAMES,
       blocks: [],
     });
     const samples: Array<{
@@ -169,6 +172,40 @@ describe("frontend API helpers", () => {
     expect(samples[0].status).toBe(200);
     expect(samples[0].durationMs).toBeGreaterThanOrEqual(0);
     expect(samples[0].transferredBytes).toBe(new TextEncoder().encode(body).length);
+  });
+
+  test("decodes compact block list responses into stored block objects", async () => {
+    globalThis.fetch = (async () =>
+      Response.json({
+        count: 1,
+        limit: 1,
+        truncated: false,
+        filters: { blockGt: null, blockLt: null, dateGt: null, dateLt: null },
+        names: BLOCK_RESPONSE_NAMES,
+        blocks: [compactBlockRow(42)],
+      })) as typeof fetch;
+
+    const result = await fetchBlocks(new URLSearchParams("limit=1"));
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0]).toMatchObject({
+      blockNumber: 42,
+      blockDate: "2024-01-01T00:00:00.000Z",
+      baseBlockFeeWei: "0",
+      totalGasUsed: "0",
+      maxGasInBlock: "0",
+      transactionCount: 1,
+      averagePriorityFeeWei: "0",
+    });
+  });
+
+  test("decodes compact single-block rows", async () => {
+    globalThis.fetch = (async () => Response.json(compactBlockRow(43))) as typeof fetch;
+
+    const result = await fetchBlockByNumber(43);
+
+    expect(result?.blockNumber).toBe(43);
+    expect(result?.blockDate).toBe("2024-01-01T00:00:00.000Z");
   });
 
   test("counts missing block debug probes as successful requests", async () => {
@@ -244,19 +281,7 @@ describe("frontend API helpers", () => {
           ],
         });
       }
-      return Response.json({
-        blockNumber: 42,
-        blockDate: "2024-01-01T00:00:00.000Z",
-        baseBlockFeeWei: "0",
-        totalGasUsed: "0",
-        maxGasInBlock: "0",
-        transactionCount: 1,
-        averagePriorityFeeWei: "0",
-        averagePriorityFeeWeightedWei: "0",
-        averageFeePriceWei: "0",
-        averageTransactionFeeWei: "0",
-        averageTransactionGasUsed: "0",
-      });
+      return Response.json(compactBlockRow(42));
     }) as typeof fetch;
 
     const result = await fetchBlockInspect("42");
@@ -274,19 +299,7 @@ describe("frontend API helpers", () => {
       if (String(input).startsWith("/api/transactions")) {
         return Response.json({ error: "Transaction data is disabled" }, { status: 404 });
       }
-      return Response.json({
-        blockNumber: 42,
-        blockDate: "2024-01-01T00:00:00.000Z",
-        baseBlockFeeWei: "0",
-        totalGasUsed: "0",
-        maxGasInBlock: "0",
-        transactionCount: 1,
-        averagePriorityFeeWei: "0",
-        averagePriorityFeeWeightedWei: "0",
-        averageFeePriceWei: "0",
-        averageTransactionFeeWei: "0",
-        averageTransactionGasUsed: "0",
-      });
+      return Response.json(compactBlockRow(42));
     }) as typeof fetch;
 
     const result = await fetchBlockInspect("42");
@@ -296,3 +309,32 @@ describe("frontend API helpers", () => {
     expect(result.transactionLoadError).toContain("HTTP 404");
   });
 });
+
+function compactBlockRow(blockNumber: number): Array<number | string | null> {
+  return BLOCK_RESPONSE_NAMES.map((name) => {
+    switch (name) {
+      case "blockNumber":
+        return blockNumber;
+      case "blockDate":
+        return "2024-01-01T00:00:00.000Z";
+      case "transactionCount":
+        return 1;
+      case "batcherQueueSize":
+      case "batcherIntensity":
+      case "batcherLowerThreshold":
+      case "batcherUpperThreshold":
+      case "batcherMaxBlockSize":
+      case "batcherMaxTxSize":
+      case "blockRewardWei":
+      case "burntFeesWei":
+      case "totalTransactionFeeWei":
+      case "feePriceSumWei":
+      case "priorityFeeSumWei":
+      case "priorityFeeWeightedNumeratorWei":
+      case "priorityFeeGasWeightedNumeratorWei":
+        return null;
+      default:
+        return "0";
+    }
+  });
+}

@@ -405,9 +405,12 @@ endpoints and advertise that state to the frontend through `GET /health`.
 
 ### `GET /blocks`
 
-Returns stored block rows ordered by `block_number` ascending. The response is always capped at **10,000
-rows** (smallest matching blocks first). All four filters below are optional and combine additively (AND).
-With no filters the smallest 10,000 stored blocks are returned.
+Returns stored block rows ordered by `block_number` descending by default. The response is always capped at
+**10,000 rows** (newest matching blocks first). All four filters below are optional and combine additively
+(AND). With no filters the newest 10,000 stored blocks are returned.
+
+The response uses a compact row format: `names` lists the field names once, and each entry in `blocks` is an
+array of values in that same order.
 
 | Query parameter | Description |
 | --- | --- |
@@ -415,12 +418,37 @@ With no filters the smallest 10,000 stored blocks are returned.
 | `blockLt` | Only blocks with `block_number < blockLt`. |
 | `dateGt` | ISO-8601 timestamp; only blocks newer than this. |
 | `dateLt` | ISO-8601 timestamp; only blocks older than this. |
+| `limit` | Maximum rows to return, capped at 10,000. |
+| `order` | `desc` for newest first, or `asc` for oldest first. |
 
 Example:
 
 ```sh
 curl 'http://localhost:3000/blocks?blockGt=19000000&blockLt=19000005'
 ```
+
+Abbreviated response shape:
+
+```json
+{
+  "count": 1,
+  "limit": 10000,
+  "truncated": false,
+  "filters": {
+    "blockGt": "19000000",
+    "blockLt": "19000005",
+    "dateGt": null,
+    "dateLt": null
+  },
+  "names": ["blockNumber", "blockDate", "baseBlockFeeWei"],
+  "blocks": [[19000004, "2026-05-27T11:55:42.000Z", "251"]]
+}
+```
+
+### `GET /blocks/:blockNumber`
+
+Returns a single stored block as only the compact value row array. The field order is the same order returned
+by `GET /blocks` in `names`. If the block has not been scanned into PostgreSQL, this endpoint returns `404`.
 
 ### `GET /block/:blockNumber`
 
