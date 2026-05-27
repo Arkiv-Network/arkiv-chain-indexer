@@ -81,6 +81,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (activeView !== "baseload") return;
+
     let cancelled = false;
 
     const refresh = async () => {
@@ -101,9 +103,11 @@ export function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [activeView]);
 
   useEffect(() => {
+    if (activeView !== "baseload") return;
+
     let cancelled = false;
 
     const refresh = async () => {
@@ -124,7 +128,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [baseloadAdminToken]);
+  }, [activeView, baseloadAdminToken]);
 
   useEffect(() => {
     if (
