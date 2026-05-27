@@ -64,6 +64,15 @@ export interface BlocksResponse {
   blocks: StoredBlock[];
 }
 
+export interface BlockRequestDebugSample {
+  ok: boolean;
+  status: number | null;
+  durationMs: number;
+  transferredBytes: number;
+}
+
+export type BlockRequestDebugObserver = (sample: BlockRequestDebugSample) => void;
+
 export interface RangesResponse {
   count: number;
   limit: number;
@@ -297,9 +306,17 @@ export interface BaseloadConfigsResponse {
   configs: StoredBaseloadConfigSummary[];
 }
 
-async function getJson<T>(path: string, params: URLSearchParams): Promise<T> {
+async function getJson<T>(
+  path: string,
+  params: URLSearchParams,
+  debugObserver?: BlockRequestDebugObserver,
+): Promise<T> {
   const qs = params.toString();
   const url = qs ? `/api${path}?${qs}` : `/api${path}`;
+  if (debugObserver) {
+    return fetchJsonWithDebug<T>(url, debugObserver);
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     const text = await response.text();
@@ -357,18 +374,141 @@ async function deleteJson<T>(path: string, bearerToken?: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function fetchBlocks(params: URLSearchParams): Promise<BlocksResponse> {
-  return getJson<BlocksResponse>("/blocks", params);
+export function fetchBlocks(
+  params: URLSearchParams,
+  debugObserver?: BlockRequestDebugObserver,
+): Promise<BlocksResponse> {
+  return getJson<BlocksResponse>("/blocks", params, debugObserver);
 }
 
-export async function fetchBlockByNumber(blockNumber: string | number): Promise<StoredBlock | null> {
-  const response = await fetch(`/api/blocks/${encodeURIComponent(blockNumber)}`);
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`HTTP ${response.status}: ${text}`);
+export async function fetchBlockByNumber(
+  blockNumber: string | number,
+  debugObserver?: BlockRequestDebugObserver,
+): Promise<StoredBlock | null> {
+  const url = `/api/blocks/${encodeURIComponent(blockNumber)}`;
+  if (!debugObserver) {
+    const response = await fetch(url);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    return (await response.json()) as StoredBlock;
   }
-  return (await response.json()) as StoredBlock;
+
+  const startedAt = nowMs();
+  let response: Response | null = null;
+  let text = "";
+  try {
+    response = await fetch(url);
+    text = await response.text();
+    const durationMs = nowMs() - startedAt;
+    if (response.status === 404) {
+      debugObserver({
+        ok: true,
+        status: response.status,
+        durationMs,
+        transferredBytes: byteLength(text),
+      });
+      return null;
+    }
+    if (!response.ok) {
+      debugObserver({
+        ok: false,
+        status: response.status,
+        durationMs,
+        transferredBytes: byteLength(text),
+      });
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    try {
+      const block = JSON.parse(text) as StoredBlock;
+      debugObserver({
+        ok: true,
+        status: response.status,
+        durationMs,
+        transferredBytes: byteLength(text),
+      });
+      return block;
+    } catch (error) {
+      debugObserver({
+        ok: false,
+        status: response.status,
+        durationMs,
+        transferredBytes: byteLength(text),
+      });
+      throw error;
+    }
+  } catch (error) {
+    if (response === null) {
+      debugObserver({
+        ok: false,
+        status: null,
+        durationMs: nowMs() - startedAt,
+        transferredBytes: 0,
+      });
+    }
+    throw error;
+  }
+}
+
+async function fetchJsonWithDebug<T>(
+  url: string,
+  debugObserver: BlockRequestDebugObserver,
+): Promise<T> {
+  const startedAt = nowMs();
+  let response: Response | null = null;
+  let text = "";
+  try {
+    response = await fetch(url);
+    text = await response.text();
+    const durationMs = nowMs() - startedAt;
+    if (!response.ok) {
+      debugObserver({
+        ok: false,
+        status: response.status,
+        durationMs,
+        transferredBytes: byteLength(text),
+      });
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    try {
+      const body = JSON.parse(text) as T;
+      debugObserver({
+        ok: true,
+        status: response.status,
+        durationMs,
+        transferredBytes: byteLength(text),
+      });
+      return body;
+    } catch (error) {
+      debugObserver({
+        ok: false,
+        status: response.status,
+        durationMs,
+        transferredBytes: byteLength(text),
+      });
+      throw error;
+    }
+  } catch (error) {
+    if (response === null) {
+      debugObserver({
+        ok: false,
+        status: null,
+        durationMs: nowMs() - startedAt,
+        transferredBytes: 0,
+      });
+    }
+    throw error;
+  }
+}
+
+function nowMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
 }
 
 export function fetchRanges(params: URLSearchParams): Promise<RangesResponse> {

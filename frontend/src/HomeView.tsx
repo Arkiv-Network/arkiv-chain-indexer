@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import {
   fetchBlockByNumber,
   fetchBlocks,
+  type BlockRequestDebugSample,
   type BlocksResponse,
   type StoredBlock,
 } from "./api";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
+import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
@@ -31,15 +32,61 @@ const MINUTE_MS = 60_000;
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
+type HomeDebugRequestKind = "range" | "block";
+
+interface HomeDebugRequestStats {
+  requests: number;
+  successful: number;
+  failed: number;
+  transferredBytes: number;
+  totalDurationMs: number;
+}
+
+type HomeDebugStats = Record<HomeDebugRequestKind, HomeDebugRequestStats>;
+
+const EMPTY_HOME_DEBUG_STATS: HomeDebugStats = {
+  range: {
+    requests: 0,
+    successful: 0,
+    failed: 0,
+    transferredBytes: 0,
+    totalDurationMs: 0,
+  },
+  block: {
+    requests: 0,
+    successful: 0,
+    failed: 0,
+    transferredBytes: 0,
+    totalDurationMs: 0,
+  },
+};
+
 export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps) {
   const [blocksData, setBlocksData] = useState<BlocksResponse | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const [blocksLoading, setBlocksLoading] = useState(true);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [debugStats, setDebugStats] = useState<HomeDebugStats>(EMPTY_HOME_DEBUG_STATS);
   const [simulateOffline, setSimulateOffline] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIMULATE_OFFLINE_STORAGE_KEY) === "true";
   });
+
+  const recordDebugRequest = useCallback(
+    (kind: HomeDebugRequestKind, sample: BlockRequestDebugSample) => {
+      setDebugStats((previous) => ({
+        ...previous,
+        [kind]: {
+          requests: previous[kind].requests + 1,
+          successful: previous[kind].successful + (sample.ok ? 1 : 0),
+          failed: previous[kind].failed + (sample.ok ? 0 : 1),
+          transferredBytes: previous[kind].transferredBytes + sample.transferredBytes,
+          totalDurationMs: previous[kind].totalDurationMs + sample.durationMs,
+        },
+      }));
+    },
+    [],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -82,7 +129,9 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       setBlocksLoading(true);
 
       try {
-        const nextBlocks = await fetchBlocks(recentBlocksParams(settings));
+        const nextBlocks = await fetchBlocks(recentBlocksParams(settings), (sample) => {
+          if (!cancelled) recordDebugRequest("range", sample);
+        });
         if (cancelled) return;
         setBlocksData(normalizeBlocksResponse(nextBlocks, settings));
         setBlocksError(null);
@@ -103,7 +152,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       cancelled = true;
       if (intervalId !== undefined) window.clearInterval(intervalId);
     };
-  }, [settings]);
+  }, [settings, recordDebugRequest]);
 
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
@@ -196,7 +245,9 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       lastPingAtMs = now;
       inFlight = true;
       try {
-        const block = await fetchBlockByNumber(nextExpectedBlockNumber);
+        const block = await fetchBlockByNumber(nextExpectedBlockNumber, (sample) => {
+          if (!cancelled) recordDebugRequest("block", sample);
+        });
         if (cancelled) return;
         setBlocksError(null);
         if (!block) return;
@@ -239,6 +290,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     settings.pingStartAgeMs,
     settings.histogramFetchLimit,
     settings.histogramWindowMinutes,
+    recordDebugRequest,
   ]);
 
   useEffect(() => {
@@ -425,6 +477,66 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
           />
         </div>
       </div>
+
+      <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} />
+    </section>
+  );
+}
+
+function HomeDebugSummary({
+  localBlockCount,
+  stats,
+}: {
+  localBlockCount: number;
+  stats: HomeDebugStats;
+}) {
+  return (
+    <aside className="home-debug-summary" aria-label="Home request debug summary">
+      <div className="home-debug-summary__head">
+        <span>debug summary</span>
+        <strong>{fmtInteger(localBlockCount)} local blocks</strong>
+      </div>
+      <div className="home-debug-summary__grid">
+        <HomeDebugRequestSummary label="Range requests" stats={stats.range} />
+        <HomeDebugRequestSummary label="Block requests" stats={stats.block} />
+      </div>
+    </aside>
+  );
+}
+
+function HomeDebugRequestSummary({
+  label,
+  stats,
+}: {
+  label: string;
+  stats: HomeDebugRequestStats;
+}) {
+  const averageMs = stats.requests === 0 ? null : stats.totalDurationMs / stats.requests;
+  return (
+    <section className="home-debug-request">
+      <h4>{label}</h4>
+      <dl>
+        <div>
+          <dt>Requests</dt>
+          <dd>{fmtInteger(stats.requests)}</dd>
+        </div>
+        <div>
+          <dt>Successful</dt>
+          <dd>{fmtInteger(stats.successful)}</dd>
+        </div>
+        <div>
+          <dt>Failed</dt>
+          <dd>{fmtInteger(stats.failed)}</dd>
+        </div>
+        <div>
+          <dt>Transferred</dt>
+          <dd>{fmtBytes(stats.transferredBytes)}</dd>
+        </div>
+        <div>
+          <dt>Avg response</dt>
+          <dd>{averageMs === null ? "—" : `${Math.round(averageMs)} ms`}</dd>
+        </div>
+      </dl>
     </section>
   );
 }
