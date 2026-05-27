@@ -109,6 +109,8 @@ interface CompactBlocksResponse {
   blocks: BlockResponseRow[];
 }
 
+let latestBlockResponseNames: readonly string[] = BLOCK_RESPONSE_NAMES;
+
 export interface BlockRequestDebugSample {
   ok: boolean;
   status: number | null;
@@ -438,7 +440,8 @@ export async function fetchBlockByNumber(
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    return decodeBlockResponseRow((await response.json()) as BlockResponseRow);
+    const row = (await response.json()) as BlockResponseRow;
+    return decodeBlockResponseRow(row, namesForBlockResponseRow(row));
   }
 
   const startedAt = nowMs();
@@ -467,7 +470,8 @@ export async function fetchBlockByNumber(
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
     try {
-      const block = decodeBlockResponseRow(JSON.parse(text) as BlockResponseRow);
+      const row = JSON.parse(text) as BlockResponseRow;
+      const block = decodeBlockResponseRow(row, namesForBlockResponseRow(row));
       debugObserver({
         ok: true,
         status: response.status,
@@ -498,12 +502,18 @@ export async function fetchBlockByNumber(
 }
 
 function expandBlocksResponse(response: CompactBlocksResponse): BlocksResponse {
+  latestBlockResponseNames = response.names.length > 0 ? response.names : BLOCK_RESPONSE_NAMES;
+
   return {
     count: response.count,
     limit: response.limit,
     truncated: response.truncated,
     blocks: response.blocks.map((row) => decodeBlockResponseRow(row, response.names)),
   };
+}
+
+function namesForBlockResponseRow(row: BlockResponseRow): readonly string[] {
+  return latestBlockResponseNames.length === row.length ? latestBlockResponseNames : BLOCK_RESPONSE_NAMES;
 }
 
 function decodeBlockResponseRow(row: BlockResponseRow, names: readonly string[] = BLOCK_RESPONSE_NAMES): StoredBlock {

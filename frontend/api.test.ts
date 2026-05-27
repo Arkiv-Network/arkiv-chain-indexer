@@ -208,6 +208,30 @@ describe("frontend API helpers", () => {
     expect(result?.blockDate).toBe("2024-01-01T00:00:00.000Z");
   });
 
+  test("uses latest block list names for compact single-block rows", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json({
+          count: 1,
+          limit: 1,
+          truncated: false,
+          filters: { blockGt: null, blockLt: null, dateGt: null, dateLt: null },
+          names: ["blockDate", "blockNumber"],
+          blocks: [["2024-01-02T00:00:00.000Z", 44]],
+        });
+      }
+      return Response.json(["2024-01-03T00:00:00.000Z", 45]);
+    }) as typeof fetch;
+
+    await fetchBlocks(new URLSearchParams("limit=1"));
+    const result = await fetchBlockByNumber(45);
+
+    expect(result?.blockNumber).toBe(45);
+    expect(result?.blockDate).toBe("2024-01-03T00:00:00.000Z");
+  });
+
   test("counts missing block debug probes as successful requests", async () => {
     const body = "not found";
     const samples: Array<{
