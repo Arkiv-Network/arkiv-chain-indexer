@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  fetchBlockByNumber,
   deleteBaseloadConfig,
+  fetchBlocks,
   fetchBlockInspect,
   fetchBaseloadConfigs,
   fetchBaseloadState,
@@ -132,6 +134,61 @@ describe("frontend API helpers", () => {
     await fetchTransactionRecords(new URLSearchParams("limit=20"));
 
     expect(observedInput).toBe("/api/transaction-records?limit=20");
+  });
+
+  test("reports debug metadata for block range requests", async () => {
+    const body = JSON.stringify({
+      count: 0,
+      limit: 1,
+      truncated: false,
+      blocks: [],
+    });
+    const samples: Array<{
+      ok: boolean;
+      status: number | null;
+      durationMs: number;
+      transferredBytes: number;
+    }> = [];
+    let observedInput = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      observedInput = String(input);
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await fetchBlocks(new URLSearchParams("limit=1"), (sample) =>
+      samples.push(sample),
+    );
+
+    expect(observedInput).toBe("/api/blocks?limit=1");
+    expect(result.blocks).toEqual([]);
+    expect(samples).toHaveLength(1);
+    expect(samples[0].ok).toBe(true);
+    expect(samples[0].status).toBe(200);
+    expect(samples[0].durationMs).toBeGreaterThanOrEqual(0);
+    expect(samples[0].transferredBytes).toBe(new TextEncoder().encode(body).length);
+  });
+
+  test("counts missing block debug probes as successful requests", async () => {
+    const body = "not found";
+    const samples: Array<{
+      ok: boolean;
+      status: number | null;
+      durationMs: number;
+      transferredBytes: number;
+    }> = [];
+    globalThis.fetch = (async () => new Response(body, { status: 404 })) as typeof fetch;
+
+    const result = await fetchBlockByNumber(43, (sample) => samples.push(sample));
+
+    expect(result).toBeNull();
+    expect(samples).toHaveLength(1);
+    expect(samples[0].ok).toBe(true);
+    expect(samples[0].status).toBe(404);
+    expect(samples[0].durationMs).toBeGreaterThanOrEqual(0);
+    expect(samples[0].transferredBytes).toBe(new TextEncoder().encode(body).length);
   });
 
   test("fetches a block inspection from the stored block and transaction APIs", async () => {
