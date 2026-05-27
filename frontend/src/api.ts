@@ -25,6 +25,37 @@ export interface StoredBlock {
   batcherMaxTxSize?: string | null;
 }
 
+export const BLOCK_RESPONSE_NAMES = [
+  "blockNumber",
+  "blockDate",
+  "baseBlockFeeWei",
+  "totalGasUsed",
+  "maxGasInBlock",
+  "transactionCount",
+  "blockRewardWei",
+  "burntFeesWei",
+  "totalTransactionFeeWei",
+  "feePriceSumWei",
+  "priorityFeeSumWei",
+  "priorityFeeWeightedNumeratorWei",
+  "priorityFeeGasWeightedNumeratorWei",
+  "averageFeePriceWei",
+  "averageTransactionFeeWei",
+  "averageTransactionGasUsed",
+  "averagePriorityFeeWeightedWei",
+  "averagePriorityFeeWei",
+  "batcherQueueSize",
+  "batcherIntensity",
+  "batcherLowerThreshold",
+  "batcherUpperThreshold",
+  "batcherMaxBlockSize",
+  "batcherMaxTxSize",
+] as const satisfies readonly (keyof StoredBlock)[];
+
+export type BlockResponseName = (typeof BLOCK_RESPONSE_NAMES)[number];
+export type BlockResponseValue = number | string | null;
+export type BlockResponseRow = BlockResponseValue[];
+
 export interface StoredBlockRange {
   rangeSize: number;
   rangeStart: number;
@@ -63,6 +94,22 @@ export interface BlocksResponse {
   truncated: boolean;
   blocks: StoredBlock[];
 }
+
+interface CompactBlocksResponse {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  filters: {
+    blockGt: string | null;
+    blockLt: string | null;
+    dateGt: string | null;
+    dateLt: string | null;
+  };
+  names: string[];
+  blocks: BlockResponseRow[];
+}
+
+let latestBlockResponseNames: readonly string[] = BLOCK_RESPONSE_NAMES;
 
 export interface BlockRequestDebugSample {
   ok: boolean;
@@ -378,7 +425,7 @@ export function fetchBlocks(
   params: URLSearchParams,
   debugObserver?: BlockRequestDebugObserver,
 ): Promise<BlocksResponse> {
-  return getJson<BlocksResponse>("/blocks", params, debugObserver);
+  return getJson<CompactBlocksResponse>("/blocks", params, debugObserver).then(expandBlocksResponse);
 }
 
 export async function fetchBlockByNumber(
@@ -393,7 +440,8 @@ export async function fetchBlockByNumber(
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    return (await response.json()) as StoredBlock;
+    const row = (await response.json()) as BlockResponseRow;
+    return decodeBlockResponseRow(row, namesForBlockResponseRow(row));
   }
 
   const startedAt = nowMs();
@@ -422,7 +470,8 @@ export async function fetchBlockByNumber(
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
     try {
-      const block = JSON.parse(text) as StoredBlock;
+      const row = JSON.parse(text) as BlockResponseRow;
+      const block = decodeBlockResponseRow(row, namesForBlockResponseRow(row));
       debugObserver({
         ok: true,
         status: response.status,
@@ -450,6 +499,95 @@ export async function fetchBlockByNumber(
     }
     throw error;
   }
+}
+
+function expandBlocksResponse(response: CompactBlocksResponse): BlocksResponse {
+  latestBlockResponseNames = response.names.length > 0 ? response.names : BLOCK_RESPONSE_NAMES;
+
+  return {
+    count: response.count,
+    limit: response.limit,
+    truncated: response.truncated,
+    blocks: response.blocks.map((row) => decodeBlockResponseRow(row, response.names)),
+  };
+}
+
+function namesForBlockResponseRow(row: BlockResponseRow): readonly string[] {
+  return latestBlockResponseNames.length === row.length ? latestBlockResponseNames : BLOCK_RESPONSE_NAMES;
+}
+
+function decodeBlockResponseRow(row: BlockResponseRow, names: readonly string[] = BLOCK_RESPONSE_NAMES): StoredBlock {
+  const values = new Map<string, BlockResponseValue>();
+  names.forEach((name, index) => values.set(name, row[index] ?? null));
+
+  const block: StoredBlock = {
+    blockNumber: numberValue(values.get("blockNumber") ?? null),
+    blockDate: stringValue(values.get("blockDate") ?? null),
+    baseBlockFeeWei: stringValue(values.get("baseBlockFeeWei") ?? null),
+    totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    maxGasInBlock: stringValue(values.get("maxGasInBlock") ?? null),
+    transactionCount: numberValue(values.get("transactionCount") ?? null),
+    averageFeePriceWei: stringValue(values.get("averageFeePriceWei") ?? null),
+    averageTransactionFeeWei: stringValue(values.get("averageTransactionFeeWei") ?? null),
+    averageTransactionGasUsed: stringValue(values.get("averageTransactionGasUsed") ?? null),
+    averagePriorityFeeWeightedWei: stringValue(values.get("averagePriorityFeeWeightedWei") ?? null),
+    averagePriorityFeeWei: stringValue(values.get("averagePriorityFeeWei") ?? null),
+    batcherQueueSize: nullableString(values.get("batcherQueueSize") ?? null),
+    batcherIntensity: nullableString(values.get("batcherIntensity") ?? null),
+    batcherLowerThreshold: nullableString(values.get("batcherLowerThreshold") ?? null),
+    batcherUpperThreshold: nullableString(values.get("batcherUpperThreshold") ?? null),
+    batcherMaxBlockSize: nullableString(values.get("batcherMaxBlockSize") ?? null),
+    batcherMaxTxSize: nullableString(values.get("batcherMaxTxSize") ?? null),
+  };
+
+  assignOptionalString(block, "blockRewardWei", values.get("blockRewardWei") ?? null);
+  assignOptionalString(block, "burntFeesWei", values.get("burntFeesWei") ?? null);
+  assignOptionalString(block, "totalTransactionFeeWei", values.get("totalTransactionFeeWei") ?? null);
+  assignOptionalString(block, "feePriceSumWei", values.get("feePriceSumWei") ?? null);
+  assignOptionalString(block, "priorityFeeSumWei", values.get("priorityFeeSumWei") ?? null);
+  assignOptionalString(
+    block,
+    "priorityFeeWeightedNumeratorWei",
+    values.get("priorityFeeWeightedNumeratorWei") ?? null,
+  );
+  assignOptionalString(
+    block,
+    "priorityFeeGasWeightedNumeratorWei",
+    values.get("priorityFeeGasWeightedNumeratorWei") ?? null,
+  );
+
+  return block;
+}
+
+function assignOptionalString(
+  block: StoredBlock,
+  name: Extract<
+    BlockResponseName,
+    | "blockRewardWei"
+    | "burntFeesWei"
+    | "totalTransactionFeeWei"
+    | "feePriceSumWei"
+    | "priorityFeeSumWei"
+    | "priorityFeeWeightedNumeratorWei"
+    | "priorityFeeGasWeightedNumeratorWei"
+  >,
+  value: BlockResponseValue,
+): void {
+  if (value !== null) {
+    block[name] = stringValue(value);
+  }
+}
+
+function numberValue(value: BlockResponseValue): number {
+  return typeof value === "number" ? value : Number(value ?? 0);
+}
+
+function stringValue(value: BlockResponseValue): string {
+  return value === null ? "" : String(value);
+}
+
+function nullableString(value: BlockResponseValue): string | null {
+  return value === null ? null : String(value);
 }
 
 async function fetchJsonWithDebug<T>(

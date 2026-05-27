@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
+  BLOCK_RESPONSE_NAMES,
   createBlockServer,
   handleRequest,
   parseFilterFromQuery,
@@ -8,6 +9,7 @@ import {
   parseTransactionFilterFromQuery,
   parseTransactionRecordsFilterFromQuery,
   type BlockInspectResponseBody,
+  type BlockResponseRow,
   type BlocksResponseBody,
   type HealthResponseBody,
   type RangesResponseBody,
@@ -30,6 +32,11 @@ const RANGE_SIZE = DEFAULT_RANGE_SIZE;
 const TEST_MNEMONIC = "test test test test test test test test test test test junk";
 
 const cleanups: Array<() => Promise<void>> = [];
+
+function blockNumbersFromRows(rows: BlockResponseRow[]): number[] {
+  const blockNumberIndex = BLOCK_RESPONSE_NAMES.indexOf("blockNumber");
+  return rows.map((row) => row[blockNumberIndex] as number);
+}
 
 async function withStorage(): Promise<ScannerStorage> {
   const { storage, cleanup } = await createIsolatedStorage("server");
@@ -286,10 +293,11 @@ describe("GET /blocks/:blockNumber", () => {
       new Request("http://example.test/blocks/42"),
       storage,
     );
-    const body = (await response.json()) as { blockNumber: number };
+    const body = (await response.json()) as BlockResponseRow;
 
     expect(response.status).toBe(200);
-    expect(body.blockNumber).toBe(42);
+    expect(body[BLOCK_RESPONSE_NAMES.indexOf("blockNumber")]).toBe(42);
+    expect(body[BLOCK_RESPONSE_NAMES.indexOf("blockDate")]).toBe("2024-01-01T00:00:00.000Z");
   });
 
   test("rejects non-numeric block numbers via the catch-all 404", async () => {
@@ -298,6 +306,62 @@ describe("GET /blocks/:blockNumber", () => {
       {} as ScannerStorage,
     );
     expect(response.status).toBe(404);
+  });
+});
+
+describe("GET /blocks", () => {
+  test("returns column names and block value rows", async () => {
+    const storage = {
+      queryBlocks: async () => [
+        {
+          blockNumber: 42,
+          blockDate: "2024-01-01T00:00:00.000Z",
+          baseBlockFeeWei: "100",
+          totalGasUsed: "21000",
+          maxGasInBlock: "30000000",
+          transactionCount: 1,
+          averageFeePriceWei: "100",
+          averageTransactionFeeWei: "2100000",
+          averageTransactionGasUsed: "21000",
+          averagePriorityFeeWeightedWei: "0",
+          averagePriorityFeeWei: "0",
+        },
+      ],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(new Request("http://example.test/blocks"), storage);
+    const body = (await response.json()) as BlocksResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.names).toEqual(BLOCK_RESPONSE_NAMES);
+    expect(body.blocks).toEqual([
+      [
+        42,
+        "2024-01-01T00:00:00.000Z",
+        "100",
+        "21000",
+        "30000000",
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "100",
+        "2100000",
+        "21000",
+        "0",
+        "0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+      ],
+    ]);
   });
 });
 
@@ -942,7 +1006,8 @@ if (!hasPostgresForTests()) {
         expect(body.count).toBe(3);
         expect(body.limit).toBe(10_000);
         expect(body.truncated).toBe(false);
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([3, 2, 1]);
+        expect(body.names).toEqual(BLOCK_RESPONSE_NAMES);
+        expect(blockNumbersFromRows(body.blocks)).toEqual([3, 2, 1]);
         expect(body.filters).toEqual({ blockGt: null, blockLt: null, dateGt: null, dateLt: null });
       });
     });
@@ -956,7 +1021,7 @@ if (!hasPostgresForTests()) {
         expect(body.count).toBe(2);
         expect(body.limit).toBe(2);
         expect(body.truncated).toBe(true);
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([5, 4]);
+        expect(blockNumbersFromRows(body.blocks)).toEqual([5, 4]);
       });
     });
 
@@ -966,7 +1031,7 @@ if (!hasPostgresForTests()) {
         const response = await fetch(`${url}/blocks?limit=2&order=asc`);
         expect(response.status).toBe(200);
         const body = (await response.json()) as BlocksResponseBody;
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([1, 2]);
+        expect(blockNumbersFromRows(body.blocks)).toEqual([1, 2]);
       });
     });
 
@@ -994,7 +1059,7 @@ if (!hasPostgresForTests()) {
         );
         expect(response.status).toBe(200);
         const body = (await response.json()) as BlocksResponseBody;
-        expect(body.blocks.map((row) => row.blockNumber)).toEqual([12, 11]);
+        expect(blockNumbersFromRows(body.blocks)).toEqual([12, 11]);
         expect(body.filters).toEqual({
           blockGt: "10",
           blockLt: "13",

@@ -44,7 +44,8 @@ export interface BlocksResponseBody {
     dateGt: string | null;
     dateLt: string | null;
   };
-  blocks: StoredBlock[];
+  names: typeof BLOCK_RESPONSE_NAMES;
+  blocks: BlockResponseRow[];
 }
 
 export interface RangesResponseBody {
@@ -129,6 +130,36 @@ export interface HealthResponseBody {
     transactionData: boolean;
   };
 }
+
+export const BLOCK_RESPONSE_NAMES = [
+  "blockNumber",
+  "blockDate",
+  "baseBlockFeeWei",
+  "totalGasUsed",
+  "maxGasInBlock",
+  "transactionCount",
+  "blockRewardWei",
+  "burntFeesWei",
+  "totalTransactionFeeWei",
+  "feePriceSumWei",
+  "priorityFeeSumWei",
+  "priorityFeeWeightedNumeratorWei",
+  "priorityFeeGasWeightedNumeratorWei",
+  "averageFeePriceWei",
+  "averageTransactionFeeWei",
+  "averageTransactionGasUsed",
+  "averagePriorityFeeWeightedWei",
+  "averagePriorityFeeWei",
+  "batcherQueueSize",
+  "batcherIntensity",
+  "batcherLowerThreshold",
+  "batcherUpperThreshold",
+  "batcherMaxBlockSize",
+  "batcherMaxTxSize",
+] as const satisfies readonly (keyof StoredBlock)[];
+
+export type BlockResponseValue = number | string | null;
+export type BlockResponseRow = BlockResponseValue[];
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -459,7 +490,7 @@ async function handleGetBlockByNumber(
     if (!block) {
       return jsonError(404, `Block ${blockNumber.toString()} was not found in storage`);
     }
-    return jsonResponse(block);
+    return jsonResponse(blockToResponseRow(block));
   } catch (error) {
     return jsonError(500, error instanceof Error ? error.message : String(error));
   }
@@ -508,10 +539,15 @@ async function handleGetBlocks(url: URL, storage: ScannerStorage): Promise<Respo
       dateGt: filter.dateGt ?? null,
       dateLt: filter.dateLt ?? null,
     },
-    blocks,
+    names: BLOCK_RESPONSE_NAMES,
+    blocks: blocks.map(blockToResponseRow),
   };
 
   return jsonResponse(body);
+}
+
+export function blockToResponseRow(block: StoredBlock): BlockResponseRow {
+  return BLOCK_RESPONSE_NAMES.map((name) => block[name] ?? null);
 }
 
 async function handleGetRanges(url: URL, storage: ScannerStorage): Promise<Response> {
