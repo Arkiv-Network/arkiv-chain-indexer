@@ -13,6 +13,11 @@ import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
+import {
+  HOME_LATEST_BLOCK_LIMIT,
+  normalizeHomeBlocksResponse,
+  recentHomeBlocksParams,
+} from "./homeBlocks";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -26,7 +31,6 @@ interface HomeViewProps {
   timeZone: string;
 }
 
-const LATEST_BLOCK_LIMIT = 20;
 const STATS_WINDOW_BLOCKS = 30;
 const MINUTE_MS = 60_000;
 const REFRESH_INTERVAL_MS = 12_000;
@@ -129,11 +133,11 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       setBlocksLoading(true);
 
       try {
-        const nextBlocks = await fetchBlocks(recentBlocksParams(settings), (sample) => {
+        const nextBlocks = await fetchBlocks(recentHomeBlocksParams(settings), (sample) => {
           if (!cancelled) recordDebugRequest("range", sample);
         });
         if (cancelled) return;
-        setBlocksData(normalizeBlocksResponse(nextBlocks, settings));
+        setBlocksData(normalizeHomeBlocksResponse(nextBlocks, settings));
         setBlocksError(null);
         setLastUpdatedAt(new Date());
         if (intervalId !== undefined) window.clearInterval(intervalId);
@@ -156,7 +160,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
 
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
-  const feedBlocks = useMemo(() => blocks.slice(0, LATEST_BLOCK_LIMIT), [blocks]);
+  const feedBlocks = useMemo(() => blocks.slice(0, HOME_LATEST_BLOCK_LIMIT), [blocks]);
   const statsWindow = useMemo(() => {
     const window = blocks.slice(0, STATS_WINDOW_BLOCKS);
     if (window.length === 0) return null;
@@ -256,7 +260,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
           if (previous.blocks.some((existing) => existing.blockNumber === block.blockNumber)) {
             return previous;
           }
-          return normalizeBlocksResponse(
+          return normalizeHomeBlocksResponse(
             { ...previous, blocks: [block, ...previous.blocks] },
             settings,
           );
@@ -288,7 +292,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     settings.nextBlockPingMs,
     settings.pingMinIntervalMs,
     settings.pingStartAgeMs,
-    settings.histogramFetchLimit,
     settings.histogramWindowMinutes,
     recordDebugRequest,
   ]);
@@ -297,7 +300,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     const prune = () => {
       setBlocksData((previous) => {
         if (!previous) return previous;
-        const next = normalizeBlocksResponse(previous, settings);
+        const next = normalizeHomeBlocksResponse(previous, settings);
         return next.blocks.length === previous.blocks.length ? previous : next;
       });
     };
@@ -636,43 +639,6 @@ function BlockFeedItem({
       </div>
     </article>
   );
-}
-
-function recentBlocksParams(settings: PageSettings): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set("limit", String(Math.max(settings.histogramFetchLimit, LATEST_BLOCK_LIMIT)));
-  params.set("order", "desc");
-  return params;
-}
-
-function normalizeBlocksResponse(response: BlocksResponse, settings: PageSettings): BlocksResponse {
-  const blocks = pruneHomeBlocks(response.blocks, settings);
-  return {
-    ...response,
-    count: blocks.length,
-    limit: Math.max(response.limit, settings.histogramFetchLimit, LATEST_BLOCK_LIMIT),
-    truncated: response.truncated || blocks.length >= response.limit,
-    blocks,
-  };
-}
-
-function pruneHomeBlocks(blocks: StoredBlock[], settings: PageSettings): StoredBlock[] {
-  const currentMinuteMs = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
-  const firstMinuteMs = currentMinuteMs - Math.max(0, settings.histogramWindowMinutes - 1) * MINUTE_MS;
-  const limit = Math.max(settings.histogramFetchLimit, LATEST_BLOCK_LIMIT);
-  const seen = new Set<number>();
-
-  return blocks
-    .slice()
-    .sort((a, b) => b.blockNumber - a.blockNumber)
-    .filter((block, index) => {
-      if (seen.has(block.blockNumber)) return false;
-      seen.add(block.blockNumber);
-      if (index < LATEST_BLOCK_LIMIT) return true;
-      const ts = Date.parse(block.blockDate);
-      return Number.isFinite(ts) && ts >= firstMinuteMs;
-    })
-    .slice(0, limit);
 }
 
 function formatBehind(ms: number): string {

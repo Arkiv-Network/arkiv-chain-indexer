@@ -62,13 +62,13 @@ describe("frontend page settings", () => {
 
   test("persists browser overrides", () => {
     const storage = new MemoryStorage();
-    const settings = { ...DEFAULT_PAGE_SETTINGS, chainName: "Local", histogramFetchLimit: 500 };
+    const settings = { ...DEFAULT_PAGE_SETTINGS, chainName: "Local", blockTimeMs: 1_000 };
 
     writeStoredPageSettings(settings, storage);
 
     expect(readStoredPageSettings(DEFAULT_PAGE_SETTINGS, storage)).toMatchObject({
       chainName: "Local",
-      histogramFetchLimit: 500,
+      blockTimeMs: 1_000,
     });
   });
 });
