@@ -17,7 +17,6 @@ export interface PageSettings {
   pingMinIntervalMs: number;
   scannerDelayWarningAgeMs: number;
   histogramWindowMinutes: number;
-  histogramFetchLimit: number;
   histogramRefreshMs: number;
   histogramClockTickMs: number;
 }
@@ -54,7 +53,6 @@ export const DEFAULT_PAGE_SETTINGS: PageSettings = {
   pingMinIntervalMs: 1_500,
   scannerDelayWarningAgeMs: 60_000,
   histogramWindowMinutes: 60,
-  histogramFetchLimit: 2_400,
   histogramRefreshMs: 5_000,
   histogramClockTickMs: 1_000,
 };
@@ -106,13 +104,6 @@ export const PAGE_SETTING_DEFINITIONS: readonly PageSettingDefinition[] = [
     envName: "VITE_HISTOGRAM_WINDOW_MINUTES",
     kind: "number",
     unit: "minutes",
-  },
-  {
-    key: "histogramFetchLimit",
-    label: "Histogram fetch limit",
-    envName: "VITE_HISTOGRAM_FETCH_LIMIT",
-    kind: "number",
-    unit: "blocks",
   },
   {
     key: "histogramRefreshMs",
@@ -168,10 +159,6 @@ export function readBuildPageSettings(env: Record<string, string | undefined> = 
       env.VITE_HISTOGRAM_WINDOW_MINUTES,
       DEFAULT_PAGE_SETTINGS.histogramWindowMinutes,
     ),
-    histogramFetchLimit: parseNonNegativeInteger(
-      env.VITE_HISTOGRAM_FETCH_LIMIT,
-      DEFAULT_PAGE_SETTINGS.histogramFetchLimit,
-    ),
     histogramRefreshMs: parseNonNegativeInteger(
       env.VITE_HISTOGRAM_REFRESH_MS,
       DEFAULT_PAGE_SETTINGS.histogramRefreshMs,
@@ -198,7 +185,6 @@ export function settingsToDraft(settings: PageSettings): SettingsDraft {
     pingMinIntervalMs: String(settings.pingMinIntervalMs),
     scannerDelayWarningAgeMs: String(settings.scannerDelayWarningAgeMs),
     histogramWindowMinutes: String(settings.histogramWindowMinutes),
-    histogramFetchLimit: String(settings.histogramFetchLimit),
     histogramRefreshMs: String(settings.histogramRefreshMs),
     histogramClockTickMs: String(settings.histogramClockTickMs),
   };
