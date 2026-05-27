@@ -12,6 +12,8 @@ const BACKEND_HOST = process.env.BACKEND_HOST ?? "backend";
 const BACKEND_PORT = Number.parseInt(process.env.BACKEND_PORT ?? "3000", 10);
 const STATIC_DIR = path.resolve(__dirname, "dist");
 const INDEX_FILE = path.join(STATIC_DIR, "index.html");
+const ONE_WEEK_SECONDS = 60 * 60 * 24 * 7;
+const CACHEABLE_INDEX_ASSET_RE = /^index-[^/]+\.(?:js|css)$/;
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -37,8 +39,18 @@ function mimeFor(filePath) {
   return MIME_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
 }
 
+function cacheHeadersFor(filePath) {
+  if (!CACHEABLE_INDEX_ASSET_RE.test(path.basename(filePath))) {
+    return {};
+  }
+
+  return {
+    "cache-control": `public, max-age=${ONE_WEEK_SECONDS}`,
+  };
+}
+
 function sendFile(filePath, res, { status = 200 } = {}) {
-  res.writeHead(status, { "content-type": mimeFor(filePath) });
+  res.writeHead(status, { "content-type": mimeFor(filePath), ...cacheHeadersFor(filePath) });
   const stream = createReadStream(filePath);
   stream.on("error", () => {
     if (!res.headersSent) {
