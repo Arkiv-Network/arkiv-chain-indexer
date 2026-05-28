@@ -13,6 +13,7 @@ interface RangesViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }
 
 interface Filters extends Record<string, string> {
@@ -45,7 +46,7 @@ interface Column<T> {
   render: (row: T) => ReactNode;
 }
 
-function rangeColumns(timeZone: string): Column<StoredBlockRange>[] {
+function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlockRange>[] {
   return [
   {
     key: "rangeSize",
@@ -103,28 +104,28 @@ function rangeColumns(timeZone: string): Column<StoredBlockRange>[] {
   },
   {
     key: "totalBlockRewardWei",
-    label: "Total rewards (ETH)",
+    label: `Total rewards (${tokenSymbol})`,
     className: "num",
     width: "11rem",
     render: (row) => fmtEth(row.totalBlockRewardWei),
   },
   {
     key: "totalBurntFeesWei",
-    label: "Total burnt (ETH)",
+    label: `Total burnt (${tokenSymbol})`,
     className: "num",
     width: "10rem",
     render: (row) => fmtEth(row.totalBurntFeesWei),
   },
   {
     key: "averageBlockRewardWei",
-    label: "Avg reward/block (ETH)",
+    label: `Avg reward/block (${tokenSymbol})`,
     className: "num",
     width: "13rem",
     render: (row) => fmtEth(row.averageBlockRewardWei),
   },
   {
     key: "averageBurntFeesWei",
-    label: "Avg burnt/block (ETH)",
+    label: `Avg burnt/block (${tokenSymbol})`,
     className: "num",
     width: "13rem",
     render: (row) => fmtEth(row.averageBurntFeesWei),
@@ -202,7 +203,7 @@ function loadFilters(locationSearch: string): Filters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
-export function RangesView({ locationSearch, onLocationChange, timeZone }: RangesViewProps) {
+export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: RangesViewProps) {
   const [filters, setFilters] = useState<Filters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<RangesResponse | null>(null);
@@ -264,7 +265,7 @@ export function RangesView({ locationSearch, onLocationChange, timeZone }: Range
   const sorted = data
     ? data.ranges.slice().sort((a, b) => b.rangeStart - a.rangeStart)
     : [];
-  const columns = useMemo(() => rangeColumns(timeZone), [timeZone]);
+  const columns = useMemo(() => rangeColumns(timeZone, tokenSymbol), [timeZone, tokenSymbol]);
 
   return (
     <section className="view">

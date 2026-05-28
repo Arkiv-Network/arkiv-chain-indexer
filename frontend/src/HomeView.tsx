@@ -448,6 +448,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
                     slot={slot}
                     onLocationChange={onLocationChange}
                     timeZone={timeZone}
+                    tokenSymbol={settings.tokenSymbol}
                   />
                 ))}
                 {!blocksLoading && blocks.length === 0 ? <p className="home-empty">No stored blocks yet.</p> : null}
@@ -573,10 +574,12 @@ function BlockFeedItem({
   slot,
   onLocationChange,
   timeZone,
+  tokenSymbol,
 }: {
   slot: BlockSlot;
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }) {
   if (slot.kind === "stub") {
     return (
@@ -618,7 +621,7 @@ function BlockFeedItem({
       </div>
       <div className="home-feed-side">
         <strong>{fmtGwei(block.baseBlockFeeWei)} gwei</strong>
-        <span>{fmtEth(block.burntFeesWei ?? "0")} ETH burnt</span>
+        <span>{fmtEth(block.burntFeesWei ?? "0")} {tokenSymbol} burnt</span>
       </div>
     </article>
   );
@@ -730,7 +733,7 @@ function LiveHistograms({
               The base fee is burnt rather than paid to miners.
             </p>
             <p>
-              Shown in gwei (1 gwei = 10⁻⁹ ETH). The solid line is the per‑minute
+              Shown in gwei (1 gwei = 10^-9 {settings.tokenSymbol}). The solid line is the per-minute
               average; the band shows the per‑minute min/max range.
             </p>
           </>

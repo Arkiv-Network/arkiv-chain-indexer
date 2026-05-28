@@ -30,6 +30,7 @@ interface ChartsViewProps {
   onLocationChange: () => void;
   timeZone: string;
   transactionDataEnabled: boolean;
+  tokenSymbol: string;
 }
 
 interface ChartsFilters extends Record<string, string> {
@@ -500,6 +501,7 @@ export function ChartsView({
   onLocationChange,
   timeZone,
   transactionDataEnabled,
+  tokenSymbol,
 }: ChartsViewProps) {
   const [filters, setFilters] = useState<ChartsFilters>(() => loadFilters(locationSearch));
   const [points, setPoints] = useState<ChartPoint[]>([]);
@@ -720,8 +722,8 @@ export function ChartsView({
   };
 
   const { traces, layout } = useMemo(
-    () => buildPlot(points, selected, selectedPoint, timeZone, xAxisMode),
-    [points, selected, selectedPoint, timeZone, xAxisMode],
+    () => buildPlot(points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol),
+    [points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol],
   );
 
   const windowInfo = useMemo(() => {
@@ -896,7 +898,7 @@ export function ChartsView({
                       />
                       <span className="param-swatch" style={{ background: isOn ? p.color : "transparent", borderColor: p.color }} />
                       <span className="param-label">{p.label}</span>
-                      <span className="param-unit">{p.unit}</span>
+                      <span className="param-unit">{displayUnit(p.unit, tokenSymbol)}</span>
                     </label>
                   );
                 })}
@@ -974,7 +976,12 @@ export function ChartsView({
             </div>
           </div>
           {selectedPoint ? (
-            <SelectionDetails point={selectedPoint} selectedKeys={selected} timeZone={timeZone} />
+            <SelectionDetails
+              point={selectedPoint}
+              selectedKeys={selected}
+              timeZone={timeZone}
+              tokenSymbol={tokenSymbol}
+            />
           ) : (
             <div className="selection-empty">Click a chart point to view block or range details.</div>
           )}
@@ -999,13 +1006,14 @@ function buildPlot(
   selectedPoint: ChartPoint | null,
   timeZone: string,
   xAxisMode: XAxisMode,
+  tokenSymbol: string,
 ): PlotBuildResult {
   const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
 
   const usedAxes: { axis: string; axisLabel: string }[] = [];
   for (const p of activeParams) {
     if (!usedAxes.find((a) => a.axis === p.axis)) {
-      usedAxes.push({ axis: p.axis, axisLabel: p.axisLabel });
+      usedAxes.push({ axis: p.axis, axisLabel: displayAxisLabel(p.axisLabel, tokenSymbol) });
     }
   }
 
@@ -1035,7 +1043,7 @@ function buildPlot(
         `<b>${p.label}</b><br>` +
         "date %{customdata[2]}<br>" +
         "blocks %{customdata[0]}–%{customdata[1]}<br>" +
-        `%{y:.4~f} ${p.unit}<extra></extra>`,
+        `%{y:.4~f} ${displayUnit(p.unit, tokenSymbol)}<extra></extra>`,
     };
     return trace;
   });
@@ -1184,10 +1192,12 @@ function SelectionDetails({
   point,
   selectedKeys,
   timeZone,
+  tokenSymbol,
 }: {
   point: ChartPoint;
   selectedKeys: string[];
   timeZone: string;
+  tokenSymbol: string;
 }) {
   const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
   return (
@@ -1220,7 +1230,7 @@ function SelectionDetails({
             <div key={param.key} className="selection-metric-row">
               <span className="param-swatch" style={{ background: param.color, borderColor: param.color }} />
               <span className="selection-metric-label">{param.label}</span>
-              <span className="selection-metric-value">{formatMetricValue(param, point)}</span>
+              <span className="selection-metric-value">{formatMetricValue(param, point, tokenSymbol)}</span>
             </div>
           ))
         )}
@@ -1229,7 +1239,7 @@ function SelectionDetails({
   );
 }
 
-function formatMetricValue(param: ParameterDef, point: ChartPoint): string {
+function formatMetricValue(param: ParameterDef, point: ChartPoint, tokenSymbol: string): string {
   const value = param.toNumber(point.values[param.key]);
   if (value === null || !Number.isFinite(value)) return "—";
 
@@ -1237,12 +1247,20 @@ function formatMetricValue(param: ParameterDef, point: ChartPoint): string {
     return `${value.toLocaleString(undefined, { maximumFractionDigits: 4 })} gwei`;
   }
   if (param.unit === "ETH") {
-    return `${value.toLocaleString(undefined, { maximumFractionDigits: 8 })} ETH`;
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${tokenSymbol}`;
   }
   if (param.unit === "gas" || param.unit === "count") {
     return `${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${param.unit}`;
   }
   return `${value.toLocaleString()} ${param.unit}`;
+}
+
+function displayUnit(unit: string, tokenSymbol: string): string {
+  return unit === "ETH" ? tokenSymbol : unit;
+}
+
+function displayAxisLabel(axisLabel: string, tokenSymbol: string): string {
+  return axisLabel.replace("(ETH)", `(${tokenSymbol})`);
 }
 
 function getCssColor(varName: string, fallback: string): string {

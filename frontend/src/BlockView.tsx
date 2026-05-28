@@ -9,6 +9,7 @@ interface BlockViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }
 
 interface Column {
@@ -21,7 +22,7 @@ interface Column {
 
 const EMPTY_BLOCK = "";
 
-export function BlockView({ locationSearch, onLocationChange, timeZone }: BlockViewProps) {
+export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: BlockViewProps) {
   const [blockNumber, setBlockNumber] = useState(() => readBlockFromSearch(locationSearch));
   const [appliedBlockNumber, setAppliedBlockNumber] = useState(blockNumber);
   const [data, setData] = useState<BlockInspectResponse | null>(null);
@@ -81,7 +82,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone }: BlockV
   };
 
   const block = data?.block;
-  const columns = useMemo(() => transactionColumns(), []);
+  const columns = useMemo(() => transactionColumns(tokenSymbol), [tokenSymbol]);
 
   return (
     <section className="view block-view">
@@ -124,11 +125,11 @@ export function BlockView({ locationSearch, onLocationChange, timeZone }: BlockV
             <Metric label="Transactions" value={fmtInteger(block.transactionCount)} />
             <Metric label="Base fee" value={`${fmtGwei(block.baseBlockFeeWei)} gwei`} />
             <Metric label="Gas used / limit" value={fmtRatio(block.totalGasUsed, block.maxGasInBlock)} />
-            <Metric label="Block reward" value={`${fmtEth(block.blockRewardWei)} ETH`} />
-            <Metric label="Burnt fees" value={`${fmtEth(block.burntFeesWei)} ETH`} />
-            <Metric label="Total tx fees" value={`${fmtEth(block.totalTransactionFeeWei)} ETH`} />
+            <Metric label="Block reward" value={`${fmtEth(block.blockRewardWei)} ${tokenSymbol}`} />
+            <Metric label="Burnt fees" value={`${fmtEth(block.burntFeesWei)} ${tokenSymbol}`} />
+            <Metric label="Total tx fees" value={`${fmtEth(block.totalTransactionFeeWei)} ${tokenSymbol}`} />
             <Metric label="Avg fee price" value={`${fmtGwei(block.averageFeePriceWei)} gwei`} />
-            <Metric label="Avg tx fee" value={`${fmtEth(block.averageTransactionFeeWei)} ETH`} />
+            <Metric label="Avg tx fee" value={`${fmtEth(block.averageTransactionFeeWei)} ${tokenSymbol}`} />
             <Metric label="Avg tx gas" value={fmtInteger(block.averageTransactionGasUsed)} />
             <Metric label="Avg priority fee" value={`${fmtGwei(block.averagePriorityFeeWei)} gwei`} />
             <Metric
@@ -191,7 +192,7 @@ function Metric({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function transactionColumns(): Column[] {
+function transactionColumns(tokenSymbol: string): Column[] {
   return [
     {
       key: "position",
@@ -233,7 +234,7 @@ function transactionColumns(): Column[] {
     },
     {
       key: "valueWei",
-      label: "Value (ETH)",
+      label: `Value (${tokenSymbol})`,
       className: "num",
       width: "9rem",
       render: (row) => fmtEth(row.valueWei),
@@ -261,7 +262,7 @@ function transactionColumns(): Column[] {
     },
     {
       key: "transactionFeeWei",
-      label: "Tx fee (ETH)",
+      label: `Tx fee (${tokenSymbol})`,
       className: "num",
       width: "10rem",
       render: (row) => fmtEth(row.transactionFeeWei),

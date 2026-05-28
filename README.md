@@ -556,6 +556,9 @@ The frontend container reads these env vars:
 | `HOST` | `0.0.0.0` | Interface to bind. |
 | `BACKEND_HOST` | `backend` | Hostname (compose service name) of the backend. |
 | `BACKEND_PORT` | `3000` | Backend TCP port. |
+| `VITE_CHAIN_NAME` | `Arkiv` | Chain name shown in the frontend header and home copy. |
+| `VITE_TOKEN_SYMBOL` | `ETH` | Three-letter token symbol used in frontend native-token labels. |
+| `VITE_TRANSACTION_EXPLORER_BASE_URL` | `https://explorer.braga.hoodi.arkiv.network/tx/` | Base URL used for external transaction-detail links. |
 
 ### Developing the frontend locally
 

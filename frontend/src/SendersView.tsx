@@ -10,6 +10,7 @@ interface SendersViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }
 
 interface SenderFilters extends Record<string, string> {
@@ -27,7 +28,7 @@ function loadFilters(locationSearch: string): SenderFilters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
-export function SendersView({ locationSearch, onLocationChange, timeZone }: SendersViewProps) {
+export function SendersView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: SendersViewProps) {
   const [filters, setFilters] = useState<SenderFilters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<SenderFilters>(filters);
   const [data, setData] = useState<SendersResponse | null>(null);
@@ -136,10 +137,10 @@ export function SendersView({ locationSearch, onLocationChange, timeZone }: Send
               <th scope="col" className="num">Tx found</th>
               <th scope="col" className="num">Latest nonce</th>
               <th scope="col" className="num">Gas used</th>
-              <th scope="col" className="num">Fees spent (ETH)</th>
-              <th scope="col" className="num">Value sent (ETH)</th>
+              <th scope="col" className="num">Fees spent ({tokenSymbol})</th>
+              <th scope="col" className="num">Value sent ({tokenSymbol})</th>
               <th scope="col" className="num">Avg gas</th>
-              <th scope="col" className="num">Avg fee (ETH)</th>
+              <th scope="col" className="num">Avg fee ({tokenSymbol})</th>
               <th scope="col" className="num">First tx block</th>
               <th scope="col">First tx date</th>
               <th scope="col" className="num">Last tx block</th>
@@ -155,10 +156,10 @@ export function SendersView({ locationSearch, onLocationChange, timeZone }: Send
                 <td className="num" data-label="Tx found">{fmtInteger(row.transactionCount)}</td>
                 <td className="num" data-label="Latest nonce">{fmtInteger(row.latestNonce)}</td>
                 <td className="num" data-label="Gas used">{fmtInteger(row.totalGasUsed)}</td>
-                <td className="num" data-label="Fees spent (ETH)">{fmtEth(row.totalTransactionFeeWei)}</td>
-                <td className="num" data-label="Value sent (ETH)">{fmtEth(row.totalValueWei)}</td>
+                <td className="num" data-label={`Fees spent (${tokenSymbol})`}>{fmtEth(row.totalTransactionFeeWei)}</td>
+                <td className="num" data-label={`Value sent (${tokenSymbol})`}>{fmtEth(row.totalValueWei)}</td>
                 <td className="num" data-label="Avg gas">{fmtInteger(row.averageGasUsed)}</td>
-                <td className="num" data-label="Avg fee (ETH)">{fmtEth(row.averageTransactionFeeWei)}</td>
+                <td className="num" data-label={`Avg fee (${tokenSymbol})`}>{fmtEth(row.averageTransactionFeeWei)}</td>
                 <td className="num" data-label="First tx block">
                   <BlockNumberLink
                     blockNumber={row.firstBlockNumberDecimal}

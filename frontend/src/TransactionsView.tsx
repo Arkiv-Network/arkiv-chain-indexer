@@ -16,6 +16,7 @@ interface TransactionsViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }
 
 interface TransactionFilters extends Record<string, string> {
@@ -94,7 +95,7 @@ const EMPTY: TransactionFilters = {
   page: "1",
 };
 
-function transactionColumns(timeZone: string, onLocationChange: () => void): Column[] {
+function transactionColumns(timeZone: string, onLocationChange: () => void, tokenSymbol: string): Column[] {
   return [
   {
     key: "blockNumber",
@@ -166,7 +167,7 @@ function transactionColumns(timeZone: string, onLocationChange: () => void): Col
   },
   {
     key: "valueWei",
-    label: "Value (ETH)",
+    label: `Value (${tokenSymbol})`,
     className: "num",
     width: "9rem",
     render: (row) => fmtEth(row.valueWei),
@@ -236,7 +237,7 @@ function transactionColumns(timeZone: string, onLocationChange: () => void): Col
   },
   {
     key: "transactionFeeWei",
-    label: "Tx fee (ETH)",
+    label: `Tx fee (${tokenSymbol})`,
     className: "num",
     width: "10rem",
     render: (row) => fmtEth(row.transactionFeeWei),
@@ -249,7 +250,7 @@ function loadFilters(locationSearch: string): TransactionFilters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
-export function TransactionsView({ locationSearch, onLocationChange, timeZone }: TransactionsViewProps) {
+export function TransactionsView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: TransactionsViewProps) {
   const [filters, setFilters] = useState<TransactionFilters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<TransactionFilters>(filters);
   const [data, setData] = useState<TransactionsResponse | null>(null);
@@ -316,7 +317,10 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone }:
     if (sort === null) return transactions;
     return transactions.slice().sort((a, b) => compareRows(a, b, sort));
   }, [data, sort]);
-  const columns = useMemo(() => transactionColumns(timeZone, onLocationChange), [timeZone, onLocationChange]);
+  const columns = useMemo(
+    () => transactionColumns(timeZone, onLocationChange, tokenSymbol),
+    [timeZone, onLocationChange, tokenSymbol],
+  );
 
   const setSortKey = (key: SortKey) => {
     setSort((current) => {

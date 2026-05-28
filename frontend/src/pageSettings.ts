@@ -7,6 +7,7 @@ import {
 
 export interface PageSettings {
   chainName: string;
+  tokenSymbol: string;
   blockTimeMs: number;
   stubTickMs: number;
   maxStubBlocks: number;
@@ -22,10 +23,10 @@ export interface PageSettings {
 }
 
 export type PageSettingsKey = keyof PageSettings;
-export type NumericPageSettingsKey = Exclude<PageSettingsKey, "chainName">;
+export type NumericPageSettingsKey = Exclude<PageSettingsKey, "chainName" | "tokenSymbol">;
 
 interface TextSettingDefinition {
-  key: "chainName";
+  key: "chainName" | "tokenSymbol";
   label: string;
   envName: string;
   kind: "text";
@@ -43,6 +44,7 @@ export type PageSettingDefinition = TextSettingDefinition | NumericSettingDefini
 
 export const DEFAULT_PAGE_SETTINGS: PageSettings = {
   chainName: "Arkiv",
+  tokenSymbol: "ETH",
   blockTimeMs: 2_000,
   stubTickMs: 500,
   maxStubBlocks: 3,
@@ -59,6 +61,7 @@ export const DEFAULT_PAGE_SETTINGS: PageSettings = {
 
 export const PAGE_SETTING_DEFINITIONS: readonly PageSettingDefinition[] = [
   { key: "chainName", label: "Chain name", envName: "VITE_CHAIN_NAME", kind: "text" },
+  { key: "tokenSymbol", label: "Token symbol", envName: "VITE_TOKEN_SYMBOL", kind: "text" },
   { key: "blockTimeMs", label: "Block time", envName: "VITE_BLOCK_TIME_MS", kind: "number", unit: "ms" },
   { key: "stubTickMs", label: "Stub tick", envName: "VITE_STUB_TICK_MS", kind: "number", unit: "ms" },
   { key: "maxStubBlocks", label: "Max stub blocks", envName: "VITE_MAX_STUB_BLOCKS", kind: "number", unit: "blocks" },
@@ -136,10 +139,18 @@ export function parseNonNegativeInteger(value: string | undefined, fallback: num
   return parsed;
 }
 
+export function parseTokenSymbol(value: string | undefined, fallback = DEFAULT_PAGE_SETTINGS.tokenSymbol): string {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(normalized)) return fallback;
+  return normalized;
+}
+
 export function readBuildPageSettings(env: Record<string, string | undefined> = envValues()): PageSettings {
   const chainName = env.VITE_CHAIN_NAME?.trim() || DEFAULT_PAGE_SETTINGS.chainName;
   return {
     chainName,
+    tokenSymbol: parseTokenSymbol(env.VITE_TOKEN_SYMBOL),
     blockTimeMs: parseNonNegativeInteger(env.VITE_BLOCK_TIME_MS, DEFAULT_PAGE_SETTINGS.blockTimeMs),
     stubTickMs: parseNonNegativeInteger(env.VITE_STUB_TICK_MS, DEFAULT_PAGE_SETTINGS.stubTickMs),
     maxStubBlocks: parseNonNegativeInteger(env.VITE_MAX_STUB_BLOCKS, DEFAULT_PAGE_SETTINGS.maxStubBlocks),
@@ -175,6 +186,7 @@ export const BUILD_PAGE_SETTINGS = readBuildPageSettings();
 export function settingsToDraft(settings: PageSettings): SettingsDraft {
   return {
     chainName: settings.chainName,
+    tokenSymbol: settings.tokenSymbol,
     blockTimeMs: String(settings.blockTimeMs),
     stubTickMs: String(settings.stubTickMs),
     maxStubBlocks: String(settings.maxStubBlocks),
@@ -199,7 +211,12 @@ export function normalizeSettingsDraft(
     return { settings: fallback, error: "Chain name is required." };
   }
 
-  const settings: PageSettings = { ...fallback, chainName };
+  const tokenSymbol = parseTokenSymbol(draft.tokenSymbol, "");
+  if (!tokenSymbol) {
+    return { settings: fallback, error: "Token symbol must be exactly three letters." };
+  }
+
+  const settings: PageSettings = { ...fallback, chainName, tokenSymbol };
   for (const definition of PAGE_SETTING_DEFINITIONS) {
     if (definition.kind !== "number") continue;
     const raw = draft[definition.key].trim();

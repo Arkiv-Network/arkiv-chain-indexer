@@ -13,14 +13,18 @@ import { transactionExplorerHref } from "./transactionLinks";
 interface RecordTransactionsViewProps {
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }
 
-const CATEGORIES: Array<{
+type RecordCategory = {
   key: TransactionRecordCategory;
   title: string;
   valueLabel: string;
   renderValue: (row: StoredTransactionRecord) => string;
-}> = [
+};
+
+function categories(tokenSymbol: string): RecordCategory[] {
+  return [
   {
     key: "gas_used",
     title: "Maximum gas used",
@@ -30,7 +34,7 @@ const CATEGORIES: Array<{
   {
     key: "transaction_fee",
     title: "Maximum fee paid",
-    valueLabel: "Fee paid (ETH)",
+    valueLabel: `Fee paid (${tokenSymbol})`,
     renderValue: (row) => fmtEth(row.recordValue),
   },
   {
@@ -39,9 +43,10 @@ const CATEGORIES: Array<{
     valueLabel: "Effective fee (gwei)",
     renderValue: (row) => fmtGwei(row.recordValue),
   },
-];
+  ];
+}
 
-export function RecordTransactionsView({ onLocationChange, timeZone }: RecordTransactionsViewProps) {
+export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol }: RecordTransactionsViewProps) {
   const [data, setData] = useState<TransactionRecordsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,7 +78,7 @@ export function RecordTransactionsView({ onLocationChange, timeZone }: RecordTra
       </p>
 
       <div className="record-category-stack">
-        {CATEGORIES.map((category) => (
+        {categories(tokenSymbol).map((category) => (
           <RecordCategoryTable
             key={category.key}
             category={category}
@@ -93,7 +98,7 @@ function RecordCategoryTable({
   onLocationChange,
   timeZone,
 }: {
-  category: (typeof CATEGORIES)[number];
+  category: RecordCategory;
   rows: StoredTransactionRecord[];
   onLocationChange: () => void;
   timeZone: string;

@@ -388,35 +388,41 @@ export function App() {
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "block" ? (
           <BlockView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "transactions" ? (
           <TransactionsView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "senders" ? (
           <SendersView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "ranges" ? (
           <RangesView
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "charts" ? (
           <ChartsView
@@ -424,6 +430,7 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             transactionDataEnabled={transactionDataEnabled === true}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "baseload" ? (
           <BaseloadView
@@ -440,6 +447,7 @@ export function App() {
             onSaveCurrentConfig={saveCurrentBaseloadConfig}
             onLoadSavedConfig={loadSavedBaseloadConfig}
             onDeleteSavedConfig={deleteSavedBaseloadConfig}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "admin" ? (
           <AdminView
