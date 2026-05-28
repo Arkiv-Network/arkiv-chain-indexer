@@ -15,6 +15,7 @@ import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
 import {
   HOME_LATEST_BLOCK_LIMIT,
+  homeHistogramMinuteRange,
   normalizeHomeBlocksResponse,
   recentHomeBlocksParams,
 } from "./homeBlocks";
@@ -792,8 +793,9 @@ function HistogramPanel({
       [labels[i], b.minuteMs === currentMinuteMs ? "in progress" : "complete"] as [string, string],
     );
 
-    const firstMs = buckets[0]?.minuteMs ?? currentMinuteMs - (histogramWindowMinutes - 1) * MINUTE_MS;
-    const lastMs = buckets[buckets.length - 1]?.minuteMs ?? currentMinuteMs;
+    const { minMs, maxMs } = homeHistogramMinuteRange(currentMinuteMs, {
+      histogramWindowMinutes,
+    });
 
     const trace: Partial<Plotly.PlotData> = {
       type: "bar",
@@ -828,8 +830,8 @@ function HistogramPanel({
       xaxis: {
         type: "date",
         range: [
-          new Date(firstMs - 30_000).toISOString(),
-          new Date(lastMs + 30_000).toISOString(),
+          new Date(minMs).toISOString(),
+          new Date(maxMs).toISOString(),
         ],
         gridcolor: "rgba(0,0,0,0)",
         zerolinecolor: "rgba(0,0,0,0)",
