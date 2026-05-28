@@ -690,28 +690,6 @@ button.secondary {
   letter-spacing: -0.015em;
 }
 
-/* Stats: three time-window groups stacked vertically */
-.home-stat-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.home-stat-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.home-stat-group-label {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-muted);
-}
-
 /* Stats grid: hairline-bordered tiles, mono numerals */
 .home-stats {
   display: grid;
@@ -723,12 +701,8 @@ button.secondary {
   overflow: hidden;
 }
 
-.home-stat-group .home-stats {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.home-stat-group:nth-of-type(n + 2) .home-stats {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.home-stats--summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .home-stat {

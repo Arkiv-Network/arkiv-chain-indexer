@@ -34,7 +34,6 @@ interface HomeViewProps {
 }
 
 const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
@@ -164,14 +163,23 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   const latestBlock = blocks[0] ?? null;
   const feedBlocks = useMemo(() => blocks.slice(0, HOME_LATEST_BLOCK_LIMIT), [blocks]);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const lastMinuteStats = useMemo(
-    () => aggregateBlocksWindow(blocks, nowMs, MINUTE_MS),
-    [blocks, nowMs],
-  );
-  const lastHourStats = useMemo(
-    () => aggregateBlocksWindow(blocks, nowMs, HOUR_MS),
-    [blocks, nowMs],
-  );
+  const lastMinuteAvgGas = useMemo(() => {
+    const cutoffMs = nowMs - MINUTE_MS;
+    let total = 0n;
+    let count = 0;
+    for (const block of blocks) {
+      const ts = Date.parse(block.blockDate);
+      if (!Number.isFinite(ts) || ts < cutoffMs) continue;
+      try {
+        total += BigInt(block.totalGasUsed);
+      } catch {
+        continue;
+      }
+      count += 1;
+    }
+    if (count === 0) return null;
+    return (total / BigInt(count)).toString();
+  }, [blocks, nowMs]);
 
   useEffect(() => {
     if (!latestBlock) return;
@@ -389,69 +397,15 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             <h3>Live statistics</h3>
           </div>
         </div>
-        <div className="home-stat-groups">
-          <StatGroup label="Last block">
-            <MetricCard
-              label="Block"
-              value={latestBlock ? `#${latestBlock.blockNumber}` : "—"}
-            />
-            <MetricCard
-              label="Base fee"
-              value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "—"}
-            />
-            <MetricCard
-              label="Transactions"
-              value={latestBlock ? fmtInteger(latestBlock.transactionCount) : "—"}
-            />
-            <MetricCard
-              label="Gas used"
-              value={latestBlock ? fmtGasBillions(latestBlock.totalGasUsed) : "—"}
-            />
-            <MetricCard
-              label="Fees"
-              value={
-                latestBlock && latestBlock.totalTransactionFeeWei
-                  ? `${fmtEth(latestBlock.totalTransactionFeeWei)} ETH`
-                  : "—"
-              }
-            />
-          </StatGroup>
-          <StatGroup label="Last minute">
-            <MetricCard
-              label="Blocks"
-              value={lastMinuteStats ? fmtInteger(lastMinuteStats.count) : "—"}
-            />
-            <MetricCard
-              label="Transactions"
-              value={lastMinuteStats ? fmtInteger(lastMinuteStats.transactions) : "—"}
-            />
-            <MetricCard
-              label="Gas used"
-              value={lastMinuteStats ? fmtGasBillions(lastMinuteStats.gasUsed) : "—"}
-            />
-            <MetricCard
-              label="Fees"
-              value={lastMinuteStats ? `${fmtEth(lastMinuteStats.feesWei)} ETH` : "—"}
-            />
-          </StatGroup>
-          <StatGroup label="Last hour">
-            <MetricCard
-              label="Blocks"
-              value={lastHourStats ? fmtInteger(lastHourStats.count) : "—"}
-            />
-            <MetricCard
-              label="Transactions"
-              value={lastHourStats ? fmtInteger(lastHourStats.transactions) : "—"}
-            />
-            <MetricCard
-              label="Gas used"
-              value={lastHourStats ? fmtGasBillions(lastHourStats.gasUsed) : "—"}
-            />
-            <MetricCard
-              label="Fees"
-              value={lastHourStats ? `${fmtEth(lastHourStats.feesWei)} ETH` : "—"}
-            />
-          </StatGroup>
+        <div className="home-stats home-stats--summary">
+          <MetricCard
+            label="Current base fee"
+            value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "—"}
+          />
+          <MetricCard
+            label="Average gas / block · last minute"
+            value={lastMinuteAvgGas !== null ? fmtGasBillions(lastMinuteAvgGas) : "—"}
+          />
         </div>
       </div>
 
@@ -506,7 +460,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             error={blocksError}
             loaded={blocksData !== null}
             settings={settings}
-            timeZone={timeZone}
           />
         </div>
       </div>
@@ -600,59 +553,6 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="home-stat-group">
-      <p className="home-stat-group-label">{label}</p>
-      <div className="home-stats">{children}</div>
-    </div>
-  );
-}
-
-interface BlocksWindowStats {
-  count: number;
-  transactions: string;
-  gasUsed: string;
-  feesWei: string;
-}
-
-function aggregateBlocksWindow(
-  blocks: StoredBlock[],
-  nowMs: number,
-  windowMs: number,
-): BlocksWindowStats | null {
-  const cutoffMs = nowMs - windowMs;
-  let count = 0;
-  let transactions = 0n;
-  let gasUsed = 0n;
-  let feesWei = 0n;
-  for (const block of blocks) {
-    const ts = Date.parse(block.blockDate);
-    if (!Number.isFinite(ts) || ts < cutoffMs) continue;
-    count += 1;
-    transactions += BigInt(block.transactionCount);
-    try {
-      gasUsed += BigInt(block.totalGasUsed);
-    } catch {
-      // ignore unparseable values
-    }
-    if (block.totalTransactionFeeWei) {
-      try {
-        feesWei += BigInt(block.totalTransactionFeeWei);
-      } catch {
-        // ignore unparseable values
-      }
-    }
-  }
-  if (count === 0) return null;
-  return {
-    count,
-    transactions: transactions.toString(),
-    gasUsed: gasUsed.toString(),
-    feesWei: feesWei.toString(),
-  };
-}
-
 function BlockMorphIcon({ filled }: { filled: boolean }) {
   return (
     <div
@@ -737,26 +637,16 @@ function formatBehind(ms: number): string {
   return `${hours} ${hours === 1 ? "hour" : "hours"}`;
 }
 
-interface MinuteBucket {
-  minuteMs: number;
-  gasUsed: number;
-  transactionCount: number;
-}
-
-type HistogramMetric = "gasUsed" | "transactionCount";
-
 function LiveHistograms({
   blocks,
   error,
   loaded,
   settings,
-  timeZone,
 }: {
   blocks: StoredBlock[];
   error: string | null;
   loaded: boolean;
   settings: PageSettings;
-  timeZone: string;
 }) {
   const [currentMinuteMs, setCurrentMinuteMs] = useState(
     () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS,
@@ -773,45 +663,78 @@ function LiveHistograms({
     return () => window.clearInterval(interval);
   }, [settings.histogramClockTickMs]);
 
-  const buckets = useMemo<MinuteBucket[]>(() => {
-    const map = new Map<number, MinuteBucket>();
-    for (let i = 0; i < settings.histogramWindowMinutes; i++) {
-      const ms = currentMinuteMs - (settings.histogramWindowMinutes - 1 - i) * MINUTE_MS;
-      map.set(ms, { minuteMs: ms, gasUsed: 0, transactionCount: 0 });
-    }
-    for (const block of blocks) {
-      const ts = Date.parse(block.blockDate);
-      if (!Number.isFinite(ts)) continue;
-      const minute = Math.floor(ts / MINUTE_MS) * MINUTE_MS;
-      const bucket = map.get(minute);
-      if (!bucket) continue;
-      const gas = Number(block.totalGasUsed);
-      if (Number.isFinite(gas)) bucket.gasUsed += gas;
-      bucket.transactionCount += block.transactionCount;
-    }
-    return Array.from(map.values()).sort((a, b) => a.minuteMs - b.minuteMs);
-  }, [blocks, currentMinuteMs, settings.histogramWindowMinutes]);
-
   return (
     <div className="home-histograms">
-      <HistogramPanel
-        title="Gas used"
-        subtitle={`per minute · last ${settings.histogramWindowMinutes} min`}
-        buckets={buckets}
+      <MinAvgMaxPanel
+        title="Network usage"
+        unitLabel="gas"
+        blocks={blocks}
         currentMinuteMs={currentMinuteMs}
         histogramWindowMinutes={settings.histogramWindowMinutes}
         colorVar="--ark-blue"
         colorFallback="#181ea9"
-        metric="gasUsed"
-        unitLabel="gas"
-        timeZone={timeZone}
+        extractValue={(block) => {
+          const gas = Number(block.totalGasUsed);
+          return Number.isFinite(gas) ? gas : null;
+        }}
+        hoverLabel="Block gas"
+        yTickformat=".2s"
+        yTicksuffix=""
+        hoverFormat=".3s"
+        infoLabel="What is network usage?"
+        infoTitle="Network usage"
+        infoBody={
+          <>
+            <p>
+              How much gas the network is consuming per block. Each value is the
+              total gas used in a single block; the solid line is the per‑minute
+              average across blocks, and the band shows the per‑minute min/max
+              range.
+            </p>
+            <p>
+              Higher values mean blocks are fuller and the network is more
+              congested, which in turn pushes the base block fee up.
+            </p>
+          </>
+        }
         error={error}
         loaded={loaded}
       />
-      <BaseFeePanel
+      <MinAvgMaxPanel
+        title="Base block fee"
+        unitLabel="gwei"
         blocks={blocks}
         currentMinuteMs={currentMinuteMs}
         histogramWindowMinutes={settings.histogramWindowMinutes}
+        colorVar="--ark-orange"
+        colorFallback="#fe7446"
+        extractValue={(block) => {
+          try {
+            const gwei = Number(BigInt(block.baseBlockFeeWei)) / 1e9;
+            return Number.isFinite(gwei) ? gwei : null;
+          } catch {
+            return null;
+          }
+        }}
+        hoverLabel="Base fee"
+        yTicksuffix=" gwei"
+        hoverFormat=",.3f"
+        infoLabel="What is base block fee?"
+        infoTitle="Base block fee (EIP‑1559)"
+        infoBody={
+          <>
+            <p>
+              The minimum gas price required for a transaction to be included in
+              a block. Set algorithmically by the protocol — it rises when blocks
+              are full and falls when they are empty, targeting ~50% utilization.
+              The base fee is burnt rather than paid to miners.
+            </p>
+            <p>
+              Shown in gwei (1 gwei = 10⁻⁹ ETH). The solid line is the per‑minute
+              average; the band shows the per‑minute min/max range.
+            </p>
+          </>
+        }
         error={error}
         loaded={loaded}
       />
@@ -819,171 +742,46 @@ function LiveHistograms({
   );
 }
 
-function HistogramPanel({
-  title,
-  subtitle,
-  buckets,
-  currentMinuteMs,
-  histogramWindowMinutes,
-  colorVar,
-  colorFallback,
-  metric,
-  unitLabel,
-  timeZone,
-  error,
-  loaded,
-}: {
+interface MinAvgMaxPanelProps {
   title: string;
-  subtitle: string;
-  buckets: MinuteBucket[];
+  unitLabel: string;
+  blocks: StoredBlock[];
   currentMinuteMs: number;
   histogramWindowMinutes: number;
   colorVar: string;
   colorFallback: string;
-  metric: HistogramMetric;
-  unitLabel: string;
-  timeZone: string;
+  extractValue: (block: StoredBlock) => number | null;
+  hoverLabel: string;
+  hoverFormat: string;
+  yTickformat?: string;
+  yTicksuffix?: string;
+  infoLabel: string;
+  infoTitle: string;
+  infoBody: React.ReactNode;
   error: string | null;
   loaded: boolean;
-}) {
-  const baseColor = getCssColor(colorVar, colorFallback);
-  const gridColor = getCssColor("--line-strong", "#1111111a");
-  const textColor = getCssColor("--ink-muted", "#6b6b6b");
-
-  const { traces, layout } = useMemo<{
-    traces: Partial<Plotly.PlotData>[];
-    layout: Partial<Plotly.Layout>;
-  }>(() => {
-    const xs = buckets.map((b) => new Date(b.minuteMs).toISOString());
-    const ys = buckets.map((b) => b[metric]);
-    const opacities = buckets.map((b) => (b.minuteMs === currentMinuteMs ? 0.55 : 0.95));
-    const labels = buckets.map((b) =>
-      new Date(b.minuteMs).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone,
-      }),
-    );
-    const customdata = buckets.map((b, i) =>
-      [labels[i], b.minuteMs === currentMinuteMs ? "in progress" : "complete"] as [string, string],
-    );
-
-    const { minMs, maxMs } = homeHistogramMinuteRange(currentMinuteMs, {
-      histogramWindowMinutes,
-    });
-
-    const trace: Partial<Plotly.PlotData> = {
-      type: "bar",
-      x: xs,
-      y: ys,
-      marker: {
-        color: baseColor,
-        opacity: opacities as unknown as number,
-        line: { width: 0 },
-      },
-      customdata: customdata as unknown as Plotly.Datum[],
-      hovertemplate:
-        `<b>${title}</b><br>` +
-        "%{customdata[0]} %{customdata[1]}<br>" +
-        `%{y:,.0f} ${unitLabel}<extra></extra>`,
-    };
-
-    const layout: Partial<Plotly.Layout> = {
-      autosize: true,
-      margin: { l: 48, r: 16, t: 8, b: 28 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(0,0,0,0)",
-      font: { color: textColor, size: 11 },
-      bargap: 0.15,
-      showlegend: false,
-      hovermode: "x unified",
-      hoverlabel: {
-        bgcolor: getCssColor("--sand", "#f6f4ef"),
-        bordercolor: gridColor,
-        font: { color: getCssColor("--ink", "#111111"), size: 12 },
-      },
-      xaxis: {
-        type: "date",
-        range: [
-          new Date(minMs).toISOString(),
-          new Date(maxMs).toISOString(),
-        ],
-        gridcolor: "rgba(0,0,0,0)",
-        zerolinecolor: "rgba(0,0,0,0)",
-        tickfont: { size: 10, color: textColor },
-        nticks: 6,
-        fixedrange: true,
-      },
-      yaxis: {
-        gridcolor: gridColor,
-        zerolinecolor: gridColor,
-        tickfont: { size: 10, color: textColor },
-        rangemode: "tozero",
-        fixedrange: true,
-      },
-    };
-
-    return { traces: [trace], layout };
-  }, [
-    buckets,
-    currentMinuteMs,
-    baseColor,
-    gridColor,
-    textColor,
-    histogramWindowMinutes,
-    metric,
-    title,
-    unitLabel,
-    timeZone,
-  ]);
-
-  return (
-    <section className="home-feed-panel home-histogram-panel">
-      <div className="home-panel-heading">
-        <h3 className="home-panel-heading-title home-histogram-title">
-          <span
-            className="home-histogram-swatch"
-            aria-hidden="true"
-            style={{ background: baseColor }}
-          />
-          {title}
-        </h3>
-        <span>{subtitle}</span>
-      </div>
-      <div className="home-histogram-chart">
-        {error && !loaded ? (
-          <div className="home-feed-empty-state">
-            <strong>Unable to load histogram.</strong>
-            <span>{error}</span>
-          </div>
-        ) : (
-          <Plot
-            data={traces}
-            layout={layout}
-            useResizeHandler
-            style={{ width: "100%", height: "100%" }}
-            config={{ displayModeBar: false, responsive: true, staticPlot: false }}
-          />
-        )}
-      </div>
-    </section>
-  );
 }
 
-function BaseFeePanel({
+function MinAvgMaxPanel({
+  title,
+  unitLabel,
   blocks,
   currentMinuteMs,
   histogramWindowMinutes,
+  colorVar,
+  colorFallback,
+  extractValue,
+  hoverLabel,
+  hoverFormat,
+  yTickformat,
+  yTicksuffix,
+  infoLabel,
+  infoTitle,
+  infoBody,
   error,
   loaded,
-}: {
-  blocks: StoredBlock[];
-  currentMinuteMs: number;
-  histogramWindowMinutes: number;
-  error: string | null;
-  loaded: boolean;
-}) {
-  const baseColor = getCssColor("--ark-orange", "#fe7446");
+}: MinAvgMaxPanelProps) {
+  const baseColor = getCssColor(colorVar, colorFallback);
   const gridColor = getCssColor("--line-strong", "#1111111a");
   const textColor = getCssColor("--ink-muted", "#6b6b6b");
 
@@ -1017,17 +815,12 @@ function BaseFeePanel({
       const minute = Math.floor(ts / MINUTE_MS) * MINUTE_MS;
       const bucket = sums.get(minute);
       if (!bucket) continue;
-      let gwei: number;
-      try {
-        gwei = Number(BigInt(block.baseBlockFeeWei)) / 1e9;
-      } catch {
-        continue;
-      }
-      if (!Number.isFinite(gwei)) continue;
-      bucket.total += gwei;
+      const value = extractValue(block);
+      if (value === null || !Number.isFinite(value)) continue;
+      bucket.total += value;
       bucket.count += 1;
-      if (gwei < bucket.min) bucket.min = gwei;
-      if (gwei > bucket.max) bucket.max = gwei;
+      if (value < bucket.min) bucket.min = value;
+      if (value > bucket.max) bucket.max = value;
     }
     const series = Array.from(sums.entries())
       .map(([minuteMs, { total, count, min, max }]) => ({
@@ -1044,6 +837,7 @@ function BaseFeePanel({
     const ysMax = series.map((p) => p.max);
     const bandFill = withAlpha(baseColor, 0.18);
     const bandLine = withAlpha(baseColor, 0.5);
+    const valueSuffix = yTicksuffix?.trim() ? yTicksuffix : ` ${unitLabel}`;
 
     const maxTrace: Partial<Plotly.PlotData> = {
       type: "scatter",
@@ -1053,7 +847,7 @@ function BaseFeePanel({
       connectgaps: true,
       line: { color: bandLine, width: 1, shape: "linear" },
       marker: { color: bandLine, size: 3, line: { width: 0 } },
-      hovertemplate: "max %{y:,.3f} gwei<extra></extra>",
+      hovertemplate: `max %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
       showlegend: false,
     };
     const minTrace: Partial<Plotly.PlotData> = {
@@ -1066,7 +860,7 @@ function BaseFeePanel({
       fillcolor: bandFill,
       line: { color: bandLine, width: 1, shape: "linear" },
       marker: { color: bandLine, size: 3, line: { width: 0 } },
-      hovertemplate: "min %{y:,.3f} gwei<extra></extra>",
+      hovertemplate: `min %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
       showlegend: false,
     };
     const avgTrace: Partial<Plotly.PlotData> = {
@@ -1077,7 +871,7 @@ function BaseFeePanel({
       connectgaps: true,
       line: { color: baseColor, width: 1.5, shape: "linear" },
       marker: { color: baseColor, size: 4, line: { width: 0 } },
-      hovertemplate: "<b>Base fee</b><br>%{x|%H:%M}<br>%{y:,.3f} gwei avg<extra></extra>",
+      hovertemplate: `<b>${hoverLabel}</b><br>%{x|%H:%M}<br>%{y:${hoverFormat}}${valueSuffix} avg<extra></extra>`,
     };
 
     const layout: Partial<Plotly.Layout> = {
@@ -1108,12 +902,26 @@ function BaseFeePanel({
         tickfont: { size: 10, color: textColor },
         rangemode: "normal",
         fixedrange: true,
-        ticksuffix: " gwei",
+        ...(yTickformat ? { tickformat: yTickformat } : {}),
+        ...(yTicksuffix !== undefined ? { ticksuffix: yTicksuffix } : {}),
       },
     };
 
     return { traces: [maxTrace, minTrace, avgTrace], layout };
-  }, [blocks, currentMinuteMs, histogramWindowMinutes, baseColor, gridColor, textColor]);
+  }, [
+    blocks,
+    currentMinuteMs,
+    histogramWindowMinutes,
+    baseColor,
+    gridColor,
+    textColor,
+    extractValue,
+    hoverFormat,
+    hoverLabel,
+    unitLabel,
+    yTickformat,
+    yTicksuffix,
+  ]);
 
   return (
     <section className="home-feed-panel home-histogram-panel">
@@ -1124,22 +932,13 @@ function BaseFeePanel({
             aria-hidden="true"
             style={{ background: baseColor }}
           />
-          Base block fee
-          <InfoTooltip label="What is base block fee?">
-            <strong>Base block fee (EIP‑1559)</strong>
-            <p>
-              The minimum gas price required for a transaction to be included in a
-              block. Set algorithmically by the protocol — it rises when blocks are
-              full and falls when they are empty, targeting ~50% utilization. The
-              base fee is burnt rather than paid to miners.
-            </p>
-            <p>
-              Shown in gwei (1 gwei = 10⁻⁹ ETH). The solid line is the per‑minute
-              average; the band shows the per‑minute min/max range.
-            </p>
+          {title}
+          <InfoTooltip label={infoLabel}>
+            <strong>{infoTitle}</strong>
+            {infoBody}
           </InfoTooltip>
         </h3>
-        <span>{`gwei · last ${histogramWindowMinutes} min`}</span>
+        <span>{`${unitLabel} · last ${histogramWindowMinutes} min`}</span>
       </div>
       <div className="home-histogram-chart">
         {error && !loaded ? (
