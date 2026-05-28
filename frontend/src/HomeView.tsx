@@ -10,6 +10,7 @@ import {
 } from "./api";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
+import { InfoTooltip } from "./InfoTooltip";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
@@ -32,8 +33,8 @@ interface HomeViewProps {
   timeZone: string;
 }
 
-const STATS_WINDOW_BLOCKS = 30;
 const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
@@ -162,35 +163,15 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
   const feedBlocks = useMemo(() => blocks.slice(0, HOME_LATEST_BLOCK_LIMIT), [blocks]);
-  const statsWindow = useMemo(() => {
-    const window = blocks.slice(0, STATS_WINDOW_BLOCKS);
-    if (window.length === 0) return null;
-    let transactions = 0n;
-    let gasUsed = 0n;
-    let feesWei = 0n;
-    for (const block of window) {
-      transactions += BigInt(block.transactionCount);
-      try {
-        gasUsed += BigInt(block.totalGasUsed);
-      } catch {
-        // ignore unparseable values
-      }
-      if (block.totalTransactionFeeWei) {
-        try {
-          feesWei += BigInt(block.totalTransactionFeeWei);
-        } catch {
-          // ignore unparseable values
-        }
-      }
-    }
-    return {
-      count: window.length,
-      transactions: transactions.toString(),
-      gasUsed: gasUsed.toString(),
-      feesWei: feesWei.toString(),
-    };
-  }, [blocks]);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const lastMinuteStats = useMemo(
+    () => aggregateBlocksWindow(blocks, nowMs, MINUTE_MS),
+    [blocks, nowMs],
+  );
+  const lastHourStats = useMemo(
+    () => aggregateBlocksWindow(blocks, nowMs, HOUR_MS),
+    [blocks, nowMs],
+  );
 
   useEffect(() => {
     if (!latestBlock) return;
@@ -408,21 +389,69 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             <h3>Live statistics</h3>
           </div>
         </div>
-        <div className="home-stats">
-          <MetricCard label="Latest block" value={latestBlock ? latestBlock.blockNumber.toString() : "—"} />
-          <MetricCard label="Base fee" value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "—"} />
-          <MetricCard
-            label="Transactions last minute"
-            value={statsWindow ? fmtInteger(statsWindow.transactions) : "—"}
-          />
-          <MetricCard
-            label="Gas used last minute"
-            value={statsWindow ? fmtGasBillions(statsWindow.gasUsed) : "—"}
-          />
-          <MetricCard
-            label="Total fees last minute"
-            value={statsWindow ? `${fmtEth(statsWindow.feesWei)} ETH` : "—"}
-          />
+        <div className="home-stat-groups">
+          <StatGroup label="Last block">
+            <MetricCard
+              label="Block"
+              value={latestBlock ? `#${latestBlock.blockNumber}` : "—"}
+            />
+            <MetricCard
+              label="Base fee"
+              value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "—"}
+            />
+            <MetricCard
+              label="Transactions"
+              value={latestBlock ? fmtInteger(latestBlock.transactionCount) : "—"}
+            />
+            <MetricCard
+              label="Gas used"
+              value={latestBlock ? fmtGasBillions(latestBlock.totalGasUsed) : "—"}
+            />
+            <MetricCard
+              label="Fees"
+              value={
+                latestBlock && latestBlock.totalTransactionFeeWei
+                  ? `${fmtEth(latestBlock.totalTransactionFeeWei)} ETH`
+                  : "—"
+              }
+            />
+          </StatGroup>
+          <StatGroup label="Last minute">
+            <MetricCard
+              label="Blocks"
+              value={lastMinuteStats ? fmtInteger(lastMinuteStats.count) : "—"}
+            />
+            <MetricCard
+              label="Transactions"
+              value={lastMinuteStats ? fmtInteger(lastMinuteStats.transactions) : "—"}
+            />
+            <MetricCard
+              label="Gas used"
+              value={lastMinuteStats ? fmtGasBillions(lastMinuteStats.gasUsed) : "—"}
+            />
+            <MetricCard
+              label="Fees"
+              value={lastMinuteStats ? `${fmtEth(lastMinuteStats.feesWei)} ETH` : "—"}
+            />
+          </StatGroup>
+          <StatGroup label="Last hour">
+            <MetricCard
+              label="Blocks"
+              value={lastHourStats ? fmtInteger(lastHourStats.count) : "—"}
+            />
+            <MetricCard
+              label="Transactions"
+              value={lastHourStats ? fmtInteger(lastHourStats.transactions) : "—"}
+            />
+            <MetricCard
+              label="Gas used"
+              value={lastHourStats ? fmtGasBillions(lastHourStats.gasUsed) : "—"}
+            />
+            <MetricCard
+              label="Fees"
+              value={lastHourStats ? `${fmtEth(lastHourStats.feesWei)} ETH` : "—"}
+            />
+          </StatGroup>
         </div>
       </div>
 
@@ -569,6 +598,59 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function StatGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="home-stat-group">
+      <p className="home-stat-group-label">{label}</p>
+      <div className="home-stats">{children}</div>
+    </div>
+  );
+}
+
+interface BlocksWindowStats {
+  count: number;
+  transactions: string;
+  gasUsed: string;
+  feesWei: string;
+}
+
+function aggregateBlocksWindow(
+  blocks: StoredBlock[],
+  nowMs: number,
+  windowMs: number,
+): BlocksWindowStats | null {
+  const cutoffMs = nowMs - windowMs;
+  let count = 0;
+  let transactions = 0n;
+  let gasUsed = 0n;
+  let feesWei = 0n;
+  for (const block of blocks) {
+    const ts = Date.parse(block.blockDate);
+    if (!Number.isFinite(ts) || ts < cutoffMs) continue;
+    count += 1;
+    transactions += BigInt(block.transactionCount);
+    try {
+      gasUsed += BigInt(block.totalGasUsed);
+    } catch {
+      // ignore unparseable values
+    }
+    if (block.totalTransactionFeeWei) {
+      try {
+        feesWei += BigInt(block.totalTransactionFeeWei);
+      } catch {
+        // ignore unparseable values
+      }
+    }
+  }
+  if (count === 0) return null;
+  return {
+    count,
+    transactions: transactions.toString(),
+    gasUsed: gasUsed.toString(),
+    feesWei: feesWei.toString(),
+  };
 }
 
 function BlockMorphIcon({ filled }: { filled: boolean }) {
@@ -726,17 +808,10 @@ function LiveHistograms({
         error={error}
         loaded={loaded}
       />
-      <HistogramPanel
-        title="Transactions"
-        subtitle={`per minute · last ${settings.histogramWindowMinutes} min`}
-        buckets={buckets}
+      <BaseFeePanel
+        blocks={blocks}
         currentMinuteMs={currentMinuteMs}
         histogramWindowMinutes={settings.histogramWindowMinutes}
-        colorVar="--ark-orange"
-        colorFallback="#fe7446"
-        metric="transactionCount"
-        unitLabel="txns"
-        timeZone={timeZone}
         error={error}
         loaded={loaded}
       />
@@ -893,6 +968,218 @@ function HistogramPanel({
       </div>
     </section>
   );
+}
+
+function BaseFeePanel({
+  blocks,
+  currentMinuteMs,
+  histogramWindowMinutes,
+  error,
+  loaded,
+}: {
+  blocks: StoredBlock[];
+  currentMinuteMs: number;
+  histogramWindowMinutes: number;
+  error: string | null;
+  loaded: boolean;
+}) {
+  const baseColor = getCssColor("--ark-orange", "#fe7446");
+  const gridColor = getCssColor("--line-strong", "#1111111a");
+  const textColor = getCssColor("--ink-muted", "#6b6b6b");
+
+  const { traces, layout } = useMemo<{
+    traces: Partial<Plotly.PlotData>[];
+    layout: Partial<Plotly.Layout>;
+  }>(() => {
+    const { minMs, maxMs } = homeHistogramMinuteRange(currentMinuteMs, {
+      histogramWindowMinutes,
+    });
+    const xMaxMs = maxMs + MINUTE_MS;
+
+    interface MinuteAgg {
+      total: number;
+      count: number;
+      min: number;
+      max: number;
+    }
+    const sums = new Map<number, MinuteAgg>();
+    for (let i = 0; i < histogramWindowMinutes; i++) {
+      sums.set(minMs + i * MINUTE_MS, {
+        total: 0,
+        count: 0,
+        min: Infinity,
+        max: -Infinity,
+      });
+    }
+    for (const block of blocks) {
+      const ts = Date.parse(block.blockDate);
+      if (!Number.isFinite(ts)) continue;
+      const minute = Math.floor(ts / MINUTE_MS) * MINUTE_MS;
+      const bucket = sums.get(minute);
+      if (!bucket) continue;
+      let gwei: number;
+      try {
+        gwei = Number(BigInt(block.baseBlockFeeWei)) / 1e9;
+      } catch {
+        continue;
+      }
+      if (!Number.isFinite(gwei)) continue;
+      bucket.total += gwei;
+      bucket.count += 1;
+      if (gwei < bucket.min) bucket.min = gwei;
+      if (gwei > bucket.max) bucket.max = gwei;
+    }
+    const series = Array.from(sums.entries())
+      .map(([minuteMs, { total, count, min, max }]) => ({
+        ts: minuteMs,
+        avg: count > 0 ? total / count : null,
+        min: count > 0 ? min : null,
+        max: count > 0 ? max : null,
+      }))
+      .sort((a, b) => a.ts - b.ts);
+
+    const xs = series.map((p) => new Date(p.ts).toISOString());
+    const ysAvg = series.map((p) => p.avg);
+    const ysMin = series.map((p) => p.min);
+    const ysMax = series.map((p) => p.max);
+    const bandFill = withAlpha(baseColor, 0.18);
+    const bandLine = withAlpha(baseColor, 0.5);
+
+    const maxTrace: Partial<Plotly.PlotData> = {
+      type: "scatter",
+      mode: "lines+markers",
+      x: xs,
+      y: ysMax as unknown as Plotly.Datum[],
+      connectgaps: true,
+      line: { color: bandLine, width: 1, shape: "linear" },
+      marker: { color: bandLine, size: 3, line: { width: 0 } },
+      hovertemplate: "max %{y:,.3f} gwei<extra></extra>",
+      showlegend: false,
+    };
+    const minTrace: Partial<Plotly.PlotData> = {
+      type: "scatter",
+      mode: "lines+markers",
+      x: xs,
+      y: ysMin as unknown as Plotly.Datum[],
+      connectgaps: true,
+      fill: "tonexty",
+      fillcolor: bandFill,
+      line: { color: bandLine, width: 1, shape: "linear" },
+      marker: { color: bandLine, size: 3, line: { width: 0 } },
+      hovertemplate: "min %{y:,.3f} gwei<extra></extra>",
+      showlegend: false,
+    };
+    const avgTrace: Partial<Plotly.PlotData> = {
+      type: "scatter",
+      mode: "lines+markers",
+      x: xs,
+      y: ysAvg as unknown as Plotly.Datum[],
+      connectgaps: true,
+      line: { color: baseColor, width: 1.5, shape: "linear" },
+      marker: { color: baseColor, size: 4, line: { width: 0 } },
+      hovertemplate: "<b>Base fee</b><br>%{x|%H:%M}<br>%{y:,.3f} gwei avg<extra></extra>",
+    };
+
+    const layout: Partial<Plotly.Layout> = {
+      autosize: true,
+      margin: { l: 56, r: 16, t: 8, b: 28 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      font: { color: textColor, size: 11 },
+      showlegend: false,
+      hovermode: "x unified",
+      hoverlabel: {
+        bgcolor: getCssColor("--sand", "#f6f4ef"),
+        bordercolor: gridColor,
+        font: { color: getCssColor("--ink", "#111111"), size: 12 },
+      },
+      xaxis: {
+        type: "date",
+        range: [new Date(minMs).toISOString(), new Date(xMaxMs).toISOString()],
+        gridcolor: "rgba(0,0,0,0)",
+        zerolinecolor: "rgba(0,0,0,0)",
+        tickfont: { size: 10, color: textColor },
+        nticks: 6,
+        fixedrange: true,
+      },
+      yaxis: {
+        gridcolor: gridColor,
+        zerolinecolor: gridColor,
+        tickfont: { size: 10, color: textColor },
+        rangemode: "normal",
+        fixedrange: true,
+        ticksuffix: " gwei",
+      },
+    };
+
+    return { traces: [maxTrace, minTrace, avgTrace], layout };
+  }, [blocks, currentMinuteMs, histogramWindowMinutes, baseColor, gridColor, textColor]);
+
+  return (
+    <section className="home-feed-panel home-histogram-panel">
+      <div className="home-panel-heading">
+        <h3 className="home-panel-heading-title home-histogram-title">
+          <span
+            className="home-histogram-swatch"
+            aria-hidden="true"
+            style={{ background: baseColor }}
+          />
+          Base block fee
+          <InfoTooltip label="What is base block fee?">
+            <strong>Base block fee (EIP‑1559)</strong>
+            <p>
+              The minimum gas price required for a transaction to be included in a
+              block. Set algorithmically by the protocol — it rises when blocks are
+              full and falls when they are empty, targeting ~50% utilization. The
+              base fee is burnt rather than paid to miners.
+            </p>
+            <p>
+              Shown in gwei (1 gwei = 10⁻⁹ ETH). The solid line is the per‑minute
+              average; the band shows the per‑minute min/max range.
+            </p>
+          </InfoTooltip>
+        </h3>
+        <span>{`gwei · last ${histogramWindowMinutes} min`}</span>
+      </div>
+      <div className="home-histogram-chart">
+        {error && !loaded ? (
+          <div className="home-feed-empty-state">
+            <strong>Unable to load chart.</strong>
+            <span>{error}</span>
+          </div>
+        ) : (
+          <Plot
+            data={traces}
+            layout={layout}
+            useResizeHandler
+            style={{ width: "100%", height: "100%" }}
+            config={{ displayModeBar: false, responsive: true, staticPlot: false }}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function withAlpha(color: string, alpha: number): string {
+  if (color.startsWith("#")) {
+    let hex = color.slice(1);
+    if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+    if (hex.length !== 6) return color;
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    if ([r, g, b].some((c) => Number.isNaN(c))) return color;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  const rgbMatch = color.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(",").map((s) => s.trim());
+    if (parts.length >= 3) {
+      return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`;
+    }
+  }
+  return color;
 }
 
 function getCssColor(varName: string, fallback: string): string {
