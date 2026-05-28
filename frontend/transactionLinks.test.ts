@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { addressSearchHref, transactionExplorerHref } from "./src/transactionLinks";
+import {
+  DEFAULT_TX_EXPLORER_BASE_URL,
+  addressSearchHref,
+  readTransactionExplorerBaseUrl,
+  transactionExplorerHref,
+} from "./src/transactionLinks";
 
 describe("transaction links", () => {
   test("links transaction hashes to the Arkiv Hoodi explorer", () => {
@@ -7,6 +12,23 @@ describe("transaction links", () => {
 
     expect(transactionExplorerHref(hash)).toBe(
       "https://explorer.braga.hoodi.arkiv.network/tx/0xf8da0a7fd7af9dae0730e43b9d0184500de5c77975dd3e644e2da22c044891c6",
+    );
+  });
+
+  test("reads configured transaction explorer base URLs", () => {
+    expect(
+      readTransactionExplorerBaseUrl({
+        VITE_TRANSACTION_EXPLORER_BASE_URL: "https://explorer.example.test/tx",
+      }),
+    ).toBe("https://explorer.example.test/tx/");
+  });
+
+  test("defaults invalid transaction explorer base URLs", () => {
+    expect(readTransactionExplorerBaseUrl({ VITE_TRANSACTION_EXPLORER_BASE_URL: "" })).toBe(
+      DEFAULT_TX_EXPLORER_BASE_URL,
+    );
+    expect(readTransactionExplorerBaseUrl({ VITE_TRANSACTION_EXPLORER_BASE_URL: "ftp://example.test/tx/" })).toBe(
+      DEFAULT_TX_EXPLORER_BASE_URL,
     );
   });
 

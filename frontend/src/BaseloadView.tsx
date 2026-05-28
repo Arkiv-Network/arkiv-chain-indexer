@@ -41,6 +41,7 @@ interface BaseloadViewProps {
   onSaveCurrentConfig: (name: string) => Promise<void>;
   onLoadSavedConfig: (name: string) => Promise<void>;
   onDeleteSavedConfig: (name: string) => Promise<void>;
+  tokenSymbol: string;
 }
 
 const DRAFT_STORAGE_KEY = "baseload.workerDraft";
@@ -82,6 +83,7 @@ export function BaseloadView({
   onSaveCurrentConfig,
   onLoadSavedConfig,
   onDeleteSavedConfig,
+  tokenSymbol,
 }: BaseloadViewProps) {
   const availableWallets = useMemo(() => getAvailableWalletNumbers(config.workers), [config.workers]);
   const [draft, setDraft] = useState<BaseloadWorkerDraft>(() =>
@@ -459,7 +461,7 @@ export function BaseloadView({
                   <td className="num">{worker.walletNumber}</td>
                   <td className="wallet-address">{worker.walletAddress}</td>
                   <td className="num">
-                    <BalanceCell balance={balances[worker.id]} />
+                    <BalanceCell balance={balances[worker.id]} tokenSymbol={tokenSymbol} />
                   </td>
                   <td>
                     <EditableNumber
@@ -582,9 +584,9 @@ export function BaseloadView({
   );
 }
 
-function BalanceCell({ balance }: { balance: BaseloadWorkerBalance | undefined }) {
+function BalanceCell({ balance, tokenSymbol }: { balance: BaseloadWorkerBalance | undefined; tokenSymbol: string }) {
   if (!balance) return <span title="No balance reported yet">—</span>;
-  const label = `${fmtEth(balance.balanceWei)} ETH`;
+  const label = `${fmtEth(balance.balanceWei)} ${tokenSymbol}`;
   if (balance.error) {
     return (
       <span className="balance-error" title={`${balance.balanceWei} wei (last updated ${balance.updatedAt})`}>

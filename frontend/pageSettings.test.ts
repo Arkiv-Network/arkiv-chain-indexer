@@ -30,25 +30,34 @@ describe("frontend page settings", () => {
     expect(
       readBuildPageSettings({
         VITE_CHAIN_NAME: "Hoodi",
+        VITE_TOKEN_SYMBOL: "glm",
         VITE_BLOCK_TIME_MS: "12000",
         VITE_STUB_TICK_MS: "-1",
         VITE_HISTOGRAM_WINDOW_MINUTES: "30",
       }),
     ).toMatchObject({
       chainName: "Hoodi",
+      tokenSymbol: "GLM",
       blockTimeMs: 12_000,
       stubTickMs: DEFAULT_PAGE_SETTINGS.stubTickMs,
       histogramWindowMinutes: 30,
     });
   });
 
+  test("defaults token symbol when Vite value is not exactly three letters", () => {
+    expect(readBuildPageSettings({ VITE_TOKEN_SYMBOL: "ether" }).tokenSymbol).toBe("ETH");
+    expect(readBuildPageSettings({ VITE_TOKEN_SYMBOL: "p1l" }).tokenSymbol).toBe("ETH");
+  });
+
   test("normalizes editable drafts", () => {
     const draft = settingsToDraft(DEFAULT_PAGE_SETTINGS);
     draft.chainName = "Braga";
+    draft.tokenSymbol = "pol";
     draft.maxStubBlocks = "5";
 
     expect(normalizeSettingsDraft(draft).settings).toMatchObject({
       chainName: "Braga",
+      tokenSymbol: "POL",
       maxStubBlocks: 5,
     });
   });

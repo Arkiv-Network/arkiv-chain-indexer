@@ -14,6 +14,7 @@ interface BlocksViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }
 
 interface Filters extends Record<string, string> {
@@ -43,7 +44,7 @@ interface Column<T> {
   render: (row: T) => ReactNode;
 }
 
-function blockColumns(timeZone: string, onLocationChange: () => void): Column<StoredBlock>[] {
+function blockColumns(timeZone: string, onLocationChange: () => void, tokenSymbol: string): Column<StoredBlock>[] {
   return [
     {
       key: "block",
@@ -74,14 +75,14 @@ function blockColumns(timeZone: string, onLocationChange: () => void): Column<St
     },
     {
       key: "blockRewardWei",
-      label: "Block reward (ETH)",
+      label: `Block reward (${tokenSymbol})`,
       className: "num",
       width: "11rem",
       render: (row) => fmtEth(row.blockRewardWei ?? "0"),
     },
     {
       key: "burntFeesWei",
-      label: "Burnt fees (ETH)",
+      label: `Burnt fees (${tokenSymbol})`,
       className: "num",
       width: "10rem",
       render: (row) => fmtEth(row.burntFeesWei ?? "0"),
@@ -180,7 +181,7 @@ function loadFilters(locationSearch: string): Filters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
-export function BlocksView({ locationSearch, onLocationChange, timeZone }: BlocksViewProps) {
+export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: BlocksViewProps) {
   const [filters, setFilters] = useState<Filters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<BlocksResponse | null>(null);
@@ -238,11 +239,14 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone }: Block
   const onLimitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setFilters((prev) => ({ ...prev, limit: e.target.value }));
   };
+  const columns = useMemo(
+    () => blockColumns(timeZone, onLocationChange, tokenSymbol),
+    [timeZone, onLocationChange, tokenSymbol],
+  );
 
   const sorted = data
     ? data.blocks.slice().sort((a, b) => b.blockNumber - a.blockNumber)
     : [];
-  const columns = useMemo(() => blockColumns(timeZone, onLocationChange), [timeZone, onLocationChange]);
 
   return (
     <section className="view">
