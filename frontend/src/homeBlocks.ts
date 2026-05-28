@@ -6,6 +6,17 @@ export const HOME_BLOCK_RETENTION_BUFFER = 60;
 
 const MINUTE_MS = 60_000;
 
+export function homeHistogramMinuteRange(
+  currentMinuteMs: number,
+  settings: Pick<PageSettings, "histogramWindowMinutes">,
+): { minMs: number; maxMs: number } {
+  const windowMinutes = Math.max(1, settings.histogramWindowMinutes);
+  return {
+    minMs: currentMinuteMs - (windowMinutes - 1) * MINUTE_MS,
+    maxMs: currentMinuteMs,
+  };
+}
+
 export function homeFetchBlockLimit(settings: PageSettings): number {
   const blockTimeMs =
     settings.blockTimeMs > 0 ? settings.blockTimeMs : DEFAULT_PAGE_SETTINGS.blockTimeMs;

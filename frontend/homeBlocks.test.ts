@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { StoredBlock } from "./src/api";
 import {
+  homeHistogramMinuteRange,
   homeFetchBlockLimit,
   homeRetainedBlockLimit,
   pruneHomeBlocks,
@@ -9,6 +10,28 @@ import {
 import { DEFAULT_PAGE_SETTINGS } from "./src/pageSettings";
 
 describe("frontend home block window", () => {
+  test("sets the default histogram x-axis to fifty-nine minutes ago through the current minute", () => {
+    const currentMinuteMs = Date.UTC(2026, 4, 28, 12, 34, 0);
+
+    expect(homeHistogramMinuteRange(currentMinuteMs, DEFAULT_PAGE_SETTINGS)).toEqual({
+      minMs: Date.UTC(2026, 4, 28, 11, 35, 0),
+      maxMs: currentMinuteMs,
+    });
+  });
+
+  test("sets custom histogram x-axis windows from the current minute", () => {
+    const currentMinuteMs = Date.UTC(2026, 4, 28, 12, 34, 0);
+
+    expect(
+      homeHistogramMinuteRange(currentMinuteMs, {
+        histogramWindowMinutes: 5,
+      }),
+    ).toEqual({
+      minMs: Date.UTC(2026, 4, 28, 12, 30, 0),
+      maxMs: currentMinuteMs,
+    });
+  });
+
   test("derives the default fetch limit from the configured block time", () => {
     expect(homeFetchBlockLimit(DEFAULT_PAGE_SETTINGS)).toBe(1_800);
     expect(recentHomeBlocksParams(DEFAULT_PAGE_SETTINGS).get("limit")).toBe("1800");
