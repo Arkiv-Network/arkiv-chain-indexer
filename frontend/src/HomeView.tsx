@@ -161,7 +161,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
 
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
-  const feedBlocks = useMemo(() => blocks.slice(0, HOME_LATEST_BLOCK_LIMIT), [blocks]);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const lastMinuteAvgGas = useMemo(() => {
     const cutoffMs = nowMs - MINUTE_MS;
@@ -196,6 +195,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     const elapsed = nowMs - latestTimeMs;
     const slotCount = Math.min(
       settings.maxStubBlocks,
+      HOME_LATEST_BLOCK_LIMIT,
       Math.max(0, Math.floor((elapsed - settings.stubVisibleAgeMs) / settings.blockTimeMs)),
     );
     const loadingLabelElapsed =
@@ -210,6 +210,11 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       };
     });
   }, [latestBlock, nowMs, settings]);
+
+  const feedBlocks = useMemo(
+    () => blocks.slice(0, Math.max(0, HOME_LATEST_BLOCK_LIMIT - stubSlots.length)),
+    [blocks, stubSlots.length],
+  );
 
   const blockSlots = useMemo<BlockSlot[]>(
     () => [...stubSlots, ...feedBlocks.map((block) => ({ kind: "real" as const, block }))],
