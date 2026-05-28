@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { StoredBlock } from "./src/api";
 import {
   homeHistogramMinuteRange,
-  homeFetchBlockLimit,
-  homeRetainedBlockLimit,
+  homeRecentWindowStartMs,
   pruneHomeBlocks,
   recentHomeBlocksParams,
 } from "./src/homeBlocks";
@@ -32,32 +31,43 @@ describe("frontend home block window", () => {
     });
   });
 
-  test("derives the default fetch limit from the configured block time", () => {
-    expect(homeFetchBlockLimit(DEFAULT_PAGE_SETTINGS)).toBe(1_800);
-    expect(recentHomeBlocksParams(DEFAULT_PAGE_SETTINGS).get("limit")).toBe("1800");
+  test("uses a date-greater filter for the default recent window", () => {
+    const nowMs = Date.UTC(2026, 4, 28, 12, 34, 56, 789);
+    const params = recentHomeBlocksParams(DEFAULT_PAGE_SETTINGS, nowMs);
+
+    expect(homeRecentWindowStartMs(nowMs, DEFAULT_PAGE_SETTINGS)).toBe(
+      Date.UTC(2026, 4, 28, 11, 34, 56, 789),
+    );
+    expect(params.get("dateGt")).toBe("2026-05-28T11:34:56.789Z");
+    expect(params.get("order")).toBe("desc");
+    expect(params.has("limit")).toBe(false);
   });
 
-  test("derives custom fetch limits from the histogram window and block time", () => {
+  test("derives custom date-greater filters from the histogram window", () => {
     const settings = {
       ...DEFAULT_PAGE_SETTINGS,
       blockTimeMs: 12_000,
       histogramWindowMinutes: 30,
     };
+    const nowMs = Date.UTC(2026, 4, 28, 12, 34, 56, 789);
 
-    expect(homeFetchBlockLimit(settings)).toBe(150);
+    expect(recentHomeBlocksParams(settings, nowMs).get("dateGt")).toBe(
+      "2026-05-28T12:04:56.789Z",
+    );
   });
 
-  test("keeps only sixty blocks beyond the fetched window", () => {
-    const blocks = Array.from({ length: 1_900 }, (_, index) =>
-      storedBlock(1_900 - index, Date.now() - index * 1_000),
-    );
+  test("removes blocks outside the recent date-greater window", () => {
+    const nowMs = Date.UTC(2026, 4, 28, 12, 0, 0);
+    const blocks = [
+      storedBlock(4, Date.UTC(2026, 4, 28, 11, 59, 0)),
+      storedBlock(3, Date.UTC(2026, 4, 28, 11, 30, 0)),
+      storedBlock(2, Date.UTC(2026, 4, 28, 11, 0, 0, 1)),
+      storedBlock(1, Date.UTC(2026, 4, 28, 11, 0, 0)),
+    ];
 
-    const pruned = pruneHomeBlocks(blocks, DEFAULT_PAGE_SETTINGS);
+    const pruned = pruneHomeBlocks(blocks, DEFAULT_PAGE_SETTINGS, nowMs);
 
-    expect(homeRetainedBlockLimit(DEFAULT_PAGE_SETTINGS)).toBe(1_860);
-    expect(pruned).toHaveLength(1_860);
-    expect(pruned[0]?.blockNumber).toBe(1_900);
-    expect(pruned.at(-1)?.blockNumber).toBe(41);
+    expect(pruned.map((block) => block.blockNumber)).toEqual([4, 3, 2]);
   });
 });
 

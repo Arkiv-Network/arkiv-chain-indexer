@@ -1,8 +1,7 @@
 import type { BlocksResponse, StoredBlock } from "./api";
-import { DEFAULT_PAGE_SETTINGS, type PageSettings } from "./pageSettings";
+import type { PageSettings } from "./pageSettings";
 
 export const HOME_LATEST_BLOCK_LIMIT = 20;
-export const HOME_BLOCK_RETENTION_BUFFER = 60;
 
 const MINUTE_MS = 60_000;
 
@@ -17,20 +16,20 @@ export function homeHistogramMinuteRange(
   };
 }
 
-export function homeFetchBlockLimit(settings: PageSettings): number {
-  const blockTimeMs =
-    settings.blockTimeMs > 0 ? settings.blockTimeMs : DEFAULT_PAGE_SETTINGS.blockTimeMs;
-  const windowMs = Math.max(0, settings.histogramWindowMinutes) * MINUTE_MS;
-  return Math.max(HOME_LATEST_BLOCK_LIMIT, Math.ceil(windowMs / blockTimeMs));
+export function homeRecentWindowStartMs(
+  nowMs: number,
+  settings: Pick<PageSettings, "histogramWindowMinutes">,
+): number {
+  const windowMinutes = Math.max(1, settings.histogramWindowMinutes);
+  return nowMs - windowMinutes * MINUTE_MS;
 }
 
-export function homeRetainedBlockLimit(settings: PageSettings): number {
-  return homeFetchBlockLimit(settings) + HOME_BLOCK_RETENTION_BUFFER;
-}
-
-export function recentHomeBlocksParams(settings: PageSettings): URLSearchParams {
+export function recentHomeBlocksParams(
+  settings: PageSettings,
+  nowMs = Date.now(),
+): URLSearchParams {
   const params = new URLSearchParams();
-  params.set("limit", String(homeFetchBlockLimit(settings)));
+  params.set("dateGt", new Date(homeRecentWindowStartMs(nowMs, settings)).toISOString());
   params.set("order", "desc");
   return params;
 }
@@ -43,17 +42,17 @@ export function normalizeHomeBlocksResponse(
   return {
     ...response,
     count: blocks.length,
-    limit: Math.max(response.limit, homeRetainedBlockLimit(settings)),
-    truncated: response.truncated || blocks.length >= response.limit,
+    truncated: response.truncated,
     blocks,
   };
 }
 
-export function pruneHomeBlocks(blocks: StoredBlock[], settings: PageSettings): StoredBlock[] {
-  const currentMinuteMs = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
-  const firstMinuteMs =
-    currentMinuteMs - Math.max(0, settings.histogramWindowMinutes - 1) * MINUTE_MS;
-  const retainedLimit = homeRetainedBlockLimit(settings);
+export function pruneHomeBlocks(
+  blocks: StoredBlock[],
+  settings: PageSettings,
+  nowMs = Date.now(),
+): StoredBlock[] {
+  const windowStartMs = homeRecentWindowStartMs(nowMs, settings);
   const seen = new Set<number>();
   const pruned: StoredBlock[] = [];
 
@@ -62,10 +61,7 @@ export function pruneHomeBlocks(blocks: StoredBlock[], settings: PageSettings): 
     seen.add(block.blockNumber);
 
     const ts = Date.parse(block.blockDate);
-    const keepForFeed = pruned.length < HOME_LATEST_BLOCK_LIMIT;
-    const keepForHistogram = Number.isFinite(ts) && ts >= firstMinuteMs;
-    if (keepForFeed || keepForHistogram) pruned.push(block);
-    if (pruned.length >= retainedLimit) break;
+    if (Number.isFinite(ts) && ts > windowStartMs) pruned.push(block);
   }
 
   return pruned;
