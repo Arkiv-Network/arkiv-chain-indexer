@@ -8,10 +8,16 @@ interface InfoTooltipProps {
   size?: number;
 }
 
+type Placement = "top" | "bottom";
+
 interface PopupPosition {
   top: number;
   left: number;
+  arrowLeft: number;
+  placement: Placement;
 }
+
+const VIEWPORT_MARGIN = 8;
 
 export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
   const [open, setOpen] = useState(false);
@@ -24,11 +30,29 @@ export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
   const updatePosition = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    setPosition({
-      top: rect.bottom + 8,
-      left: rect.left + rect.width / 2,
-    });
+    const triggerRect = trigger.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const triggerCenter = triggerRect.left + triggerRect.width / 2;
+
+    const popup = popupRef.current;
+    // Fall back to a reasonable estimate before the popup has rendered.
+    const popupWidth = popup ? popup.offsetWidth : Math.min(320, viewportWidth - VIEWPORT_MARGIN * 2);
+    const popupHeight = popup ? popup.offsetHeight : 0;
+
+    const maxLeft = Math.max(VIEWPORT_MARGIN, viewportWidth - popupWidth - VIEWPORT_MARGIN);
+    const desiredLeft = triggerCenter - popupWidth / 2;
+    const left = Math.min(Math.max(desiredLeft, VIEWPORT_MARGIN), maxLeft);
+
+    const spaceBelow = viewportHeight - triggerRect.bottom;
+    const spaceAbove = triggerRect.top;
+    const wantsBottom = spaceBelow >= popupHeight + 8 || spaceBelow >= spaceAbove;
+    const placement: Placement = wantsBottom ? "bottom" : "top";
+    const top = placement === "bottom" ? triggerRect.bottom + 8 : triggerRect.top - popupHeight - 8;
+
+    const arrowLeft = Math.min(Math.max(triggerCenter - left, 12), popupWidth - 12);
+
+    setPosition({ top, left, arrowLeft, placement });
   }, []);
 
   useLayoutEffect(() => {
@@ -41,6 +65,13 @@ export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
       window.removeEventListener("resize", updatePosition);
     };
   }, [open, updatePosition]);
+
+  // After the popup is in the DOM, re-measure so we can clamp using the real width/height.
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (!popupRef.current) return;
+    updatePosition();
+  }, [open, updatePosition, children]);
 
   useEffect(() => {
     if (!pinned) return;
@@ -106,14 +137,20 @@ export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
       >
         <Info size={size} />
       </button>
-      {open && position
+      {open
         ? createPortal(
             <div
               ref={popupRef}
               id={popupId}
               role="tooltip"
               className="info-tooltip-popup"
-              style={{ top: position.top, left: position.left }}
+              data-placement={position?.placement ?? "bottom"}
+              style={{
+                top: position?.top ?? -9999,
+                left: position?.left ?? -9999,
+                visibility: position ? "visible" : "hidden",
+                ["--info-tooltip-arrow-left" as string]: position ? `${position.arrowLeft}px` : "50%",
+              }}
               onMouseEnter={handleEnter}
               onMouseLeave={handleLeave}
             >
