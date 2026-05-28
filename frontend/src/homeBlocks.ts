@@ -1,7 +1,7 @@
 import type { BlocksResponse, StoredBlock } from "./api";
 import type { PageSettings } from "./pageSettings";
 
-export const HOME_LATEST_BLOCK_LIMIT = 20;
+export const HOME_LATEST_BLOCK_LIMIT = 10;
 
 const MINUTE_MS = 60_000;
 
