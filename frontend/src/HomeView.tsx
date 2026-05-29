@@ -16,6 +16,7 @@ import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
 import {
   HOME_LATEST_BLOCK_LIMIT,
+  buildHomeMinAvgMaxSeries,
   homeHistogramMinuteRange,
   normalizeHomeBlocksResponse,
   recentHomeBlocksParams,
@@ -713,6 +714,46 @@ function LiveHistograms({
         loaded={loaded}
       />
       <MinAvgMaxPanel
+        title="Batcher Operation"
+        unitLabel="queue size"
+        blocks={blocks}
+        currentMinuteMs={currentMinuteMs}
+        histogramWindowMinutes={settings.histogramWindowMinutes}
+        colorVar="--ok"
+        colorFallback="#1f7a4d"
+        extractValue={(block) => {
+          if (block.batcherQueueSize === undefined || block.batcherQueueSize === null) return null;
+          try {
+            const queueSize = Number(BigInt(block.batcherQueueSize));
+            return Number.isFinite(queueSize) ? queueSize : null;
+          } catch {
+            return null;
+          }
+        }}
+        hoverLabel="Batcher queue"
+        yTickformat=".2s"
+        yTicksuffix=""
+        hoverFormat=".3s"
+        infoLabel="What is batcher operation?"
+        infoTitle="Batcher Operation"
+        infoBody={
+          <>
+            <p>
+              The batcher queue size reported by the collector for each block. The
+              solid line is the per-minute average queue size, and the band shows
+              the per-minute min/max range.
+            </p>
+            <p>
+              Missing collector readings are left out of the calculation so gaps
+              show where operation metrics were not available.
+            </p>
+          </>
+        }
+        emptyLabel="No batcher queue data in this window."
+        error={error}
+        loaded={loaded}
+      />
+      <MinAvgMaxPanel
         title="Base block fee"
         unitLabel="gwei"
         blocks={blocks}
@@ -770,6 +811,7 @@ interface MinAvgMaxPanelProps {
   infoLabel: string;
   infoTitle: string;
   infoBody: React.ReactNode;
+  emptyLabel?: string;
   error: string | null;
   loaded: boolean;
 }
@@ -790,6 +832,7 @@ function MinAvgMaxPanel({
   infoLabel,
   infoTitle,
   infoBody,
+  emptyLabel,
   error,
   loaded,
 }: MinAvgMaxPanelProps) {
@@ -797,51 +840,23 @@ function MinAvgMaxPanel({
   const gridColor = getCssColor("--line-strong", "#1111111a");
   const textColor = getCssColor("--ink-muted", "#6b6b6b");
 
-  const { traces, layout } = useMemo<{
+  const { traces, layout, hasData } = useMemo<{
     traces: Partial<Plotly.PlotData>[];
     layout: Partial<Plotly.Layout>;
+    hasData: boolean;
   }>(() => {
     const { minMs, maxMs } = homeHistogramMinuteRange(currentMinuteMs, {
       histogramWindowMinutes,
     });
     const xMaxMs = maxMs + MINUTE_MS;
 
-    interface MinuteAgg {
-      total: number;
-      count: number;
-      min: number;
-      max: number;
-    }
-    const sums = new Map<number, MinuteAgg>();
-    for (let i = 0; i < histogramWindowMinutes; i++) {
-      sums.set(minMs + i * MINUTE_MS, {
-        total: 0,
-        count: 0,
-        min: Infinity,
-        max: -Infinity,
-      });
-    }
-    for (const block of blocks) {
-      const ts = Date.parse(block.blockDate);
-      if (!Number.isFinite(ts)) continue;
-      const minute = Math.floor(ts / MINUTE_MS) * MINUTE_MS;
-      const bucket = sums.get(minute);
-      if (!bucket) continue;
-      const value = extractValue(block);
-      if (value === null || !Number.isFinite(value)) continue;
-      bucket.total += value;
-      bucket.count += 1;
-      if (value < bucket.min) bucket.min = value;
-      if (value > bucket.max) bucket.max = value;
-    }
-    const series = Array.from(sums.entries())
-      .map(([minuteMs, { total, count, min, max }]) => ({
-        ts: minuteMs,
-        avg: count > 0 ? total / count : null,
-        min: count > 0 ? min : null,
-        max: count > 0 ? max : null,
-      }))
-      .sort((a, b) => a.ts - b.ts);
+    const series = buildHomeMinAvgMaxSeries(
+      blocks,
+      currentMinuteMs,
+      { histogramWindowMinutes },
+      extractValue,
+    );
+    const hasData = series.some((p) => p.avg !== null);
 
     const xs = series.map((p) => new Date(p.ts).toISOString());
     const ysAvg = series.map((p) => p.avg);
@@ -919,7 +934,7 @@ function MinAvgMaxPanel({
       },
     };
 
-    return { traces: [maxTrace, minTrace, avgTrace], layout };
+    return { traces: [maxTrace, minTrace, avgTrace], layout, hasData };
   }, [
     blocks,
     currentMinuteMs,
@@ -957,6 +972,11 @@ function MinAvgMaxPanel({
           <div className="home-feed-empty-state">
             <strong>Unable to load chart.</strong>
             <span>{error}</span>
+          </div>
+        ) : loaded && !hasData ? (
+          <div className="home-feed-empty-state">
+            <strong>No chart data.</strong>
+            <span>{emptyLabel ?? "No values are available in this window."}</span>
           </div>
         ) : (
           <Plot

@@ -5,6 +5,13 @@ export const HOME_LATEST_BLOCK_LIMIT = 10;
 
 const MINUTE_MS = 60_000;
 
+export interface HomeMinAvgMaxPoint {
+  ts: number;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+}
+
 export function homeHistogramMinuteRange(
   currentMinuteMs: number,
   settings: Pick<PageSettings, "histogramWindowMinutes">,
@@ -32,6 +39,56 @@ export function recentHomeBlocksParams(
   params.set("dateGt", new Date(homeRecentWindowStartMs(nowMs, settings)).toISOString());
   params.set("order", "desc");
   return params;
+}
+
+export function buildHomeMinAvgMaxSeries(
+  blocks: StoredBlock[],
+  currentMinuteMs: number,
+  settings: Pick<PageSettings, "histogramWindowMinutes">,
+  extractValue: (block: StoredBlock) => number | null,
+): HomeMinAvgMaxPoint[] {
+  const { minMs } = homeHistogramMinuteRange(currentMinuteMs, settings);
+  const windowMinutes = Math.max(1, settings.histogramWindowMinutes);
+
+  interface MinuteAgg {
+    total: number;
+    count: number;
+    min: number;
+    max: number;
+  }
+
+  const sums = new Map<number, MinuteAgg>();
+  for (let i = 0; i < windowMinutes; i++) {
+    sums.set(minMs + i * MINUTE_MS, {
+      total: 0,
+      count: 0,
+      min: Infinity,
+      max: -Infinity,
+    });
+  }
+
+  for (const block of blocks) {
+    const ts = Date.parse(block.blockDate);
+    if (!Number.isFinite(ts)) continue;
+    const minute = Math.floor(ts / MINUTE_MS) * MINUTE_MS;
+    const bucket = sums.get(minute);
+    if (!bucket) continue;
+    const value = extractValue(block);
+    if (value === null || !Number.isFinite(value)) continue;
+    bucket.total += value;
+    bucket.count += 1;
+    if (value < bucket.min) bucket.min = value;
+    if (value > bucket.max) bucket.max = value;
+  }
+
+  return Array.from(sums.entries())
+    .map(([minuteMs, { total, count, min, max }]) => ({
+      ts: minuteMs,
+      avg: count > 0 ? total / count : null,
+      min: count > 0 ? min : null,
+      max: count > 0 ? max : null,
+    }))
+    .sort((a, b) => a.ts - b.ts);
 }
 
 export function normalizeHomeBlocksResponse(
