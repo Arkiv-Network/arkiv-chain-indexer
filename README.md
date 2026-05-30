@@ -22,7 +22,7 @@ cp .env.example .env
 # edit .env and set SCANNER_RPC_FULL_NODE to your JSON-RPC endpoint
 docker compose up --build
 ```
-
+ 
 Open:
 
 - Frontend: <http://localhost:23560> (the React app talks to the backend through the same origin at `/api/*`)
