@@ -224,6 +224,27 @@ function minuteOf(timestampMs: number): number {
   return Math.floor(timestampMs / MINUTE_MS);
 }
 
+/**
+ * Whether a parsed value is a well-formed {@link GuzzlerBucket}. Used to reject
+ * legacy or corrupt entries (e.g. the old per-transaction Redis format) before
+ * they reach the tracker, where a missing `firstSeenMs` would surface as an
+ * `Invalid Date`.
+ */
+export function isValidBucket(value: unknown): value is GuzzlerBucket {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const bucket = value as Record<string, unknown>;
+  return (
+    Number.isFinite(bucket.minute) &&
+    Number.isFinite(bucket.transactionCount) &&
+    typeof bucket.totalGasUsed === "string" &&
+    typeof bucket.totalFeeWei === "string" &&
+    Number.isFinite(bucket.firstSeenMs) &&
+    Number.isFinite(bucket.lastSeenMs)
+  );
+}
+
 /** Mutable in-memory form of a bucket; bigints avoid repeated string parsing. */
 interface MutableBucket {
   minute: number;
@@ -326,11 +347,11 @@ export class GuzzlerTracker {
 
   /** Restore a sender's retained buckets (e.g. from persistence). */
   loadSender(address: string, buckets: GuzzlerBucket[]): void {
-    if (buckets.length === 0) {
-      return;
-    }
     const map = new Map<number, MutableBucket>();
     for (const bucket of buckets) {
+      if (!isValidBucket(bucket)) {
+        continue; // skip legacy/corrupt entries rather than crash downstream
+      }
       map.set(bucket.minute, {
         minute: bucket.minute,
         count: bucket.transactionCount,
@@ -339,6 +360,9 @@ export class GuzzlerTracker {
         firstMs: bucket.firstSeenMs,
         lastMs: bucket.lastSeenMs,
       });
+    }
+    if (map.size === 0) {
+      return;
     }
     this.senders.set(normalizeAddress(address), map);
   }
@@ -527,7 +551,7 @@ export function buildGuzzlerHistory(
 ): GuzzlerHistory {
   const cutoff = nowMs - retentionMs;
   const points = buckets
-    .filter((bucket) => bucket.lastSeenMs > cutoff)
+    .filter((bucket) => isValidBucket(bucket) && bucket.lastSeenMs > cutoff)
     .sort((a, b) => a.minute - b.minute)
     .map((bucket) => ({
       minute: bucket.minute,

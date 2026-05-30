@@ -1,6 +1,7 @@
 import { RedisClient } from "bun";
 import {
   DEFAULT_GUZZLER_RETENTION_MS,
+  isValidBucket,
   normalizeAddress,
   type GuzzlerBucket,
   type GuzzlerLeaderboards,
@@ -53,11 +54,20 @@ export class RedisGuzzlerStore implements GuzzlerStore {
   async loadAll(): Promise<Map<string, GuzzlerBucket[]>> {
     const raw = await this.client.hgetall(this.key);
     const result = new Map<string, GuzzlerBucket[]>();
+    // Opportunistically drop fields that no longer parse to valid buckets — e.g.
+    // data written by the previous per-transaction schema — so a deploy over an
+    // existing cache self-heals instead of carrying garbage forward.
+    const stale: string[] = [];
     for (const [address, json] of Object.entries(raw ?? {})) {
       const buckets = parseBuckets(json);
       if (buckets.length > 0) {
         result.set(address, buckets);
+      } else {
+        stale.push(address);
       }
+    }
+    if (stale.length > 0) {
+      await this.removeSenders(stale);
     }
     return result;
   }
@@ -127,7 +137,7 @@ export class RedisGuzzlerStore implements GuzzlerStore {
 function parseBuckets(json: string): GuzzlerBucket[] {
   try {
     const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? (parsed as GuzzlerBucket[]) : [];
+    return Array.isArray(parsed) ? parsed.filter(isValidBucket) : [];
   } catch {
     return [];
   }
