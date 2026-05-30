@@ -1,3 +1,4 @@
+import { CliHelpRequested, coerceInt, parseCli, type CliSpec } from "./cli";
 import { aggregateRanges } from "./aggregator";
 import { SUPPORTED_RANGE_SIZES } from "./ranges";
 import { ScannerStorage } from "./storage";
@@ -10,80 +11,46 @@ interface AggregateAllConfig {
   once: boolean;
 }
 
-class HelpRequested extends Error {}
+class HelpRequested extends CliHelpRequested {}
+
+const SPEC: CliSpec = {
+  name: "aggregate-all",
+  summary: `DATABASE_URL=postgres://... bun run aggregate-all
+
+Periodically aggregates every supported range size (2, 5, 10, 20, 50, 100, 200, 500, 1000).`,
+  options: [
+    {
+      flags: "--database-url <url>",
+      description: "PostgreSQL connection string (or DATABASE_URL env).",
+      env: ["DATABASE_URL", "SCANNER_DATABASE_URL"],
+    },
+    {
+      flags: "--interval-ms <number>",
+      description: "Sleep between full sweeps. Defaults to 60000.",
+      env: ["AGGREGATE_INTERVAL_MS"],
+      default: DEFAULT_INTERVAL_MS.toString(),
+    },
+    { flags: "--once", description: "Run a single sweep then exit." },
+  ],
+};
 
 function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): AggregateAllConfig {
-  const values: Record<string, string> = {};
-  let help = false;
-  let once = false;
+  const cli = parseCli(SPEC, args, env);
 
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!arg?.startsWith("--")) {
-      throw new Error(`Unexpected argument: ${arg}`);
-    }
-
-    const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
-    if (!rawKey) {
-      throw new Error(`Invalid argument: ${arg}`);
-    }
-    if (rawKey === "help") {
-      help = true;
-      continue;
-    }
-    if (rawKey === "once") {
-      once = true;
-      continue;
-    }
-
-    const value = inlineValue ?? args[index + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(`Missing value for --${rawKey}`);
-    }
-    values[rawKey] = value;
-    if (inlineValue === undefined) {
-      index += 1;
-    }
+  if (cli.helpRequested) {
+    throw new HelpRequested(cli.helpText);
   }
 
-  if (help) {
-    throw new HelpRequested(usage());
-  }
-
-  const databaseUrl =
-    values["database-url"] ?? env.DATABASE_URL ?? env.SCANNER_DATABASE_URL;
+  const databaseUrl = cli.value("database-url");
   if (!databaseUrl) {
     throw new Error("DATABASE_URL (or --database-url) is required");
   }
 
-  const intervalRaw = values["interval-ms"] ?? env.AGGREGATE_INTERVAL_MS;
-  const intervalMs = intervalRaw === undefined ? DEFAULT_INTERVAL_MS : parsePositiveInt("--interval-ms", intervalRaw);
-
-  return { databaseUrl, intervalMs, once };
-}
-
-function parsePositiveInt(name: string, raw: string): number {
-  if (!/^\d+$/.test(raw)) {
-    throw new Error(`${name} must be a non-negative integer`);
-  }
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new Error(`${name} is too large`);
-  }
-  return parsed;
-}
-
-function usage(): string {
-  return `Usage:
-  DATABASE_URL=postgres://... bun run aggregate-all
-
-Periodically aggregates every supported range size (2, 5, 10, 20, 50, 100, 200, 500, 1000).
-
-Options:
-  --database-url <url>     PostgreSQL connection string (or DATABASE_URL env).
-  --interval-ms <number>   Sleep between full sweeps. Defaults to 60000.
-  --once                   Run a single sweep then exit.
-  --help                   Show this message.`;
+  return {
+    databaseUrl,
+    intervalMs: coerceInt("--interval-ms", cli.value("interval-ms")!),
+    once: cli.flag("once"),
+  };
 }
 
 async function runSweep(storage: ScannerStorage): Promise<void> {
