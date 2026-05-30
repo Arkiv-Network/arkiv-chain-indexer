@@ -1,6 +1,12 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type BlockInspectionResult } from "./blockInspector";
-import { readGuzzlerStatistics, type GuzzlerStat, type GuzzlerStore } from "./guzzlers";
+import {
+  DEFAULT_GUZZLER_LIMIT,
+  MAX_GUZZLER_LIMIT,
+  readGuzzlerLeaderboards,
+  type GuzzlerLeaderboards,
+  type GuzzlerStore,
+} from "./guzzlers";
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
@@ -102,12 +108,7 @@ export interface SendersResponseBody {
   senders: StoredSenderStats[];
 }
 
-export interface GuzzlersResponseBody {
-  windowMs: number;
-  generatedAt: string;
-  count: number;
-  guzzlers: GuzzlerStat[];
-}
+export type GuzzlersResponseBody = GuzzlerLeaderboards;
 
 export interface BaseloadConfigsResponseBody {
   configs: StoredBaseloadConfigSummary[];
@@ -244,7 +245,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/guzzlers") {
-    return handleGetGuzzlers(options.guzzlerStore);
+    return handleGetGuzzlers(url, options.guzzlerStore);
   }
 
   if (url.pathname === "/blocks") {
@@ -695,18 +696,33 @@ async function readGuzzlerCacheHealth(
   }
 }
 
-async function handleGetGuzzlers(guzzlerStore: GuzzlerStore | undefined): Promise<Response> {
+/** Parse `?limit=`, falling back to the default and clamping to the maximum. */
+function parseGuzzlerLimit(params: URLSearchParams): number {
+  const raw = params.get("limit");
+  if (raw === null) {
+    return DEFAULT_GUZZLER_LIMIT;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return DEFAULT_GUZZLER_LIMIT;
+  }
+  return Math.min(Math.floor(value), MAX_GUZZLER_LIMIT);
+}
+
+async function handleGetGuzzlers(
+  url: URL,
+  guzzlerStore: GuzzlerStore | undefined,
+): Promise<Response> {
   if (!guzzlerStore) {
     return jsonError(503, "Guzzler tracking is disabled");
   }
 
-  const statistics = await readGuzzlerStatistics(guzzlerStore, Date.now());
-  const body: GuzzlersResponseBody = {
-    windowMs: statistics.windowMs,
-    generatedAt: statistics.generatedAt,
-    count: statistics.count,
-    guzzlers: statistics.guzzlers,
-  };
+  const limit = parseGuzzlerLimit(url.searchParams);
+  const body: GuzzlersResponseBody = await readGuzzlerLeaderboards(
+    guzzlerStore,
+    Date.now(),
+    limit,
+  );
 
   return jsonResponse(body);
 }

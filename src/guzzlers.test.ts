@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   GuzzlerTracker,
-  readGuzzlerStatistics,
+  readGuzzlerLeaderboards,
   type GuzzlerStore,
   type GuzzlerTransaction,
 } from "./guzzlers";
+
+const HOUR = 60 * 60 * 1000;
 
 const T0 = Date.parse("2026-05-30T12:00:00.000Z");
 
@@ -102,19 +104,73 @@ describe("GuzzlerTracker", () => {
   });
 });
 
-describe("readGuzzlerStatistics", () => {
-  test("loads from the store, drops aged-out senders, and sorts by gas", async () => {
+describe("GuzzlerTracker.getLeaderboards", () => {
+  test("buckets each transaction into the windows that contain it", () => {
+    const tracker = new GuzzlerTracker();
+    // Ages chosen to land in nested window sets.
+    tracker.loadSender("0xrecent", [tx("0xr", T0 - 60_000, "100", "10")]); // 1m → every window
+    tracker.loadSender("0xmid", [tx("0xm", T0 - 30 * 60_000, "500", "50")]); // 30m → 1h,6h,24h
+    tracker.loadSender("0xold", [tx("0xo", T0 - 10 * HOUR, "999", "99")]); // 10h → 24h only
+
+    const board = tracker.getLeaderboards(T0, 10);
+    expect(board.retentionMs).toBe(24 * HOUR);
+    expect(board.limit).toBe(10);
+    const byLabel = Object.fromEntries(board.windows.map((w) => [w.label, w]));
+
+    expect(byLabel["5m"]!.guzzlers.map((g) => g.address)).toEqual(["0xrecent"]);
+    expect(byLabel["20m"]!.guzzlers.map((g) => g.address)).toEqual(["0xrecent"]);
+    // 1h includes recent + mid, ranked by gas (500 > 100).
+    expect(byLabel["1h"]!.guzzlers.map((g) => g.address)).toEqual(["0xmid", "0xrecent"]);
+    expect(byLabel["6h"]!.guzzlers.map((g) => g.address)).toEqual(["0xmid", "0xrecent"]);
+    expect(byLabel["24h"]!.count).toBe(3);
+    expect(byLabel["24h"]!.guzzlers.map((g) => g.address)).toEqual(["0xold", "0xmid", "0xrecent"]);
+  });
+
+  test("sums repeated transactions for a sender within a window", () => {
+    const tracker = new GuzzlerTracker();
+    tracker.loadSender("0xa", [tx("0x1", T0 - 1000, "100", "10"), tx("0x2", T0 - 2000, "200", "20")]);
+
+    const board = tracker.getLeaderboards(T0, 10);
+    const five = board.windows.find((w) => w.label === "5m")!;
+    expect(five.guzzlers[0]).toMatchObject({
+      address: "0xa",
+      transactionCount: 2,
+      totalGasUsed: "300",
+      totalFeeWei: "30",
+    });
+  });
+
+  test("applies the top-N limit per window but still reports the full count", () => {
+    const tracker = new GuzzlerTracker();
+    for (let i = 0; i < 5; i += 1) {
+      tracker.loadSender(`0x${i.toString()}`, [tx(`0xh${i.toString()}`, T0 - 1000, String((i + 1) * 100))]);
+    }
+
+    const board = tracker.getLeaderboards(T0, 2);
+    const five = board.windows.find((w) => w.label === "5m")!;
+    expect(five.count).toBe(5);
+    expect(five.guzzlers.map((g) => g.address)).toEqual(["0x4", "0x3"]);
+  });
+});
+
+describe("readGuzzlerLeaderboards", () => {
+  test("loads from the store, drops aged-out senders, and ranks per window", async () => {
     const store = new FakeGuzzlerStore(
       new Map([
-        ["0xactive", [tx("0x1", T0, "300")]],
+        ["0xactive", [tx("0x1", T0 - 60_000, "300")]],
         ["0xbusy", [tx("0x2", T0 - 10, "50"), tx("0x3", T0 - 5, "60")]],
-        ["0xexpired", [tx("0x4", T0 - 10_000_000, "999")]],
+        ["0xexpired", [tx("0x4", T0 - 25 * HOUR, "999")]],
       ]),
     );
 
-    const stats = await readGuzzlerStatistics(store, T0);
-    expect(stats.guzzlers.map((g) => g.address)).toEqual(["0xactive", "0xbusy"]);
-    expect(stats.count).toBe(2);
-    expect(stats.windowMs).toBe(60 * 60 * 1000);
+    const board = await readGuzzlerLeaderboards(store, T0, 10);
+    expect(board.windows.map((w) => w.label)).toEqual(["5m", "20m", "1h", "6h", "24h"]);
+    const five = board.windows.find((w) => w.label === "5m")!;
+    // 0xbusy (110) outranks 0xactive (300)? No — 300 > 110, so 0xactive first.
+    expect(five.guzzlers.map((g) => g.address)).toEqual(["0xactive", "0xbusy"]);
+    // The sender beyond the 24h retention is swept from every window.
+    for (const window of board.windows) {
+      expect(window.guzzlers.map((g) => g.address)).not.toContain("0xexpired");
+    }
   });
 });

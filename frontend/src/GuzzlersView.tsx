@@ -10,21 +10,26 @@ interface GuzzlersViewProps {
 }
 
 /**
- * The list can hold tens of thousands of addresses, so we mount the cards in
- * batches and reveal more as the user scrolls. Every address is still
- * reachable — we just never build the whole DOM in one frame.
+ * The list can hold many addresses, so we mount the cards in batches and reveal
+ * more as the user scrolls. Every returned address is still reachable — we just
+ * never build the whole DOM in one frame.
  */
 const BATCH = 150;
 
+/** Top-N senders requested per window. */
+const LIMIT = 250;
+
 /**
- * Window presets. The backend aggregates over a fixed one-hour window, so these
- * filter the returned list to addresses last active within the chosen span
- * (`seconds: null` keeps the whole hour).
+ * Window tabs. The backend ranks senders independently for each of these spans
+ * and returns the top-N per window, keyed by `label`; the tab just picks which
+ * window's leaderboard to render.
  */
 const WINDOWS = [
-  { key: "5m", label: "5 min", seconds: 5 * 60 },
-  { key: "20m", label: "20 min", seconds: 20 * 60 },
-  { key: "1h", label: "1 hour", seconds: null },
+  { key: "5m", label: "5 min" },
+  { key: "20m", label: "20 min" },
+  { key: "1h", label: "1 hour" },
+  { key: "6h", label: "6 hours" },
+  { key: "24h", label: "24 hours" },
 ] as const;
 
 type WindowKey = (typeof WINDOWS)[number]["key"];
@@ -41,7 +46,7 @@ export function GuzzlersView({ tokenSymbol }: GuzzlersViewProps) {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetchGuzzlers()
+    fetchGuzzlers(LIMIT)
       .then((body) => {
         setData(body);
         setNow(Date.now());
@@ -62,17 +67,16 @@ export function GuzzlersView({ tokenSymbol }: GuzzlersViewProps) {
   }, [windowKey]);
 
   const selectedWindow = WINDOWS.find((w) => w.key === windowKey) ?? WINDOWS[2];
-  const guzzlers = useMemo(() => {
-    const all = data?.guzzlers ?? [];
-    const seconds = selectedWindow.seconds;
-    if (seconds === null) return all;
-    return all.filter((g) => {
-      const age = secondsSince(now, g.lastSeen);
-      return age !== null && age <= seconds;
-    });
-  }, [data, selectedWindow, now]);
+  const selectedBoard = useMemo(
+    () => data?.windows.find((w) => w.label === windowKey) ?? null,
+    [data, windowKey],
+  );
+  const guzzlers = selectedBoard?.guzzlers ?? [];
 
+  // The backend already ranked and cut to the top-N for this window; `total` is
+  // how many we received, `activeCount` how many were active before the cut.
   const total = guzzlers.length;
+  const activeCount = selectedBoard?.count ?? 0;
   const maxGas = total > 0 ? toBigInt(guzzlers[0]!.totalGasUsed) : 0n;
   const shown = Math.min(visibleCount, total);
 
@@ -120,7 +124,7 @@ export function GuzzlersView({ tokenSymbol }: GuzzlersViewProps) {
         {error
           ? `Failed to load guzzlers: ${error}`
           : data
-            ? `${fmtInteger(total)} of ${fmtInteger(data.count)} addresses active in the last ${
+            ? `${fmtInteger(total)} of ${fmtInteger(activeCount)} addresses active in the last ${
                 selectedWindow.label
               }, ranked by gas used.`
             : loading

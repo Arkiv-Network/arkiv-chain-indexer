@@ -264,11 +264,18 @@ export interface GuzzlerStat {
   lastSeen: string;
 }
 
-export interface GuzzlersResponse {
+export interface GuzzlerWindowLeaderboard {
+  label: string;
   windowMs: number;
-  generatedAt: string;
   count: number;
   guzzlers: GuzzlerStat[];
+}
+
+export interface GuzzlersResponse {
+  generatedAt: string;
+  retentionMs: number;
+  limit: number;
+  windows: GuzzlerWindowLeaderboard[];
 }
 
 export interface DatabaseTableStats {
@@ -726,8 +733,12 @@ export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", new URLSearchParams());
 }
 
-export function fetchGuzzlers(): Promise<GuzzlersResponse> {
-  return getJson<GuzzlersResponse>("/guzzlers", new URLSearchParams());
+export function fetchGuzzlers(limit?: number): Promise<GuzzlersResponse> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) {
+    params.set("limit", String(limit));
+  }
+  return getJson<GuzzlersResponse>("/guzzlers", params);
 }
 
 export interface AdminVerifyResponse {
