@@ -3,10 +3,20 @@ import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { blockieDataUri } from "./blockies";
 import { fmtDurationSeconds, fmtEth, fmtInteger } from "./format";
+import { GuzzlerActivityView } from "./GuzzlerActivityView";
+import { normalizeAddressInput } from "./guzzlerActivity";
+import { writePermalink } from "./permalinks";
 
 interface GuzzlersViewProps {
+  locationSearch: string;
+  onLocationChange: () => void;
   timeZone: string;
   tokenSymbol: string;
+}
+
+/** The drill-in address from the URL (`?view=guzzlers&address=0x…`), if valid. */
+function readSelectedAddress(search: string): string | null {
+  return normalizeAddressInput(new URLSearchParams(search).get("address"));
 }
 
 /**
@@ -34,7 +44,52 @@ const WINDOWS = [
 
 type WindowKey = (typeof WINDOWS)[number]["key"];
 
-export function GuzzlersView({ tokenSymbol }: GuzzlersViewProps) {
+export function GuzzlersView({
+  locationSearch,
+  onLocationChange,
+  timeZone,
+  tokenSymbol,
+}: GuzzlersViewProps) {
+  const selectedAddress = readSelectedAddress(locationSearch);
+
+  // Navigate by rewriting the `address` permalink param; App re-reads the URL.
+  const selectAddress = useCallback(
+    (address: string) => {
+      if (writePermalink("guzzlers", { address })) onLocationChange();
+    },
+    [onLocationChange],
+  );
+  const clearAddress = useCallback(() => {
+    if (writePermalink("guzzlers", {})) onLocationChange();
+  }, [onLocationChange]);
+
+  if (selectedAddress) {
+    return (
+      <GuzzlerActivityView
+        address={selectedAddress}
+        timeZone={timeZone}
+        tokenSymbol={tokenSymbol}
+        onBack={clearAddress}
+        onSelectAddress={selectAddress}
+      />
+    );
+  }
+
+  return (
+    <GuzzlerLeaderboard
+      tokenSymbol={tokenSymbol}
+      onSelectAddress={selectAddress}
+    />
+  );
+}
+
+function GuzzlerLeaderboard({
+  tokenSymbol,
+  onSelectAddress,
+}: {
+  tokenSymbol: string;
+  onSelectAddress: (address: string) => void;
+}) {
   const [data, setData] = useState<GuzzlersResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -141,6 +196,7 @@ export function GuzzlersView({ tokenSymbol }: GuzzlersViewProps) {
             maxGas={maxGas}
             nowMs={now}
             tokenSymbol={tokenSymbol}
+            onSelect={onSelectAddress}
           />
         ))}
       </ol>
@@ -160,20 +216,35 @@ function GuzzlerCard({
   maxGas,
   nowMs,
   tokenSymbol,
+  onSelect,
 }: {
   rank: number;
   guzzler: GuzzlerStat;
   maxGas: bigint;
   nowMs: number;
   tokenSymbol: string;
+  onSelect: (address: string) => void;
 }) {
   const display = addressDisplay(guzzler.address);
   const gas = toBigInt(guzzler.totalGasUsed);
   const barPct = maxGas > 0n ? Number((gas * 1000n) / maxGas) / 10 : 0;
   const lastSeenAgo = secondsSince(nowMs, guzzler.lastSeen);
+  const open = () => onSelect(guzzler.address);
 
   return (
-    <li className="guzzler-card">
+    <li
+      className="guzzler-card clickable"
+      role="button"
+      tabIndex={0}
+      aria-label={`View activity for ${display.label}`}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          open();
+        }
+      }}
+    >
       <span className={`guzzler-rank${rank <= 3 ? " top" : ""}`}>{rank}</span>
       <img
         className="guzzler-icon"
@@ -229,7 +300,9 @@ function AddressLabel({
     return () => window.clearTimeout(timeout);
   }, [copied]);
 
-  const onCopy = async () => {
+  const onCopy = async (event: React.MouseEvent) => {
+    // The card is clickable; copying must not also navigate into the address.
+    event.stopPropagation();
     try {
       await navigator.clipboard.writeText(address);
       setCopied(true);

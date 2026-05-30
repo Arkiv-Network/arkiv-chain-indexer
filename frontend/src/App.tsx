@@ -458,7 +458,12 @@ export function App() {
             tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "guzzlers" ? (
-          <GuzzlersView timeZone={timeZone} tokenSymbol={pageSettings.tokenSymbol} />
+          <GuzzlersView
+            locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
+          />
         ) : activeView === "admin" ? (
           <AdminView
             settings={pageSettings}
