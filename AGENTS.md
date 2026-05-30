@@ -14,7 +14,7 @@ bun install
 bun test
 DATABASE_URL=postgres://gas:gas@localhost:5432/gas \
   SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
-  bun run scan -- --from-block 19000000 --to-block 19000000
+  bun run scan
 DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate -- --range 50
 DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate-all -- --once
 DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run serve

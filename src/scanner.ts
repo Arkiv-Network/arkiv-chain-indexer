@@ -33,11 +33,6 @@ export async function runScanner(
   logBuildInfo();
   console.log(`Transaction row storage: ${config.saveTransactionData ? "enabled" : "disabled"}`);
   console.log(`Guzzler tracking: ${guzzlerRecorder ? "enabled" : "disabled"}`);
-  if (config.toBlock !== undefined) {
-    await runBoundedForwardScanner(config, rpc, storage, runtime, batcherCollector, guzzlerRecorder);
-    return;
-  }
-
   if (config.backfillOnly) {
     await runBackfillScanner(config, rpc, storage, runtime, batcherCollector);
     return;
@@ -51,78 +46,6 @@ function logBuildInfo(): void {
   console.log(
     `Scanner build: commit ${build.commit ?? "unknown"}, built at ${build.builtAtUtc ?? "unknown"}`,
   );
-}
-
-async function runBoundedForwardScanner(
-  config: ScannerConfig,
-  rpc: EthereumRpcClient,
-  storage: ScannerStorage,
-  runtime: ScannerRuntime,
-  batcherCollector: BatcherMetricsSource | undefined,
-  guzzlerRecorder: GuzzlerRecorder | undefined,
-): Promise<void> {
-  if (config.fromBlock === undefined) {
-    throw new Error("--from-block is required when --to-block is set");
-  }
-
-  const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
-  let nextBlock = lastSuccessfulBlock === undefined ? config.fromBlock : lastSuccessfulBlock + 1n;
-
-  console.log(`Starting scanner at block ${nextBlock.toString()}`);
-  if (lastSuccessfulBlock !== undefined) {
-    console.log(`Resumed from last successful block ${lastSuccessfulBlock.toString()}`);
-  }
-
-  while (true) {
-    let latestBlock: bigint;
-    try {
-      latestBlock = await rpc.getLatestBlockNumber();
-    } catch (error) {
-      console.error(
-        `Failed to read latest block (block target: latest) via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
-        error,
-      );
-      await runtime.sleep(config.retryMs);
-      continue;
-    }
-
-    const safeHead =
-      latestBlock > config.confirmationDepth ? latestBlock - config.confirmationDepth : 0n;
-    await recordChainProgress(storage, latestBlock, safeHead);
-    const upperBound = config.toBlock !== undefined && config.toBlock < safeHead ? config.toBlock : safeHead;
-
-    if (nextBlock > upperBound) {
-      if (config.toBlock !== undefined && nextBlock > config.toBlock) {
-        console.log(`Finished scanning through block ${config.toBlock.toString()}`);
-        return;
-      }
-
-      await runtime.sleep(config.pollMs);
-      continue;
-    }
-
-    try {
-      await scanOneBlock(
-        nextBlock,
-        rpc,
-        storage,
-        config.txReceiptConcurrency,
-        { kind: "lastSuccessfulBlock" },
-        { latestBlock, safeHead },
-        config.saveTransactionData,
-        batcherCollector,
-        guzzlerRecorder,
-      );
-      await fillRecentMissingBatcherMetrics(storage, batcherCollector);
-      nextBlock += 1n;
-    } catch (error) {
-      console.error(
-        `Failed to scan block ${nextBlock.toString()} via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
-        error,
-      );
-      await runtime.sleep(config.retryMs);
-    }
-  }
 }
 
 async function runNearHeadBackfillScanner(
@@ -181,6 +104,13 @@ async function runBackfillScanner(
   runtime: ScannerRuntime,
   batcherCollector: BatcherMetricsSource | undefined,
 ): Promise<void> {
+  if (config.disableBackfill) {
+    console.log("Backfill-only scanner started with backfill disabled; idling without scanning");
+    while (true) {
+      await runtime.sleep(config.pollMs);
+    }
+  }
+
   console.log(
     `Starting backfill-only scanner with oldest backfill block ${config.oldestBackfillBlock.toString()}`,
   );

@@ -39,9 +39,14 @@ The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so produ
 block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
 
-The main `scanner` container stays near the safe chain head with `SCANNER_DISABLE_BACKFILL=true` by default.
-Historical backfill runs in the separate `backfill-scanner` container with `SCANNER_BACKFILL_ONLY=true`; it sleeps
-for `SCANNER_BACKFILL_SLEEP_MS` after every successfully stored backfill block, defaulting to 100ms.
+The main `scanner` container only ever scans forward near the safe chain head (it always runs with
+`SCANNER_DISABLE_BACKFILL=true`). Historical backfill runs exclusively in the separate `backfill-scanner` container
+with `SCANNER_BACKFILL_ONLY=true`, sleeping for `SCANNER_BACKFILL_SLEEP_MS` after every successfully stored backfill
+block (defaulting to 100ms).
+
+`SCANNER_DISABLE_BACKFILL` is the master switch for that backfill container: it defaults to `true`, which makes the
+`backfill-scanner` idle and do no work at all. Set `SCANNER_DISABLE_BACKFILL=false` in `.env` to actually run the
+historical backfill.
 
 The aggregator container runs `bun run aggregate-all` which walks every supported range size, resumes each size
 after its newest completed range, and sleeps for 30 seconds after each sweep (configurable via
@@ -64,9 +69,6 @@ For shared deployments, set `BASELOAD_ADMIN_BEARER_TOKEN` so mutating Baseload w
 `Authorization: Bearer <token>`. Readonly views and status APIs remain public. The Baseload tab includes an admin
 bearer token field that stores the token in browser local storage and sends it only with worker configuration
 changes.
-
-To do a quick bounded backfill instead of continuous near-head scanning, set `SCANNER_FROM_BLOCK` and
-`SCANNER_TO_BLOCK` in `.env`.
 
 Set `BATCHER_COLLECTOR_URL` to attach recent batcher queue/threshold metadata to stored blocks. The collector
 only serves recent seconds, so the dedicated batcher collector service requests batcher data for stored blocks
@@ -116,15 +118,11 @@ export SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/
 bun run scan
 ```
 
-In continuous mode the scanner can run the near-head forward loop, the historical backfill loop, or both. The
-Docker Compose stack runs forward scanning and backfill in separate containers by default. The backfill loop walks
-older blocks in 20-second work slices and stops at `--oldest-backfill-block`, which defaults to `25000000`.
-
-For a bounded historical scan, pass both `--from-block` and `--to-block`:
-
-```sh
-bun run scan -- --from-block 19000000 --to-block 19000002
-```
+The scanner runs the near-head forward loop, the historical backfill loop, or both. The Docker Compose stack runs
+forward scanning and backfill in separate containers: the `scanner` container only scans forward, while the
+`backfill-scanner` container only backfills (and idles entirely while `SCANNER_DISABLE_BACKFILL=true`). The backfill
+loop walks older blocks in 20-second work slices and stops at `--oldest-backfill-block`, which defaults to
+`25000000`.
 
 After each block is scanned and stored, the scanner prints a per-block summary:
 
@@ -149,10 +147,8 @@ Configuration can be passed through CLI flags or environment variables.
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
 | `--database-url` | `DATABASE_URL` | **required** | PostgreSQL connection string. |
-| `--from-block` | `SCANNER_FROM_BLOCK` | unset | First block for bounded `--to-block` scans. |
-| `--to-block` | `SCANNER_TO_BLOCK` | unset | Optional inclusive block number to stop at. |
-| `--oldest-backfill-block` | `SCANNER_OLDEST_BACKFILL_BLOCK` | `25000000` | Oldest block the continuous scanner will backfill to. |
-| `--disable-backfill` | `SCANNER_DISABLE_BACKFILL` | `false` | Skip the historical backfill phase and only scan forward from the safe head. |
+| `--oldest-backfill-block` | `SCANNER_OLDEST_BACKFILL_BLOCK` | `25000000` | Oldest block the backfill scanner will backfill to. |
+| `--disable-backfill` | `SCANNER_DISABLE_BACKFILL` | `false` | Skip the historical backfill phase. The forward scanner only scans near the safe head; the backfill-only scanner idles and does nothing. |
 | `--backfill-only` | `SCANNER_BACKFILL_ONLY` | `false` | Run only the historical backfill loop in continuous mode. |
 | `--backfill-sleep-ms` | `SCANNER_BACKFILL_SLEEP_MS` | `100` | Delay after each successfully stored backfill block. |
 | `--confirmation-depth` | `SCANNER_CONFIRMATION_DEPTH` | `3` | Number of blocks to stay behind the latest head. |
@@ -371,13 +367,12 @@ used, average transaction fee, first/last seen block/date, and aggregation times
 Forward progress is stored in the `scanner_state` table as `last_successful_block`. Continuous backfill progress
 is stored separately as `backfill_next_block`.
 
-For bounded scans:
+General invariants:
 
-1. If progress exists, scanning resumes from `last_successful_block + 1`.
-2. If no progress exists, scanning starts from `--from-block`.
-3. A block and the progress update are committed in the same PostgreSQL transaction.
-4. If reading, computing, or writing a block fails, progress is not advanced.
-5. The scanner retries the same block after `--retry-ms`.
+1. Forward scanning resumes from `last_successful_block + 1`.
+2. A block and its progress update are committed in the same PostgreSQL transaction.
+3. If reading, computing, or writing a block fails, progress is not advanced.
+4. The scanner retries the same block after `--retry-ms`.
 
 For continuous scans:
 
@@ -599,13 +594,14 @@ TEST_DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun test
 Each integration test runs against its own randomly-named schema and drops it on cleanup, so tests can share a
 database without interfering with each other.
 
-Run a short manual smoke scan against the public endpoint:
+Run a short manual smoke scan against the public endpoint. The scanner runs continuously near the safe head, so
+stop it with Ctrl-C once a few blocks have been stored:
 
 ```sh
 docker compose up -d postgres
 DATABASE_URL=postgres://gas:gas@localhost:5432/gas \
   SCANNER_RPC_FULL_NODE=https://mainnet.rpc-node.dev.golem.network/ \
-  bun run scan -- --from-block 19000000 --to-block 19000000
+  bun run scan
 ```
 
 Inspect stored rows:

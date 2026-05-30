@@ -4,28 +4,9 @@ import { HelpRequested, parseConfig } from "./config";
 const baseEnv: NodeJS.ProcessEnv = {
   SCANNER_RPC_FULL_NODE: "https://example.test",
   DATABASE_URL: "postgres://user:pass@localhost:5432/test",
-  SCANNER_FROM_BLOCK: "10",
 };
 
 describe("parseConfig", () => {
-  test("does not require from-block for continuous near-head scanning", () => {
-    expect(
-      parseConfig([], {
-        SCANNER_RPC_FULL_NODE: "https://example.test",
-        DATABASE_URL: "postgres://user:pass@localhost:5432/test",
-      }).fromBlock,
-    ).toBeUndefined();
-  });
-
-  test("requires from-block when to-block is set", () => {
-    expect(() =>
-      parseConfig(["--to-block", "12"], {
-        SCANNER_RPC_FULL_NODE: "https://example.test",
-        DATABASE_URL: "postgres://user:pass@localhost:5432/test",
-      }),
-    ).toThrow("--from-block is required when --to-block is set");
-  });
-
   test("requires DATABASE_URL", () => {
     expect(() => parseConfig([], { SCANNER_RPC_FULL_NODE: "https://example.test" })).toThrow(
       "DATABASE_URL (or --database-url) is required",
@@ -221,14 +202,17 @@ describe("parseConfig", () => {
     });
   });
 
-  test("rejects conflicting backfill-only and disabled backfill modes", () => {
-    expect(() =>
+  test("allows backfill-only mode together with disabled backfill so the backfill scanner idles", () => {
+    expect(
       parseConfig([], {
         ...baseEnv,
         SCANNER_BACKFILL_ONLY: "true",
         SCANNER_DISABLE_BACKFILL: "true",
       }),
-    ).toThrow("--backfill-only cannot be combined with --disable-backfill");
+    ).toMatchObject({
+      backfillOnly: true,
+      disableBackfill: true,
+    });
   });
 
   test("reads batcher collector URL from env and lets CLI override it", () => {

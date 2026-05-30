@@ -11,8 +11,6 @@ import {
 export interface ScannerConfig {
   rpcUrl: string;
   databaseUrl: string;
-  fromBlock?: bigint;
-  toBlock?: bigint;
   oldestBackfillBlock: bigint;
   confirmationDepth: bigint;
   pollMs: number;
@@ -46,16 +44,6 @@ const SPEC: CliSpec = {
       flags: "--database-url <url>",
       description: "PostgreSQL connection string (or DATABASE_URL env).",
       env: ["DATABASE_URL", "SCANNER_DATABASE_URL"],
-    },
-    {
-      flags: "--from-block <number>",
-      description: "First block for bounded --to-block scans.",
-    },
-    { flags: "--from <number>", description: "Alias for --from-block.", hidden: true },
-    {
-      flags: "--to-block <number>",
-      description: "Optional inclusive block to stop at.",
-      env: ["SCANNER_TO_BLOCK"],
     },
     {
       flags: "--oldest-backfill-block <number>",
@@ -145,17 +133,8 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
     throw new Error("DATABASE_URL (or --database-url) is required");
   }
 
-  const fromBlockRaw = cli.value("from-block") ?? cli.value("from") ?? env.SCANNER_FROM_BLOCK;
-  const toBlockRaw = cli.value("to-block");
-  if (toBlockRaw && !fromBlockRaw) {
-    throw new Error("--from-block is required when --to-block is set");
-  }
-
   const disableBackfill = coerceBoolean("--disable-backfill", cli.value("disable-backfill")!);
   const backfillOnly = coerceBoolean("--backfill-only", cli.value("backfill-only")!);
-  if (disableBackfill && backfillOnly) {
-    throw new Error("--backfill-only cannot be combined with --disable-backfill");
-  }
 
   const batcherCollectorUrl = cli.value("batcher-collector-url");
   const redisUrl = cli.value("redis-url");
@@ -163,8 +142,6 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
   return {
     rpcUrl,
     databaseUrl,
-    ...(fromBlockRaw ? { fromBlock: coerceBigInt("--from-block", fromBlockRaw) } : {}),
-    ...(toBlockRaw ? { toBlock: coerceBigInt("--to-block", toBlockRaw) } : {}),
     oldestBackfillBlock: coerceBigInt("--oldest-backfill-block", cli.value("oldest-backfill-block")!),
     confirmationDepth: coerceBigInt("--confirmation-depth", cli.value("confirmation-depth")!),
     pollMs: coerceInt("--poll-ms", cli.value("poll-ms")!),

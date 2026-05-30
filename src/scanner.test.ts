@@ -433,6 +433,30 @@ describe("runScanner", () => {
     expect(runtime.sleeps).toEqual([100]);
   });
 
+  test("backfill-only mode with backfill disabled idles without scanning", async () => {
+    const rpc = new SimpleRpc();
+    const storage = new FakeStorage();
+    const runtime = new StopAfterFirstSleepRuntime();
+
+    await expect(
+      runScanner(
+        config({
+          backfillOnly: true,
+          disableBackfill: true,
+          confirmationDepth: 0n,
+          oldestBackfillBlock: 90n,
+        }),
+        rpc as unknown as EthereumRpcClient,
+        storage as unknown as ScannerStorage,
+        runtime,
+      ),
+    ).rejects.toThrow("stop after first sleep");
+
+    expect(rpc.requestedBlocks).toEqual([]);
+    expect(storage.backfillNextBlock).toBeUndefined();
+    expect(storage.lastSuccessfulBlock).toBeUndefined();
+  });
+
   test("logs latest block read failures with latest block target and RPC endpoint", async () => {
     const rpc = new LatestBlockFailureRpc();
     const storage = new FakeStorage();
