@@ -43,8 +43,9 @@ The main `scanner` container stays near the safe chain head with `SCANNER_DISABL
 Historical backfill runs in the separate `backfill-scanner` container with `SCANNER_BACKFILL_ONLY=true`; it sleeps
 for `SCANNER_BACKFILL_SLEEP_MS` after every successfully stored backfill block, defaulting to 100ms.
 
-The aggregator container runs `bun run aggregate-all` which walks every supported range size and sleeps for one
-minute between sweeps (configurable via `AGGREGATE_INTERVAL_MS`).
+The aggregator container runs `bun run aggregate-all` which walks every supported range size, resumes each size
+after its newest completed range, and sleeps for 30 seconds after each sweep (configurable via
+`AGGREGATE_INTERVAL_MS`).
 
 The sender aggregator container runs `bun run aggregate-senders` which rebuilds address-level stats from stored
 transaction rows and sleeps for one minute between rebuilds (configurable via `SENDER_AGGREGATE_INTERVAL_MS`).
@@ -314,9 +315,11 @@ Two aggregation runners are available:
   bun run aggregate-senders -- --once
   ```
 
-Each aggregator run walks every aligned window from `floor(min_stored_block / M) * M` up through the highest
-stored block, and writes a row only for windows where all `M` blocks are present in `blocks`. Incomplete windows
-are skipped (and can be re-aggregated later once the missing blocks are scanned).
+Single-range aggregator runs walk every aligned window from `floor(min_stored_block / M) * M` up through the
+highest stored block, and write a row only for windows where all `M` blocks are present in `blocks`. Incomplete
+windows are skipped (and can be re-aggregated later once the missing blocks are scanned). Periodic
+`aggregate-all` sweeps mark completed rows and resume each range size from its newest completed range, so later
+sweeps do not recompute historical windows.
 
 Each size lives independently in `block_ranges` keyed by `(range_size, range_start)`.
 
@@ -335,6 +338,7 @@ Each size lives independently in `block_ranges` keyed by `(range_size, range_sta
 | `average_transaction_gas_used` | `sum(block.average_transaction_gas_used * block.transaction_count) / sum(block.transaction_count)`. |
 | `average_priority_fee_weighted_wei` | `sum(block.priority_fee_gas_weighted_numerator_wei) / sum(block.total_gas_used)`. Legacy block rows without that exact field fall back to `sum(block.average_priority_fee_weighted_wei * block.total_gas_used) / sum(block.total_gas_used)`. |
 | `average_priority_fee_wei` | `sum(block.average_priority_fee_wei * block.transaction_count) / sum(block.transaction_count)`. |
+| `is_complete` | Marks rows whose full block window was present when the range aggregate was written. |
 
 When `total_gas_used` or `transaction_count` for the window is `0` the corresponding average is stored as `0`.
 
@@ -346,7 +350,7 @@ When `total_gas_used` or `transaction_count` for the window is `0` the correspon
 | `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--from-block` | `AGGREGATE_FROM_BLOCK` | unset | Optional lower bound on the windows to consider. |
 | `--to-block` | `AGGREGATE_TO_BLOCK` | unset | Optional upper bound on the windows to consider. |
-| `--interval-ms` | `AGGREGATE_INTERVAL_MS` | `60000` | (aggregate-all) sleep between full sweeps. |
+| `--interval-ms` | `AGGREGATE_INTERVAL_MS` | `30000` | (aggregate-all) sleep after each full sweep. |
 | `--once` | n/a | unset | (aggregate-all) run one sweep then exit. |
 
 #### Sender aggregator

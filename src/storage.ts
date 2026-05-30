@@ -483,6 +483,7 @@ export class ScannerStorage {
         average_batcher_upper_threshold TEXT,
         average_batcher_max_block_size TEXT,
         average_batcher_max_tx_size TEXT,
+        is_complete BOOLEAN NOT NULL DEFAULT TRUE,
         aggregated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (range_size, range_start)
       )
@@ -519,6 +520,10 @@ export class ScannerStorage {
     await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_upper_threshold");
     await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_block_size");
     await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_tx_size");
+    await this.pool.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS is_complete BOOLEAN NOT NULL DEFAULT TRUE`,
+    );
   }
 
   private async addNullableTextColumn(table: string, column: string): Promise<void> {
@@ -1562,6 +1567,72 @@ export class ScannerStorage {
     return metrics;
   }
 
+  async getLatestCompleteRangeStart(
+    rangeSize: bigint,
+    fromRangeStart?: bigint,
+  ): Promise<bigint | undefined> {
+    assertSupportedRangeSize(rangeSize);
+    if (fromRangeStart !== undefined && (fromRangeStart < 0n || fromRangeStart % rangeSize !== 0n)) {
+      throw new Error(
+        `Range start ${fromRangeStart.toString()} must be a non-negative multiple of ${rangeSize.toString()}`,
+      );
+    }
+
+    if (fromRangeStart !== undefined) {
+      const result = await this.pool.query<{ range_start: string | null }>(
+        `WITH complete_ranges AS (
+           SELECT
+             range_start,
+             ROW_NUMBER() OVER (ORDER BY range_start ASC) AS row_number
+           FROM ${this.qBlockRanges}
+           WHERE range_size = $1
+             AND range_start >= $2
+             AND is_complete = TRUE
+         ),
+         contiguous_ranges AS (
+           SELECT range_start
+           FROM complete_ranges
+           WHERE range_start = $2::bigint + ((row_number - 1) * $1::bigint)
+         )
+         SELECT MAX(range_start)::text AS range_start
+         FROM contiguous_ranges`,
+        [rangeSize.toString(), fromRangeStart.toString()],
+      );
+      const value = result.rows[0]?.range_start;
+      return value === null || value === undefined ? undefined : BigInt(value);
+    }
+
+    const result = await this.pool.query<{ range_start: string | null }>(
+      `SELECT MAX(range_start)::text AS range_start
+       FROM ${this.qBlockRanges}
+       WHERE range_size = $1
+         AND is_complete = TRUE`,
+      [rangeSize.toString()],
+    );
+    const value = result.rows[0]?.range_start;
+    return value === null || value === undefined ? undefined : BigInt(value);
+  }
+
+  async isBlockRangeComplete(rangeStart: bigint, rangeSize: bigint): Promise<boolean> {
+    assertSupportedRangeSize(rangeSize);
+    if (rangeStart < 0n || rangeStart % rangeSize !== 0n) {
+      throw new Error(
+        `Range start ${rangeStart.toString()} must be a non-negative multiple of ${rangeSize.toString()}`,
+      );
+    }
+    const result = await this.pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM ${this.qBlockRanges}
+         WHERE range_size = $1
+           AND range_start = $2
+           AND is_complete = TRUE
+       ) AS exists`,
+      [rangeSize.toString(), rangeStart.toString()],
+    );
+    return result.rows[0]?.exists === true;
+  }
+
   async saveBlockRange(metrics: BlockRangeMetrics): Promise<void> {
     assertSupportedRangeSize(metrics.rangeSize);
     await this.pool.query(
@@ -1595,8 +1666,9 @@ export class ScannerStorage {
         average_batcher_upper_threshold,
         average_batcher_max_block_size,
         average_batcher_max_tx_size,
+        is_complete,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, TRUE, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -1625,6 +1697,7 @@ export class ScannerStorage {
         average_batcher_upper_threshold = EXCLUDED.average_batcher_upper_threshold,
         average_batcher_max_block_size = EXCLUDED.average_batcher_max_block_size,
         average_batcher_max_tx_size = EXCLUDED.average_batcher_max_tx_size,
+        is_complete = TRUE,
         aggregated_at = NOW()`,
       [
         metrics.rangeSize.toString(),

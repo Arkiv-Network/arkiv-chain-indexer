@@ -3,7 +3,7 @@ import { aggregateRanges } from "./aggregator";
 import { SUPPORTED_RANGE_SIZES } from "./ranges";
 import { ScannerStorage } from "./storage";
 
-const DEFAULT_INTERVAL_MS = 60_000;
+const DEFAULT_INTERVAL_MS = 30_000;
 
 interface AggregateAllConfig {
   databaseUrl: string;
@@ -26,7 +26,7 @@ Periodically aggregates every supported range size (2, 5, 10, 20, 50, 100, 200, 
     },
     {
       flags: "--interval-ms <number>",
-      description: "Sleep between full sweeps. Defaults to 60000.",
+      description: "Sleep after each full sweep. Defaults to 30000.",
       env: ["AGGREGATE_INTERVAL_MS"],
       default: DEFAULT_INTERVAL_MS.toString(),
     },
@@ -56,10 +56,14 @@ function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): Aggr
 async function runSweep(storage: ScannerStorage): Promise<void> {
   for (const rangeSize of SUPPORTED_RANGE_SIZES) {
     const startedAt = Date.now();
-    const result = await aggregateRanges(storage, { rangeSize });
+    const result = await aggregateRanges(storage, {
+      rangeSize,
+      skipCompleted: true,
+      stopAfterIncomplete: true,
+    });
     const elapsedMs = Date.now() - startedAt;
     console.log(
-      `range_size=${rangeSize.toString()} written=${result.written} incomplete=${result.incomplete} elapsed_ms=${elapsedMs}`,
+      `range_size=${rangeSize.toString()} written=${result.written} incomplete=${result.incomplete} skipped_complete=${result.skippedComplete} elapsed_ms=${elapsedMs}`,
     );
   }
 }
@@ -88,7 +92,6 @@ async function main(): Promise<void> {
     );
 
     while (!stopping) {
-      const sweepStart = Date.now();
       try {
         await runSweep(storage);
       } catch (error) {
@@ -96,11 +99,7 @@ async function main(): Promise<void> {
       }
       if (config.once || stopping) break;
 
-      const elapsed = Date.now() - sweepStart;
-      const wait = Math.max(0, config.intervalMs - elapsed);
-      if (wait > 0) {
-        await sleep(wait);
-      }
+      await sleep(config.intervalMs);
     }
   } catch (error) {
     if (error instanceof HelpRequested) {

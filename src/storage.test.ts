@@ -763,10 +763,35 @@ if (!hasPostgresForTests()) {
       expect(twos).toEqual([]);
     });
 
+    test("tracks completed range starts independently for each range size", async () => {
+      const storage = await withStorage();
+      for (let blockNumber = 0n; blockNumber < 200n; blockNumber += 1n) {
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+      }
+
+      await storage.aggregateRangeIfComplete(0n, 50n);
+      await storage.aggregateRangeIfComplete(50n, 50n);
+      await storage.aggregateRangeIfComplete(150n, 50n);
+      await storage.aggregateRangeIfComplete(0n, 100n);
+
+      expect(await storage.getLatestCompleteRangeStart(50n)).toBe(150n);
+      expect(await storage.getLatestCompleteRangeStart(50n, 0n)).toBe(50n);
+      expect(await storage.getLatestCompleteRangeStart(50n, 100n)).toBeUndefined();
+      expect(await storage.getLatestCompleteRangeStart(50n, 150n)).toBe(150n);
+      expect(await storage.getLatestCompleteRangeStart(100n)).toBe(0n);
+      expect(await storage.getLatestCompleteRangeStart(2n)).toBeUndefined();
+      expect(await storage.isBlockRangeComplete(50n, 50n)).toBe(true);
+      expect(await storage.isBlockRangeComplete(100n, 50n)).toBe(false);
+      expect(await storage.isBlockRangeComplete(150n, 50n)).toBe(true);
+      expect(await storage.isBlockRangeComplete(0n, 100n)).toBe(true);
+    });
+
     test("rejects unsupported range sizes in storage helpers", async () => {
       const storage = await withStorage();
       expect(storage.aggregateRangeIfComplete(0n, 7n)).rejects.toThrow();
       expect(storage.getBlocksForRange(0n, 7n)).rejects.toThrow();
+      expect(storage.getLatestCompleteRangeStart(7n)).rejects.toThrow();
+      expect(storage.isBlockRangeComplete(0n, 7n)).rejects.toThrow();
     });
 
     test("getMinStoredBlock / getMaxStoredBlock reflect stored blocks", async () => {
