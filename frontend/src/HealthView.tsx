@@ -34,6 +34,8 @@ export function HealthView({ timeZone }: HealthViewProps) {
 
   const scanner = data?.scanner;
   const database = data?.database;
+  const guzzlers = data?.guzzlers;
+  const guzzlersEnabled = guzzlers?.enabled ?? data?.features.guzzlers ?? false;
 
   return (
     <section className="view health-view">
@@ -84,16 +86,33 @@ export function HealthView({ timeZone }: HealthViewProps) {
           </dl>
         </section>
 
-        <section className="health-panel database-panel">
-          <h3>Database</h3>
+        <section className="health-panel">
+          <h3>Guzzler cache</h3>
           <dl>
+            <Metric label="Status" value={guzzlersEnabled ? "Enabled" : "Disabled"} />
             <Metric
-              label="Total database size"
-              value={fmtBytes(database?.totalSizeBytes)}
-              title={bytesTitle(database?.totalSizeBytes)}
+              label="Cached senders"
+              value={guzzlersEnabled ? fmtInteger(guzzlers?.entryCount) : "—"}
+            />
+            <Metric
+              label="Cache size"
+              value={guzzlersEnabled ? fmtBytes(guzzlers?.totalSizeBytes) : "—"}
+              title={guzzlersEnabled ? bytesTitle(guzzlers?.totalSizeBytes) : undefined}
             />
           </dl>
-          <div className="table-wrap health-table-wrap">
+        </section>
+      </div>
+
+      <section className="health-panel database-panel">
+        <h3>Database</h3>
+        <dl>
+          <Metric
+            label="Total database size"
+            value={fmtBytes(database?.totalSizeBytes)}
+            title={bytesTitle(database?.totalSizeBytes)}
+          />
+        </dl>
+        <div className="table-wrap health-table-wrap">
             <table className="data-table health-table">
               <thead>
                 <tr>
@@ -124,7 +143,6 @@ export function HealthView({ timeZone }: HealthViewProps) {
             </table>
           </div>
         </section>
-      </div>
     </section>
   );
 }

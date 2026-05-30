@@ -255,6 +255,22 @@ export interface SendersResponse {
   senders: StoredSenderStats[];
 }
 
+export interface GuzzlerStat {
+  address: string;
+  transactionCount: number;
+  totalGasUsed: string;
+  totalFeeWei: string;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface GuzzlersResponse {
+  windowMs: number;
+  generatedAt: string;
+  count: number;
+  guzzlers: GuzzlerStat[];
+}
+
 export interface DatabaseTableStats {
   tableName: string;
   rowCount: string;
@@ -289,6 +305,12 @@ export interface HealthResponse {
   };
   features: {
     transactionData: boolean;
+    guzzlers?: boolean;
+  };
+  guzzlers?: {
+    enabled: boolean;
+    entryCount: number | null;
+    totalSizeBytes: string | null;
   };
 }
 
@@ -702,6 +724,10 @@ export function fetchSenders(params: URLSearchParams): Promise<SendersResponse> 
 
 export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", new URLSearchParams());
+}
+
+export function fetchGuzzlers(): Promise<GuzzlersResponse> {
+  return getJson<GuzzlersResponse>("/guzzlers", new URLSearchParams());
 }
 
 export interface AdminVerifyResponse {

@@ -7,6 +7,7 @@ export type View =
   | "senders"
   | "ranges"
   | "charts"
+  | "guzzlers"
   | "health"
   | "admin"
   | "baseload";
@@ -29,6 +30,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "senders") return "senders";
   if (value === "ranges") return "ranges";
   if (value === "charts") return "charts";
+  if (value === "guzzlers") return "guzzlers";
   if (value === "health") return "health";
   if (value === "admin") return "admin";
   if (value === "baseload") return "baseload";

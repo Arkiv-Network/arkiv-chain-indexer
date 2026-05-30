@@ -1481,6 +1481,7 @@ td.num {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .baseload-form {
@@ -1595,8 +1596,9 @@ td.num {
 
 .health-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
+  align-items: start;
 }
 
 .health-panel {
@@ -1613,24 +1615,27 @@ td.num {
 
 .health-panel dl {
   display: grid;
-  grid-template-columns: minmax(9rem, 1fr) minmax(0, 1.5fr);
-  gap: 0.55rem 0.85rem;
+  grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+  gap: 0.55rem 1rem;
   margin: 0;
+  align-items: baseline;
 }
 
 .health-panel dt {
   color: var(--muted);
   font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .health-panel dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .database-panel {
-  grid-column: 1 / -1;
+  margin-top: 1rem;
 }
 
 .health-table-wrap {
@@ -1644,6 +1649,203 @@ td.num {
 .health-table th,
 .health-table td {
   white-space: nowrap;
+}
+
+/* ---- Guzzlers view ---- */
+
+.guzzler-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--stone);
+}
+
+.segmented button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.segmented button:hover {
+  color: var(--fg);
+}
+
+.segmented button.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.guzzler-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.guzzler-card {
+  display: grid;
+  grid-template-columns: 2.25rem 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  /* Render only the cards near the viewport — keeps the full (large) list smooth. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+
+.guzzler-rank {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.guzzler-rank.top {
+  color: var(--ark-orange);
+}
+
+.guzzler-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.guzzler-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.guzzler-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.guzzler-address .mono {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.guzzler-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--stone);
+  overflow: hidden;
+}
+
+.guzzler-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--ark-blue-2));
+  min-width: 2px;
+}
+
+.guzzler-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.guzzler-sentinel {
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.guzzler-stats {
+  display: flex;
+  gap: 1.4rem;
+  margin: 0;
+}
+
+.guzzler-stats > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+}
+
+.guzzler-stats dt {
+  order: 2;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.guzzler-stats dd {
+  order: 1;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 720px) {
+  .guzzler-card {
+    grid-template-columns: 2rem 36px minmax(0, 1fr);
+    grid-template-areas:
+      "rank icon main"
+      "stats stats stats";
+    contain-intrinsic-size: auto 120px;
+  }
+
+  .guzzler-rank {
+    grid-area: rank;
+  }
+
+  .guzzler-icon {
+    grid-area: icon;
+  }
+
+  .guzzler-main {
+    grid-area: main;
+  }
+
+  .guzzler-stats {
+    grid-area: stats;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.4rem;
+  }
+
+  .guzzler-stats > div {
+    align-items: flex-start;
+  }
 }
 
 /* ---- Charts view ---- */

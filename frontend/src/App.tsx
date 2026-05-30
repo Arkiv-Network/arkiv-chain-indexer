@@ -19,6 +19,7 @@ import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
+import { GuzzlersView } from "./GuzzlersView";
 import { HealthView } from "./HealthView";
 import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
@@ -343,6 +344,13 @@ export function App() {
             </button>
             <button
               type="button"
+              className={activeView === "guzzlers" ? "active" : ""}
+              onClick={() => setView("guzzlers")}
+            >
+              Guzzlers
+            </button>
+            <button
+              type="button"
               className={activeView === "health" ? "active" : ""}
               onClick={() => setView("health")}
             >
@@ -449,6 +457,8 @@ export function App() {
             onDeleteSavedConfig={deleteSavedBaseloadConfig}
             tokenSymbol={pageSettings.tokenSymbol}
           />
+        ) : activeView === "guzzlers" ? (
+          <GuzzlersView timeZone={timeZone} tokenSymbol={pageSettings.tokenSymbol} />
         ) : activeView === "admin" ? (
           <AdminView
             settings={pageSettings}
