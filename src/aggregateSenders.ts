@@ -1,3 +1,4 @@
+import { CliHelpRequested, coerceInt, parseCli, type CliSpec } from "./cli";
 import { ScannerStorage } from "./storage";
 
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -8,80 +9,46 @@ interface AggregateSendersConfig {
   once: boolean;
 }
 
-class SenderAggregateHelpRequested extends Error {}
+class SenderAggregateHelpRequested extends CliHelpRequested {}
+
+const SPEC: CliSpec = {
+  name: "aggregate-senders",
+  summary: `DATABASE_URL=postgres://... bun run aggregate-senders
+
+Rebuilds the sender_stats table from stored transaction rows.`,
+  options: [
+    {
+      flags: "--database-url <url>",
+      description: "PostgreSQL connection string (or DATABASE_URL env).",
+      env: ["DATABASE_URL", "SCANNER_DATABASE_URL"],
+    },
+    {
+      flags: "--interval-ms <number>",
+      description: "Sleep between rebuilds. Defaults to 60000.",
+      env: ["SENDER_AGGREGATE_INTERVAL_MS"],
+      default: DEFAULT_INTERVAL_MS.toString(),
+    },
+    { flags: "--once", description: "Run a single rebuild then exit." },
+  ],
+};
 
 function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): AggregateSendersConfig {
-  const values: Record<string, string> = {};
-  let help = false;
-  let once = false;
+  const cli = parseCli(SPEC, args, env);
 
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!arg?.startsWith("--")) {
-      throw new Error(`Unexpected argument: ${arg}`);
-    }
-
-    const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
-    if (!rawKey) {
-      throw new Error(`Invalid argument: ${arg}`);
-    }
-    if (rawKey === "help") {
-      help = true;
-      continue;
-    }
-    if (rawKey === "once") {
-      once = true;
-      continue;
-    }
-
-    const value = inlineValue ?? args[index + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(`Missing value for --${rawKey}`);
-    }
-    values[rawKey] = value;
-    if (inlineValue === undefined) {
-      index += 1;
-    }
+  if (cli.helpRequested) {
+    throw new SenderAggregateHelpRequested(cli.helpText);
   }
 
-  if (help) {
-    throw new SenderAggregateHelpRequested(usage());
-  }
-
-  const databaseUrl = values["database-url"] ?? env.DATABASE_URL ?? env.SCANNER_DATABASE_URL;
+  const databaseUrl = cli.value("database-url");
   if (!databaseUrl) {
     throw new Error("DATABASE_URL (or --database-url) is required");
   }
 
-  const intervalRaw = values["interval-ms"] ?? env.SENDER_AGGREGATE_INTERVAL_MS;
-  const intervalMs =
-    intervalRaw === undefined ? DEFAULT_INTERVAL_MS : parsePositiveInt("--interval-ms", intervalRaw);
-
-  return { databaseUrl, intervalMs, once };
-}
-
-function parsePositiveInt(name: string, raw: string): number {
-  if (!/^\d+$/.test(raw)) {
-    throw new Error(`${name} must be a non-negative integer`);
-  }
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new Error(`${name} is too large`);
-  }
-  return parsed;
-}
-
-function usage(): string {
-  return `Usage:
-  DATABASE_URL=postgres://... bun run aggregate-senders
-
-Rebuilds the sender_stats table from stored transaction rows.
-
-Options:
-  --database-url <url>     PostgreSQL connection string (or DATABASE_URL env).
-  --interval-ms <number>   Sleep between rebuilds. Defaults to 60000.
-  --once                   Run a single rebuild then exit.
-  --help                   Show this message.`;
+  return {
+    databaseUrl,
+    intervalMs: coerceInt("--interval-ms", cli.value("interval-ms")!),
+    once: cli.flag("once"),
+  };
 }
 
 function sleep(ms: number): Promise<void> {

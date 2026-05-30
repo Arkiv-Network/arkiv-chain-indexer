@@ -1,3 +1,4 @@
+import { CliHelpRequested, coercePositiveInt, parseCli, type CliSpec } from "./cli";
 import { HttpBatcherCollector } from "./batcher";
 import { fillRecentMissingBatcherMetrics } from "./scanner";
 import { ScannerStorage } from "./storage";
@@ -22,23 +23,51 @@ const defaultRuntime: BatcherCollectorRuntime = {
   log: (message) => console.log(message),
 };
 
+/** Help text raised when the batcher collector is invoked with `--help`. */
+export class HelpRequested extends CliHelpRequested {}
+
+const SPEC: CliSpec = {
+  name: "collect-batcher",
+  summary: `DATABASE_URL=postgres://user:pass@host:5432/db \\
+  BATCHER_COLLECTOR_URL=https://batcher-collector.example \\
+  bun run collect-batcher`,
+  options: [
+    {
+      flags: "--database-url <url>",
+      description: "PostgreSQL connection string (or DATABASE_URL env).",
+      env: ["DATABASE_URL", "SCANNER_DATABASE_URL"],
+    },
+    {
+      flags: "--batcher-collector-url <url>",
+      description: "BATCHER_COLLECTOR_URL base for recent block batcher metrics.",
+      env: ["BATCHER_COLLECTOR_URL", "SCANNER_BATCHER_COLLECTOR_URL"],
+    },
+    {
+      flags: "--interval-ms <number>",
+      description: "Delay between collector sweeps. Defaults to 10000.",
+      env: ["BATCHER_COLLECTOR_INTERVAL_MS"],
+      default: DEFAULT_INTERVAL_MS.toString(),
+    },
+    { flags: "--once", description: "Run one collector sweep and exit." },
+  ],
+};
+
 export function parseBatcherCollectorConfig(
   args: string[] = process.argv.slice(2),
   env: NodeJS.ProcessEnv = process.env,
 ): BatcherCollectorConfig {
-  const parsed = parseArgs(args);
+  const cli = parseCli(SPEC, args, env);
 
-  if (parsed.help) {
-    throw new HelpRequested(usage());
+  if (cli.helpRequested) {
+    throw new HelpRequested(cli.helpText);
   }
 
-  const databaseUrl = parsed.values["database-url"] ?? env.DATABASE_URL ?? env.SCANNER_DATABASE_URL;
+  const databaseUrl = cli.value("database-url");
   if (!databaseUrl) {
     throw new Error("DATABASE_URL (or --database-url) is required");
   }
 
-  const batcherCollectorUrl =
-    parsed.values["batcher-collector-url"] ?? env.BATCHER_COLLECTOR_URL ?? env.SCANNER_BATCHER_COLLECTOR_URL;
+  const batcherCollectorUrl = cli.value("batcher-collector-url");
   if (!batcherCollectorUrl) {
     throw new Error("BATCHER_COLLECTOR_URL (or --batcher-collector-url) is required");
   }
@@ -46,13 +75,8 @@ export function parseBatcherCollectorConfig(
   return {
     databaseUrl,
     batcherCollectorUrl,
-    intervalMs: parsePositiveNumberOption(
-      "--interval-ms",
-      parsed.values["interval-ms"] ??
-        env.BATCHER_COLLECTOR_INTERVAL_MS ??
-        DEFAULT_INTERVAL_MS.toString(),
-    ),
-    once: parsed.once,
+    intervalMs: coercePositiveInt("--interval-ms", cli.value("interval-ms")!),
+    once: cli.flag("once"),
   };
 }
 
@@ -74,87 +98,6 @@ export async function runBatcherCollector(
 
     await runtime.sleep(config.intervalMs);
   }
-}
-
-export class HelpRequested extends Error {}
-
-interface ParsedArgs {
-  help: boolean;
-  once: boolean;
-  values: Record<string, string>;
-}
-
-function parseArgs(args: string[]): ParsedArgs {
-  const result: ParsedArgs = {
-    help: false,
-    once: false,
-    values: {},
-  };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!arg?.startsWith("--")) {
-      throw new Error(`Unexpected argument: ${arg}`);
-    }
-
-    const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
-    if (!rawKey) {
-      throw new Error(`Invalid argument: ${arg}`);
-    }
-
-    if (rawKey === "help") {
-      result.help = true;
-      continue;
-    }
-
-    if (rawKey === "once") {
-      result.once = true;
-      continue;
-    }
-
-    const value = inlineValue ?? args[index + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(`Missing value for --${rawKey}`);
-    }
-
-    result.values[rawKey] = value;
-    if (inlineValue === undefined) {
-      index += 1;
-    }
-  }
-
-  return result;
-}
-
-function parsePositiveNumberOption(name: string, value: string): number {
-  if (!/^\d+$/.test(value)) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new Error(`${name} is too large`);
-  }
-
-  if (parsed === 0) {
-    throw new Error(`${name} must be greater than zero`);
-  }
-
-  return parsed;
-}
-
-function usage(): string {
-  return `Usage:
-  DATABASE_URL=postgres://user:pass@host:5432/db \\
-    BATCHER_COLLECTOR_URL=https://batcher-collector.example \\
-    bun run collect-batcher
-
-Options:
-  --database-url <url>           PostgreSQL connection string (or DATABASE_URL env).
-  --batcher-collector-url <url>  BATCHER_COLLECTOR_URL base for recent block batcher metrics.
-  --interval-ms <number>         Delay between collector sweeps. Defaults to 10000.
-  --once                         Run one collector sweep and exit.
-  --help                         Show this message.`;
 }
 
 function sleep(ms: number): Promise<void> {
