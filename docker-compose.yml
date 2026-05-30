@@ -122,7 +122,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
-      AGGREGATE_INTERVAL_MS: ${AGGREGATE_INTERVAL_MS:-60000}
+      AGGREGATE_INTERVAL_MS: ${AGGREGATE_INTERVAL_MS:-30000}
     extra_hosts: *extra-hosts
     command: ["bun", "run", "aggregate-all"]
 
