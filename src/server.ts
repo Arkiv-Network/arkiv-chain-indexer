@@ -291,9 +291,6 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/senders") {
-    if (!transactionDataEnabled) {
-      return jsonError(404, "Transaction data is disabled");
-    }
     return handleGetSenders(url, storage);
   }
 

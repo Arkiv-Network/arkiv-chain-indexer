@@ -225,6 +225,7 @@ export class ScannerStorage {
   private readonly qBlockRanges: string;
   private readonly qTransactions: string;
   private readonly qTransactionRecords: string;
+  private readonly qSenderBlockStats: string;
   private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
 
@@ -238,6 +239,7 @@ export class ScannerStorage {
     this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
     this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
     this.qTransactionRecords = `${quoteIdent(this.schema)}.transaction_records`;
+    this.qSenderBlockStats = `${quoteIdent(this.schema)}.sender_block_stats`;
     this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
   }
@@ -432,6 +434,26 @@ export class ScannerStorage {
        ON ${this.qTransactionRecords} (hash)`,
     );
     await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qSenderBlockStats} (
+        block_number BIGINT NOT NULL,
+        block_date TEXT NOT NULL,
+        address TEXT NOT NULL,
+        latest_nonce TEXT,
+        transaction_count BIGINT NOT NULL,
+        total_gas_used TEXT NOT NULL,
+        total_transaction_fee_wei TEXT NOT NULL,
+        total_value_wei TEXT NOT NULL,
+        first_position INTEGER NOT NULL,
+        last_position INTEGER NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (block_number, address)
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("sender_block_stats_address_idx")}
+       ON ${this.qSenderBlockStats} (address)`,
+    );
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qSenderStats} (
         address TEXT PRIMARY KEY,
         latest_nonce TEXT,
@@ -615,6 +637,11 @@ export class ScannerStorage {
         regclassName: regclassName(this.schema, "block_ranges"),
       },
       {
+        name: "sender_block_stats",
+        qualifiedName: this.qSenderBlockStats,
+        regclassName: regclassName(this.schema, "sender_block_stats"),
+      },
+      {
         name: "sender_stats",
         qualifiedName: this.qSenderStats,
         regclassName: regclassName(this.schema, "sender_stats"),
@@ -785,6 +812,12 @@ export class ScannerStorage {
       if (transactions !== undefined) {
         await this.replaceTransactionsForBlock(client, metrics, transactions);
       }
+      const affectedSenderAddresses = await this.replaceSenderBlockStatsForBlock(
+        client,
+        metrics,
+        recordCandidates,
+      );
+      await this.refreshSenderStats(client, affectedSenderAddresses);
       await this.deleteTransactionRecordsForBlock(client, metrics.blockNumber);
       await this.upsertTransactionRecords(client, metrics, recordCandidates);
       await this.applyProgressUpdate(client, metrics, progressUpdate);
@@ -1043,6 +1076,116 @@ export class ScannerStorage {
         contract_address
       ) VALUES ${values.join(", ")}`,
       params,
+    );
+  }
+
+  private async replaceSenderBlockStatsForBlock(
+    client: pg.PoolClient,
+    metrics: BlockMetrics,
+    transactions: InspectedTransaction[],
+  ): Promise<string[]> {
+    const previousResult = await client.query<{ address: string }>(
+      `SELECT address FROM ${this.qSenderBlockStats} WHERE block_number = $1`,
+      [metrics.blockNumber.toString()],
+    );
+    await client.query(`DELETE FROM ${this.qSenderBlockStats} WHERE block_number = $1`, [
+      metrics.blockNumber.toString(),
+    ]);
+
+    const groups = senderBlockStatsFromTransactions(transactions);
+    if (groups.length > 0) {
+      const columnsPerRow = 10;
+      const params: Array<string | number | null> = [];
+      const values = groups.map((group, rowIndex) => {
+        const offset = rowIndex * columnsPerRow;
+        params.push(
+          metrics.blockNumber.toString(),
+          metrics.blockDate,
+          group.address,
+          group.latestNonce,
+          group.transactionCount.toString(),
+          group.totalGasUsed.toString(),
+          group.totalTransactionFeeWei.toString(),
+          group.totalValueWei.toString(),
+          group.firstPosition,
+          group.lastPosition,
+        );
+        const placeholders = Array.from(
+          { length: columnsPerRow },
+          (_unused, columnIndex) => `$${offset + columnIndex + 1}`,
+        );
+        return `(${placeholders.join(", ")})`;
+      });
+
+      await client.query(
+        `INSERT INTO ${this.qSenderBlockStats} (
+          block_number,
+          block_date,
+          address,
+          latest_nonce,
+          transaction_count,
+          total_gas_used,
+          total_transaction_fee_wei,
+          total_value_wei,
+          first_position,
+          last_position
+        ) VALUES ${values.join(", ")}`,
+        params,
+      );
+    }
+
+    return [
+      ...previousResult.rows.map((row) => row.address),
+      ...groups.map((group) => group.address),
+    ];
+  }
+
+  private async refreshSenderStats(
+    client: pg.PoolClient,
+    addresses: readonly string[],
+  ): Promise<void> {
+    const uniqueAddresses = [...new Set(addresses)];
+    if (uniqueAddresses.length === 0) {
+      return;
+    }
+
+    await client.query(`DELETE FROM ${this.qSenderStats} WHERE address = ANY($1::text[])`, [
+      uniqueAddresses,
+    ]);
+    await client.query(
+      `INSERT INTO ${this.qSenderStats} (
+        address,
+        latest_nonce,
+        transaction_count,
+        total_gas_used,
+        total_transaction_fee_wei,
+        total_value_wei,
+        average_gas_used,
+        average_transaction_fee_wei,
+        first_block_number,
+        last_block_number,
+        first_block_date,
+        last_block_date,
+        aggregated_at
+      )
+      SELECT
+        address,
+        MAX(latest_nonce::numeric)::text AS latest_nonce,
+        SUM(transaction_count)::bigint AS transaction_count,
+        SUM(total_gas_used::numeric)::text AS total_gas_used,
+        SUM(total_transaction_fee_wei::numeric)::text AS total_transaction_fee_wei,
+        SUM(total_value_wei::numeric)::text AS total_value_wei,
+        TRUNC(SUM(total_gas_used::numeric) / SUM(transaction_count), 0)::text AS average_gas_used,
+        TRUNC(SUM(total_transaction_fee_wei::numeric) / SUM(transaction_count), 0)::text AS average_transaction_fee_wei,
+        MIN(block_number) AS first_block_number,
+        MAX(block_number) AS last_block_number,
+        (ARRAY_AGG(block_date ORDER BY block_number ASC, first_position ASC))[1] AS first_block_date,
+        (ARRAY_AGG(block_date ORDER BY block_number DESC, last_position DESC))[1] AS last_block_date,
+        NOW() AS aggregated_at
+      FROM ${this.qSenderBlockStats}
+      WHERE address = ANY($1::text[])
+      GROUP BY address`,
+      [uniqueAddresses],
     );
   }
 
@@ -1419,6 +1562,37 @@ export class ScannerStorage {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO ${this.qSenderBlockStats} (
+          block_number,
+          block_date,
+          address,
+          latest_nonce,
+          transaction_count,
+          total_gas_used,
+          total_transaction_fee_wei,
+          total_value_wei,
+          first_position,
+          last_position,
+          updated_at
+        )
+        SELECT
+          block_number,
+          (ARRAY_AGG(block_date ORDER BY position ASC))[1] AS block_date,
+          LOWER(from_address) AS address,
+          MAX(nonce::numeric)::text AS latest_nonce,
+          COUNT(*) AS transaction_count,
+          SUM(gas_used::numeric)::text AS total_gas_used,
+          SUM(transaction_fee_wei::numeric)::text AS total_transaction_fee_wei,
+          SUM(value_wei::numeric)::text AS total_value_wei,
+          MIN(position) AS first_position,
+          MAX(position) AS last_position,
+          NOW() AS updated_at
+        FROM ${this.qTransactions}
+        WHERE from_address IS NOT NULL
+        GROUP BY block_number, LOWER(from_address)
+        ON CONFLICT (block_number, address) DO NOTHING`,
+      );
       await client.query(`DELETE FROM ${this.qSenderStats}`);
       const result = await client.query(
         `INSERT INTO ${this.qSenderStats} (
@@ -1437,22 +1611,21 @@ export class ScannerStorage {
           aggregated_at
         )
         SELECT
-          LOWER(from_address) AS address,
-          MAX(nonce::numeric)::text AS latest_nonce,
-          COUNT(*) AS transaction_count,
-          SUM(gas_used::numeric)::text AS total_gas_used,
-          SUM(transaction_fee_wei::numeric)::text AS total_transaction_fee_wei,
-          SUM(value_wei::numeric)::text AS total_value_wei,
-          TRUNC(SUM(gas_used::numeric) / COUNT(*), 0)::text AS average_gas_used,
-          TRUNC(SUM(transaction_fee_wei::numeric) / COUNT(*), 0)::text AS average_transaction_fee_wei,
+          address,
+          MAX(latest_nonce::numeric)::text AS latest_nonce,
+          SUM(transaction_count)::bigint AS transaction_count,
+          SUM(total_gas_used::numeric)::text AS total_gas_used,
+          SUM(total_transaction_fee_wei::numeric)::text AS total_transaction_fee_wei,
+          SUM(total_value_wei::numeric)::text AS total_value_wei,
+          TRUNC(SUM(total_gas_used::numeric) / SUM(transaction_count), 0)::text AS average_gas_used,
+          TRUNC(SUM(total_transaction_fee_wei::numeric) / SUM(transaction_count), 0)::text AS average_transaction_fee_wei,
           MIN(block_number) AS first_block_number,
           MAX(block_number) AS last_block_number,
-          (ARRAY_AGG(block_date ORDER BY block_number ASC, position ASC))[1] AS first_block_date,
-          (ARRAY_AGG(block_date ORDER BY block_number DESC, position DESC))[1] AS last_block_date,
+          (ARRAY_AGG(block_date ORDER BY block_number ASC, first_position ASC))[1] AS first_block_date,
+          (ARRAY_AGG(block_date ORDER BY block_number DESC, last_position DESC))[1] AS last_block_date,
           NOW() AS aggregated_at
-        FROM ${this.qTransactions}
-        WHERE from_address IS NOT NULL
-        GROUP BY LOWER(from_address)`,
+        FROM ${this.qSenderBlockStats}
+        GROUP BY address`,
       );
       await client.query("COMMIT");
       return result.rowCount ?? 0;
@@ -1916,6 +2089,60 @@ export class ScannerStorage {
   async close(): Promise<void> {
     await this.pool.end();
   }
+}
+
+interface SenderBlockStatsInput {
+  address: string;
+  latestNonce: string | null;
+  transactionCount: bigint;
+  totalGasUsed: bigint;
+  totalTransactionFeeWei: bigint;
+  totalValueWei: bigint;
+  firstPosition: number;
+  lastPosition: number;
+}
+
+function senderBlockStatsFromTransactions(
+  transactions: readonly InspectedTransaction[],
+): SenderBlockStatsInput[] {
+  const groups = new Map<string, SenderBlockStatsInput>();
+  for (const transaction of transactions) {
+    if (transaction.from === null) {
+      continue;
+    }
+
+    const address = transaction.from.toLowerCase();
+    const existing = groups.get(address);
+    if (existing === undefined) {
+      groups.set(address, {
+        address,
+        latestNonce: transaction.nonce,
+        transactionCount: 1n,
+        totalGasUsed: BigInt(transaction.gasUsed),
+        totalTransactionFeeWei: BigInt(transaction.transactionFeeWei),
+        totalValueWei: BigInt(transaction.valueWei),
+        firstPosition: transaction.position,
+        lastPosition: transaction.position,
+      });
+      continue;
+    }
+
+    existing.transactionCount += 1n;
+    existing.totalGasUsed += BigInt(transaction.gasUsed);
+    existing.totalTransactionFeeWei += BigInt(transaction.transactionFeeWei);
+    existing.totalValueWei += BigInt(transaction.valueWei);
+    existing.firstPosition = Math.min(existing.firstPosition, transaction.position);
+    existing.lastPosition = Math.max(existing.lastPosition, transaction.position);
+    existing.latestNonce = maxDecimalString(existing.latestNonce, transaction.nonce);
+  }
+
+  return [...groups.values()];
+}
+
+function maxDecimalString(left: string | null, right: string | null): string | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return BigInt(left) >= BigInt(right) ? left : right;
 }
 
 function resolveLimit(requested: number | undefined, hardMax: number): number {

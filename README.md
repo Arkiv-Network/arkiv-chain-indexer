@@ -36,8 +36,8 @@ portal are reachable from the host but are not published on every network interf
 The frontend container is a tiny Node `server.js` that serves the Vite-built React app from `dist/` and reverse-proxies any request starting with `/api/` to the `backend` service (the `/api` prefix is stripped). This means you don't need to expose the backend publicly. In nginx-backed deployments, leave the frontend and backend bound to loopback and publish only nginx.
 
 The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so production-style mainnet scans keep
-block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
-`SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
+block metrics and sender stats but do not persist per-transaction rows or expose transaction inspection UI. Set
+`SAVE_TRANSACTION_DATA=true` if you want the `/transactions` and `/block/:blockNumber` APIs.
 
 The main `scanner` container only ever scans forward near the safe chain head (it always runs with
 `SCANNER_DISABLE_BACKFILL=true`). Historical backfill runs exclusively in the separate `backfill-scanner` container
@@ -52,8 +52,9 @@ The aggregator container runs `bun run aggregate-all` which walks every supporte
 after its newest completed range, and sleeps for 30 seconds after each sweep (configurable via
 `AGGREGATE_INTERVAL_MS`).
 
-The sender aggregator container runs `bun run aggregate-senders` which rebuilds address-level stats from stored
-transaction rows and sleeps for one minute between rebuilds (configurable via `SENDER_AGGREGATE_INTERVAL_MS`).
+The sender aggregator container runs `bun run aggregate-senders` which rebuilds address-level stats from compact
+per-block sender aggregates and sleeps for one minute between rebuilds (configurable via
+`SENDER_AGGREGATE_INTERVAL_MS`).
 
 The batcher collector container runs `bun run collect-batcher` which enriches already stored recent blocks with
 batcher queue/threshold metrics and sleeps for ten seconds between sweeps (configurable via
@@ -351,10 +352,11 @@ When `total_gas_used` or `transaction_count` for the window is `0` the correspon
 
 #### Sender aggregator
 
-The sender aggregator rebuilds `sender_stats` from stored rows in `transactions`, grouping by normalized
-`from_address`. This requires transaction storage to have been enabled while scanning. Each sender row stores the
-latest found nonce, found transaction count, total gas used, total transaction fees, total sent value, average gas
-used, average transaction fee, first/last seen block/date, and aggregation timestamp.
+The sender aggregator rebuilds `sender_stats` from compact per-block sender aggregates written by the scanner.
+These aggregates are populated from every inspected transaction even when full transaction row storage is disabled.
+For older databases, stored `transactions` rows are used to seed any missing sender-block aggregates. Each sender
+row stores the latest found nonce, found transaction count, total gas used, total transaction fees, total sent value,
+average gas used, average transaction fee, first/last seen block/date, and aggregation timestamp.
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
@@ -481,8 +483,9 @@ curl 'http://localhost:3000/transactions?dateGt=2024-01-01T00:00:00Z&dateLt=2024
 
 ### `GET /senders`
 
-Returns precomputed sender-address stats ordered from most active to least active by default. When transaction
-data is disabled this endpoint returns `404`. Responses are capped at **10,000 sender addresses**.
+Returns precomputed sender-address stats ordered from most active to least active by default. This endpoint uses
+compact sender aggregates and remains available when full transaction row storage is disabled. Responses are capped
+at **10,000 sender addresses**.
 
 | Query parameter | Description |
 | --- | --- |

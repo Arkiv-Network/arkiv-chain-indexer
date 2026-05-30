@@ -65,7 +65,7 @@ export function App() {
   );
   const view = readViewFromSearch(locationSearch);
   const activeView =
-    transactionDataEnabled !== true && (view === "block" || view === "transactions" || view === "senders")
+    transactionDataEnabled !== true && (view === "block" || view === "transactions")
       ? "blocks"
       : view;
 
@@ -134,7 +134,7 @@ export function App() {
   useEffect(() => {
     if (
       transactionDataEnabled === false &&
-      (view === "block" || view === "transactions" || view === "senders") &&
+      (view === "block" || view === "transactions") &&
       writePermalink("blocks", {})
     ) {
       setLocationSearch(getCurrentSearch());
@@ -312,15 +312,15 @@ export function App() {
                 >
                   Address
                 </button>
-                <button
-                  type="button"
-                  className={activeView === "senders" ? "active" : ""}
-                  onClick={() => setView("senders")}
-                >
-                  Senders
-                </button>
               </>
             ) : null}
+            <button
+              type="button"
+              className={activeView === "senders" ? "active" : ""}
+              onClick={() => setView("senders")}
+            >
+              Senders
+            </button>
             <button
               type="button"
               className={activeView === "transaction-records" ? "active" : ""}

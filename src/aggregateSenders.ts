@@ -15,7 +15,7 @@ const SPEC: CliSpec = {
   name: "aggregate-senders",
   summary: `DATABASE_URL=postgres://... bun run aggregate-senders
 
-Rebuilds the sender_stats table from stored transaction rows.`,
+Rebuilds the sender_stats table from per-block sender aggregates.`,
   options: [
     {
       flags: "--database-url <url>",

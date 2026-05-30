@@ -148,6 +148,7 @@ if (!hasPostgresForTests()) {
         "transactions",
         "transaction_records",
         "block_ranges",
+        "sender_block_stats",
         "sender_stats",
         "scanner_state",
         "baseload_configs",
@@ -155,8 +156,9 @@ if (!hasPostgresForTests()) {
       expect(byName.get("blocks")?.rowCount).toBe("2");
       expect(byName.get("transactions")?.rowCount).toBe("2");
       expect(byName.get("transaction_records")?.rowCount).toBe("6");
+      expect(byName.get("sender_block_stats")?.rowCount).toBe("1");
       expect(byName.get("block_ranges")?.rowCount).toBe("1");
-      expect(byName.get("sender_stats")?.rowCount).toBe("0");
+      expect(byName.get("sender_stats")?.rowCount).toBe("1");
       expect(byName.get("scanner_state")?.rowCount).toBe("1");
       expect(byName.get("baseload_configs")?.rowCount).toBe("0");
       for (const table of stats.tables) {
@@ -542,6 +544,131 @@ if (!hasPostgresForTests()) {
 
       const ascending = await storage.querySenderStats({ order: "asc", limit: 1 });
       expect(ascending.map((row) => row.address)).toEqual([quietAddress]);
+    });
+
+    test("updates sender stats from inspected transactions when full transaction rows are disabled", async () => {
+      const storage = await withStorage();
+      const activeAddress = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const quietAddress = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({
+          blockNumber: 42n,
+          blockDate: "2024-01-03T00:00:00.000Z",
+          transactionCount: 3,
+        }),
+        { kind: "lastSuccessfulBlock" },
+        undefined,
+        [
+          transactionFixture({
+            position: 0,
+            hash: "0xaaa",
+            from: activeAddress.toUpperCase() as `0x${string}`,
+            nonce: "10",
+            valueWei: "100",
+            gasUsed: "21000",
+            transactionFeeWei: "2310000",
+          }),
+          transactionFixture({
+            position: 1,
+            hash: "0xbbb",
+            from: activeAddress,
+            nonce: "11",
+            valueWei: "300",
+            gasUsed: "42000",
+            transactionFeeWei: "4620000",
+          }),
+          transactionFixture({
+            position: 2,
+            hash: "0xccc",
+            from: quietAddress,
+            nonce: "1",
+            valueWei: "50",
+            gasUsed: "50000",
+            transactionFeeWei: "6000000",
+          }),
+        ],
+      );
+
+      expect(await storage.countTransactions({ blockNumber: 42n })).toBe(0);
+
+      const rows = await storage.querySenderStats();
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        address: activeAddress,
+        latestNonce: "11",
+        transactionCount: "2",
+        totalGasUsed: "63000",
+        totalTransactionFeeWei: "6930000",
+        totalValueWei: "400",
+        averageGasUsed: "31500",
+        averageTransactionFeeWei: "3465000",
+        firstBlockNumber: 42,
+        lastBlockNumber: 42,
+      });
+      expect(rows[1]).toMatchObject({
+        address: quietAddress,
+        transactionCount: "1",
+      });
+    });
+
+    test("replaces prior sender contributions when a block is re-saved", async () => {
+      const storage = await withStorage();
+      const firstAddress = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const removedAddress = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 42n, transactionCount: 2 }),
+        { kind: "lastSuccessfulBlock" },
+        undefined,
+        [
+          transactionFixture({
+            position: 0,
+            hash: "0xaaa",
+            from: firstAddress,
+            nonce: "1",
+            gasUsed: "21000",
+            transactionFeeWei: "2310000",
+            valueWei: "100",
+          }),
+          transactionFixture({
+            position: 1,
+            hash: "0xbbb",
+            from: removedAddress,
+            nonce: "1",
+            gasUsed: "50000",
+            transactionFeeWei: "6000000",
+            valueWei: "300",
+          }),
+        ],
+      );
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 42n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        undefined,
+        [
+          transactionFixture({
+            position: 0,
+            hash: "0xccc",
+            from: firstAddress,
+            nonce: "2",
+            gasUsed: "42000",
+            transactionFeeWei: "4620000",
+            valueWei: "200",
+          }),
+        ],
+      );
+
+      const rows = await storage.querySenderStats({ order: "asc" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        address: firstAddress,
+        latestNonce: "2",
+        transactionCount: "1",
+        totalGasUsed: "42000",
+        totalTransactionFeeWei: "4620000",
+        totalValueWei: "200",
+      });
     });
 
     test("saves and queries transactions with block context", async () => {

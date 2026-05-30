@@ -904,16 +904,20 @@ describe("GET /senders", () => {
     expect(response.status).toBe(400);
   });
 
-  test("returns 404 when transaction data is disabled", async () => {
+  test("returns sender stats when transaction rows are disabled", async () => {
+    const storage = {
+      querySenderStats: async () => [],
+    } as unknown as ScannerStorage;
     const response = await handleRequest(
       new Request("http://example.test/senders"),
-      {} as ScannerStorage,
+      storage,
       { transactionDataEnabled: false },
     );
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: "Transaction data is disabled",
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      count: 0,
+      senders: [],
     });
   });
 });
