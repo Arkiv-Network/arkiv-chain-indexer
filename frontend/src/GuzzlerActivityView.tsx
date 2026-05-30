@@ -14,18 +14,23 @@ import {
   normalizeAddressInput,
   summarizeGuzzlerHistory,
   type GuzzlerActivityMetricKey,
+  type GuzzlerActivityWindowKey,
 } from "./guzzlerActivity";
 
 const Plot = createPlotlyComponent(Plotly);
 
 interface GuzzlerActivityViewProps {
   address: string;
+  /** Selected time window, kept in the permalink so it survives reloads/links. */
+  windowKey: GuzzlerActivityWindowKey;
   timeZone: string;
   tokenSymbol: string;
   /** Return to the leaderboard. */
   onBack: () => void;
   /** Switch the view to a different address. */
   onSelectAddress: (address: string) => void;
+  /** Change the time window (rewrites the permalink). */
+  onWindowChange: (windowKey: GuzzlerActivityWindowKey) => void;
 }
 
 const REFRESH_MS = 15_000;
@@ -33,18 +38,17 @@ const REFRESH_MS = 15_000;
 /** Per-minute activity timeseries for a single guzzler over the last 24h. */
 export function GuzzlerActivityView({
   address,
+  windowKey,
   timeZone,
   tokenSymbol,
   onBack,
   onSelectAddress,
+  onWindowChange,
 }: GuzzlerActivityViewProps) {
   const [data, setData] = useState<GuzzlerHistoryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  // The full 24h horizon is the most useful default for "show me everything",
-  // and the 1h/6h windows are one click away when activity is dense.
-  const [windowKey, setWindowKey] = useState("24h");
   const [metricKey, setMetricKey] = useState<GuzzlerActivityMetricKey>("transactions");
   const [addressInput, setAddressInput] = useState(address);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -115,7 +119,7 @@ export function GuzzlerActivityView({
           <button type="button" className="link-button guzzler-back" onClick={onBack}>
             ← Leaderboard
           </button>
-          <h2>Guzzler activity</h2>
+          <h2>Wallet activity</h2>
         </div>
         <div className="guzzler-controls">
           <div className="segmented" role="group" aria-label="Metric">
@@ -138,7 +142,7 @@ export function GuzzlerActivityView({
                 type="button"
                 className={w.key === windowKey ? "active" : ""}
                 aria-pressed={w.key === windowKey}
-                onClick={() => setWindowKey(w.key)}
+                onClick={() => onWindowChange(w.key)}
               >
                 {w.label}
               </button>
@@ -160,7 +164,7 @@ export function GuzzlerActivityView({
         />
         <form className="guzzler-address-form" onSubmit={onSubmitAddress}>
           <label className="visually-hidden" htmlFor="guzzler-address-input">
-            Guzzler address
+            Wallet address
           </label>
           <input
             id="guzzler-address-input"

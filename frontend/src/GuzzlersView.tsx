@@ -4,7 +4,12 @@ import { addressDisplay } from "./addressAliases";
 import { blockieDataUri } from "./blockies";
 import { fmtDurationSeconds, fmtEth, fmtInteger } from "./format";
 import { GuzzlerActivityView } from "./GuzzlerActivityView";
-import { normalizeAddressInput } from "./guzzlerActivity";
+import {
+  activityWindowForMs,
+  normalizeActivityWindowKey,
+  normalizeAddressInput,
+  type GuzzlerActivityWindowKey,
+} from "./guzzlerActivity";
 import { writePermalink } from "./permalinks";
 
 interface GuzzlersViewProps {
@@ -17,6 +22,11 @@ interface GuzzlersViewProps {
 /** The drill-in address from the URL (`?view=guzzlers&address=0x…`), if valid. */
 function readSelectedAddress(search: string): string | null {
   return normalizeAddressInput(new URLSearchParams(search).get("address"));
+}
+
+/** The activity window from the URL (`&window=6h`), if it's a known key. */
+function readSelectedWindow(search: string): GuzzlerActivityWindowKey | null {
+  return normalizeActivityWindowKey(new URLSearchParams(search).get("window"));
 }
 
 /**
@@ -34,12 +44,14 @@ const LIMIT = 250;
  * and returns the top-N per window, keyed by `label`; the tab just picks which
  * window's leaderboard to render.
  */
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
 const WINDOWS = [
-  { key: "5m", label: "5 min" },
-  { key: "20m", label: "20 min" },
-  { key: "1h", label: "1 hour" },
-  { key: "6h", label: "6 hours" },
-  { key: "24h", label: "24 hours" },
+  { key: "5m", label: "5 min", ms: 5 * MINUTE_MS },
+  { key: "20m", label: "20 min", ms: 20 * MINUTE_MS },
+  { key: "1h", label: "1 hour", ms: HOUR_MS },
+  { key: "6h", label: "6 hours", ms: 6 * HOUR_MS },
+  { key: "24h", label: "24 hours", ms: 24 * HOUR_MS },
 ] as const;
 
 type WindowKey = (typeof WINDOWS)[number]["key"];
@@ -51,11 +63,15 @@ export function GuzzlersView({
   tokenSymbol,
 }: GuzzlersViewProps) {
   const selectedAddress = readSelectedAddress(locationSearch);
+  const selectedWindow = readSelectedWindow(locationSearch);
 
-  // Navigate by rewriting the `address` permalink param; App re-reads the URL.
-  const selectAddress = useCallback(
-    (address: string) => {
-      if (writePermalink("guzzlers", { address })) onLocationChange();
+  // Navigate by rewriting the `address`/`window` permalink params; App re-reads
+  // the URL. The window is kept so a drill-in (and reloads/links) preserve it.
+  const navigate = useCallback(
+    (address: string, windowKey?: GuzzlerActivityWindowKey) => {
+      const filters: Record<string, string> = { address };
+      if (windowKey) filters.window = windowKey;
+      if (writePermalink("guzzlers", filters)) onLocationChange();
     },
     [onLocationChange],
   );
@@ -67,10 +83,13 @@ export function GuzzlersView({
     return (
       <GuzzlerActivityView
         address={selectedAddress}
+        windowKey={selectedWindow ?? "24h"}
         timeZone={timeZone}
         tokenSymbol={tokenSymbol}
         onBack={clearAddress}
-        onSelectAddress={selectAddress}
+        // Switching address keeps the current window selection.
+        onSelectAddress={(address) => navigate(address, selectedWindow ?? undefined)}
+        onWindowChange={(windowKey) => navigate(selectedAddress, windowKey)}
       />
     );
   }
@@ -78,7 +97,7 @@ export function GuzzlersView({
   return (
     <GuzzlerLeaderboard
       tokenSymbol={tokenSymbol}
-      onSelectAddress={selectAddress}
+      onSelectAddress={navigate}
     />
   );
 }
@@ -88,7 +107,7 @@ function GuzzlerLeaderboard({
   onSelectAddress,
 }: {
   tokenSymbol: string;
-  onSelectAddress: (address: string) => void;
+  onSelectAddress: (address: string, windowKey: GuzzlerActivityWindowKey) => void;
 }) {
   const [data, setData] = useState<GuzzlersResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +173,7 @@ function GuzzlerLeaderboard({
   return (
     <section className="view guzzlers-view">
       <div className="view-heading-row">
-        <h2>Network guzzlers</h2>
+        <h2>Most Active Wallets</h2>
         <div className="guzzler-controls">
           <div className="segmented" role="group" aria-label="Active window">
             {WINDOWS.map((w) => (
@@ -174,6 +193,11 @@ function GuzzlerLeaderboard({
           </button>
         </div>
       </div>
+
+      <p className="guzzler-intro summary">
+        These are the network's most active wallets — the senders submitting the
+        most transactions over the selected window, ranked by total gas used.
+      </p>
 
       <p className={`summary${error ? " error" : ""}`}>
         {error
@@ -196,7 +220,8 @@ function GuzzlerLeaderboard({
             maxGas={maxGas}
             nowMs={now}
             tokenSymbol={tokenSymbol}
-            onSelect={onSelectAddress}
+            // Carry the leaderboard's window selection into the activity view.
+            onSelect={(address) => onSelectAddress(address, activityWindowForMs(selectedWindow.ms))}
           />
         ))}
       </ol>

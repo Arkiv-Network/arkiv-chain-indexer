@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import type { GuzzlerHistoryPoint } from "./src/api";
 import {
   activityPlotRange,
+  activityWindowForMs,
   filterPointsByWindow,
   GUZZLER_ACTIVITY_WINDOWS,
   isAddressLike,
   metricSeries,
+  normalizeActivityWindowKey,
   normalizeAddressInput,
   summarizeGuzzlerHistory,
   weiToTokenNumber,
@@ -151,6 +153,39 @@ describe("activityPlotRange", () => {
   test("24h window spans exactly the retention horizon", () => {
     const day = GUZZLER_ACTIVITY_WINDOWS.find((w) => w.key === "24h");
     expect(day?.ms).toBe(24 * 60 * MINUTE_MS);
+  });
+});
+
+describe("activityWindowForMs", () => {
+  const MIN = 60_000;
+  const HR = 60 * MIN;
+
+  test("collapses anything up to an hour onto the 1h window", () => {
+    expect(activityWindowForMs(5 * MIN)).toBe("1h");
+    expect(activityWindowForMs(20 * MIN)).toBe("1h");
+    expect(activityWindowForMs(HR)).toBe("1h");
+  });
+
+  test("maps the six-hour span to 6h and the day span to 24h", () => {
+    expect(activityWindowForMs(HR + 1)).toBe("6h");
+    expect(activityWindowForMs(6 * HR)).toBe("6h");
+    expect(activityWindowForMs(6 * HR + 1)).toBe("24h");
+    expect(activityWindowForMs(24 * HR)).toBe("24h");
+  });
+});
+
+describe("normalizeActivityWindowKey", () => {
+  test("accepts the known window keys", () => {
+    for (const key of ["1h", "6h", "24h", "all"]) {
+      expect(normalizeActivityWindowKey(key)).toBe(key);
+    }
+  });
+
+  test("rejects unknown or leaderboard-only keys", () => {
+    expect(normalizeActivityWindowKey("5m")).toBeNull();
+    expect(normalizeActivityWindowKey("20m")).toBeNull();
+    expect(normalizeActivityWindowKey("")).toBeNull();
+    expect(normalizeActivityWindowKey(null)).toBeNull();
   });
 });
 

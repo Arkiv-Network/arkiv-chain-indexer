@@ -2602,3 +2602,21 @@ th:not(.num) .sort-header {
     min-height: 55vh;
   }
 }
+
+/* ---- Home: most active wallets preview ---- */
+.home-activity-note {
+  margin: 0 0 0.75rem;
+  color: var(--ink-muted, #6b6b6b);
+  font-size: 0.9rem;
+}
+
+/* The home wallet rows reuse the block-feed row layout but are links, so reset
+   the default anchor look and add a hover affordance. */
+a.home-feed-item {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.home-feed-item:hover {
+  border-color: var(--ark-blue, #181ea9);
+}

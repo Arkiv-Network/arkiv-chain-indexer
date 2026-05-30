@@ -4,10 +4,14 @@ import Plotly from "plotly.js-dist-min";
 import {
   fetchBlockByNumber,
   fetchBlocks,
+  fetchGuzzlers,
   type BlockRequestDebugSample,
   type BlocksResponse,
+  type GuzzlerStat,
   type StoredBlock,
 } from "./api";
+import { addressDisplay } from "./addressAliases";
+import { blockieDataUri } from "./blockies";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { InfoTooltip } from "./InfoTooltip";
@@ -37,6 +41,10 @@ interface HomeViewProps {
 const MINUTE_MS = 60_000;
 const REFRESH_INTERVAL_MS = 12_000;
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
+
+/** How many top wallets to preview on the home page, and over which window. */
+const HOME_GUZZLER_LIMIT = 10;
+const HOME_GUZZLER_WINDOW = "1h";
 
 type HomeDebugRequestKind = "range" | "block";
 
@@ -73,6 +81,8 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   const [blocksLoading, setBlocksLoading] = useState(true);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [debugStats, setDebugStats] = useState<HomeDebugStats>(EMPTY_HOME_DEBUG_STATS);
+  const [topGuzzlers, setTopGuzzlers] = useState<GuzzlerStat[] | null>(null);
+  const [guzzlersUnavailable, setGuzzlersUnavailable] = useState(false);
   const [simulateOffline, setSimulateOffline] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIMULATE_OFFLINE_STORAGE_KEY) === "true";
@@ -159,6 +169,31 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       if (intervalId !== undefined) window.clearInterval(intervalId);
     };
   }, [settings, recordDebugRequest]);
+
+  // Most-active-wallets preview (top guzzlers over the last hour). Independent of
+  // the blocks feed — if the guzzlers feature is disabled the section just hides.
+  useEffect(() => {
+    let cancelled = false;
+    const loadGuzzlers = async () => {
+      try {
+        const board = await fetchGuzzlers(HOME_GUZZLER_LIMIT);
+        if (cancelled) return;
+        const hourly = board.windows.find((w) => w.label === HOME_GUZZLER_WINDOW);
+        setTopGuzzlers((hourly?.guzzlers ?? []).slice(0, HOME_GUZZLER_LIMIT));
+        setGuzzlersUnavailable(false);
+      } catch {
+        if (cancelled) return;
+        setTopGuzzlers([]);
+        setGuzzlersUnavailable(true);
+      }
+    };
+    void loadGuzzlers();
+    const interval = window.setInterval(loadGuzzlers, REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const blocks = blocksData?.blocks ?? [];
   const latestBlock = blocks[0] ?? null;
@@ -311,6 +346,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   }, [settings]);
 
   const blocksHref = buildPermalinkHref("blocks", { limit: "100" });
+  const guzzlersHref = buildPermalinkHref("guzzlers", {});
   const lastUpdatedLabel = useMemo(() => {
     if (!lastUpdatedAt) return "Waiting for data";
     return `Updated ${lastUpdatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
@@ -331,6 +367,20 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   const openBlocksView = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     if (writePermalink("blocks", { limit: "100" })) {
+      onLocationChange();
+    }
+  };
+
+  const openGuzzlersView = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (writePermalink("guzzlers", {})) {
+      onLocationChange();
+    }
+  };
+
+  const openGuzzler = (event: React.MouseEvent<HTMLAnchorElement>, address: string) => {
+    event.preventDefault();
+    if (writePermalink("guzzlers", { address })) {
       onLocationChange();
     }
   };
@@ -417,6 +467,74 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             value={lastMinuteAvgGas !== null ? fmtGasBillions(lastMinuteAvgGas) : "—"}
           />
         </div>
+      </div>
+
+      <div>
+        <div className="home-section-head">
+          <div>
+            <p className="home-kicker">network activity</p>
+            <h3>Most active wallets · last hour</h3>
+          </div>
+          <a href={guzzlersHref} onClick={openGuzzlersView}>
+            Explore network activity →
+          </a>
+        </div>
+        <p className="home-activity-note">
+          The wallets submitting the most transactions in the last hour, ranked by
+          total gas used.
+        </p>
+        {guzzlersUnavailable ? (
+          <p className="home-empty">Wallet activity tracking is not enabled.</p>
+        ) : topGuzzlers === null ? (
+          <p className="home-empty">Loading most active wallets…</p>
+        ) : topGuzzlers.length === 0 ? (
+          <p className="home-empty">No wallet activity in the last hour.</p>
+        ) : (
+          <div className="home-feed-list">
+            {topGuzzlers.map((guzzler, index) => {
+              const display = addressDisplay(guzzler.address);
+              return (
+                <a
+                  key={guzzler.address}
+                  className="home-feed-item"
+                  href={buildPermalinkHref("guzzlers", { address: guzzler.address })}
+                  onClick={(event) => openGuzzler(event, guzzler.address)}
+                  title={`View activity for ${display.title ?? guzzler.address}`}
+                >
+                  <img
+                    className="guzzler-icon"
+                    src={blockieDataUri(guzzler.address)}
+                    alt=""
+                    width={40}
+                    height={40}
+                    loading="lazy"
+                  />
+                  <div className="home-feed-main">
+                    <div className="home-feed-title">
+                      <span className="mono">
+                        {index + 1}. {display.label}
+                      </span>
+                    </div>
+                    <div className="home-feed-meta">
+                      <span>
+                        <b>{fmtInteger(guzzler.transactionCount)}</b> txns
+                      </span>
+                      <span>
+                        <b>{fmtGasBillions(guzzler.totalGasUsed)}</b> gas
+                      </span>
+                    </div>
+                  </div>
+                  <div className="home-feed-side">
+                    <strong>#{index + 1}</strong>
+                    <span>
+                      {fmtEth(guzzler.totalFeeWei)} {settings.tokenSymbol} fees
+                    </span>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div>

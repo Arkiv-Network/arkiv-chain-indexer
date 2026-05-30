@@ -14,9 +14,12 @@ const WEI_PER_TOKEN = 1_000_000_000_000_000_000n; // 1e18
 /** Fixed-point scale used when converting wei to a plain JS number of tokens. */
 const TOKEN_PRECISION = 1_000_000n; // 1e6 — six decimals of the native token
 
+/** Stable identifier for an activity-view time window (used in the permalink). */
+export type GuzzlerActivityWindowKey = "1h" | "6h" | "24h" | "all";
+
 /** A selectable time span for the chart's x-axis. `ms === null` fits the data. */
 export interface GuzzlerActivityWindow {
-  key: string;
+  key: GuzzlerActivityWindowKey;
   label: string;
   /** Span in milliseconds, or null to auto-fit to whatever data exists. */
   ms: number | null;
@@ -170,6 +173,26 @@ export function activityPlotRange(
     return undefined;
   }
   return [new Date(nowMs - windowMs).toISOString(), new Date(nowMs).toISOString()];
+}
+
+/**
+ * Map a leaderboard window span onto the activity view's coarser windows so a
+ * drill-in keeps a comparable time selection: anything up to an hour collapses
+ * to "1h", up to six hours to "6h", and the rest to the 24h horizon.
+ */
+export function activityWindowForMs(ms: number): GuzzlerActivityWindowKey {
+  if (ms <= HOUR_MS) return "1h";
+  if (ms <= 6 * HOUR_MS) return "6h";
+  return "24h";
+}
+
+/** A valid activity window key (e.g. from the permalink), or null. */
+export function normalizeActivityWindowKey(
+  value: string | null | undefined,
+): GuzzlerActivityWindowKey | null {
+  return GUZZLER_ACTIVITY_WINDOWS.some((window) => window.key === value)
+    ? (value as GuzzlerActivityWindowKey)
+    : null;
 }
 
 /** Whether a string is a syntactically valid 0x-prefixed 20-byte address. */

@@ -347,7 +347,7 @@ export function App() {
               className={activeView === "guzzlers" ? "active" : ""}
               onClick={() => setView("guzzlers")}
             >
-              Guzzlers
+              Activity
             </button>
             <button
               type="button"
