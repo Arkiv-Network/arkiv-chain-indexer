@@ -405,3 +405,94 @@ export async function readGuzzlerLeaderboards(
   tracker.sweep(nowMs);
   return tracker.getLeaderboards(nowMs, limit, windows);
 }
+
+/** Default lifetime of a cached leaderboard before it is recomputed. */
+export const DEFAULT_GUZZLER_CACHE_TTL_MS = 5000;
+
+/** Return a copy of `board` with each window cut to the requested top-N. */
+function sliceLeaderboards(board: GuzzlerLeaderboards, limit: number): GuzzlerLeaderboards {
+  const safeLimit = Math.max(0, Math.floor(limit));
+  return {
+    generatedAt: board.generatedAt,
+    retentionMs: board.retentionMs,
+    limit: safeLimit,
+    windows: board.windows.map((window) => ({
+      label: window.label,
+      windowMs: window.windowMs,
+      count: window.count,
+      guzzlers: window.guzzlers.slice(0, safeLimit),
+    })),
+  };
+}
+
+export interface GuzzlerLeaderboardCacheOptions {
+  /** How long a computed board is reused before recomputing. */
+  ttlMs?: number;
+  /** Injectable clock for deterministic tests. Defaults to `Date.now`. */
+  now?: () => number;
+  windows?: readonly GuzzlerWindow[];
+  retentionMs?: number;
+}
+
+/**
+ * Server-side cache for the guzzler leaderboards.
+ *
+ * Recomputing a leaderboard means pulling the entire persisted dataset out of
+ * Redis (a full `HGETALL` of up to {@link DEFAULT_GUZZLER_WINDOW_MS} of senders)
+ * and rebuilding a tracker from scratch — far too costly to repeat on every
+ * request. This caches the fully ranked board (computed at
+ * {@link MAX_GUZZLER_LIMIT}) for a short TTL and answers each request with a
+ * re-sliced view, so bursts of traffic collapse onto a single rebuild.
+ * Concurrent misses share one in-flight rebuild to avoid a stampede.
+ */
+export class GuzzlerLeaderboardCache {
+  private readonly ttlMs: number;
+  private readonly now: () => number;
+  private readonly windows: readonly GuzzlerWindow[];
+  private readonly retentionMs: number;
+  private cached: { board: GuzzlerLeaderboards; computedAtMs: number } | null = null;
+  private inFlight: Promise<GuzzlerLeaderboards> | null = null;
+
+  constructor(
+    private readonly store: GuzzlerStore,
+    options: GuzzlerLeaderboardCacheOptions = {},
+  ) {
+    this.ttlMs = options.ttlMs ?? DEFAULT_GUZZLER_CACHE_TTL_MS;
+    this.now = options.now ?? (() => Date.now());
+    this.windows = options.windows ?? GUZZLER_WINDOWS;
+    this.retentionMs = options.retentionMs ?? DEFAULT_GUZZLER_WINDOW_MS;
+  }
+
+  /** The leaderboards cut to `limit`, recomputing from the store only if stale. */
+  async get(limit: number = DEFAULT_GUZZLER_LIMIT): Promise<GuzzlerLeaderboards> {
+    return sliceLeaderboards(await this.fullBoard(), limit);
+  }
+
+  private async fullBoard(): Promise<GuzzlerLeaderboards> {
+    const nowMs = this.now();
+    if (this.cached && nowMs - this.cached.computedAtMs < this.ttlMs) {
+      return this.cached.board;
+    }
+    if (this.inFlight) {
+      return this.inFlight;
+    }
+    // Compute at the maximum top-N so any per-request limit can be served by
+    // slicing the cached board without another rebuild.
+    const rebuild = readGuzzlerLeaderboards(
+      this.store,
+      nowMs,
+      MAX_GUZZLER_LIMIT,
+      this.windows,
+      this.retentionMs,
+    )
+      .then((board) => {
+        this.cached = { board, computedAtMs: nowMs };
+        return board;
+      })
+      .finally(() => {
+        this.inFlight = null;
+      });
+    this.inFlight = rebuild;
+    return rebuild;
+  }
+}

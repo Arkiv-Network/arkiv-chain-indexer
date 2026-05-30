@@ -63,7 +63,7 @@ describe("batcher collector worker", () => {
       {
         blockNumber: "10",
         blockDate: "2026-05-22T15:17:01.000Z",
-      } as StoredBlock,
+      } as unknown as StoredBlock,
     ]);
     const collector = new FakeBatcherCollector({ batcherQueueSize: "906" });
     const runtime = new FakeRuntime();

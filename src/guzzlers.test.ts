@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  GuzzlerLeaderboardCache,
   GuzzlerTracker,
   readGuzzlerLeaderboards,
   type GuzzlerStore,
@@ -172,5 +173,64 @@ describe("readGuzzlerLeaderboards", () => {
     for (const window of board.windows) {
       expect(window.guzzlers.map((g) => g.address)).not.toContain("0xexpired");
     }
+  });
+});
+
+class CountingGuzzlerStore extends FakeGuzzlerStore {
+  loadCount = 0;
+  override async loadAll(): Promise<Map<string, GuzzlerTransaction[]>> {
+    this.loadCount += 1;
+    return super.loadAll();
+  }
+}
+
+describe("GuzzlerLeaderboardCache", () => {
+  function buildStore(): CountingGuzzlerStore {
+    return new CountingGuzzlerStore(
+      new Map([
+        ["0xa", [tx("0x1", T0 - 1000, "100")]],
+        ["0xb", [tx("0x2", T0 - 1000, "200")]],
+        ["0xc", [tx("0x3", T0 - 1000, "300")]],
+      ]),
+    );
+  }
+
+  test("reuses the computed board within the TTL and recomputes after it", async () => {
+    const store = buildStore();
+    let now = T0;
+    const cache = new GuzzlerLeaderboardCache(store, { ttlMs: 5000, now: () => now });
+
+    await cache.get(10);
+    now = T0 + 4000; // still within the 5s TTL
+    await cache.get(10);
+    expect(store.loadCount).toBe(1);
+
+    now = T0 + 6000; // past the TTL
+    await cache.get(10);
+    expect(store.loadCount).toBe(2);
+  });
+
+  test("serves different limits from one cached board", async () => {
+    const store = buildStore();
+    const cache = new GuzzlerLeaderboardCache(store, { ttlMs: 5000, now: () => T0 });
+
+    const top1 = await cache.get(1);
+    const top10 = await cache.get(10);
+
+    expect(store.loadCount).toBe(1); // both served from the same rebuild
+    const five1 = top1.windows.find((w) => w.label === "5m")!;
+    const five10 = top10.windows.find((w) => w.label === "5m")!;
+    expect(top1.limit).toBe(1);
+    expect(five1.guzzlers.map((g) => g.address)).toEqual(["0xc"]);
+    expect(five1.count).toBe(3); // full count preserved despite the cut
+    expect(five10.guzzlers.map((g) => g.address)).toEqual(["0xc", "0xb", "0xa"]);
+  });
+
+  test("collapses concurrent misses onto a single rebuild", async () => {
+    const store = buildStore();
+    const cache = new GuzzlerLeaderboardCache(store, { ttlMs: 5000, now: () => T0 });
+
+    await Promise.all([cache.get(10), cache.get(10), cache.get(10)]);
+    expect(store.loadCount).toBe(1);
   });
 });

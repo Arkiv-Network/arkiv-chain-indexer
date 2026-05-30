@@ -3,6 +3,7 @@ import { type BlockInspectionResult } from "./blockInspector";
 import {
   DEFAULT_GUZZLER_LIMIT,
   MAX_GUZZLER_LIMIT,
+  GuzzlerLeaderboardCache,
   readGuzzlerLeaderboards,
   type GuzzlerLeaderboards,
   type GuzzlerStore,
@@ -40,6 +41,11 @@ export interface BlockServerOptions {
   baseloadRuntime?: BaseloadRuntime;
   baseloadAdminBearerToken?: string;
   guzzlerStore?: GuzzlerStore;
+  /**
+   * Persistent leaderboard cache, created once per server so repeated requests
+   * reuse a computed board instead of rebuilding it from Redis each time.
+   */
+  guzzlerLeaderboardCache?: GuzzlerLeaderboardCache;
 }
 
 export interface BlocksResponseBody {
@@ -188,6 +194,11 @@ const CORS_HEADERS: Record<string, string> = {
 
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
+  // Build the leaderboard cache once so it persists across requests; without
+  // this each /guzzlers hit would reload the whole dataset from Redis.
+  const guzzlerLeaderboardCache = options.guzzlerStore
+    ? new GuzzlerLeaderboardCache(options.guzzlerStore)
+    : undefined;
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
     fetch: (request) =>
@@ -198,6 +209,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
           ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
           : {}),
         ...(options.guzzlerStore ? { guzzlerStore: options.guzzlerStore } : {}),
+        ...(guzzlerLeaderboardCache ? { guzzlerLeaderboardCache } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -245,7 +257,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/guzzlers") {
-    return handleGetGuzzlers(url, options.guzzlerStore);
+    return handleGetGuzzlers(url, options.guzzlerLeaderboardCache, options.guzzlerStore);
   }
 
   if (url.pathname === "/blocks") {
@@ -711,18 +723,19 @@ function parseGuzzlerLimit(params: URLSearchParams): number {
 
 async function handleGetGuzzlers(
   url: URL,
+  cache: GuzzlerLeaderboardCache | undefined,
   guzzlerStore: GuzzlerStore | undefined,
 ): Promise<Response> {
-  if (!guzzlerStore) {
+  if (!cache && !guzzlerStore) {
     return jsonError(503, "Guzzler tracking is disabled");
   }
 
   const limit = parseGuzzlerLimit(url.searchParams);
-  const body: GuzzlersResponseBody = await readGuzzlerLeaderboards(
-    guzzlerStore,
-    Date.now(),
-    limit,
-  );
+  // The server supplies a persistent cache; a bare store (e.g. from a direct
+  // handleRequest call in tests) falls back to a one-shot rebuild.
+  const body: GuzzlersResponseBody = cache
+    ? await cache.get(limit)
+    : await readGuzzlerLeaderboards(guzzlerStore as GuzzlerStore, Date.now(), limit);
 
   return jsonResponse(body);
 }
