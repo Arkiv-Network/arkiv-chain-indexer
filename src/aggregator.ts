@@ -46,7 +46,10 @@ export async function aggregateRanges(
   let skippedComplete = 0;
 
   if (skipCompleted) {
-    const latestCompleteRangeStart = await storage.getLatestCompleteRangeStart(rangeSize);
+    const latestCompleteRangeStart = await storage.getLatestCompleteRangeStart(
+      rangeSize,
+      processedFirstRangeStart,
+    );
     if (latestCompleteRangeStart !== undefined && latestCompleteRangeStart >= processedFirstRangeStart) {
       const latestSkippedRangeStart =
         latestCompleteRangeStart < lastRangeStart ? latestCompleteRangeStart : lastRangeStart;

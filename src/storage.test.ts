@@ -771,13 +771,18 @@ if (!hasPostgresForTests()) {
 
       await storage.aggregateRangeIfComplete(0n, 50n);
       await storage.aggregateRangeIfComplete(50n, 50n);
+      await storage.aggregateRangeIfComplete(150n, 50n);
       await storage.aggregateRangeIfComplete(0n, 100n);
 
-      expect(await storage.getLatestCompleteRangeStart(50n)).toBe(50n);
+      expect(await storage.getLatestCompleteRangeStart(50n)).toBe(150n);
+      expect(await storage.getLatestCompleteRangeStart(50n, 0n)).toBe(50n);
+      expect(await storage.getLatestCompleteRangeStart(50n, 100n)).toBeUndefined();
+      expect(await storage.getLatestCompleteRangeStart(50n, 150n)).toBe(150n);
       expect(await storage.getLatestCompleteRangeStart(100n)).toBe(0n);
       expect(await storage.getLatestCompleteRangeStart(2n)).toBeUndefined();
       expect(await storage.isBlockRangeComplete(50n, 50n)).toBe(true);
       expect(await storage.isBlockRangeComplete(100n, 50n)).toBe(false);
+      expect(await storage.isBlockRangeComplete(150n, 50n)).toBe(true);
       expect(await storage.isBlockRangeComplete(0n, 100n)).toBe(true);
     });
 
