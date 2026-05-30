@@ -1,11 +1,14 @@
 import {
   DEFAULT_GUZZLER_RETENTION_MS,
   DEFAULT_GUZZLER_SWEEP_INTERVAL_MS,
+  GUZZLER_BUCKET_MS,
   GUZZLER_CACHE_LIMIT,
   GUZZLER_WINDOWS,
   GuzzlerTracker,
+  isValidBucket,
   normalizeAddress,
   type GuzzlerBlockTransaction,
+  type GuzzlerBucket,
   type GuzzlerRecorder,
   type GuzzlerStatistics,
   type GuzzlerStore,
@@ -89,34 +92,39 @@ export class GuzzlerService implements GuzzlerRecorder {
       return;
     }
 
-    const touched = new Set<string>();
+    const bySender = new Map<string, GuzzlerBlockTransaction[]>();
     for (const tx of transactions) {
       if (!tx.from) {
         continue;
       }
-      this.tracker.record(
-        tx.from,
-        { timestampMs: blockTimestampMs, gasUsed: tx.gasUsed, feeWei: tx.feeWei },
-        now,
-      );
-      touched.add(normalizeAddress(tx.from));
+      const address = normalizeAddress(tx.from);
+      const senderTransactions = bySender.get(address) ?? [];
+      senderTransactions.push(tx);
+      bySender.set(address, senderTransactions);
     }
 
-    if (touched.size === 0) {
+    if (bySender.size === 0) {
       return;
     }
 
-    const updated: string[] = [];
-    const removed: string[] = [];
-    for (const address of touched) {
-      const buckets = this.tracker.getSenderBuckets(address);
-      if (buckets && buckets.length > 0) {
-        updated.push(address);
-      } else {
-        removed.push(address);
-      }
+    const updated = [...bySender].map(([address, senderTransactions]) => ({
+      address,
+      buckets: foldBlockTransactions(
+        this.tracker.getSenderBuckets(address) ?? [],
+        senderTransactions,
+        blockTimestampMs,
+        now,
+        this.retentionMs,
+      ),
+    }));
+
+    // Persist first. If Redis fails, the scanner retries the block and the
+    // in-memory tracker has not been advanced, so retrying cannot double count.
+    await Promise.all(updated.map(({ address, buckets }) => this.store.putSender(address, buckets)));
+
+    for (const { address, buckets } of updated) {
+      this.tracker.loadSender(address, buckets);
     }
-    await this.persist(updated, removed);
   }
 
   /** Current in-memory statistics (primarily for diagnostics/tests). */
@@ -172,5 +180,80 @@ export class GuzzlerService implements GuzzlerRecorder {
       this.sweepTimer = null;
     }
     await this.store.close();
+  }
+}
+
+interface MutableBucketDraft {
+  minute: number;
+  transactionCount: number;
+  totalGasUsed: bigint;
+  totalFeeWei: bigint;
+  firstSeenMs: number;
+  lastSeenMs: number;
+}
+
+function foldBlockTransactions(
+  currentBuckets: GuzzlerBucket[],
+  transactions: GuzzlerBlockTransaction[],
+  blockTimestampMs: number,
+  nowMs: number,
+  retentionMs: number,
+): GuzzlerBucket[] {
+  const cutoff = nowMs - retentionMs;
+  const buckets = new Map<number, MutableBucketDraft>();
+
+  for (const bucket of currentBuckets) {
+    if (!isValidBucket(bucket) || bucket.lastSeenMs <= cutoff) {
+      continue;
+    }
+    buckets.set(bucket.minute, {
+      minute: bucket.minute,
+      transactionCount: bucket.transactionCount,
+      totalGasUsed: toBigInt(bucket.totalGasUsed),
+      totalFeeWei: toBigInt(bucket.totalFeeWei),
+      firstSeenMs: bucket.firstSeenMs,
+      lastSeenMs: bucket.lastSeenMs,
+    });
+  }
+
+  const minute = Math.floor(blockTimestampMs / GUZZLER_BUCKET_MS);
+  let bucket = buckets.get(minute);
+  if (!bucket) {
+    bucket = {
+      minute,
+      transactionCount: 0,
+      totalGasUsed: 0n,
+      totalFeeWei: 0n,
+      firstSeenMs: blockTimestampMs,
+      lastSeenMs: blockTimestampMs,
+    };
+    buckets.set(minute, bucket);
+  }
+
+  for (const tx of transactions) {
+    bucket.transactionCount += 1;
+    bucket.totalGasUsed += toBigInt(tx.gasUsed);
+    bucket.totalFeeWei += toBigInt(tx.feeWei);
+    if (blockTimestampMs < bucket.firstSeenMs) bucket.firstSeenMs = blockTimestampMs;
+    if (blockTimestampMs > bucket.lastSeenMs) bucket.lastSeenMs = blockTimestampMs;
+  }
+
+  return [...buckets.values()]
+    .sort((a, b) => a.minute - b.minute)
+    .map((bucket) => ({
+      minute: bucket.minute,
+      transactionCount: bucket.transactionCount,
+      totalGasUsed: bucket.totalGasUsed.toString(),
+      totalFeeWei: bucket.totalFeeWei.toString(),
+      firstSeenMs: bucket.firstSeenMs,
+      lastSeenMs: bucket.lastSeenMs,
+    }));
+}
+
+function toBigInt(value: string): bigint {
+  try {
+    return BigInt(value);
+  } catch {
+    return 0n;
   }
 }

@@ -9,6 +9,7 @@ import {
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { BatcherMetrics, BatcherMetricsSource } from "./batcher";
+import type { GuzzlerBlockTransaction, GuzzlerRecorder } from "./guzzlers";
 import type { BlockProgressUpdate, ScannerStorage } from "./storage";
 import type { InspectedTransaction } from "./blockInspector";
 import type { BlockMetrics, Hex, RpcBlock, RpcReceipt } from "./types";
@@ -97,6 +98,56 @@ describe("scanOneBlock", () => {
       txHash(1),
     ]);
     expect(storage.lastSuccessfulBlock).toBe(1n);
+  });
+
+  test("records guzzler transactions even when transaction rows are disabled", async () => {
+    const rpc = new SimpleRpc(new Map(), 2);
+    const storage = new FakeStorage();
+    const guzzlers = new FakeGuzzlerRecorder();
+
+    await scanOneBlock(
+      1n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+      { kind: "lastSuccessfulBlock" },
+      {},
+      false,
+      undefined,
+      guzzlers,
+    );
+
+    expect(storage.savedTransactions).toHaveLength(0);
+    expect(guzzlers.blocks).toHaveLength(1);
+    expect(guzzlers.blocks[0]?.timestampMs).toBe(Date.parse("2024-01-12T04:09:36.000Z"));
+    expect(guzzlers.blocks[0]?.transactions.map((entry) => entry.hash)).toEqual([
+      txHash(0),
+      txHash(1),
+    ]);
+    expect(guzzlers.blocks[0]?.transactions.map((entry) => entry.gasUsed)).toEqual(["1", "1"]);
+  });
+
+  test("fails the block when guzzler recording fails", async () => {
+    const rpc = new SimpleRpc(new Map(), 1);
+    const storage = new FakeStorage();
+    const guzzlers = new FakeGuzzlerRecorder(1);
+
+    await expect(
+      scanOneBlock(
+        1n,
+        rpc as unknown as EthereumRpcClient,
+        storage as unknown as ScannerStorage,
+        1,
+        { kind: "lastSuccessfulBlock" },
+        {},
+        true,
+        undefined,
+        guzzlers,
+      ),
+    ).rejects.toThrow("guzzler write failed");
+
+    expect(storage.savedMetrics).toHaveLength(1);
+    expect(guzzlers.blocks).toHaveLength(1);
   });
 
   test("adds batcher collector metrics to stored block metrics when available", async () => {
@@ -278,6 +329,33 @@ describe("backfillDownForSlice", () => {
     expect(rpc.requestedBlocks).toEqual([100n, 100n]);
     expect(runtime.sleeps).toEqual([7]);
     expect(storage.backfillNextBlock).toBe(99n);
+  });
+});
+
+describe("scanForwardToSafeHead guzzler retry", () => {
+  test("retries the same block when guzzler recording fails", async () => {
+    const rpc = new SimpleRpc(new Map(), 1);
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime();
+    const guzzlers = new FakeGuzzlerRecorder(1);
+
+    const scanned = await scanForwardToSafeHead(
+      1n,
+      1n,
+      config({ retryMs: 123 }),
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      runtime,
+      undefined,
+      guzzlers,
+    );
+
+    expect(scanned).toBe(true);
+    expect(runtime.sleeps).toEqual([123]);
+    expect(rpc.requestedBlocks).toEqual([1n, 1n]);
+    expect(storage.savedMetrics.map((entry) => entry.blockNumber)).toEqual([1n, 1n]);
+    expect(guzzlers.blocks).toHaveLength(2);
+    expect(storage.lastSuccessfulBlock).toBe(1n);
   });
 });
 
@@ -617,6 +695,23 @@ class FakeBatcherCollector implements BatcherMetricsSource {
   async getMetricsForBlockDate(blockDate: string): Promise<BatcherMetrics | undefined> {
     this.requestedDates.push(blockDate);
     return this.metrics;
+  }
+}
+
+class FakeGuzzlerRecorder implements GuzzlerRecorder {
+  blocks: Array<{ timestampMs: number; transactions: GuzzlerBlockTransaction[] }> = [];
+
+  constructor(private failuresRemaining = 0) {}
+
+  async recordBlock(
+    blockTimestampMs: number,
+    transactions: Iterable<GuzzlerBlockTransaction>,
+  ): Promise<void> {
+    this.blocks.push({ timestampMs: blockTimestampMs, transactions: [...transactions] });
+    if (this.failuresRemaining > 0) {
+      this.failuresRemaining -= 1;
+      throw new Error("guzzler write failed");
+    }
   }
 }
 

@@ -17,6 +17,7 @@ class InMemoryGuzzlerStore implements GuzzlerStore {
   putCount = 0;
   removeCount = 0;
   saveCount = 0;
+  putFailuresRemaining = 0;
   closed = false;
 
   constructor(initial?: Map<string, GuzzlerBucket[]>) {
@@ -38,6 +39,10 @@ class InMemoryGuzzlerStore implements GuzzlerStore {
   }
   async putSender(address: string, buckets: GuzzlerBucket[]): Promise<void> {
     this.putCount += 1;
+    if (this.putFailuresRemaining > 0) {
+      this.putFailuresRemaining -= 1;
+      throw new Error("put failed");
+    }
     this.senders.set(address, buckets.map((b) => ({ ...b })));
   }
   async removeSenders(addresses: string[]): Promise<void> {
@@ -113,6 +118,34 @@ describe("GuzzlerService", () => {
       transactionCount: 2,
       totalGasUsed: "300",
       totalFeeWei: "30",
+    });
+  });
+
+  test("does not mutate memory before a failed bucket persistence", async () => {
+    const store = new InMemoryGuzzlerStore();
+    store.putFailuresRemaining = 1;
+    const svc = service(store, T0);
+
+    await expect(svc.recordBlock(T0, [blockTx("0xAaa", "0x1", "100", "10")])).rejects.toThrow(
+      "put failed",
+    );
+    expect(svc.getStatistics(T0).count).toBe(0);
+    expect(store.senders.has("0xaaa")).toBe(false);
+
+    await svc.recordBlock(T0, [blockTx("0xAaa", "0x1", "100", "10")]);
+
+    const buckets = store.senders.get("0xaaa");
+    expect(buckets).toHaveLength(1);
+    expect(buckets?.[0]).toMatchObject({
+      transactionCount: 1,
+      totalGasUsed: "100",
+      totalFeeWei: "10",
+    });
+    expect(svc.getStatistics(T0).guzzlers[0]).toMatchObject({
+      address: "0xaaa",
+      transactionCount: 1,
+      totalGasUsed: "100",
+      totalFeeWei: "10",
     });
   });
 

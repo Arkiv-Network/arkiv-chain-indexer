@@ -341,19 +341,15 @@ async function recordGuzzlerTransactions(
   if (!Number.isFinite(blockTimestampMs)) {
     return;
   }
-  try {
-    await guzzlerRecorder.recordBlock(
-      blockTimestampMs,
-      transactions.map((transaction) => ({
-        from: transaction.from,
-        hash: transaction.hash,
-        gasUsed: transaction.gasUsed,
-        feeWei: transaction.transactionFeeWei,
-      })),
-    );
-  } catch (error) {
-    console.error("Failed to record guzzler transactions", error);
-  }
+  await guzzlerRecorder.recordBlock(
+    blockTimestampMs,
+    transactions.map((transaction) => ({
+      from: transaction.from,
+      hash: transaction.hash,
+      gasUsed: transaction.gasUsed,
+      feeWei: transaction.transactionFeeWei,
+    })),
+  );
 }
 
 async function enrichWithBatcherMetrics(
