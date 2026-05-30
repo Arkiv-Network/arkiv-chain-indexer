@@ -1,5 +1,6 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type BlockInspectionResult } from "./blockInspector";
+import { readGuzzlerStatistics, type GuzzlerStat, type GuzzlerStore } from "./guzzlers";
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
@@ -32,6 +33,7 @@ export interface BlockServerOptions {
   transactionDataEnabled?: boolean;
   baseloadRuntime?: BaseloadRuntime;
   baseloadAdminBearerToken?: string;
+  guzzlerStore?: GuzzlerStore;
 }
 
 export interface BlocksResponseBody {
@@ -100,6 +102,13 @@ export interface SendersResponseBody {
   senders: StoredSenderStats[];
 }
 
+export interface GuzzlersResponseBody {
+  windowMs: number;
+  generatedAt: string;
+  count: number;
+  guzzlers: GuzzlerStat[];
+}
+
 export interface BaseloadConfigsResponseBody {
   configs: StoredBaseloadConfigSummary[];
 }
@@ -128,6 +137,7 @@ export interface HealthResponseBody {
   database: DatabaseStats;
   features: {
     transactionData: boolean;
+    guzzlers: boolean;
   };
 }
 
@@ -179,6 +189,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.baseloadAdminBearerToken !== undefined
           ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
           : {}),
+        ...(options.guzzlerStore ? { guzzlerStore: options.guzzlerStore } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -222,7 +233,11 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/health") {
-    return handleGetHealth(storage, transactionDataEnabled);
+    return handleGetHealth(storage, transactionDataEnabled, options.guzzlerStore !== undefined);
+  }
+
+  if (url.pathname === "/guzzlers") {
+    return handleGetGuzzlers(options.guzzlerStore);
   }
 
   if (url.pathname === "/blocks") {
@@ -427,6 +442,7 @@ function requireAdminBearerToken(request: Request, adminBearerToken: string | un
 async function handleGetHealth(
   storage: ScannerStorage,
   transactionDataEnabled: boolean,
+  guzzlersEnabled: boolean,
 ): Promise<Response> {
   const now = new Date();
   const [progress, database] = await Promise.all([
@@ -464,6 +480,7 @@ async function handleGetHealth(
     database,
     features: {
       transactionData: transactionDataEnabled,
+      guzzlers: guzzlersEnabled,
     },
   };
 
@@ -644,6 +661,22 @@ async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): P
   const body: TransactionRecordsResponseBody = {
     limit,
     records: await storage.queryTransactionRecords({ limit }),
+  };
+
+  return jsonResponse(body);
+}
+
+async function handleGetGuzzlers(guzzlerStore: GuzzlerStore | undefined): Promise<Response> {
+  if (!guzzlerStore) {
+    return jsonError(503, "Guzzler tracking is disabled");
+  }
+
+  const statistics = await readGuzzlerStatistics(guzzlerStore, Date.now());
+  const body: GuzzlersResponseBody = {
+    windowMs: statistics.windowMs,
+    generatedAt: statistics.generatedAt,
+    count: statistics.count,
+    guzzlers: statistics.guzzlers,
   };
 
   return jsonResponse(body);

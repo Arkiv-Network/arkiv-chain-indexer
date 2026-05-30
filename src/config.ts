@@ -23,6 +23,7 @@ export interface ScannerConfig {
   backfillOnly: boolean;
   backfillSleepMs: number;
   batcherCollectorUrl?: string;
+  redisUrl?: string;
 }
 
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
@@ -118,6 +119,12 @@ const SPEC: CliSpec = {
       description: "Optional BATCHER_COLLECTOR_URL base for recent block batcher metrics.",
       env: ["BATCHER_COLLECTOR_URL", "SCANNER_BATCHER_COLLECTOR_URL"],
     },
+    {
+      flags: "--redis-url <url>",
+      description:
+        "Optional Redis connection string. When set, recent senders are tracked for the guzzlers API.",
+      env: ["REDIS_URL", "SCANNER_REDIS_URL"],
+    },
   ],
 };
 
@@ -151,6 +158,7 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
   }
 
   const batcherCollectorUrl = cli.value("batcher-collector-url");
+  const redisUrl = cli.value("redis-url");
 
   return {
     rpcUrl,
@@ -170,5 +178,6 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
     backfillOnly,
     backfillSleepMs: coerceInt("--backfill-sleep-ms", cli.value("backfill-sleep-ms")!),
     ...(batcherCollectorUrl ? { batcherCollectorUrl } : {}),
+    ...(redisUrl ? { redisUrl } : {}),
   };
 }

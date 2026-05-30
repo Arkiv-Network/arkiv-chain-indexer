@@ -24,6 +24,7 @@
   "dependencies": {
     "@arkiv-network/sdk": "file:arkiv-sdk-js/arkiv-network-sdk-latest.tgz",
     "commander": "^15.0.0",
+    "denque": "^2.1.0",
     "pg": "^8.20.0",
     "viem": "^2.38.2"
   }

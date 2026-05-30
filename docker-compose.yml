@@ -19,6 +19,20 @@ services:
       timeout: 5s
       retries: 20
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   scanner:
     build:
       context: .
@@ -30,8 +44,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
       SCANNER_FROM_BLOCK: ${SCANNER_FROM_BLOCK:-}
       SCANNER_TO_BLOCK: ${SCANNER_TO_BLOCK:-}
@@ -141,8 +158,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
@@ -193,3 +213,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

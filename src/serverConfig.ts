@@ -6,6 +6,7 @@ export interface ServerConfig {
   hostname?: string;
   transactionDataEnabled: boolean;
   baseloadAdminBearerToken?: string;
+  redisUrl?: string;
 }
 
 const DEFAULT_PORT = 3000;
@@ -47,6 +48,12 @@ const SPEC: CliSpec = {
         "Bearer token required for mutating Baseload worker requests. Defaults to BASELOAD_ADMIN_BEARER_TOKEN. If unset, Baseload mutations are unrestricted.",
       env: ["BASELOAD_ADMIN_BEARER_TOKEN"],
     },
+    {
+      flags: "--redis-url <url>",
+      description:
+        "Optional Redis connection string. When set, the /guzzlers endpoint serves recent-sender statistics.",
+      env: ["REDIS_URL", "SERVER_REDIS_URL"],
+    },
   ],
 };
 
@@ -69,6 +76,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     cli.value("transaction-data-enabled")!,
   );
   const baseloadAdminBearerToken = cli.value("baseload-admin-bearer-token");
+  const redisUrl = cli.value("redis-url");
 
   return {
     databaseUrl,
@@ -76,5 +84,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     ...(hostname ? { hostname } : {}),
     transactionDataEnabled,
     ...(baseloadAdminBearerToken ? { baseloadAdminBearerToken } : {}),
+    ...(redisUrl ? { redisUrl } : {}),
   };
 }

@@ -4,6 +4,7 @@ import { readBuildInfo } from "./buildInfo";
 import { computeBlockMetrics } from "./metrics";
 import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { BatcherMetricsSource } from "./batcher";
+import type { GuzzlerRecorder } from "./guzzlers";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { ScannerConfig } from "./config";
@@ -27,11 +28,13 @@ export async function runScanner(
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
   batcherCollector?: BatcherMetricsSource,
+  guzzlerRecorder?: GuzzlerRecorder,
 ): Promise<void> {
   logBuildInfo();
   console.log(`Transaction row storage: ${config.saveTransactionData ? "enabled" : "disabled"}`);
+  console.log(`Guzzler tracking: ${guzzlerRecorder ? "enabled" : "disabled"}`);
   if (config.toBlock !== undefined) {
-    await runBoundedForwardScanner(config, rpc, storage, runtime, batcherCollector);
+    await runBoundedForwardScanner(config, rpc, storage, runtime, batcherCollector, guzzlerRecorder);
     return;
   }
 
@@ -40,7 +43,7 @@ export async function runScanner(
     return;
   }
 
-  await runNearHeadBackfillScanner(config, rpc, storage, runtime, batcherCollector);
+  await runNearHeadBackfillScanner(config, rpc, storage, runtime, batcherCollector, guzzlerRecorder);
 }
 
 function logBuildInfo(): void {
@@ -56,6 +59,7 @@ async function runBoundedForwardScanner(
   storage: ScannerStorage,
   runtime: ScannerRuntime,
   batcherCollector: BatcherMetricsSource | undefined,
+  guzzlerRecorder: GuzzlerRecorder | undefined,
 ): Promise<void> {
   if (config.fromBlock === undefined) {
     throw new Error("--from-block is required when --to-block is set");
@@ -107,6 +111,7 @@ async function runBoundedForwardScanner(
         { latestBlock, safeHead },
         config.saveTransactionData,
         batcherCollector,
+        guzzlerRecorder,
       );
       await fillRecentMissingBatcherMetrics(storage, batcherCollector);
       nextBlock += 1n;
@@ -126,6 +131,7 @@ async function runNearHeadBackfillScanner(
   storage: ScannerStorage,
   runtime: ScannerRuntime,
   batcherCollector: BatcherMetricsSource | undefined,
+  guzzlerRecorder: GuzzlerRecorder | undefined,
 ): Promise<void> {
   if (config.disableBackfill) {
     console.log("Starting near-head scanner with backfill disabled");
@@ -158,6 +164,7 @@ async function runNearHeadBackfillScanner(
       storage,
       runtime,
       batcherCollector,
+      guzzlerRecorder,
     );
     await fillRecentMissingBatcherMetrics(storage, batcherCollector);
 
@@ -266,6 +273,7 @@ export async function scanForwardToSafeHead(
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
   batcherCollector?: BatcherMetricsSource,
+  guzzlerRecorder?: GuzzlerRecorder,
 ): Promise<boolean> {
   const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
   // Cold start: no prior progress — jump to the lower bound (typically the
@@ -287,6 +295,7 @@ export async function scanForwardToSafeHead(
       "forward",
       { safeHead },
       batcherCollector,
+      guzzlerRecorder,
     );
 
     scanned = true;
@@ -306,6 +315,7 @@ async function scanBlockWithRetry(
   direction: "backfill" | "forward",
   summaryContext: BlockSummaryContext = {},
   batcherCollector?: BatcherMetricsSource,
+  guzzlerRecorder?: GuzzlerRecorder,
 ): Promise<void> {
   while (true) {
     try {
@@ -318,6 +328,7 @@ async function scanBlockWithRetry(
         summaryContext,
         config.saveTransactionData,
         batcherCollector,
+        guzzlerRecorder,
       );
       return;
     } catch (error) {
@@ -339,6 +350,7 @@ export async function scanOneBlock(
   summaryContext: BlockSummaryContext = {},
   saveTransactionData = true,
   batcherCollector?: BatcherMetricsSource,
+  guzzlerRecorder?: GuzzlerRecorder,
 ): Promise<void> {
   const startedAt = performance.now();
   const rpcStatsBefore = rpc.getStatsSnapshot();
@@ -352,6 +364,7 @@ export async function scanOneBlock(
   const inspectedTransactions = inspectBlockFromRpc(block, receipts).transactions;
   const transactions = saveTransactionData ? inspectedTransactions : undefined;
   await storage.saveBlockMetrics(metrics, progressUpdate, transactions, inspectedTransactions);
+  await recordGuzzlerTransactions(guzzlerRecorder, metrics.blockDate, inspectedTransactions);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats, summaryContext));
@@ -384,6 +397,33 @@ export async function fillRecentMissingBatcherMetrics(
     }
   }
   return updated;
+}
+
+async function recordGuzzlerTransactions(
+  guzzlerRecorder: GuzzlerRecorder | undefined,
+  blockDate: string,
+  transactions: ReturnType<typeof inspectBlockFromRpc>["transactions"],
+): Promise<void> {
+  if (!guzzlerRecorder) {
+    return;
+  }
+  const blockTimestampMs = Date.parse(blockDate);
+  if (!Number.isFinite(blockTimestampMs)) {
+    return;
+  }
+  try {
+    await guzzlerRecorder.recordBlock(
+      blockTimestampMs,
+      transactions.map((transaction) => ({
+        from: transaction.from,
+        hash: transaction.hash,
+        gasUsed: transaction.gasUsed,
+        feeWei: transaction.transactionFeeWei,
+      })),
+    );
+  } catch (error) {
+    console.error("Failed to record guzzler transactions", error);
+  }
 }
 
 async function enrichWithBatcherMetrics(
