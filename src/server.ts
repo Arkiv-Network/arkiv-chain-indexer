@@ -3,8 +3,10 @@ import { type BlockInspectionResult } from "./blockInspector";
 import {
   DEFAULT_GUZZLER_LIMIT,
   MAX_GUZZLER_LIMIT,
+  buildGuzzlerHistory,
   emptyLeaderboards,
   sliceLeaderboards,
+  type GuzzlerHistory,
   type GuzzlerLeaderboards,
   type GuzzlerStore,
 } from "./guzzlers";
@@ -110,6 +112,8 @@ export interface SendersResponseBody {
 }
 
 export type GuzzlersResponseBody = GuzzlerLeaderboards;
+
+export type GuzzlerHistoryResponseBody = GuzzlerHistory;
 
 export interface BaseloadConfigsResponseBody {
   configs: StoredBaseloadConfigSummary[];
@@ -247,6 +251,11 @@ export async function handleRequest(
 
   if (url.pathname === "/guzzlers") {
     return handleGetGuzzlers(url, options.guzzlerStore);
+  }
+
+  const guzzlerHistoryMatch = url.pathname.match(/^\/guzzler\/(.+)$/);
+  if (guzzlerHistoryMatch?.[1]) {
+    return handleGetGuzzlerHistory(decodeURIComponent(guzzlerHistoryMatch[1]), options.guzzlerStore);
   }
 
   if (url.pathname === "/blocks") {
@@ -741,6 +750,29 @@ async function handleGetGuzzlers(
   const body: GuzzlersResponseBody = board
     ? sliceLeaderboards(board, limit)
     : emptyLeaderboards(Date.now(), limit);
+
+  return jsonResponse(body);
+}
+
+async function handleGetGuzzlerHistory(
+  rawAddress: string,
+  guzzlerStore: GuzzlerStore | undefined,
+): Promise<Response> {
+  if (!guzzlerStore) {
+    return jsonError(503, "Guzzler tracking is disabled");
+  }
+
+  let address: string;
+  try {
+    address = parseAddressParam("address", rawAddress);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  // A single sender is one hash field, so this reads live rather than from the
+  // minute-cached leaderboard. An unknown sender yields an empty history.
+  const buckets = await guzzlerStore.loadSender(address);
+  const body: GuzzlerHistoryResponseBody = buildGuzzlerHistory(address, buckets ?? [], Date.now());
 
   return jsonResponse(body);
 }

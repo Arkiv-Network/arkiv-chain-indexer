@@ -32,6 +32,10 @@ class InMemoryGuzzlerStore implements GuzzlerStore {
       [...this.senders].map(([address, buckets]) => [address, buckets.map((b) => ({ ...b }))]),
     );
   }
+  async loadSender(address: string): Promise<GuzzlerBucket[] | null> {
+    const buckets = this.senders.get(address);
+    return buckets ? buckets.map((b) => ({ ...b })) : null;
+  }
   async putSender(address: string, buckets: GuzzlerBucket[]): Promise<void> {
     this.putCount += 1;
     this.senders.set(address, buckets.map((b) => ({ ...b })));

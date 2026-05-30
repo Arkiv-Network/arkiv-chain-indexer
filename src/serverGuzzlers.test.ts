@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { handleRequest, type GuzzlersResponseBody, type HealthResponseBody } from "./server";
+import {
+  handleRequest,
+  type GuzzlerHistoryResponseBody,
+  type GuzzlersResponseBody,
+  type HealthResponseBody,
+} from "./server";
 import {
   GUZZLER_CACHE_LIMIT,
   GuzzlerTracker,
@@ -46,6 +51,10 @@ class FakeGuzzlerStore implements GuzzlerStore {
   async loadAll(): Promise<Map<string, GuzzlerBucket[]>> {
     return new Map([...this.data].map(([address, buckets]) => [address, buckets.map((b) => ({ ...b }))]));
   }
+  async loadSender(address: string): Promise<GuzzlerBucket[] | null> {
+    const buckets = this.data.get(address.toLowerCase());
+    return buckets ? buckets.map((b) => ({ ...b })) : null;
+  }
   async putSender(): Promise<void> {}
   async removeSenders(): Promise<void> {}
   async saveLeaderboards(): Promise<void> {}
@@ -63,6 +72,9 @@ class FakeGuzzlerStore implements GuzzlerStore {
 }
 
 const emptyStorage = {} as ScannerStorage;
+
+/** A valid lowercase 20-byte hex address. */
+const ADDRESS = `0x${"ab".repeat(20)}`;
 
 describe("GET /guzzlers", () => {
   test("ranks active senders by gas used in every window", async () => {
@@ -178,6 +190,93 @@ describe("GET /guzzlers", () => {
     const response = await handleRequest(new Request("http://example.test/guzzlers"), emptyStorage);
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "Guzzler tracking is disabled" });
+  });
+});
+
+describe("GET /guzzler/:address", () => {
+  test("returns a sender's minute-bucket history ordered oldest-first", async () => {
+    const store = new FakeGuzzlerStore(
+      new Map([
+        [ADDRESS, [bucket(NOW - 2 * MINUTE, "200", "20"), bucket(NOW - 5 * MINUTE, "100", "10")]],
+      ]),
+    );
+
+    const response = await handleRequest(
+      new Request(`http://example.test/guzzler/${ADDRESS}`),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as GuzzlerHistoryResponseBody;
+    expect(body.address).toBe(ADDRESS);
+    expect(body.bucketMs).toBe(MINUTE);
+    expect(body.retentionMs).toBe(24 * HOUR);
+    expect(body.count).toBe(2);
+    expect(body.points.map((p) => p.totalGasUsed)).toEqual(["100", "200"]);
+    expect(body.points[0]?.startTime).toBe(
+      new Date(Math.floor((NOW - 5 * MINUTE) / MINUTE) * MINUTE).toISOString(),
+    );
+  });
+
+  test("uppercase addresses resolve to the same history", async () => {
+    const store = new FakeGuzzlerStore(new Map([[ADDRESS, [bucket(NOW - MINUTE, "100", "10")]]]));
+
+    const response = await handleRequest(
+      new Request(`http://example.test/guzzler/${ADDRESS.toUpperCase().replace("0X", "0x")}`),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+    const body = (await response.json()) as GuzzlerHistoryResponseBody;
+    expect(body.address).toBe(ADDRESS);
+    expect(body.count).toBe(1);
+  });
+
+  test("omits buckets aged past retention", async () => {
+    const store = new FakeGuzzlerStore(
+      new Map([[ADDRESS, [bucket(NOW - 25 * HOUR, "999"), bucket(NOW - MINUTE, "100")]]]),
+    );
+
+    const response = await handleRequest(
+      new Request(`http://example.test/guzzler/${ADDRESS}`),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+    const body = (await response.json()) as GuzzlerHistoryResponseBody;
+    expect(body.points.map((p) => p.totalGasUsed)).toEqual(["100"]);
+  });
+
+  test("returns an empty history for an unknown sender", async () => {
+    const store = new FakeGuzzlerStore(new Map());
+
+    const response = await handleRequest(
+      new Request(`http://example.test/guzzler/${ADDRESS}`),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as GuzzlerHistoryResponseBody;
+    expect(body.address).toBe(ADDRESS);
+    expect(body.count).toBe(0);
+    expect(body.points).toEqual([]);
+  });
+
+  test("rejects an invalid address", async () => {
+    const store = new FakeGuzzlerStore(new Map());
+    const response = await handleRequest(
+      new Request("http://example.test/guzzler/not-an-address"),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+    expect(response.status).toBe(400);
+  });
+
+  test("returns 503 when guzzler tracking is disabled", async () => {
+    const response = await handleRequest(
+      new Request(`http://example.test/guzzler/${ADDRESS}`),
+      emptyStorage,
+    );
+    expect(response.status).toBe(503);
   });
 });
 

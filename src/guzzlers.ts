@@ -112,6 +112,35 @@ export interface GuzzlerStat {
   lastSeen: string;
 }
 
+/** One minute of a single sender's activity, shaped for a timeseries chart. */
+export interface GuzzlerHistoryPoint {
+  /** Epoch minute the point covers, i.e. `floor(timestampMs / 60000)`. */
+  minute: number;
+  /** Start of the minute bucket, as an ISO timestamp. */
+  startTime: string;
+  transactionCount: number;
+  totalGasUsed: string;
+  totalFeeWei: string;
+  /** ISO timestamp of the earliest transaction in the minute. */
+  firstSeen: string;
+  /** ISO timestamp of the latest transaction in the minute. */
+  lastSeen: string;
+}
+
+/** A single sender's per-minute history over the retention window. */
+export interface GuzzlerHistory {
+  address: string;
+  generatedAt: string;
+  /** How long buckets are retained — equal to the largest window. */
+  retentionMs: number;
+  /** Width of each point, in milliseconds (one minute). */
+  bucketMs: number;
+  /** Number of populated minutes returned. */
+  count: number;
+  /** Points ordered oldest-first, ready to plot. */
+  points: GuzzlerHistoryPoint[];
+}
+
 /** The full guzzler statistics payload for a single window. */
 export interface GuzzlerStatistics {
   windowMs: number;
@@ -153,6 +182,8 @@ export interface GuzzlerStoreStats {
 export interface GuzzlerStore {
   /** Load every persisted sender and its retained buckets. */
   loadAll(): Promise<Map<string, GuzzlerBucket[]>>;
+  /** Load a single sender's retained buckets, or null if none are cached. */
+  loadSender(address: string): Promise<GuzzlerBucket[] | null>;
   /** Persist the full retained bucket list for a sender. */
   putSender(address: string, buckets: GuzzlerBucket[]): Promise<void>;
   /** Drop senders that no longer have any buckets in the window. */
@@ -480,6 +511,41 @@ export function sliceLeaderboards(board: GuzzlerLeaderboards, limit: number): Gu
       count: window.count,
       guzzlers: window.guzzlers.slice(0, safeLimit),
     })),
+  };
+}
+
+/**
+ * Build a single sender's per-minute history from its stored buckets: drop
+ * anything aged past retention, order oldest-first, and shape each bucket as a
+ * chart-ready point.
+ */
+export function buildGuzzlerHistory(
+  address: string,
+  buckets: GuzzlerBucket[],
+  nowMs: number,
+  retentionMs: number = DEFAULT_GUZZLER_RETENTION_MS,
+): GuzzlerHistory {
+  const cutoff = nowMs - retentionMs;
+  const points = buckets
+    .filter((bucket) => bucket.lastSeenMs > cutoff)
+    .sort((a, b) => a.minute - b.minute)
+    .map((bucket) => ({
+      minute: bucket.minute,
+      startTime: new Date(bucket.minute * GUZZLER_BUCKET_MS).toISOString(),
+      transactionCount: bucket.transactionCount,
+      totalGasUsed: bucket.totalGasUsed,
+      totalFeeWei: bucket.totalFeeWei,
+      firstSeen: new Date(bucket.firstSeenMs).toISOString(),
+      lastSeen: new Date(bucket.lastSeenMs).toISOString(),
+    }));
+
+  return {
+    address: normalizeAddress(address),
+    generatedAt: new Date(nowMs).toISOString(),
+    retentionMs,
+    bucketMs: GUZZLER_BUCKET_MS,
+    count: points.length,
+    points,
   };
 }
 

@@ -278,6 +278,25 @@ export interface GuzzlersResponse {
   windows: GuzzlerWindowLeaderboard[];
 }
 
+export interface GuzzlerHistoryPoint {
+  minute: number;
+  startTime: string;
+  transactionCount: number;
+  totalGasUsed: string;
+  totalFeeWei: string;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface GuzzlerHistoryResponse {
+  address: string;
+  generatedAt: string;
+  retentionMs: number;
+  bucketMs: number;
+  count: number;
+  points: GuzzlerHistoryPoint[];
+}
+
 export interface DatabaseTableStats {
   tableName: string;
   rowCount: string;
@@ -739,6 +758,13 @@ export function fetchGuzzlers(limit?: number): Promise<GuzzlersResponse> {
     params.set("limit", String(limit));
   }
   return getJson<GuzzlersResponse>("/guzzlers", params);
+}
+
+export function fetchGuzzlerHistory(address: string): Promise<GuzzlerHistoryResponse> {
+  return getJson<GuzzlerHistoryResponse>(
+    `/guzzler/${encodeURIComponent(address)}`,
+    new URLSearchParams(),
+  );
 }
 
 export interface AdminVerifyResponse {

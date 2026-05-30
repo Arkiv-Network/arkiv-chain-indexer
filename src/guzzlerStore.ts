@@ -1,6 +1,7 @@
 import { RedisClient } from "bun";
 import {
   DEFAULT_GUZZLER_RETENTION_MS,
+  normalizeAddress,
   type GuzzlerBucket,
   type GuzzlerLeaderboards,
   type GuzzlerStore,
@@ -59,6 +60,15 @@ export class RedisGuzzlerStore implements GuzzlerStore {
       }
     }
     return result;
+  }
+
+  async loadSender(address: string): Promise<GuzzlerBucket[] | null> {
+    const json = await this.client.hget(this.key, normalizeAddress(address));
+    if (!json) {
+      return null;
+    }
+    const buckets = parseBuckets(json);
+    return buckets.length > 0 ? buckets : null;
   }
 
   async putSender(address: string, buckets: GuzzlerBucket[]): Promise<void> {
