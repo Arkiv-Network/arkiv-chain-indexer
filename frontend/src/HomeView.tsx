@@ -472,76 +472,8 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
       <div>
         <div className="home-section-head">
           <div>
-            <p className="home-kicker">network activity</p>
-            <h3>Most active wallets · last hour</h3>
-          </div>
-          <a href={guzzlersHref} onClick={openGuzzlersView}>
-            Explore network activity →
-          </a>
-        </div>
-        <p className="home-activity-note">
-          The wallets submitting the most transactions in the last hour, ranked by
-          total gas used.
-        </p>
-        {guzzlersUnavailable ? (
-          <p className="home-empty">Wallet activity tracking is not enabled.</p>
-        ) : topGuzzlers === null ? (
-          <p className="home-empty">Loading most active wallets…</p>
-        ) : topGuzzlers.length === 0 ? (
-          <p className="home-empty">No wallet activity in the last hour.</p>
-        ) : (
-          <div className="home-feed-list">
-            {topGuzzlers.map((guzzler, index) => {
-              const display = addressDisplay(guzzler.address);
-              return (
-                <a
-                  key={guzzler.address}
-                  className="home-feed-item"
-                  href={buildPermalinkHref("guzzlers", { address: guzzler.address })}
-                  onClick={(event) => openGuzzler(event, guzzler.address)}
-                  title={`View activity for ${display.title ?? guzzler.address}`}
-                >
-                  <img
-                    className="guzzler-icon"
-                    src={blockieDataUri(guzzler.address)}
-                    alt=""
-                    width={40}
-                    height={40}
-                    loading="lazy"
-                  />
-                  <div className="home-feed-main">
-                    <div className="home-feed-title">
-                      <span className="mono">
-                        {index + 1}. {display.label}
-                      </span>
-                    </div>
-                    <div className="home-feed-meta">
-                      <span>
-                        <b>{fmtInteger(guzzler.transactionCount)}</b> txns
-                      </span>
-                      <span>
-                        <b>{fmtGasBillions(guzzler.totalGasUsed)}</b> gas
-                      </span>
-                    </div>
-                  </div>
-                  <div className="home-feed-side">
-                    <strong>#{index + 1}</strong>
-                    <span>
-                      {fmtEth(guzzler.totalFeeWei)} {settings.tokenSymbol} fees
-                    </span>
-                  </div>
-                </a>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <div className="home-section-head">
-          <div>
             <p className="home-kicker">live feed</p>
-            <h3>Latest blocks &amp; last {settings.histogramWindowMinutes} minutes</h3>
+            <h3>Latest blocks &amp; most active wallets</h3>
           </div>
         </div>
         <div className="home-feed-grid">
@@ -584,16 +516,117 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             )}
           </section>
 
-          <LiveHistograms
-            blocks={blocks}
-            error={blocksError}
-            loaded={blocksData !== null}
-            settings={settings}
+          <HomeWalletActivityPanel
+            topGuzzlers={topGuzzlers}
+            guzzlersUnavailable={guzzlersUnavailable}
+            guzzlersHref={guzzlersHref}
+            onOpenGuzzlersView={openGuzzlersView}
+            onOpenGuzzler={openGuzzler}
+            tokenSymbol={settings.tokenSymbol}
           />
         </div>
       </div>
 
+      <div>
+        <div className="home-section-head">
+          <div>
+            <p className="home-kicker">charts</p>
+            <h3>Last {settings.histogramWindowMinutes} minutes</h3>
+          </div>
+        </div>
+        <LiveHistograms
+          blocks={blocks}
+          error={blocksError}
+          loaded={blocksData !== null}
+          settings={settings}
+        />
+      </div>
+
       <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} />
+    </section>
+  );
+}
+
+function HomeWalletActivityPanel({
+  topGuzzlers,
+  guzzlersUnavailable,
+  guzzlersHref,
+  onOpenGuzzlersView,
+  onOpenGuzzler,
+  tokenSymbol,
+}: {
+  topGuzzlers: GuzzlerStat[] | null;
+  guzzlersUnavailable: boolean;
+  guzzlersHref: string;
+  onOpenGuzzlersView: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onOpenGuzzler: (event: React.MouseEvent<HTMLAnchorElement>, address: string) => void;
+  tokenSymbol: string;
+}) {
+  return (
+    <section className="home-feed-panel" aria-labelledby="home-active-wallets">
+      <div className="home-panel-heading">
+        <div>
+          <h3 id="home-active-wallets">Most active wallets</h3>
+          <p className="home-activity-note">
+            Last hour, ranked by total gas used.
+          </p>
+        </div>
+        <a className="home-panel-link" href={guzzlersHref} onClick={onOpenGuzzlersView}>
+          Explore activity
+        </a>
+      </div>
+      {guzzlersUnavailable ? (
+        <p className="home-empty">Wallet activity tracking is not enabled.</p>
+      ) : topGuzzlers === null ? (
+        <p className="home-empty">Loading most active wallets…</p>
+      ) : topGuzzlers.length === 0 ? (
+        <p className="home-empty">No wallet activity in the last hour.</p>
+      ) : (
+        <div className="home-feed-list">
+          {topGuzzlers.map((guzzler, index) => {
+            const display = addressDisplay(guzzler.address);
+            return (
+              <a
+                key={guzzler.address}
+                className="home-feed-item home-wallet-item"
+                href={buildPermalinkHref("guzzlers", { address: guzzler.address })}
+                onClick={(event) => onOpenGuzzler(event, guzzler.address)}
+                title={`View activity for ${display.title ?? guzzler.address}`}
+              >
+                <img
+                  className="guzzler-icon"
+                  src={blockieDataUri(guzzler.address)}
+                  alt=""
+                  width={40}
+                  height={40}
+                  loading="lazy"
+                />
+                <div className="home-feed-main">
+                  <div className="home-feed-title">
+                    <span className="mono">
+                      {index + 1}. {display.label}
+                    </span>
+                  </div>
+                  <div className="home-feed-meta">
+                    <span>
+                      <b>{fmtInteger(guzzler.transactionCount)}</b> txns
+                    </span>
+                    <span>
+                      <b>{fmtGasBillions(guzzler.totalGasUsed)}</b> gas
+                    </span>
+                  </div>
+                </div>
+                <div className="home-feed-side">
+                  <strong>#{index + 1}</strong>
+                  <span>
+                    {fmtEth(guzzler.totalFeeWei)} {tokenSymbol} fees
+                  </span>
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
