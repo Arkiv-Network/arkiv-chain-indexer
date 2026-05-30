@@ -139,6 +139,13 @@ export interface HealthResponseBody {
     transactionData: boolean;
     guzzlers: boolean;
   };
+  guzzlers: {
+    enabled: boolean;
+    /** Number of senders held in the Redis cache, or null when disabled/unavailable. */
+    entryCount: number | null;
+    /** Approximate total size of the cached entries in bytes, or null. */
+    totalSizeBytes: string | null;
+  };
 }
 
 export const BLOCK_RESPONSE_NAMES = [
@@ -233,7 +240,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/health") {
-    return handleGetHealth(storage, transactionDataEnabled, options.guzzlerStore !== undefined);
+    return handleGetHealth(storage, transactionDataEnabled, options.guzzlerStore);
   }
 
   if (url.pathname === "/guzzlers") {
@@ -442,8 +449,9 @@ function requireAdminBearerToken(request: Request, adminBearerToken: string | un
 async function handleGetHealth(
   storage: ScannerStorage,
   transactionDataEnabled: boolean,
-  guzzlersEnabled: boolean,
+  guzzlerStore: GuzzlerStore | undefined,
 ): Promise<Response> {
+  const guzzlers = await readGuzzlerCacheHealth(guzzlerStore);
   const now = new Date();
   const [progress, database] = await Promise.all([
     storage.getScannerProgress(),
@@ -480,8 +488,9 @@ async function handleGetHealth(
     database,
     features: {
       transactionData: transactionDataEnabled,
-      guzzlers: guzzlersEnabled,
+      guzzlers: guzzlerStore !== undefined,
     },
+    guzzlers,
   };
 
   return jsonResponse(body);
@@ -664,6 +673,26 @@ async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): P
   };
 
   return jsonResponse(body);
+}
+
+async function readGuzzlerCacheHealth(
+  guzzlerStore: GuzzlerStore | undefined,
+): Promise<HealthResponseBody["guzzlers"]> {
+  if (!guzzlerStore) {
+    return { enabled: false, entryCount: null, totalSizeBytes: null };
+  }
+  try {
+    const stats = await guzzlerStore.stats();
+    return {
+      enabled: true,
+      entryCount: stats.entryCount,
+      totalSizeBytes: stats.totalBytes.toString(),
+    };
+  } catch (error) {
+    // Never let a transient cache hiccup take down the health endpoint.
+    console.error("Failed to read guzzler cache stats", error);
+    return { enabled: true, entryCount: null, totalSizeBytes: null };
+  }
 }
 
 async function handleGetGuzzlers(guzzlerStore: GuzzlerStore | undefined): Promise<Response> {

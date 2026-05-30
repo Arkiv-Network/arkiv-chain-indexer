@@ -58,6 +58,14 @@ export interface GuzzlerStatistics {
   guzzlers: GuzzlerStat[];
 }
 
+/** Size metrics for the persisted guzzler cache, surfaced via /health. */
+export interface GuzzlerStoreStats {
+  /** Number of senders currently held in the cache. */
+  entryCount: number;
+  /** Approximate total size of the cached entries, in bytes. */
+  totalBytes: number;
+}
+
 /** Persistence boundary so the tracker can be backed by Redis (or a fake). */
 export interface GuzzlerStore {
   /** Load every persisted sender and its retained transactions. */
@@ -66,6 +74,8 @@ export interface GuzzlerStore {
   putSender(address: string, txs: GuzzlerTransaction[]): Promise<void>;
   /** Drop senders that no longer have any transactions in the window. */
   removeSenders(addresses: string[]): Promise<void>;
+  /** Report how many entries the cache holds and roughly how large it is. */
+  stats(): Promise<GuzzlerStoreStats>;
   /** Release any underlying resources (connections, timers). */
   close(): Promise<void>;
 }

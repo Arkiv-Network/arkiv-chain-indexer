@@ -19,6 +19,9 @@ class FakeGuzzlerStore implements GuzzlerStore {
   }
   async putSender(): Promise<void> {}
   async removeSenders(): Promise<void> {}
+  async stats(): Promise<{ entryCount: number; totalBytes: number }> {
+    return { entryCount: this.data.size, totalBytes: 0 };
+  }
   async close(): Promise<void> {}
 }
 

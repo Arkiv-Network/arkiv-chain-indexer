@@ -28,6 +28,13 @@ class InMemoryGuzzlerStore implements GuzzlerStore {
     this.removeCount += 1;
     for (const address of addresses) this.senders.delete(address);
   }
+  async stats(): Promise<{ entryCount: number; totalBytes: number }> {
+    let totalBytes = 0;
+    for (const txs of this.senders.values()) {
+      totalBytes += Buffer.byteLength(JSON.stringify(txs), "utf8");
+    }
+    return { entryCount: this.senders.size, totalBytes };
+  }
   async close(): Promise<void> {
     this.closed = true;
   }

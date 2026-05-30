@@ -1,5 +1,5 @@
 import { RedisClient } from "bun";
-import type { GuzzlerStore, GuzzlerTransaction } from "./guzzlers";
+import type { GuzzlerStore, GuzzlerStoreStats, GuzzlerTransaction } from "./guzzlers";
 
 /**
  * {@link GuzzlerStore} backed by a single Redis hash, keyed by sender address,
@@ -46,6 +46,21 @@ export class RedisGuzzlerStore implements GuzzlerStore {
     }
     const [first, ...rest] = addresses;
     await this.client.hdel(this.key, first as string, ...rest);
+  }
+
+  async stats(): Promise<GuzzlerStoreStats> {
+    // HLEN is O(1); MEMORY USAGE is an efficient, sampled estimate of the hash's
+    // total RAM footprint (key + values + overhead) — both keep /health cheap
+    // even when many senders are cached.
+    const [entryCount, usage] = await Promise.all([
+      this.client.hlen(this.key),
+      this.client.send("MEMORY", ["USAGE", this.key]),
+    ]);
+    const totalBytes = Number(usage);
+    return {
+      entryCount: entryCount ?? 0,
+      totalBytes: Number.isFinite(totalBytes) ? totalBytes : 0,
+    };
   }
 
   async close(): Promise<void> {

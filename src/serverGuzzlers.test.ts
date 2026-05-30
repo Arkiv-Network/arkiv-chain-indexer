@@ -12,6 +12,13 @@ class FakeGuzzlerStore implements GuzzlerStore {
   }
   async putSender(): Promise<void> {}
   async removeSenders(): Promise<void> {}
+  async stats(): Promise<{ entryCount: number; totalBytes: number }> {
+    let totalBytes = 0;
+    for (const txs of this.data.values()) {
+      totalBytes += Buffer.byteLength(JSON.stringify(txs), "utf8");
+    }
+    return { entryCount: this.data.size, totalBytes };
+  }
   async close(): Promise<void> {}
 }
 
@@ -84,5 +91,28 @@ describe("GET /health guzzlers feature flag", () => {
 
     const withoutStore = await handleRequest(new Request("http://example.test/health"), healthStorage);
     expect(((await withoutStore.json()) as HealthResponseBody).features.guzzlers).toBe(false);
+  });
+
+  test("reports guzzler cache entry count and size", async () => {
+    const store = new FakeGuzzlerStore(
+      new Map([
+        ["0xa", [{ hash: "0x1", timestampMs: NOW, gasUsed: "100", feeWei: "10" }]],
+        ["0xb", [{ hash: "0x2", timestampMs: NOW, gasUsed: "200", feeWei: "20" }]],
+      ]),
+    );
+    const response = await handleRequest(new Request("http://example.test/health"), healthStorage, {
+      guzzlerStore: store,
+    });
+    const body = (await response.json()) as HealthResponseBody;
+
+    expect(body.guzzlers.enabled).toBe(true);
+    expect(body.guzzlers.entryCount).toBe(2);
+    expect(Number(body.guzzlers.totalSizeBytes)).toBeGreaterThan(0);
+  });
+
+  test("reports a disabled cache when no store is configured", async () => {
+    const response = await handleRequest(new Request("http://example.test/health"), healthStorage);
+    const body = (await response.json()) as HealthResponseBody;
+    expect(body.guzzlers).toEqual({ enabled: false, entryCount: null, totalSizeBytes: null });
   });
 });
