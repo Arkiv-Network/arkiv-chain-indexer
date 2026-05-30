@@ -3,8 +3,8 @@ import { type BlockInspectionResult } from "./blockInspector";
 import {
   DEFAULT_GUZZLER_LIMIT,
   MAX_GUZZLER_LIMIT,
-  GuzzlerLeaderboardCache,
-  readGuzzlerLeaderboards,
+  emptyLeaderboards,
+  sliceLeaderboards,
   type GuzzlerLeaderboards,
   type GuzzlerStore,
 } from "./guzzlers";
@@ -41,11 +41,6 @@ export interface BlockServerOptions {
   baseloadRuntime?: BaseloadRuntime;
   baseloadAdminBearerToken?: string;
   guzzlerStore?: GuzzlerStore;
-  /**
-   * Persistent leaderboard cache, created once per server so repeated requests
-   * reuse a computed board instead of rebuilding it from Redis each time.
-   */
-  guzzlerLeaderboardCache?: GuzzlerLeaderboardCache;
 }
 
 export interface BlocksResponseBody {
@@ -194,11 +189,6 @@ const CORS_HEADERS: Record<string, string> = {
 
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
-  // Build the leaderboard cache once so it persists across requests; without
-  // this each /guzzlers hit would reload the whole dataset from Redis.
-  const guzzlerLeaderboardCache = options.guzzlerStore
-    ? new GuzzlerLeaderboardCache(options.guzzlerStore)
-    : undefined;
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
     fetch: (request) =>
@@ -209,7 +199,6 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
           ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
           : {}),
         ...(options.guzzlerStore ? { guzzlerStore: options.guzzlerStore } : {}),
-        ...(guzzlerLeaderboardCache ? { guzzlerLeaderboardCache } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -257,7 +246,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/guzzlers") {
-    return handleGetGuzzlers(url, options.guzzlerLeaderboardCache, options.guzzlerStore);
+    return handleGetGuzzlers(url, options.guzzlerStore);
   }
 
   if (url.pathname === "/blocks") {
@@ -708,34 +697,50 @@ async function readGuzzlerCacheHealth(
   }
 }
 
-/** Parse `?limit=`, falling back to the default and clamping to the maximum. */
+/**
+ * Parse `?limit=`, falling back to the default. The cached board only holds the
+ * top {@link MAX_GUZZLER_LIMIT} senders per window, so a larger request cannot
+ * be served and is rejected rather than silently clamped.
+ */
 function parseGuzzlerLimit(params: URLSearchParams): number {
   const raw = params.get("limit");
   if (raw === null) {
     return DEFAULT_GUZZLER_LIMIT;
   }
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    return DEFAULT_GUZZLER_LIMIT;
+  if (!/^\d+$/.test(raw)) {
+    throw new Error("limit must be a positive integer");
   }
-  return Math.min(Math.floor(value), MAX_GUZZLER_LIMIT);
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error("limit must be a positive integer");
+  }
+  if (value > MAX_GUZZLER_LIMIT) {
+    throw new Error(`limit must be at most ${MAX_GUZZLER_LIMIT}`);
+  }
+  return value;
 }
 
 async function handleGetGuzzlers(
   url: URL,
-  cache: GuzzlerLeaderboardCache | undefined,
   guzzlerStore: GuzzlerStore | undefined,
 ): Promise<Response> {
-  if (!cache && !guzzlerStore) {
+  if (!guzzlerStore) {
     return jsonError(503, "Guzzler tracking is disabled");
   }
 
-  const limit = parseGuzzlerLimit(url.searchParams);
-  // The server supplies a persistent cache; a bare store (e.g. from a direct
-  // handleRequest call in tests) falls back to a one-shot rebuild.
-  const body: GuzzlersResponseBody = cache
-    ? await cache.get(limit)
-    : await readGuzzlerLeaderboards(guzzlerStore as GuzzlerStore, Date.now(), limit);
+  let limit: number;
+  try {
+    limit = parseGuzzlerLimit(url.searchParams);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  // The writer refreshes this cached board once a minute; the API just slices
+  // it to the requested top-N. Before the first refresh, serve an empty board.
+  const board = await guzzlerStore.loadLeaderboards();
+  const body: GuzzlersResponseBody = board
+    ? sliceLeaderboards(board, limit)
+    : emptyLeaderboards(Date.now(), limit);
 
   return jsonResponse(body);
 }

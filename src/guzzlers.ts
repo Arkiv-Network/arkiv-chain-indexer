@@ -1,22 +1,26 @@
-import Denque from "denque";
-
 /**
- * Guzzlers: an in-memory, database-free view of the most active senders over a
- * set of sliding time windows (see {@link GUZZLER_WINDOWS}).
+ * Guzzlers: a database-free view of the most active senders over a set of
+ * sliding time windows (see {@link GUZZLER_WINDOWS}).
  *
- * Unlike the Postgres-backed `sender_stats` aggregation, guzzler statistics are
- * computed entirely from in-memory per-sender deques (one {@link Denque} per
- * address). The cache retains transactions for as long as the largest window
- * ({@link DEFAULT_GUZZLER_WINDOW_MS}); a single pass over a sender's retained
- * transactions then aggregates them into every window at once. The deques are
- * mirrored into Redis (see {@link GuzzlerStore}) so the data survives a restart.
+ * Statistics are aggregated into **one-minute buckets** per sender rather than
+ * stored as individual transactions: every transaction folds into the bucket
+ * for the minute it landed in, so a sender doing thousands of transactions a
+ * minute costs a single bucket instead of thousands of rows. Buckets are
+ * retained for {@link DEFAULT_GUZZLER_RETENTION_MS} (24 hours) and mirrored into
+ * Redis (see {@link GuzzlerStore}) so the data survives a restart.
  *
- * The near-head scanner is the single writer; the backend server reads the
- * persisted state to answer the `/guzzlers` API.
+ * The near-head scanner is the single writer. Once a minute it sweeps expired
+ * buckets and recomputes the per-window leaderboards (the top
+ * {@link GUZZLER_CACHE_LIMIT} senders), storing that response in Redis. The
+ * backend server answers `/guzzlers` straight from that cached board — it never
+ * rebuilds the leaderboards itself.
  */
 
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
+
+/** Width of a single statistics bucket: one minute. */
+export const GUZZLER_BUCKET_MS = MINUTE_MS;
 
 /** A predefined time window the guzzler API ranks senders over. */
 export interface GuzzlerWindow {
@@ -28,9 +32,9 @@ export interface GuzzlerWindow {
 
 /**
  * The leaderboards exposed by the API, ordered ascending by span. The largest
- * window doubles as the cache retention period — a transaction is kept only as
- * long as it can still contribute to some window. Keeping these nested (each
- * window fully contains the smaller ones) lets a single pass fill them all.
+ * window doubles as the retention period — a bucket is kept only as long as it
+ * can still contribute to some window. Keeping these nested (each window fully
+ * contains the smaller ones) lets a single pass fill them all.
  */
 export const GUZZLER_WINDOWS: readonly GuzzlerWindow[] = [
   { label: "5m", ms: 5 * MINUTE_MS },
@@ -40,21 +44,27 @@ export const GUZZLER_WINDOWS: readonly GuzzlerWindow[] = [
   { label: "24h", ms: 24 * HOUR_MS },
 ];
 
-/** Default retention window: the largest tracked window. */
-export const DEFAULT_GUZZLER_WINDOW_MS = Math.max(...GUZZLER_WINDOWS.map((w) => w.ms));
+/** Retention period for bucket data: the largest tracked window (24 hours). */
+export const DEFAULT_GUZZLER_RETENTION_MS = Math.max(...GUZZLER_WINDOWS.map((w) => w.ms));
 
 /** Default number of top senders returned per window. */
 export const DEFAULT_GUZZLER_LIMIT = 100;
 
-/** Upper bound on the per-window top-N a caller may request. */
-export const MAX_GUZZLER_LIMIT = 1000;
+/**
+ * Upper bound on the per-window top-N a caller may request. The cached board is
+ * computed at exactly this limit, so a request for more cannot be served and is
+ * rejected.
+ */
+export const MAX_GUZZLER_LIMIT = 250;
 
-/** Default cadence for the background sweep that evicts expired transactions. */
+/** Top-N senders per window persisted in the cached leaderboard response. */
+export const GUZZLER_CACHE_LIMIT = MAX_GUZZLER_LIMIT;
+
+/** Default cadence for the background sweep + cached-leaderboard refresh. */
 export const DEFAULT_GUZZLER_SWEEP_INTERVAL_MS = 60 * 1000;
 
-/** A single transaction retained for a sender. */
-export interface GuzzlerTransaction {
-  hash: string;
+/** The data needed to fold a single transaction into a bucket. */
+export interface GuzzlerTransactionInput {
   /** Block timestamp in milliseconds since the Unix epoch. */
   timestampMs: number;
   /** Gas used by the transaction, as a decimal string. */
@@ -71,7 +81,26 @@ export interface GuzzlerBlockTransaction {
   feeWei: string;
 }
 
-/** Aggregated statistics for a single guzzler over the active window. */
+/**
+ * One minute of aggregated activity for a sender. This is the unit stored in
+ * Redis (a sender is a JSON array of these).
+ */
+export interface GuzzlerBucket {
+  /** Epoch minute the bucket covers, i.e. `floor(timestampMs / 60000)`. */
+  minute: number;
+  /** Number of transactions folded into the bucket. */
+  transactionCount: number;
+  /** Total gas used across the bucket, as a decimal string. */
+  totalGasUsed: string;
+  /** Total fee in wei across the bucket, as a decimal string. */
+  totalFeeWei: string;
+  /** Earliest transaction timestamp folded into the bucket, in ms. */
+  firstSeenMs: number;
+  /** Latest transaction timestamp folded into the bucket, in ms. */
+  lastSeenMs: number;
+}
+
+/** Aggregated statistics for a single guzzler over a window. */
 export interface GuzzlerStat {
   address: string;
   transactionCount: number;
@@ -105,7 +134,7 @@ export interface GuzzlerWindowLeaderboard {
 /** The full multi-window payload returned by the `/guzzlers` API. */
 export interface GuzzlerLeaderboards {
   generatedAt: string;
-  /** How long transactions are retained — equal to the largest window. */
+  /** How long buckets are retained — equal to the largest window. */
   retentionMs: number;
   /** The top-N cut applied to each window. */
   limit: number;
@@ -122,12 +151,16 @@ export interface GuzzlerStoreStats {
 
 /** Persistence boundary so the tracker can be backed by Redis (or a fake). */
 export interface GuzzlerStore {
-  /** Load every persisted sender and its retained transactions. */
-  loadAll(): Promise<Map<string, GuzzlerTransaction[]>>;
-  /** Persist the full retained transaction list for a sender. */
-  putSender(address: string, txs: GuzzlerTransaction[]): Promise<void>;
-  /** Drop senders that no longer have any transactions in the window. */
+  /** Load every persisted sender and its retained buckets. */
+  loadAll(): Promise<Map<string, GuzzlerBucket[]>>;
+  /** Persist the full retained bucket list for a sender. */
+  putSender(address: string, buckets: GuzzlerBucket[]): Promise<void>;
+  /** Drop senders that no longer have any buckets in the window. */
   removeSenders(addresses: string[]): Promise<void>;
+  /** Store the precomputed leaderboard response served to clients. */
+  saveLeaderboards(board: GuzzlerLeaderboards): Promise<void>;
+  /** Read the precomputed leaderboard response, or null if none is cached. */
+  loadLeaderboards(): Promise<GuzzlerLeaderboards | null>;
   /** Report how many entries the cache holds and roughly how large it is. */
   stats(): Promise<GuzzlerStoreStats>;
   /** Release any underlying resources (connections, timers). */
@@ -155,134 +188,181 @@ function toBigInt(value: string): bigint {
   }
 }
 
+/** Epoch minute a timestamp falls in. */
+function minuteOf(timestampMs: number): number {
+  return Math.floor(timestampMs / MINUTE_MS);
+}
+
+/** Mutable in-memory form of a bucket; bigints avoid repeated string parsing. */
+interface MutableBucket {
+  minute: number;
+  count: number;
+  gas: bigint;
+  fee: bigint;
+  firstMs: number;
+  lastMs: number;
+}
+
+function serializeBucket(bucket: MutableBucket): GuzzlerBucket {
+  return {
+    minute: bucket.minute,
+    transactionCount: bucket.count,
+    totalGasUsed: bucket.gas.toString(),
+    totalFeeWei: bucket.fee.toString(),
+    firstSeenMs: bucket.firstMs,
+    lastSeenMs: bucket.lastMs,
+  };
+}
+
 /**
- * In-memory tracker maintaining one {@link Denque} of recent transactions per
- * sender. Transactions older than the window are evicted from the front of each
- * deque; senders whose deque becomes empty are dropped entirely.
+ * In-memory tracker maintaining one-minute buckets per sender. Buckets whose
+ * newest transaction has aged past the retention period are evicted; senders
+ * whose bucket set becomes empty are dropped entirely.
  */
 export class GuzzlerTracker {
-  private readonly senders = new Map<string, Denque<GuzzlerTransaction>>();
+  private readonly senders = new Map<string, Map<number, MutableBucket>>();
 
-  constructor(private readonly windowMs: number = DEFAULT_GUZZLER_WINDOW_MS) {}
+  constructor(private readonly retentionMs: number = DEFAULT_GUZZLER_RETENTION_MS) {}
 
-  get windowMilliseconds(): number {
-    return this.windowMs;
+  get retentionMilliseconds(): number {
+    return this.retentionMs;
   }
 
-  /** Number of senders currently retaining at least one transaction. */
+  /** Number of senders currently retaining at least one bucket. */
   get senderCount(): number {
     return this.senders.size;
   }
 
-  private cutoff(nowMs: number): number {
-    return nowMs - this.windowMs;
-  }
-
-  private evictExpired(deque: Denque<GuzzlerTransaction>, nowMs: number): void {
-    const cutoff = this.cutoff(nowMs);
-    while (!deque.isEmpty()) {
-      const front = deque.peekFront();
-      if (front !== undefined && front.timestampMs <= cutoff) {
-        deque.shift();
-      } else {
-        break;
+  /** A bucket is expired once its newest transaction is out of retention. */
+  private evictExpired(buckets: Map<number, MutableBucket>, nowMs: number): boolean {
+    const cutoff = nowMs - this.retentionMs;
+    let changed = false;
+    for (const [minute, bucket] of buckets) {
+      if (bucket.lastMs <= cutoff) {
+        buckets.delete(minute);
+        changed = true;
       }
     }
+    return changed;
   }
 
-  /** Record a transaction for a sender, evicting anything now out of window. */
-  record(address: string, tx: GuzzlerTransaction, nowMs: number): void {
+  /** Fold a transaction into its sender's minute bucket, evicting expired ones. */
+  record(address: string, tx: GuzzlerTransactionInput, nowMs: number): void {
     const key = normalizeAddress(address);
-    let deque = this.senders.get(key);
-    if (!deque) {
-      deque = new Denque<GuzzlerTransaction>();
-      this.senders.set(key, deque);
+    let buckets = this.senders.get(key);
+    if (!buckets) {
+      buckets = new Map<number, MutableBucket>();
+      this.senders.set(key, buckets);
     }
-    deque.push(tx);
-    this.evictExpired(deque, nowMs);
-    if (deque.isEmpty()) {
+
+    const minute = minuteOf(tx.timestampMs);
+    let bucket = buckets.get(minute);
+    if (!bucket) {
+      bucket = { minute, count: 0, gas: 0n, fee: 0n, firstMs: tx.timestampMs, lastMs: tx.timestampMs };
+      buckets.set(minute, bucket);
+    }
+    bucket.count += 1;
+    bucket.gas += toBigInt(tx.gasUsed);
+    bucket.fee += toBigInt(tx.feeWei);
+    if (tx.timestampMs < bucket.firstMs) bucket.firstMs = tx.timestampMs;
+    if (tx.timestampMs > bucket.lastMs) bucket.lastMs = tx.timestampMs;
+
+    this.evictExpired(buckets, nowMs);
+    if (buckets.size === 0) {
       this.senders.delete(key);
     }
   }
 
   /**
-   * Evict expired transactions across every sender.
-   * @returns the addresses whose deque shrank (`updated`) or emptied (`removed`).
+   * Evict expired buckets across every sender.
+   * @returns the addresses whose bucket set shrank (`updated`) or emptied (`removed`).
    */
   sweep(nowMs: number): { updated: string[]; removed: string[] } {
     const updated: string[] = [];
     const removed: string[] = [];
-    for (const [address, deque] of this.senders) {
-      const before = deque.length;
-      this.evictExpired(deque, nowMs);
-      if (deque.isEmpty()) {
+    for (const [address, buckets] of this.senders) {
+      const before = buckets.size;
+      this.evictExpired(buckets, nowMs);
+      if (buckets.size === 0) {
         this.senders.delete(address);
         removed.push(address);
-      } else if (deque.length !== before) {
+      } else if (buckets.size !== before) {
         updated.push(address);
       }
     }
     return { updated, removed };
   }
 
-  /** Restore a sender's retained transactions (e.g. from persistence). */
-  loadSender(address: string, txs: GuzzlerTransaction[]): void {
-    if (txs.length === 0) {
+  /** Restore a sender's retained buckets (e.g. from persistence). */
+  loadSender(address: string, buckets: GuzzlerBucket[]): void {
+    if (buckets.length === 0) {
       return;
     }
-    const ordered = txs.slice().sort((a, b) => a.timestampMs - b.timestampMs);
-    this.senders.set(normalizeAddress(address), new Denque<GuzzlerTransaction>(ordered));
+    const map = new Map<number, MutableBucket>();
+    for (const bucket of buckets) {
+      map.set(bucket.minute, {
+        minute: bucket.minute,
+        count: bucket.transactionCount,
+        gas: toBigInt(bucket.totalGasUsed),
+        fee: toBigInt(bucket.totalFeeWei),
+        firstMs: bucket.firstSeenMs,
+        lastMs: bucket.lastSeenMs,
+      });
+    }
+    this.senders.set(normalizeAddress(address), map);
   }
 
-  /** The retained transactions for a sender, or undefined if it has none. */
-  getSenderTransactions(address: string): GuzzlerTransaction[] | undefined {
-    return this.senders.get(normalizeAddress(address))?.toArray();
+  /** A sender's retained buckets sorted ascending by minute, or undefined. */
+  getSenderBuckets(address: string): GuzzlerBucket[] | undefined {
+    const buckets = this.senders.get(normalizeAddress(address));
+    if (!buckets) {
+      return undefined;
+    }
+    return [...buckets.values()].sort((a, b) => a.minute - b.minute).map(serializeBucket);
   }
 
   /**
-   * Compute statistics for every sender with at least one transaction in the
-   * window, sorted by gas used descending (the biggest guzzlers first).
+   * Aggregate every sender's buckets over the full retention window, sorted by
+   * gas used descending. Primarily for diagnostics and tests.
    */
   getStatistics(nowMs: number): GuzzlerStatistics {
-    const cutoff = this.cutoff(nowMs);
+    const cutoff = nowMs - this.retentionMs;
     const guzzlers: GuzzlerStat[] = [];
 
-    for (const [address, deque] of this.senders) {
-      const txs = deque.toArray().filter((tx) => tx.timestampMs > cutoff);
-      if (txs.length === 0) {
-        continue;
-      }
-
-      let totalGas = 0n;
-      let totalFee = 0n;
+    for (const [address, buckets] of this.senders) {
+      let count = 0;
+      let gas = 0n;
+      let fee = 0n;
       let firstSeen = Number.POSITIVE_INFINITY;
       let lastSeen = Number.NEGATIVE_INFINITY;
-      for (const tx of txs) {
-        totalGas += toBigInt(tx.gasUsed);
-        totalFee += toBigInt(tx.feeWei);
-        if (tx.timestampMs < firstSeen) firstSeen = tx.timestampMs;
-        if (tx.timestampMs > lastSeen) lastSeen = tx.timestampMs;
+      for (const bucket of buckets.values()) {
+        if (bucket.lastMs <= cutoff) {
+          continue;
+        }
+        count += bucket.count;
+        gas += bucket.gas;
+        fee += bucket.fee;
+        if (bucket.firstMs < firstSeen) firstSeen = bucket.firstMs;
+        if (bucket.lastMs > lastSeen) lastSeen = bucket.lastMs;
+      }
+      if (count === 0) {
+        continue;
       }
 
       guzzlers.push({
         address,
-        transactionCount: txs.length,
-        totalGasUsed: totalGas.toString(),
-        totalFeeWei: totalFee.toString(),
+        transactionCount: count,
+        totalGasUsed: gas.toString(),
+        totalFeeWei: fee.toString(),
         firstSeen: new Date(firstSeen).toISOString(),
         lastSeen: new Date(lastSeen).toISOString(),
       });
     }
 
-    guzzlers.sort(
-      (a, b) =>
-        compareBigIntDesc(a.totalGasUsed, b.totalGasUsed) ||
-        b.transactionCount - a.transactionCount ||
-        a.address.localeCompare(b.address),
-    );
+    guzzlers.sort(compareGuzzlers);
 
     return {
-      windowMs: this.windowMs,
+      windowMs: this.retentionMs,
       generatedAt: new Date(nowMs).toISOString(),
       count: guzzlers.length,
       guzzlers,
@@ -292,10 +372,11 @@ export class GuzzlerTracker {
   /**
    * Rank senders for every window in {@link GUZZLER_WINDOWS} in a single pass.
    *
-   * Because the windows are nested (ascending by span), each transaction is
-   * added to the smallest window that still contains it and every larger one,
-   * so one walk of a sender's deque fills all windows. Each window is then
-   * sorted by gas used descending and cut to `limit`.
+   * Because the windows are nested (ascending by span), each bucket is added to
+   * the smallest window that still contains it and every larger one, keyed off
+   * the bucket's newest transaction. One walk of a sender's buckets fills all
+   * windows; each window is then sorted by gas used descending and cut to
+   * `limit`.
    */
   getLeaderboards(
     nowMs: number,
@@ -303,9 +384,9 @@ export class GuzzlerTracker {
     windows: readonly GuzzlerWindow[] = GUZZLER_WINDOWS,
   ): GuzzlerLeaderboards {
     const safeLimit = Math.max(0, Math.floor(limit));
-    const buckets: GuzzlerStat[][] = windows.map(() => []);
+    const ranked: GuzzlerStat[][] = windows.map(() => []);
 
-    for (const [address, deque] of this.senders) {
+    for (const [address, buckets] of this.senders) {
       const acc = windows.map(() => ({
         count: 0,
         gas: 0n,
@@ -314,10 +395,10 @@ export class GuzzlerTracker {
         last: Number.NEGATIVE_INFINITY,
       }));
 
-      for (const tx of deque.toArray()) {
-        const age = nowMs - tx.timestampMs;
-        // Skip the leading windows too small to contain this transaction; once
-        // a window includes it, every larger window does too.
+      for (const bucket of buckets.values()) {
+        const age = nowMs - bucket.lastMs;
+        // Skip the leading windows too small to contain this bucket; once a
+        // window includes it, every larger window does too.
         let start = 0;
         while (start < windows.length && windows[start]!.ms <= age) {
           start += 1;
@@ -325,15 +406,13 @@ export class GuzzlerTracker {
         if (start >= windows.length) {
           continue; // older than the largest window
         }
-        const gas = toBigInt(tx.gasUsed);
-        const fee = toBigInt(tx.feeWei);
         for (let j = start; j < windows.length; j += 1) {
           const a = acc[j]!;
-          a.count += 1;
-          a.gas += gas;
-          a.fee += fee;
-          if (tx.timestampMs < a.first) a.first = tx.timestampMs;
-          if (tx.timestampMs > a.last) a.last = tx.timestampMs;
+          a.count += bucket.count;
+          a.gas += bucket.gas;
+          a.fee += bucket.fee;
+          if (bucket.firstMs < a.first) a.first = bucket.firstMs;
+          if (bucket.lastMs > a.last) a.last = bucket.lastMs;
         }
       }
 
@@ -342,7 +421,7 @@ export class GuzzlerTracker {
         if (a.count === 0) {
           continue;
         }
-        buckets[j]!.push({
+        ranked[j]!.push({
           address,
           transactionCount: a.count,
           totalGasUsed: a.gas.toString(),
@@ -355,16 +434,11 @@ export class GuzzlerTracker {
 
     return {
       generatedAt: new Date(nowMs).toISOString(),
-      retentionMs: this.windowMs,
+      retentionMs: this.retentionMs,
       limit: safeLimit,
       windows: windows.map((window, j) => {
-        const bucket = buckets[j]!;
-        bucket.sort(
-          (a, b) =>
-            compareBigIntDesc(a.totalGasUsed, b.totalGasUsed) ||
-            b.transactionCount - a.transactionCount ||
-            a.address.localeCompare(b.address),
-        );
+        const bucket = ranked[j]!;
+        bucket.sort(compareGuzzlers);
         return {
           label: window.label,
           windowMs: window.ms,
@@ -376,6 +450,15 @@ export class GuzzlerTracker {
   }
 }
 
+/** Rank by gas used desc, breaking ties by transaction count then address. */
+function compareGuzzlers(a: GuzzlerStat, b: GuzzlerStat): number {
+  return (
+    compareBigIntDesc(a.totalGasUsed, b.totalGasUsed) ||
+    b.transactionCount - a.transactionCount ||
+    a.address.localeCompare(b.address)
+  );
+}
+
 function compareBigIntDesc(a: string, b: string): number {
   const left = toBigInt(a);
   const right = toBigInt(b);
@@ -384,33 +467,8 @@ function compareBigIntDesc(a: string, b: string): number {
   return 0;
 }
 
-/**
- * Read-side helper used by the API: rebuild a tracker from persisted state,
- * drop anything that has aged out, and return the per-window leaderboards. This
- * never mutates Redis — cleanup of the persisted set is the writer's
- * responsibility.
- */
-export async function readGuzzlerLeaderboards(
-  store: GuzzlerStore,
-  nowMs: number,
-  limit: number = DEFAULT_GUZZLER_LIMIT,
-  windows: readonly GuzzlerWindow[] = GUZZLER_WINDOWS,
-  retentionMs: number = DEFAULT_GUZZLER_WINDOW_MS,
-): Promise<GuzzlerLeaderboards> {
-  const all = await store.loadAll();
-  const tracker = new GuzzlerTracker(retentionMs);
-  for (const [address, txs] of all) {
-    tracker.loadSender(address, txs);
-  }
-  tracker.sweep(nowMs);
-  return tracker.getLeaderboards(nowMs, limit, windows);
-}
-
-/** Default lifetime of a cached leaderboard before it is recomputed. */
-export const DEFAULT_GUZZLER_CACHE_TTL_MS = 5000;
-
 /** Return a copy of `board` with each window cut to the requested top-N. */
-function sliceLeaderboards(board: GuzzlerLeaderboards, limit: number): GuzzlerLeaderboards {
+export function sliceLeaderboards(board: GuzzlerLeaderboards, limit: number): GuzzlerLeaderboards {
   const safeLimit = Math.max(0, Math.floor(limit));
   return {
     generatedAt: board.generatedAt,
@@ -425,74 +483,22 @@ function sliceLeaderboards(board: GuzzlerLeaderboards, limit: number): GuzzlerLe
   };
 }
 
-export interface GuzzlerLeaderboardCacheOptions {
-  /** How long a computed board is reused before recomputing. */
-  ttlMs?: number;
-  /** Injectable clock for deterministic tests. Defaults to `Date.now`. */
-  now?: () => number;
-  windows?: readonly GuzzlerWindow[];
-  retentionMs?: number;
-}
-
-/**
- * Server-side cache for the guzzler leaderboards.
- *
- * Recomputing a leaderboard means pulling the entire persisted dataset out of
- * Redis (a full `HGETALL` of up to {@link DEFAULT_GUZZLER_WINDOW_MS} of senders)
- * and rebuilding a tracker from scratch — far too costly to repeat on every
- * request. This caches the fully ranked board (computed at
- * {@link MAX_GUZZLER_LIMIT}) for a short TTL and answers each request with a
- * re-sliced view, so bursts of traffic collapse onto a single rebuild.
- * Concurrent misses share one in-flight rebuild to avoid a stampede.
- */
-export class GuzzlerLeaderboardCache {
-  private readonly ttlMs: number;
-  private readonly now: () => number;
-  private readonly windows: readonly GuzzlerWindow[];
-  private readonly retentionMs: number;
-  private cached: { board: GuzzlerLeaderboards; computedAtMs: number } | null = null;
-  private inFlight: Promise<GuzzlerLeaderboards> | null = null;
-
-  constructor(
-    private readonly store: GuzzlerStore,
-    options: GuzzlerLeaderboardCacheOptions = {},
-  ) {
-    this.ttlMs = options.ttlMs ?? DEFAULT_GUZZLER_CACHE_TTL_MS;
-    this.now = options.now ?? (() => Date.now());
-    this.windows = options.windows ?? GUZZLER_WINDOWS;
-    this.retentionMs = options.retentionMs ?? DEFAULT_GUZZLER_WINDOW_MS;
-  }
-
-  /** The leaderboards cut to `limit`, recomputing from the store only if stale. */
-  async get(limit: number = DEFAULT_GUZZLER_LIMIT): Promise<GuzzlerLeaderboards> {
-    return sliceLeaderboards(await this.fullBoard(), limit);
-  }
-
-  private async fullBoard(): Promise<GuzzlerLeaderboards> {
-    const nowMs = this.now();
-    if (this.cached && nowMs - this.cached.computedAtMs < this.ttlMs) {
-      return this.cached.board;
-    }
-    if (this.inFlight) {
-      return this.inFlight;
-    }
-    // Compute at the maximum top-N so any per-request limit can be served by
-    // slicing the cached board without another rebuild.
-    const rebuild = readGuzzlerLeaderboards(
-      this.store,
-      nowMs,
-      MAX_GUZZLER_LIMIT,
-      this.windows,
-      this.retentionMs,
-    )
-      .then((board) => {
-        this.cached = { board, computedAtMs: nowMs };
-        return board;
-      })
-      .finally(() => {
-        this.inFlight = null;
-      });
-    this.inFlight = rebuild;
-    return rebuild;
-  }
+/** A well-formed, empty leaderboard payload (e.g. before the first refresh). */
+export function emptyLeaderboards(
+  nowMs: number,
+  limit: number = DEFAULT_GUZZLER_LIMIT,
+  windows: readonly GuzzlerWindow[] = GUZZLER_WINDOWS,
+  retentionMs: number = DEFAULT_GUZZLER_RETENTION_MS,
+): GuzzlerLeaderboards {
+  return {
+    generatedAt: new Date(nowMs).toISOString(),
+    retentionMs,
+    limit: Math.max(0, Math.floor(limit)),
+    windows: windows.map((window) => ({
+      label: window.label,
+      windowMs: window.ms,
+      count: 0,
+      guzzlers: [],
+    })),
+  };
 }

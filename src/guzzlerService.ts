@@ -1,17 +1,23 @@
 import {
+  DEFAULT_GUZZLER_RETENTION_MS,
   DEFAULT_GUZZLER_SWEEP_INTERVAL_MS,
-  DEFAULT_GUZZLER_WINDOW_MS,
+  GUZZLER_CACHE_LIMIT,
+  GUZZLER_WINDOWS,
   GuzzlerTracker,
   normalizeAddress,
   type GuzzlerBlockTransaction,
   type GuzzlerRecorder,
   type GuzzlerStatistics,
   type GuzzlerStore,
+  type GuzzlerWindow,
 } from "./guzzlers";
 
 export interface GuzzlerServiceOptions {
-  windowMs?: number;
+  retentionMs?: number;
   sweepIntervalMs?: number;
+  /** Top-N senders per window stored in the cached leaderboard response. */
+  cacheLimit?: number;
+  windows?: readonly GuzzlerWindow[];
   /** Injectable clock for deterministic tests. Defaults to `Date.now`. */
   now?: () => number;
   log?: (message: string) => void;
@@ -20,15 +26,18 @@ export interface GuzzlerServiceOptions {
 /**
  * Write-side owner of the guzzler tracker, used by the near-head scanner.
  *
- * It loads persisted state on {@link start}, records each block's transactions
- * into the in-memory deques while mirroring changes to the {@link GuzzlerStore},
- * and runs a background sweep so transactions and empty senders are evicted even
- * when no new blocks arrive.
+ * It loads persisted buckets on {@link start}, folds each block's transactions
+ * into per-minute buckets while mirroring changes to the {@link GuzzlerStore},
+ * and once a minute sweeps expired buckets and recomputes the cached
+ * leaderboard response (the top {@link GUZZLER_CACHE_LIMIT} senders per window)
+ * that the API serves verbatim.
  */
 export class GuzzlerService implements GuzzlerRecorder {
   private readonly tracker: GuzzlerTracker;
-  private readonly windowMs: number;
+  private readonly retentionMs: number;
   private readonly sweepIntervalMs: number;
+  private readonly cacheLimit: number;
+  private readonly windows: readonly GuzzlerWindow[];
   private readonly now: () => number;
   private readonly log: (message: string) => void;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -38,26 +47,32 @@ export class GuzzlerService implements GuzzlerRecorder {
     private readonly store: GuzzlerStore,
     options: GuzzlerServiceOptions = {},
   ) {
-    this.windowMs = options.windowMs ?? DEFAULT_GUZZLER_WINDOW_MS;
+    this.retentionMs = options.retentionMs ?? DEFAULT_GUZZLER_RETENTION_MS;
     this.sweepIntervalMs = options.sweepIntervalMs ?? DEFAULT_GUZZLER_SWEEP_INTERVAL_MS;
+    this.cacheLimit = options.cacheLimit ?? GUZZLER_CACHE_LIMIT;
+    this.windows = options.windows ?? GUZZLER_WINDOWS;
     this.now = options.now ?? (() => Date.now());
     this.log = options.log ?? (() => {});
-    this.tracker = new GuzzlerTracker(this.windowMs);
+    this.tracker = new GuzzlerTracker(this.retentionMs);
   }
 
-  /** Load persisted senders, drop anything already expired, and start sweeping. */
+  /**
+   * Load persisted buckets, drop anything already expired, publish an initial
+   * cached leaderboard, and start the once-a-minute sweep + refresh loop.
+   */
   async start(): Promise<void> {
     const all = await this.store.loadAll();
-    for (const [address, txs] of all) {
-      this.tracker.loadSender(address, txs);
+    for (const [address, buckets] of all) {
+      this.tracker.loadSender(address, buckets);
     }
     const { updated, removed } = this.tracker.sweep(this.now());
     await this.persist(updated, removed);
+    await this.refreshLeaderboards();
     this.log(`Guzzler tracker loaded ${this.tracker.senderCount.toString()} active sender(s)`);
 
     if (this.sweepIntervalMs > 0) {
       this.sweepTimer = setInterval(() => {
-        void this.sweep();
+        void this.tick();
       }, this.sweepIntervalMs);
       this.sweepTimer.unref?.();
     }
@@ -68,9 +83,9 @@ export class GuzzlerService implements GuzzlerRecorder {
     transactions: Iterable<GuzzlerBlockTransaction>,
   ): Promise<void> {
     const now = this.now();
-    // Blocks older than the window can never contribute to the last-hour view
-    // (e.g. historical backfill) — skip them entirely instead of writing churn.
-    if (blockTimestampMs <= now - this.windowMs) {
+    // Blocks older than retention can never contribute to any window (e.g.
+    // historical backfill) — skip them entirely instead of writing churn.
+    if (blockTimestampMs <= now - this.retentionMs) {
       return;
     }
 
@@ -81,7 +96,7 @@ export class GuzzlerService implements GuzzlerRecorder {
       }
       this.tracker.record(
         tx.from,
-        { hash: tx.hash, timestampMs: blockTimestampMs, gasUsed: tx.gasUsed, feeWei: tx.feeWei },
+        { timestampMs: blockTimestampMs, gasUsed: tx.gasUsed, feeWei: tx.feeWei },
         now,
       );
       touched.add(normalizeAddress(tx.from));
@@ -94,8 +109,8 @@ export class GuzzlerService implements GuzzlerRecorder {
     const updated: string[] = [];
     const removed: string[] = [];
     for (const address of touched) {
-      const current = this.tracker.getSenderTransactions(address);
-      if (current && current.length > 0) {
+      const buckets = this.tracker.getSenderBuckets(address);
+      if (buckets && buckets.length > 0) {
         updated.push(address);
       } else {
         removed.push(address);
@@ -109,7 +124,16 @@ export class GuzzlerService implements GuzzlerRecorder {
     return this.tracker.getStatistics(nowMs);
   }
 
-  /** Evict expired transactions and remove now-empty senders from the cache. */
+  /** The once-a-minute job: evict expired buckets, then refresh the cache. */
+  private async tick(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+    await this.sweep();
+    await this.refreshLeaderboards();
+  }
+
+  /** Evict expired buckets and remove now-empty senders from the cache. */
   async sweep(): Promise<void> {
     if (this.stopped) {
       return;
@@ -124,10 +148,16 @@ export class GuzzlerService implements GuzzlerRecorder {
     );
   }
 
+  /** Recompute the top-N leaderboards and store them as the cached response. */
+  async refreshLeaderboards(): Promise<void> {
+    const board = this.tracker.getLeaderboards(this.now(), this.cacheLimit, this.windows);
+    await this.store.saveLeaderboards(board);
+  }
+
   private async persist(updated: string[], removed: string[]): Promise<void> {
     await Promise.all(
       updated.map((address) =>
-        this.store.putSender(address, this.tracker.getSenderTransactions(address) ?? []),
+        this.store.putSender(address, this.tracker.getSenderBuckets(address) ?? []),
       ),
     );
     if (removed.length > 0) {

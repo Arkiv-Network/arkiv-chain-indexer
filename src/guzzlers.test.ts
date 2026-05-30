@@ -1,37 +1,33 @@
 import { describe, expect, test } from "bun:test";
 import {
-  GuzzlerLeaderboardCache,
+  emptyLeaderboards,
+  GUZZLER_WINDOWS,
   GuzzlerTracker,
-  readGuzzlerLeaderboards,
-  type GuzzlerStore,
-  type GuzzlerTransaction,
+  sliceLeaderboards,
+  type GuzzlerBucket,
 } from "./guzzlers";
 
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
 
 const T0 = Date.parse("2026-05-30T12:00:00.000Z");
 
-function tx(hash: string, timestampMs: number, gasUsed: string, feeWei = "0"): GuzzlerTransaction {
-  return { hash, timestampMs, gasUsed, feeWei };
-}
-
-class FakeGuzzlerStore implements GuzzlerStore {
-  constructor(private readonly data: Map<string, GuzzlerTransaction[]>) {}
-  async loadAll(): Promise<Map<string, GuzzlerTransaction[]>> {
-    return new Map([...this.data].map(([address, txs]) => [address, txs.map((t) => ({ ...t }))]));
-  }
-  async putSender(): Promise<void> {}
-  async removeSenders(): Promise<void> {}
-  async stats(): Promise<{ entryCount: number; totalBytes: number }> {
-    return { entryCount: this.data.size, totalBytes: 0 };
-  }
-  async close(): Promise<void> {}
+/** A single-transaction bucket landing in the minute that contains `timestampMs`. */
+function bucket(timestampMs: number, gasUsed: string, feeWei = "0", count = 1): GuzzlerBucket {
+  return {
+    minute: Math.floor(timestampMs / MINUTE),
+    transactionCount: count,
+    totalGasUsed: gasUsed,
+    totalFeeWei: feeWei,
+    firstSeenMs: timestampMs,
+    lastSeenMs: timestampMs,
+  };
 }
 
 describe("GuzzlerTracker", () => {
   test("tracks a sender and reports it in statistics", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xAbC", tx("0x1", T0, "21000", "1000"), T0);
+    tracker.record("0xAbC", { timestampMs: T0, gasUsed: "21000", feeWei: "1000" }, T0);
 
     const stats = tracker.getStatistics(T0);
     expect(stats.count).toBe(1);
@@ -43,75 +39,105 @@ describe("GuzzlerTracker", () => {
     });
   });
 
+  test("folds transactions in the same minute into one bucket", () => {
+    const tracker = new GuzzlerTracker();
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "100", feeWei: "10" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 5000, gasUsed: "200", feeWei: "20" }, T0 + 5000);
+
+    const buckets = tracker.getSenderBuckets("0xa");
+    expect(buckets).toHaveLength(1);
+    expect(buckets?.[0]).toMatchObject({
+      transactionCount: 2,
+      totalGasUsed: "300",
+      totalFeeWei: "30",
+    });
+  });
+
+  test("splits transactions in different minutes into separate buckets", () => {
+    const tracker = new GuzzlerTracker();
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "100", feeWei: "0" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 2 * MINUTE, gasUsed: "200", feeWei: "0" }, T0 + 2 * MINUTE);
+
+    const buckets = tracker.getSenderBuckets("0xa");
+    expect(buckets?.map((b) => b.transactionCount)).toEqual([1, 1]);
+    expect(buckets?.map((b) => b.minute)).toEqual([
+      Math.floor(T0 / MINUTE),
+      Math.floor((T0 + 2 * MINUTE) / MINUTE),
+    ]);
+  });
+
   test("normalizes addresses case-insensitively", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xAAA", tx("0x1", T0, "10"), T0);
-    tracker.record("0xaaa", tx("0x2", T0 + 1, "20"), T0 + 1);
+    tracker.record("0xAAA", { timestampMs: T0, gasUsed: "10", feeWei: "0" }, T0);
+    tracker.record("0xaaa", { timestampMs: T0 + 1000, gasUsed: "20", feeWei: "0" }, T0 + 1000);
 
-    const stats = tracker.getStatistics(T0 + 1);
+    const stats = tracker.getStatistics(T0 + 1000);
     expect(stats.count).toBe(1);
     expect(stats.guzzlers[0]?.transactionCount).toBe(2);
     expect(stats.guzzlers[0]?.totalGasUsed).toBe("30");
   });
 
-  test("evicts transactions older than the window on record", () => {
-    const tracker = new GuzzlerTracker(1000);
-    tracker.record("0xa", tx("0x1", 0, "10"), 0);
-    tracker.record("0xa", tx("0x2", 2000, "20"), 2000);
+  test("evicts buckets older than the retention window on record", () => {
+    const tracker = new GuzzlerTracker(2 * MINUTE);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "10", feeWei: "0" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 3 * MINUTE, gasUsed: "20", feeWei: "0" }, T0 + 3 * MINUTE);
 
-    const stats = tracker.getStatistics(2000);
+    const stats = tracker.getStatistics(T0 + 3 * MINUTE);
     expect(stats.guzzlers[0]?.transactionCount).toBe(1);
     expect(stats.guzzlers[0]?.totalGasUsed).toBe("20");
   });
 
-  test("sweep removes senders whose transactions all aged out", () => {
-    const tracker = new GuzzlerTracker(1000);
-    tracker.record("0xa", tx("0x1", 0, "10"), 0);
-    tracker.record("0xb", tx("0x2", 1500, "10"), 1500);
+  test("sweep removes senders whose buckets all aged out", () => {
+    const tracker = new GuzzlerTracker(2 * MINUTE);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "10", feeWei: "0" }, T0);
+    tracker.record("0xb", { timestampMs: T0 + 90 * 1000, gasUsed: "10", feeWei: "0" }, T0 + 90 * 1000);
 
-    const { removed, updated } = tracker.sweep(2000);
+    const { removed, updated } = tracker.sweep(T0 + 3 * MINUTE);
     expect(removed).toEqual(["0xa"]);
     expect(updated).toEqual([]);
     expect(tracker.senderCount).toBe(1);
-    expect(tracker.getStatistics(2000).count).toBe(1);
+    expect(tracker.getStatistics(T0 + 3 * MINUTE).count).toBe(1);
   });
 
   test("returns only senders active in the window, sorted by gas used desc", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xsmall", tx("0x1", T0, "100"), T0);
-    tracker.record("0xsmall", tx("0x2", T0 + 1, "100"), T0 + 1);
-    tracker.record("0xbig", tx("0x3", T0 + 2, "500"), T0 + 2);
+    tracker.record("0xsmall", { timestampMs: T0, gasUsed: "100", feeWei: "0" }, T0);
+    tracker.record("0xsmall", { timestampMs: T0 + 1000, gasUsed: "100", feeWei: "0" }, T0 + 1000);
+    tracker.record("0xbig", { timestampMs: T0 + 2000, gasUsed: "500", feeWei: "0" }, T0 + 2000);
 
-    const stats = tracker.getStatistics(T0 + 2);
+    const stats = tracker.getStatistics(T0 + 2000);
     expect(stats.guzzlers.map((g) => g.address)).toEqual(["0xbig", "0xsmall"]);
     expect(stats.guzzlers[0]?.totalGasUsed).toBe("500");
     expect(stats.guzzlers[1]?.totalGasUsed).toBe("200");
   });
 
-  test("reports first and last seen timestamps", () => {
+  test("reports first and last seen timestamps across buckets", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xa", tx("0x1", T0, "1"), T0);
-    tracker.record("0xa", tx("0x2", T0 + 5000, "1"), T0 + 5000);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "1", feeWei: "0" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 5 * MINUTE, gasUsed: "1", feeWei: "0" }, T0 + 5 * MINUTE);
 
-    const stat = tracker.getStatistics(T0 + 5000).guzzlers[0];
+    const stat = tracker.getStatistics(T0 + 5 * MINUTE).guzzlers[0];
     expect(stat?.firstSeen).toBe(new Date(T0).toISOString());
-    expect(stat?.lastSeen).toBe(new Date(T0 + 5000).toISOString());
+    expect(stat?.lastSeen).toBe(new Date(T0 + 5 * MINUTE).toISOString());
   });
 
-  test("loadSender restores retained transactions", () => {
+  test("loadSender restores retained buckets sorted by minute", () => {
     const tracker = new GuzzlerTracker();
-    tracker.loadSender("0xa", [tx("0x2", T0 + 1, "5"), tx("0x1", T0, "5")]);
-    expect(tracker.getSenderTransactions("0xa")?.map((t) => t.hash)).toEqual(["0x1", "0x2"]);
+    tracker.loadSender("0xa", [bucket(T0 + 2 * MINUTE, "5"), bucket(T0, "5")]);
+    expect(tracker.getSenderBuckets("0xa")?.map((b) => b.minute)).toEqual([
+      Math.floor(T0 / MINUTE),
+      Math.floor((T0 + 2 * MINUTE) / MINUTE),
+    ]);
   });
 });
 
 describe("GuzzlerTracker.getLeaderboards", () => {
-  test("buckets each transaction into the windows that contain it", () => {
+  test("buckets each bucket into the windows that contain it", () => {
     const tracker = new GuzzlerTracker();
     // Ages chosen to land in nested window sets.
-    tracker.loadSender("0xrecent", [tx("0xr", T0 - 60_000, "100", "10")]); // 1m → every window
-    tracker.loadSender("0xmid", [tx("0xm", T0 - 30 * 60_000, "500", "50")]); // 30m → 1h,6h,24h
-    tracker.loadSender("0xold", [tx("0xo", T0 - 10 * HOUR, "999", "99")]); // 10h → 24h only
+    tracker.loadSender("0xrecent", [bucket(T0 - MINUTE, "100", "10")]); // 1m → every window
+    tracker.loadSender("0xmid", [bucket(T0 - 30 * MINUTE, "500", "50")]); // 30m → 1h,6h,24h
+    tracker.loadSender("0xold", [bucket(T0 - 10 * HOUR, "999", "99")]); // 10h → 24h only
 
     const board = tracker.getLeaderboards(T0, 10);
     expect(board.retentionMs).toBe(24 * HOUR);
@@ -127,9 +153,12 @@ describe("GuzzlerTracker.getLeaderboards", () => {
     expect(byLabel["24h"]!.guzzlers.map((g) => g.address)).toEqual(["0xold", "0xmid", "0xrecent"]);
   });
 
-  test("sums repeated transactions for a sender within a window", () => {
+  test("sums a sender's buckets within a window", () => {
     const tracker = new GuzzlerTracker();
-    tracker.loadSender("0xa", [tx("0x1", T0 - 1000, "100", "10"), tx("0x2", T0 - 2000, "200", "20")]);
+    tracker.loadSender("0xa", [
+      bucket(T0 - MINUTE, "100", "10"),
+      bucket(T0 - 2 * MINUTE, "200", "20"),
+    ]);
 
     const board = tracker.getLeaderboards(T0, 10);
     const five = board.windows.find((w) => w.label === "5m")!;
@@ -144,7 +173,7 @@ describe("GuzzlerTracker.getLeaderboards", () => {
   test("applies the top-N limit per window but still reports the full count", () => {
     const tracker = new GuzzlerTracker();
     for (let i = 0; i < 5; i += 1) {
-      tracker.loadSender(`0x${i.toString()}`, [tx(`0xh${i.toString()}`, T0 - 1000, String((i + 1) * 100))]);
+      tracker.loadSender(`0x${i.toString()}`, [bucket(T0 - MINUTE, String((i + 1) * 100))]);
     }
 
     const board = tracker.getLeaderboards(T0, 2);
@@ -154,83 +183,31 @@ describe("GuzzlerTracker.getLeaderboards", () => {
   });
 });
 
-describe("readGuzzlerLeaderboards", () => {
-  test("loads from the store, drops aged-out senders, and ranks per window", async () => {
-    const store = new FakeGuzzlerStore(
-      new Map([
-        ["0xactive", [tx("0x1", T0 - 60_000, "300")]],
-        ["0xbusy", [tx("0x2", T0 - 10, "50"), tx("0x3", T0 - 5, "60")]],
-        ["0xexpired", [tx("0x4", T0 - 25 * HOUR, "999")]],
-      ]),
-    );
+describe("sliceLeaderboards", () => {
+  test("cuts each window to the requested top-N while preserving the count", () => {
+    const tracker = new GuzzlerTracker();
+    tracker.loadSender("0xa", [bucket(T0 - MINUTE, "100")]);
+    tracker.loadSender("0xb", [bucket(T0 - MINUTE, "200")]);
+    tracker.loadSender("0xc", [bucket(T0 - MINUTE, "300")]);
 
-    const board = await readGuzzlerLeaderboards(store, T0, 10);
-    expect(board.windows.map((w) => w.label)).toEqual(["5m", "20m", "1h", "6h", "24h"]);
-    const five = board.windows.find((w) => w.label === "5m")!;
-    // 0xbusy (110) outranks 0xactive (300)? No — 300 > 110, so 0xactive first.
-    expect(five.guzzlers.map((g) => g.address)).toEqual(["0xactive", "0xbusy"]);
-    // The sender beyond the 24h retention is swept from every window.
-    for (const window of board.windows) {
-      expect(window.guzzlers.map((g) => g.address)).not.toContain("0xexpired");
-    }
+    const full = tracker.getLeaderboards(T0, 250);
+    const sliced = sliceLeaderboards(full, 1);
+    const five = sliced.windows.find((w) => w.label === "5m")!;
+    expect(sliced.limit).toBe(1);
+    expect(five.count).toBe(3);
+    expect(five.guzzlers.map((g) => g.address)).toEqual(["0xc"]);
   });
 });
 
-class CountingGuzzlerStore extends FakeGuzzlerStore {
-  loadCount = 0;
-  override async loadAll(): Promise<Map<string, GuzzlerTransaction[]>> {
-    this.loadCount += 1;
-    return super.loadAll();
-  }
-}
-
-describe("GuzzlerLeaderboardCache", () => {
-  function buildStore(): CountingGuzzlerStore {
-    return new CountingGuzzlerStore(
-      new Map([
-        ["0xa", [tx("0x1", T0 - 1000, "100")]],
-        ["0xb", [tx("0x2", T0 - 1000, "200")]],
-        ["0xc", [tx("0x3", T0 - 1000, "300")]],
-      ]),
-    );
-  }
-
-  test("reuses the computed board within the TTL and recomputes after it", async () => {
-    const store = buildStore();
-    let now = T0;
-    const cache = new GuzzlerLeaderboardCache(store, { ttlMs: 5000, now: () => now });
-
-    await cache.get(10);
-    now = T0 + 4000; // still within the 5s TTL
-    await cache.get(10);
-    expect(store.loadCount).toBe(1);
-
-    now = T0 + 6000; // past the TTL
-    await cache.get(10);
-    expect(store.loadCount).toBe(2);
-  });
-
-  test("serves different limits from one cached board", async () => {
-    const store = buildStore();
-    const cache = new GuzzlerLeaderboardCache(store, { ttlMs: 5000, now: () => T0 });
-
-    const top1 = await cache.get(1);
-    const top10 = await cache.get(10);
-
-    expect(store.loadCount).toBe(1); // both served from the same rebuild
-    const five1 = top1.windows.find((w) => w.label === "5m")!;
-    const five10 = top10.windows.find((w) => w.label === "5m")!;
-    expect(top1.limit).toBe(1);
-    expect(five1.guzzlers.map((g) => g.address)).toEqual(["0xc"]);
-    expect(five1.count).toBe(3); // full count preserved despite the cut
-    expect(five10.guzzlers.map((g) => g.address)).toEqual(["0xc", "0xb", "0xa"]);
-  });
-
-  test("collapses concurrent misses onto a single rebuild", async () => {
-    const store = buildStore();
-    const cache = new GuzzlerLeaderboardCache(store, { ttlMs: 5000, now: () => T0 });
-
-    await Promise.all([cache.get(10), cache.get(10), cache.get(10)]);
-    expect(store.loadCount).toBe(1);
+describe("emptyLeaderboards", () => {
+  test("returns a well-formed payload with every window empty", () => {
+    const board = emptyLeaderboards(T0, 100);
+    expect(board.limit).toBe(100);
+    expect(board.retentionMs).toBe(24 * HOUR);
+    expect(board.windows.map((w) => w.label)).toEqual(GUZZLER_WINDOWS.map((w) => w.label));
+    for (const window of board.windows) {
+      expect(window.count).toBe(0);
+      expect(window.guzzlers).toEqual([]);
+    }
   });
 });

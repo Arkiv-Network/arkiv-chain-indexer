@@ -1,43 +1,68 @@
 import { RedisClient } from "bun";
-import type { GuzzlerStore, GuzzlerStoreStats, GuzzlerTransaction } from "./guzzlers";
+import {
+  DEFAULT_GUZZLER_RETENTION_MS,
+  type GuzzlerBucket,
+  type GuzzlerLeaderboards,
+  type GuzzlerStore,
+  type GuzzlerStoreStats,
+} from "./guzzlers";
 
 /**
- * {@link GuzzlerStore} backed by a single Redis hash, keyed by sender address,
- * whose values are JSON-encoded arrays of the sender's retained transactions.
+ * {@link GuzzlerStore} backed by Redis.
  *
- * A hash keeps the whole dataset under one key so the read side can fetch every
- * active sender in a single `HGETALL`, while the writer updates or removes
- * individual senders with `HSET` / `HDEL`.
+ * Per-sender bucket data lives in a single hash keyed by sender address, whose
+ * values are JSON-encoded arrays of the sender's retained one-minute buckets.
+ * The hash keeps the whole dataset under one key so the writer can load every
+ * active sender in a single `HGETALL`, while updating or removing individual
+ * senders with `HSET` / `HDEL`.
+ *
+ * The precomputed leaderboard response — refreshed once a minute by the writer
+ * and served verbatim by the API — lives under a separate string key with a
+ * short TTL, so a stalled writer's board eventually disappears instead of being
+ * served forever.
  */
 export class RedisGuzzlerStore implements GuzzlerStore {
   static readonly DEFAULT_KEY = "guzzlers:senders";
+  static readonly DEFAULT_LEADERBOARD_KEY = "guzzlers:leaderboards";
+
+  /**
+   * How long the cached leaderboard survives without a refresh. Comfortably
+   * above the once-a-minute refresh cadence so a healthy writer always keeps it
+   * fresh, but bounded so a dead writer's board self-expires.
+   */
+  private readonly leaderboardTtlSeconds = Math.ceil(DEFAULT_GUZZLER_RETENTION_MS / 1000);
 
   private constructor(
     private readonly client: RedisClient,
     private readonly key: string,
+    private readonly leaderboardKey: string,
   ) {}
 
   /** Connect to Redis and return a ready store. */
-  static async open(url: string, key: string = RedisGuzzlerStore.DEFAULT_KEY): Promise<RedisGuzzlerStore> {
+  static async open(
+    url: string,
+    key: string = RedisGuzzlerStore.DEFAULT_KEY,
+    leaderboardKey: string = RedisGuzzlerStore.DEFAULT_LEADERBOARD_KEY,
+  ): Promise<RedisGuzzlerStore> {
     const client = new RedisClient(url);
     await client.connect();
-    return new RedisGuzzlerStore(client, key);
+    return new RedisGuzzlerStore(client, key, leaderboardKey);
   }
 
-  async loadAll(): Promise<Map<string, GuzzlerTransaction[]>> {
+  async loadAll(): Promise<Map<string, GuzzlerBucket[]>> {
     const raw = await this.client.hgetall(this.key);
-    const result = new Map<string, GuzzlerTransaction[]>();
+    const result = new Map<string, GuzzlerBucket[]>();
     for (const [address, json] of Object.entries(raw ?? {})) {
-      const txs = parseTransactions(json);
-      if (txs.length > 0) {
-        result.set(address, txs);
+      const buckets = parseBuckets(json);
+      if (buckets.length > 0) {
+        result.set(address, buckets);
       }
     }
     return result;
   }
 
-  async putSender(address: string, txs: GuzzlerTransaction[]): Promise<void> {
-    await this.client.hset(this.key, address, JSON.stringify(txs));
+  async putSender(address: string, buckets: GuzzlerBucket[]): Promise<void> {
+    await this.client.hset(this.key, address, JSON.stringify(buckets));
   }
 
   async removeSenders(addresses: string[]): Promise<void> {
@@ -46,6 +71,27 @@ export class RedisGuzzlerStore implements GuzzlerStore {
     }
     const [first, ...rest] = addresses;
     await this.client.hdel(this.key, first as string, ...rest);
+  }
+
+  async saveLeaderboards(board: GuzzlerLeaderboards): Promise<void> {
+    await this.client.send("SET", [
+      this.leaderboardKey,
+      JSON.stringify(board),
+      "EX",
+      this.leaderboardTtlSeconds.toString(),
+    ]);
+  }
+
+  async loadLeaderboards(): Promise<GuzzlerLeaderboards | null> {
+    const json = await this.client.get(this.leaderboardKey);
+    if (!json) {
+      return null;
+    }
+    try {
+      return JSON.parse(json) as GuzzlerLeaderboards;
+    } catch {
+      return null;
+    }
   }
 
   async stats(): Promise<GuzzlerStoreStats> {
@@ -68,10 +114,10 @@ export class RedisGuzzlerStore implements GuzzlerStore {
   }
 }
 
-function parseTransactions(json: string): GuzzlerTransaction[] {
+function parseBuckets(json: string): GuzzlerBucket[] {
   try {
     const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? (parsed as GuzzlerTransaction[]) : [];
+    return Array.isArray(parsed) ? (parsed as GuzzlerBucket[]) : [];
   } catch {
     return [];
   }
