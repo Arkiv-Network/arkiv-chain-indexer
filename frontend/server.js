@@ -14,6 +14,7 @@ const STATIC_DIR = path.resolve(__dirname, "dist");
 const INDEX_FILE = path.join(STATIC_DIR, "index.html");
 const ONE_WEEK_SECONDS = 60 * 60 * 24 * 7;
 const CACHEABLE_INDEX_ASSET_RE = /^index-[^/]+\.(?:js|css)$/;
+const ENABLE_BROTLI = process.env.NODE_ENV === "production";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -49,9 +50,58 @@ function cacheHeadersFor(filePath) {
   };
 }
 
-function sendFile(filePath, res, { status = 200 } = {}) {
-  res.writeHead(status, { "content-type": mimeFor(filePath), ...cacheHeadersFor(filePath) });
-  const stream = createReadStream(filePath);
+function acceptsBrotli(req) {
+  const header = req.headers["accept-encoding"];
+  if (!header || Array.isArray(header)) {
+    return false;
+  }
+
+  return header
+    .split(",")
+    .map((encoding) => encoding.trim().toLowerCase())
+    .some((encoding) => {
+      const [name, ...params] = encoding.split(";").map((part) => part.trim());
+      if (name !== "br") {
+        return false;
+      }
+
+      const quality = params.find((param) => param.startsWith("q="));
+      return !quality || Number.parseFloat(quality.slice(2)) > 0;
+    });
+}
+
+async function getBrotliAsset(filePath, req) {
+  if (!ENABLE_BROTLI || !acceptsBrotli(req)) {
+    return null;
+  }
+
+  const brotliPath = `${filePath}.br`;
+  const stats = await stat(brotliPath).catch(() => null);
+  if (!stats?.isFile()) {
+    return null;
+  }
+
+  return { filePath: brotliPath, size: stats.size };
+}
+
+async function sendFile(filePath, req, res, { status = 200 } = {}) {
+  const brotliAsset = await getBrotliAsset(filePath, req);
+  const responsePath = brotliAsset?.filePath ?? filePath;
+  const headers = {
+    "content-type": mimeFor(filePath),
+    ...cacheHeadersFor(filePath),
+  };
+
+  if (brotliAsset) {
+    headers["content-encoding"] = "br";
+    headers["content-length"] = brotliAsset.size;
+    headers.vary = "Accept-Encoding";
+  } else if (ENABLE_BROTLI) {
+    headers.vary = "Accept-Encoding";
+  }
+
+  res.writeHead(status, headers);
+  const stream = createReadStream(responsePath);
   stream.on("error", () => {
     if (!res.headersSent) {
       res.writeHead(500, { "content-type": "text/plain" });
@@ -106,7 +156,7 @@ async function serveStatic(req, res) {
   try {
     const stats = await stat(candidate);
     if (stats.isFile()) {
-      sendFile(candidate, res);
+      await sendFile(candidate, req, res);
       return;
     }
   } catch {
@@ -115,7 +165,7 @@ async function serveStatic(req, res) {
 
   try {
     await stat(INDEX_FILE);
-    sendFile(INDEX_FILE, res, { status: 200 });
+    await sendFile(INDEX_FILE, req, res, { status: 200 });
   } catch {
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("Not found");
