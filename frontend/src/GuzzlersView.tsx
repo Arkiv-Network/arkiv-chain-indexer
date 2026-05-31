@@ -173,7 +173,7 @@ function GuzzlerLeaderboard({
   return (
     <section className="view guzzlers-view">
       <div className="view-heading-row">
-        <h2>Most Active Wallets</h2>
+        <h2>Most Active Wallets (1h)</h2>
         <div className="guzzler-controls">
           <div className="segmented" role="group" aria-label="Active window">
             {WINDOWS.map((w) => (

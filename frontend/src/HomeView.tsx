@@ -531,7 +531,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
         <div className="home-section-head">
           <div>
             <p className="home-kicker">charts</p>
-            <h3>Last {settings.histogramWindowMinutes} minutes</h3>
           </div>
         </div>
         <LiveHistograms
