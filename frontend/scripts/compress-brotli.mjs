@@ -8,6 +8,30 @@ const compress = promisify(brotliCompress);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
 
+// Formats whose bytes are already compressed; Brotli would add CPU cost on both
+// ends for little or no size benefit, so we leave them uncompressed.
+const ALREADY_COMPRESSED = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".woff",
+  ".woff2",
+  ".mp4",
+  ".webm",
+  ".mov",
+  ".mp3",
+  ".ogg",
+  ".m4a",
+  ".zip",
+  ".gz",
+  ".br",
+  ".7z",
+  ".rar",
+]);
+
 async function listFiles(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
@@ -16,7 +40,7 @@ async function listFiles(dir) {
     const filePath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await listFiles(filePath)));
-    } else if (entry.isFile() && !entry.name.endsWith(".br")) {
+    } else if (entry.isFile() && !ALREADY_COMPRESSED.has(path.extname(entry.name).toLowerCase())) {
       files.push(filePath);
     }
   }
