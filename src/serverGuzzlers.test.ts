@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
   handleRequest,
+  type GuzzlerHistoryPointResponseRow,
   type GuzzlerHistoryResponseBody,
   type GuzzlersResponseBody,
   type HealthResponseBody,
@@ -75,6 +77,13 @@ const emptyStorage = {} as ScannerStorage;
 
 /** A valid lowercase 20-byte hex address. */
 const ADDRESS = `0x${"ab".repeat(20)}`;
+
+function historyValue(
+  row: GuzzlerHistoryPointResponseRow,
+  name: (typeof GUZZLER_HISTORY_POINT_RESPONSE_NAMES)[number],
+): number | string | null {
+  return row[GUZZLER_HISTORY_POINT_RESPONSE_NAMES.indexOf(name)] ?? null;
+}
 
 describe("GET /guzzlers", () => {
   test("ranks active senders by gas used in every window", async () => {
@@ -213,8 +222,9 @@ describe("GET /guzzler/:address", () => {
     expect(body.bucketMs).toBe(MINUTE);
     expect(body.retentionMs).toBe(24 * HOUR);
     expect(body.count).toBe(2);
-    expect(body.points.map((p) => p.totalGasUsed)).toEqual(["100", "200"]);
-    expect(body.points[0]?.startTime).toBe(
+    expect(body.names).toEqual(GUZZLER_HISTORY_POINT_RESPONSE_NAMES);
+    expect(body.points.map((p) => historyValue(p, "totalGasUsed"))).toEqual(["100", "200"]);
+    expect(historyValue(body.points[0]!, "startTime")).toBe(
       new Date(Math.floor((NOW - 5 * MINUTE) / MINUTE) * MINUTE).toISOString(),
     );
   });
@@ -230,6 +240,7 @@ describe("GET /guzzler/:address", () => {
     const body = (await response.json()) as GuzzlerHistoryResponseBody;
     expect(body.address).toBe(ADDRESS);
     expect(body.count).toBe(1);
+    expect(body.names).toEqual(GUZZLER_HISTORY_POINT_RESPONSE_NAMES);
   });
 
   test("omits buckets aged past retention", async () => {
@@ -243,7 +254,7 @@ describe("GET /guzzler/:address", () => {
       { guzzlerStore: store },
     );
     const body = (await response.json()) as GuzzlerHistoryResponseBody;
-    expect(body.points.map((p) => p.totalGasUsed)).toEqual(["100"]);
+    expect(body.points.map((p) => historyValue(p, "totalGasUsed"))).toEqual(["100"]);
   });
 
   test("returns an empty history for an unknown sender", async () => {
@@ -258,6 +269,7 @@ describe("GET /guzzler/:address", () => {
     const body = (await response.json()) as GuzzlerHistoryResponseBody;
     expect(body.address).toBe(ADDRESS);
     expect(body.count).toBe(0);
+    expect(body.names).toEqual(GUZZLER_HISTORY_POINT_RESPONSE_NAMES);
     expect(body.points).toEqual([]);
   });
 

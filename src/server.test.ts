@@ -1,10 +1,12 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   BLOCK_RESPONSE_NAMES,
+  RANGE_RESPONSE_NAMES,
   createBlockServer,
   handleRequest,
   parseFilterFromQuery,
   parseRangeFilterFromQuery,
+  type RangeResponseRow,
   parseSenderStatsFilterFromQuery,
   parseTransactionFilterFromQuery,
   parseTransactionRecordsFilterFromQuery,
@@ -36,6 +38,13 @@ const cleanups: Array<() => Promise<void>> = [];
 function blockNumbersFromRows(rows: BlockResponseRow[]): number[] {
   const blockNumberIndex = BLOCK_RESPONSE_NAMES.indexOf("blockNumber");
   return rows.map((row) => row[blockNumberIndex] as number);
+}
+
+function rangeValue(
+  row: RangeResponseRow,
+  name: (typeof RANGE_RESPONSE_NAMES)[number],
+): number | string | null {
+  return row[RANGE_RESPONSE_NAMES.indexOf(name)] ?? null;
 }
 
 async function withStorage(): Promise<ScannerStorage> {
@@ -1118,13 +1127,12 @@ if (!hasPostgresForTests()) {
         expect(body.count).toBe(1);
         expect(body.limit).toBe(10_000);
         expect(body.truncated).toBe(false);
-        expect(body.ranges.map((row) => row.rangeStart)).toEqual([100]);
-        expect(body.ranges[0]).toMatchObject({
-          minBaseFeeWei: "100",
-          maxBaseFeeWei: "100",
-          minMaxGasInBlock: "30000000",
-          maxMaxGasInBlock: "30000000",
-        });
+        expect(body.names).toEqual(RANGE_RESPONSE_NAMES);
+        expect(body.ranges.map((row) => rangeValue(row, "rangeStart"))).toEqual([100]);
+        expect(rangeValue(body.ranges[0]!, "minBaseFeeWei")).toBe("100");
+        expect(rangeValue(body.ranges[0]!, "maxBaseFeeWei")).toBe("100");
+        expect(rangeValue(body.ranges[0]!, "minMaxGasInBlock")).toBe("30000000");
+        expect(rangeValue(body.ranges[0]!, "maxMaxGasInBlock")).toBe("30000000");
         expect(body.filters).toEqual({
           rangeSize: "100",
           rangeStartGt: "0",
@@ -1150,8 +1158,8 @@ if (!hasPostgresForTests()) {
         const response = await fetch(`${url}/ranges?rangeSize=50`);
         expect(response.status).toBe(200);
         const body = (await response.json()) as RangesResponseBody;
-        expect(body.ranges.map((row) => row.rangeStart)).toEqual([100, 50, 0]);
-        expect(body.ranges.every((row) => row.rangeSize === 50)).toBe(true);
+        expect(body.ranges.map((row) => rangeValue(row, "rangeStart"))).toEqual([100, 50, 0]);
+        expect(body.ranges.every((row) => rangeValue(row, "rangeSize") === 50)).toBe(true);
         expect(body.filters.rangeSize).toBe("50");
       });
     });
@@ -1166,7 +1174,7 @@ if (!hasPostgresForTests()) {
         const response = await fetch(`${url}/ranges?limit=2`);
         expect(response.status).toBe(200);
         const body = (await response.json()) as RangesResponseBody;
-        expect(body.ranges.map((row) => row.rangeStart)).toEqual([200, 100]);
+        expect(body.ranges.map((row) => rangeValue(row, "rangeStart"))).toEqual([200, 100]);
       });
     });
 
@@ -1179,6 +1187,7 @@ if (!hasPostgresForTests()) {
         expect(response.status).toBe(200);
         const body = (await response.json()) as RangesResponseBody;
         expect(body.count).toBe(0);
+        expect(body.names).toEqual(RANGE_RESPONSE_NAMES);
         expect(body.ranges).toEqual([]);
         expect(body.filters.rangeSize).toBe("500");
       });
@@ -1207,6 +1216,7 @@ if (!hasPostgresForTests()) {
         expect(response.status).toBe(200);
         const body = (await response.json()) as RangesResponseBody;
         expect(body.count).toBe(0);
+        expect(body.names).toEqual(RANGE_RESPONSE_NAMES);
         expect(body.ranges).toEqual([]);
       });
     });

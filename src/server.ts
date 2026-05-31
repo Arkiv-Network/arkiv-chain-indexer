@@ -7,6 +7,7 @@ import {
   emptyLeaderboards,
   sliceLeaderboards,
   type GuzzlerHistory,
+  type GuzzlerHistoryPoint,
   type GuzzlerLeaderboards,
   type GuzzlerStore,
 } from "./guzzlers";
@@ -70,7 +71,8 @@ export interface RangesResponseBody {
     dateGt: string | null;
     dateLt: string | null;
   };
-  ranges: StoredBlockRange[];
+  names: typeof RANGE_RESPONSE_NAMES;
+  ranges: RangeResponseRow[];
 }
 
 export interface TransactionsResponseBody {
@@ -113,7 +115,10 @@ export interface SendersResponseBody {
 
 export type GuzzlersResponseBody = GuzzlerLeaderboards;
 
-export type GuzzlerHistoryResponseBody = GuzzlerHistory;
+export type GuzzlerHistoryResponseBody = Omit<GuzzlerHistory, "points"> & {
+  names: typeof GUZZLER_HISTORY_POINT_RESPONSE_NAMES;
+  points: GuzzlerHistoryPointResponseRow[];
+};
 
 export interface BaseloadConfigsResponseBody {
   configs: StoredBaseloadConfigSummary[];
@@ -183,6 +188,54 @@ export const BLOCK_RESPONSE_NAMES = [
 
 export type BlockResponseValue = number | string | null;
 export type BlockResponseRow = BlockResponseValue[];
+
+export const RANGE_RESPONSE_NAMES = [
+  "rangeSize",
+  "rangeStart",
+  "rangeEnd",
+  "minBlockDate",
+  "maxBlockDate",
+  "minBaseFeeWei",
+  "maxBaseFeeWei",
+  "averageBaseFeeWei",
+  "totalGasUsed",
+  "totalMaxGas",
+  "minMaxGasInBlock",
+  "maxMaxGasInBlock",
+  "transactionCount",
+  "totalBlockRewardWei",
+  "totalBurntFeesWei",
+  "averageBlockRewardWei",
+  "averageBurntFeesWei",
+  "averageFeePriceWei",
+  "averageTransactionGasUsed",
+  "averagePriorityFeeWeightedWei",
+  "averagePriorityFeeWei",
+  "minBatcherQueueSize",
+  "maxBatcherQueueSize",
+  "averageBatcherQueueSize",
+  "averageBatcherIntensity",
+  "averageBatcherLowerThreshold",
+  "averageBatcherUpperThreshold",
+  "averageBatcherMaxBlockSize",
+  "averageBatcherMaxTxSize",
+] as const satisfies readonly (keyof StoredBlockRange)[];
+
+export type RangeResponseValue = number | string | null;
+export type RangeResponseRow = RangeResponseValue[];
+
+export const GUZZLER_HISTORY_POINT_RESPONSE_NAMES = [
+  "minute",
+  "startTime",
+  "transactionCount",
+  "totalGasUsed",
+  "totalFeeWei",
+  "firstSeen",
+  "lastSeen",
+] as const satisfies readonly (keyof GuzzlerHistoryPoint)[];
+
+export type GuzzlerHistoryPointResponseValue = number | string | null;
+export type GuzzlerHistoryPointResponseRow = GuzzlerHistoryPointResponseValue[];
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -610,10 +663,15 @@ async function handleGetRanges(url: URL, storage: ScannerStorage): Promise<Respo
       dateGt: filter.dateGt ?? null,
       dateLt: filter.dateLt ?? null,
     },
-    ranges,
+    names: RANGE_RESPONSE_NAMES,
+    ranges: ranges.map(rangeToResponseRow),
   };
 
   return jsonResponse(body);
+}
+
+export function rangeToResponseRow(range: StoredBlockRange): RangeResponseRow {
+  return RANGE_RESPONSE_NAMES.map((name) => range[name] ?? null);
 }
 
 async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise<Response> {
@@ -772,9 +830,20 @@ async function handleGetGuzzlerHistory(
   // A single sender is one hash field, so this reads live rather than from the
   // minute-cached leaderboard. An unknown sender yields an empty history.
   const buckets = await guzzlerStore.loadSender(address);
-  const body: GuzzlerHistoryResponseBody = buildGuzzlerHistory(address, buckets ?? [], Date.now());
+  const history = buildGuzzlerHistory(address, buckets ?? [], Date.now());
+  const body: GuzzlerHistoryResponseBody = {
+    ...history,
+    names: GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
+    points: history.points.map(guzzlerHistoryPointToResponseRow),
+  };
 
   return jsonResponse(body);
+}
+
+export function guzzlerHistoryPointToResponseRow(
+  point: GuzzlerHistoryPoint,
+): GuzzlerHistoryPointResponseRow {
+  return GUZZLER_HISTORY_POINT_RESPONSE_NAMES.map((name) => point[name] ?? null);
 }
 
 async function handleGetSenders(url: URL, storage: ScannerStorage): Promise<Response> {

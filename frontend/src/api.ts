@@ -56,6 +56,42 @@ export type BlockResponseName = (typeof BLOCK_RESPONSE_NAMES)[number];
 export type BlockResponseValue = number | string | null;
 export type BlockResponseRow = BlockResponseValue[];
 
+export const RANGE_RESPONSE_NAMES = [
+  "rangeSize",
+  "rangeStart",
+  "rangeEnd",
+  "minBlockDate",
+  "maxBlockDate",
+  "minBaseFeeWei",
+  "maxBaseFeeWei",
+  "averageBaseFeeWei",
+  "totalGasUsed",
+  "totalMaxGas",
+  "minMaxGasInBlock",
+  "maxMaxGasInBlock",
+  "transactionCount",
+  "totalBlockRewardWei",
+  "totalBurntFeesWei",
+  "averageBlockRewardWei",
+  "averageBurntFeesWei",
+  "averageFeePriceWei",
+  "averageTransactionGasUsed",
+  "averagePriorityFeeWeightedWei",
+  "averagePriorityFeeWei",
+  "minBatcherQueueSize",
+  "maxBatcherQueueSize",
+  "averageBatcherQueueSize",
+  "averageBatcherIntensity",
+  "averageBatcherLowerThreshold",
+  "averageBatcherUpperThreshold",
+  "averageBatcherMaxBlockSize",
+  "averageBatcherMaxTxSize",
+] as const satisfies readonly (keyof StoredBlockRange)[];
+
+export type RangeResponseName = (typeof RANGE_RESPONSE_NAMES)[number];
+export type RangeResponseValue = number | string | null;
+export type RangeResponseRow = RangeResponseValue[];
+
 export interface StoredBlockRange {
   rangeSize: number;
   rangeStart: number;
@@ -125,6 +161,21 @@ export interface RangesResponse {
   limit: number;
   truncated: boolean;
   ranges: StoredBlockRange[];
+}
+
+interface CompactRangesResponse {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  filters: {
+    rangeSize: string;
+    rangeStartGt: string | null;
+    rangeStartLt: string | null;
+    dateGt: string | null;
+    dateLt: string | null;
+  };
+  names: string[];
+  ranges: RangeResponseRow[];
 }
 
 export interface InspectedTransaction {
@@ -288,6 +339,21 @@ export interface GuzzlerHistoryPoint {
   lastSeen: string;
 }
 
+export const GUZZLER_HISTORY_POINT_RESPONSE_NAMES = [
+  "minute",
+  "startTime",
+  "transactionCount",
+  "totalGasUsed",
+  "totalFeeWei",
+  "firstSeen",
+  "lastSeen",
+] as const satisfies readonly (keyof GuzzlerHistoryPoint)[];
+
+export type GuzzlerHistoryPointResponseName =
+  (typeof GUZZLER_HISTORY_POINT_RESPONSE_NAMES)[number];
+export type GuzzlerHistoryPointResponseValue = number | string | null;
+export type GuzzlerHistoryPointResponseRow = GuzzlerHistoryPointResponseValue[];
+
 export interface GuzzlerHistoryResponse {
   address: string;
   generatedAt: string;
@@ -295,6 +361,16 @@ export interface GuzzlerHistoryResponse {
   bucketMs: number;
   count: number;
   points: GuzzlerHistoryPoint[];
+}
+
+interface CompactGuzzlerHistoryResponse {
+  address: string;
+  generatedAt: string;
+  retentionMs: number;
+  bucketMs: number;
+  count: number;
+  names: string[];
+  points: GuzzlerHistoryPointResponseRow[];
 }
 
 export interface DatabaseTableStats {
@@ -560,6 +636,28 @@ function expandBlocksResponse(response: CompactBlocksResponse): BlocksResponse {
   };
 }
 
+function expandRangesResponse(response: CompactRangesResponse): RangesResponse {
+  return {
+    count: response.count,
+    limit: response.limit,
+    truncated: response.truncated,
+    ranges: response.ranges.map((row) => decodeRangeResponseRow(row, response.names)),
+  };
+}
+
+function expandGuzzlerHistoryResponse(
+  response: CompactGuzzlerHistoryResponse,
+): GuzzlerHistoryResponse {
+  return {
+    address: response.address,
+    generatedAt: response.generatedAt,
+    retentionMs: response.retentionMs,
+    bucketMs: response.bucketMs,
+    count: response.count,
+    points: response.points.map((row) => decodeGuzzlerHistoryPointResponseRow(row, response.names)),
+  };
+}
+
 function namesForBlockResponseRow(row: BlockResponseRow): readonly string[] {
   return latestBlockResponseNames.length === row.length ? latestBlockResponseNames : BLOCK_RESPONSE_NAMES;
 }
@@ -605,6 +703,78 @@ function decodeBlockResponseRow(row: BlockResponseRow, names: readonly string[] 
   );
 
   return block;
+}
+
+function decodeRangeResponseRow(
+  row: RangeResponseRow,
+  names: readonly string[] = RANGE_RESPONSE_NAMES,
+): StoredBlockRange {
+  const values = valuesByName(names, row);
+
+  const range: StoredBlockRange = {
+    rangeSize: numberValue(values.get("rangeSize") ?? null),
+    rangeStart: numberValue(values.get("rangeStart") ?? null),
+    rangeEnd: numberValue(values.get("rangeEnd") ?? null),
+    minBlockDate: stringValue(values.get("minBlockDate") ?? null),
+    maxBlockDate: stringValue(values.get("maxBlockDate") ?? null),
+    minBaseFeeWei: stringValue(values.get("minBaseFeeWei") ?? null),
+    maxBaseFeeWei: stringValue(values.get("maxBaseFeeWei") ?? null),
+    averageBaseFeeWei: stringValue(values.get("averageBaseFeeWei") ?? null),
+    averageFeePriceWei: stringValue(values.get("averageFeePriceWei") ?? null),
+    averagePriorityFeeWei: stringValue(values.get("averagePriorityFeeWei") ?? null),
+    averagePriorityFeeWeightedWei: stringValue(
+      values.get("averagePriorityFeeWeightedWei") ?? null,
+    ),
+    averageTransactionGasUsed: stringValue(values.get("averageTransactionGasUsed") ?? null),
+    totalBlockRewardWei: stringValue(values.get("totalBlockRewardWei") ?? null),
+    totalBurntFeesWei: stringValue(values.get("totalBurntFeesWei") ?? null),
+    averageBlockRewardWei: stringValue(values.get("averageBlockRewardWei") ?? null),
+    averageBurntFeesWei: stringValue(values.get("averageBurntFeesWei") ?? null),
+    transactionCount: numberValue(values.get("transactionCount") ?? null),
+    totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    totalMaxGas: stringValue(values.get("totalMaxGas") ?? null),
+    minMaxGasInBlock: stringValue(values.get("minMaxGasInBlock") ?? null),
+    maxMaxGasInBlock: stringValue(values.get("maxMaxGasInBlock") ?? null),
+    minBatcherQueueSize: nullableString(values.get("minBatcherQueueSize") ?? null),
+    maxBatcherQueueSize: nullableString(values.get("maxBatcherQueueSize") ?? null),
+    averageBatcherQueueSize: nullableString(values.get("averageBatcherQueueSize") ?? null),
+    averageBatcherIntensity: nullableString(values.get("averageBatcherIntensity") ?? null),
+    averageBatcherLowerThreshold: nullableString(
+      values.get("averageBatcherLowerThreshold") ?? null,
+    ),
+    averageBatcherUpperThreshold: nullableString(
+      values.get("averageBatcherUpperThreshold") ?? null,
+    ),
+    averageBatcherMaxBlockSize: nullableString(values.get("averageBatcherMaxBlockSize") ?? null),
+    averageBatcherMaxTxSize: nullableString(values.get("averageBatcherMaxTxSize") ?? null),
+  };
+
+  return range;
+}
+
+function decodeGuzzlerHistoryPointResponseRow(
+  row: GuzzlerHistoryPointResponseRow,
+  names: readonly string[] = GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
+): GuzzlerHistoryPoint {
+  const values = valuesByName(names, row);
+  return {
+    minute: numberValue(values.get("minute") ?? null),
+    startTime: stringValue(values.get("startTime") ?? null),
+    transactionCount: numberValue(values.get("transactionCount") ?? null),
+    totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    totalFeeWei: stringValue(values.get("totalFeeWei") ?? null),
+    firstSeen: stringValue(values.get("firstSeen") ?? null),
+    lastSeen: stringValue(values.get("lastSeen") ?? null),
+  };
+}
+
+function valuesByName<T extends number | string | null>(
+  names: readonly string[],
+  row: readonly T[],
+): Map<string, T | null> {
+  const values = new Map<string, T | null>();
+  names.forEach((name, index) => values.set(name, row[index] ?? null));
+  return values;
 }
 
 function assignOptionalString(
@@ -698,7 +868,7 @@ function byteLength(value: string): number {
 }
 
 export function fetchRanges(params: URLSearchParams): Promise<RangesResponse> {
-  return getJson<RangesResponse>("/ranges", params);
+  return getJson<CompactRangesResponse>("/ranges", params).then(expandRangesResponse);
 }
 
 export async function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResponse> {
@@ -761,10 +931,10 @@ export function fetchGuzzlers(limit?: number): Promise<GuzzlersResponse> {
 }
 
 export function fetchGuzzlerHistory(address: string): Promise<GuzzlerHistoryResponse> {
-  return getJson<GuzzlerHistoryResponse>(
+  return getJson<CompactGuzzlerHistoryResponse>(
     `/guzzler/${encodeURIComponent(address)}`,
     new URLSearchParams(),
-  );
+  ).then(expandGuzzlerHistoryResponse);
 }
 
 export interface AdminVerifyResponse {

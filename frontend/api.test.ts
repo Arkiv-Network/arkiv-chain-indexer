@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   BLOCK_RESPONSE_NAMES,
+  GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
+  RANGE_RESPONSE_NAMES,
   fetchBlockByNumber,
   deleteBaseloadConfig,
   fetchBlocks,
   fetchBlockInspect,
   fetchBaseloadConfigs,
   fetchBaseloadState,
+  fetchGuzzlerHistory,
+  fetchRanges,
   fetchTransactionRecords,
   fetchSenders,
   loadBaseloadConfig,
@@ -252,6 +256,66 @@ describe("frontend API helpers", () => {
     expect(samples[0].transferredBytes).toBe(new TextEncoder().encode(body).length);
   });
 
+  test("decodes compact range rows into stored range objects", async () => {
+    globalThis.fetch = (async () =>
+      Response.json({
+        count: 1,
+        limit: 1,
+        truncated: false,
+        filters: {
+          rangeSize: "100",
+          rangeStartGt: null,
+          rangeStartLt: null,
+          dateGt: null,
+          dateLt: null,
+        },
+        names: RANGE_RESPONSE_NAMES,
+        ranges: [compactRangeRow(100)],
+      })) as typeof fetch;
+
+    const result = await fetchRanges(new URLSearchParams("limit=1"));
+
+    expect(result.ranges).toHaveLength(1);
+    expect(result.ranges[0]).toMatchObject({
+      rangeSize: 100,
+      rangeStart: 100,
+      rangeEnd: 199,
+      minBlockDate: "2024-01-01T00:00:00.000Z",
+      transactionCount: 12,
+      totalGasUsed: "252000",
+      minBatcherQueueSize: null,
+    });
+  });
+
+  test("decodes compact guzzler history rows into point objects", async () => {
+    const address = `0x${"ab".repeat(20)}`;
+    globalThis.fetch = (async () =>
+      Response.json({
+        address,
+        generatedAt: "2024-01-01T00:02:00.000Z",
+        retentionMs: 86_400_000,
+        bucketMs: 60_000,
+        count: 1,
+        names: GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
+        points: [compactGuzzlerHistoryPointRow()],
+      })) as typeof fetch;
+
+    const result = await fetchGuzzlerHistory(address);
+
+    expect(result.address).toBe(address);
+    expect(result.points).toEqual([
+      {
+        minute: 28_392_480,
+        startTime: "2024-01-01T00:00:00.000Z",
+        transactionCount: 3,
+        totalGasUsed: "63000",
+        totalFeeWei: "420000",
+        firstSeen: "2024-01-01T00:00:05.000Z",
+        lastSeen: "2024-01-01T00:00:55.000Z",
+      },
+    ]);
+  });
+
   test("fetches a block inspection from the stored block and transaction APIs", async () => {
     const observedInputs: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -360,5 +424,59 @@ function compactBlockRow(blockNumber: number): Array<number | string | null> {
       default:
         return "0";
     }
+  });
+}
+
+function compactRangeRow(rangeStart: number): Array<number | string | null> {
+  return RANGE_RESPONSE_NAMES.map((name) => {
+    switch (name) {
+      case "rangeSize":
+        return 100;
+      case "rangeStart":
+        return rangeStart;
+      case "rangeEnd":
+        return rangeStart + 99;
+      case "minBlockDate":
+        return "2024-01-01T00:00:00.000Z";
+      case "maxBlockDate":
+        return "2024-01-01T00:10:00.000Z";
+      case "transactionCount":
+        return 12;
+      case "totalGasUsed":
+        return "252000";
+      case "minBatcherQueueSize":
+      case "maxBatcherQueueSize":
+      case "averageBatcherQueueSize":
+      case "averageBatcherIntensity":
+      case "averageBatcherLowerThreshold":
+      case "averageBatcherUpperThreshold":
+      case "averageBatcherMaxBlockSize":
+      case "averageBatcherMaxTxSize":
+        return null;
+      default:
+        return "100";
+    }
+  });
+}
+
+function compactGuzzlerHistoryPointRow(): Array<number | string | null> {
+  return GUZZLER_HISTORY_POINT_RESPONSE_NAMES.map((name) => {
+    switch (name) {
+      case "minute":
+        return 28_392_480;
+      case "startTime":
+        return "2024-01-01T00:00:00.000Z";
+      case "transactionCount":
+        return 3;
+      case "totalGasUsed":
+        return "63000";
+      case "totalFeeWei":
+        return "420000";
+      case "firstSeen":
+        return "2024-01-01T00:00:05.000Z";
+      case "lastSeen":
+        return "2024-01-01T00:00:55.000Z";
+    }
+    return null;
   });
 }
