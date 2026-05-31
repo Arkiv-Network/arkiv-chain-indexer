@@ -537,6 +537,11 @@ dependency-free Node HTTP server that:
    prefix). For example a browser request to `/api/blocks?blockGt=1` is forwarded to `http://backend:3000/blocks?blockGt=1`.
 3. Falls back to `index.html` for any other unknown path (SPA routing).
 
+The frontend production build also writes `.br` siblings for the files in `frontend/dist/`. The Node static server
+serves those Brotli files only when `NODE_ENV=production` and the browser sends `Accept-Encoding: br`; development
+and other non-production runs always serve the original files. The Docker frontend image sets `NODE_ENV=production`
+for its runtime stage.
+
 Four views are provided when transaction data is enabled; otherwise the Transactions view and inspection links
 are hidden:
 
@@ -574,7 +579,7 @@ Or build + run the production server locally:
 cd frontend
 npm install
 npm run build
-BACKEND_HOST=localhost BACKEND_PORT=3000 PORT=23560 node server.js
+NODE_ENV=production BACKEND_HOST=localhost BACKEND_PORT=3000 PORT=23560 node server.js
 ```
 
 ## Tests
