@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
+import { AddressFace } from "./AddressFace";
 import { fetchGuzzlerHistory, type GuzzlerHistoryPoint, type GuzzlerHistoryResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
-import { blockieDataUri } from "./blockies";
 import { fmtDate, fmtDurationSeconds, fmtEth, fmtInteger, fmtMillions } from "./format";
 import {
   activityPlotRange,
@@ -155,13 +155,7 @@ export function GuzzlerActivityView({
       </div>
 
       <div className="guzzler-activity-id">
-        <img
-          className="guzzler-icon"
-          src={blockieDataUri(address)}
-          alt=""
-          width={40}
-          height={40}
-        />
+        <AddressFace address={address} />
         <form className="guzzler-address-form" onSubmit={onSubmitAddress}>
           <label className="visually-hidden" htmlFor="guzzler-address-input">
             Wallet address

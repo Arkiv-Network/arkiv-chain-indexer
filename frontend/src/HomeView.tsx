@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
+import { AddressFace } from "./AddressFace";
 import {
   fetchBlockByNumber,
   fetchBlocks,
@@ -11,7 +12,6 @@ import {
   type StoredBlock,
 } from "./api";
 import { addressDisplay } from "./addressAliases";
-import { blockieDataUri } from "./blockies";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { InfoTooltip } from "./InfoTooltip";
@@ -592,14 +592,7 @@ function HomeWalletActivityPanel({
                 onClick={(event) => onOpenGuzzler(event, guzzler.address)}
                 title={`View activity for ${display.title ?? guzzler.address}`}
               >
-                <img
-                  className="guzzler-icon"
-                  src={blockieDataUri(guzzler.address)}
-                  alt=""
-                  width={40}
-                  height={40}
-                  loading="lazy"
-                />
+                <AddressFace address={guzzler.address} loading="lazy" />
                 <div className="home-feed-main">
                   <div className="home-feed-title">
                     <span className="mono">

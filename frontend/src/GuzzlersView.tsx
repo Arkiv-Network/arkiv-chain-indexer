@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AddressFace } from "./AddressFace";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
-import { blockieDataUri } from "./blockies";
 import { fmtDurationSeconds, fmtEth, fmtInteger } from "./format";
 import { GuzzlerActivityView } from "./GuzzlerActivityView";
 import {
@@ -271,14 +271,7 @@ function GuzzlerCard({
       }}
     >
       <span className={`guzzler-rank${rank <= 3 ? " top" : ""}`}>{rank}</span>
-      <img
-        className="guzzler-icon"
-        src={blockieDataUri(guzzler.address)}
-        alt=""
-        width={40}
-        height={40}
-        loading="lazy"
-      />
+      <AddressFace address={guzzler.address} loading="lazy" />
       <div className="guzzler-main">
         <div className="guzzler-id">
           <AddressLabel address={guzzler.address} label={display.label} title={display.title} />
