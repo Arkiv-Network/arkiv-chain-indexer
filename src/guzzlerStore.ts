@@ -13,7 +13,8 @@ import {
  * {@link GuzzlerStore} backed by Redis.
  *
  * Per-sender bucket data lives in a single hash keyed by sender address, whose
- * values are JSON-encoded arrays of the sender's retained one-minute buckets.
+ * values are JSON-encoded versioned tuples of the sender's retained one-minute
+ * buckets.
  * The hash keeps the whole dataset under one key so the writer can load every
  * active sender in a single `HGETALL`, while updating or removing individual
  * senders with `HSET` / `HDEL`.
@@ -82,7 +83,7 @@ export class RedisGuzzlerStore implements GuzzlerStore {
   }
 
   async putSender(address: string, buckets: GuzzlerBucket[]): Promise<void> {
-    await this.client.hset(this.key, address, JSON.stringify(buckets));
+    await this.client.hset(this.key, address, JSON.stringify(serializeBuckets(buckets)));
   }
 
   async removeSenders(addresses: string[]): Promise<void> {
@@ -134,11 +135,71 @@ export class RedisGuzzlerStore implements GuzzlerStore {
   }
 }
 
-function parseBuckets(json: string): GuzzlerBucket[] {
+const SENDER_BUCKET_FORMAT_VERSION = 1;
+
+type SerializedBucketTuple = [
+  minute: number,
+  transactionCount: number,
+  totalGasUsed: string,
+  totalFeeWei: string,
+  firstSeenMs: number,
+  lastSeenMs: number,
+];
+
+interface SerializedBucketEnvelope {
+  v: typeof SENDER_BUCKET_FORMAT_VERSION;
+  b: SerializedBucketTuple[];
+}
+
+export function serializeBuckets(buckets: GuzzlerBucket[]): SerializedBucketEnvelope {
+  return {
+    v: SENDER_BUCKET_FORMAT_VERSION,
+    b: buckets.map((bucket) => [
+      bucket.minute,
+      bucket.transactionCount,
+      bucket.totalGasUsed,
+      bucket.totalFeeWei,
+      bucket.firstSeenMs,
+      bucket.lastSeenMs,
+    ]),
+  };
+}
+
+export function parseBuckets(json: string): GuzzlerBucket[] {
   try {
     const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed.filter(isValidBucket) : [];
+    if (Array.isArray(parsed)) {
+      return parsed.filter(isValidBucket);
+    }
+    if (isSerializedBucketEnvelope(parsed)) {
+      return parsed.b.map(parseBucketTuple).filter((bucket): bucket is GuzzlerBucket => bucket !== null);
+    }
+    return [];
   } catch {
     return [];
   }
+}
+
+function isSerializedBucketEnvelope(value: unknown): value is SerializedBucketEnvelope {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const envelope = value as Record<string, unknown>;
+  return envelope.v === SENDER_BUCKET_FORMAT_VERSION && Array.isArray(envelope.b);
+}
+
+function parseBucketTuple(value: unknown): GuzzlerBucket | null {
+  if (!Array.isArray(value) || value.length !== 6) {
+    return null;
+  }
+  const [minute, transactionCount, totalGasUsed, totalFeeWei, firstSeenMs, lastSeenMs] = value;
+  const bucket = {
+    minute,
+    transactionCount,
+    totalGasUsed,
+    totalFeeWei,
+    firstSeenMs,
+    lastSeenMs,
+  };
+  return isValidBucket(bucket) ? bucket : null;
 }
