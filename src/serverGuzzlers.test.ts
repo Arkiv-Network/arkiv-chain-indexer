@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  GUZZLER_STAT_RESPONSE_NAMES,
   GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
   handleRequest,
+  type GuzzlerStatResponseRow,
   type GuzzlerHistoryPointResponseRow,
   type GuzzlerHistoryResponseBody,
   type GuzzlersResponseBody,
+  type GuzzlerWindowLeaderboardResponseRow,
   type HealthResponseBody,
 } from "./server";
 import {
@@ -85,6 +88,17 @@ function historyValue(
   return row[GUZZLER_HISTORY_POINT_RESPONSE_NAMES.indexOf(name)] ?? null;
 }
 
+function guzzlerValue(
+  row: GuzzlerStatResponseRow,
+  name: (typeof GUZZLER_STAT_RESPONSE_NAMES)[number],
+): number | string | null {
+  return row[GUZZLER_STAT_RESPONSE_NAMES.indexOf(name)] ?? null;
+}
+
+function guzzlerAddresses(window: GuzzlerWindowLeaderboardResponseRow | undefined): Array<number | string | null> {
+  return window?.guzzlers.map((guzzler) => guzzlerValue(guzzler, "address")) ?? [];
+}
+
 describe("GET /guzzlers", () => {
   test("ranks active senders by gas used in every window", async () => {
     const store = new FakeGuzzlerStore(
@@ -104,13 +118,15 @@ describe("GET /guzzlers", () => {
     const body = (await response.json()) as GuzzlersResponseBody;
     expect(body.limit).toBe(100);
     expect(body.retentionMs).toBe(24 * HOUR);
+    expect(body.names).toEqual(GUZZLER_STAT_RESPONSE_NAMES);
     expect(body.windows.map((w) => w.label)).toEqual(["5m", "20m", "1h", "6h", "24h"]);
 
     // Both transactions are seconds old, so they appear in every window.
     for (const window of body.windows) {
       expect(window.count).toBe(2);
-      expect(window.guzzlers.map((g) => g.address)).toEqual(["0xbig", "0xsmall"]);
-      expect(window.guzzlers[0]).toMatchObject({ totalGasUsed: "900", transactionCount: 1 });
+      expect(guzzlerAddresses(window)).toEqual(["0xbig", "0xsmall"]);
+      expect(guzzlerValue(window.guzzlers[0]!, "totalGasUsed")).toBe("900");
+      expect(guzzlerValue(window.guzzlers[0]!, "transactionCount")).toBe(1);
     }
   });
 
@@ -165,7 +181,40 @@ describe("GET /guzzlers", () => {
     expect(body.limit).toBe(1);
     const five = body.windows.find((w) => w.label === "5m");
     expect(five?.count).toBe(3);
-    expect(five?.guzzlers.map((g) => g.address)).toEqual(["0xc"]);
+    expect(guzzlerAddresses(five)).toEqual(["0xc"]);
+  });
+
+  test("can return only one requested window", async () => {
+    const store = new FakeGuzzlerStore(
+      new Map([
+        ["0xrecent", [bucket(NOW - 1000, "100", "10")]],
+        ["0xold", [bucket(NOW - 2 * HOUR, "200", "20")]],
+      ]),
+    );
+
+    const response = await handleRequest(
+      new Request("http://example.test/guzzlers?window=1h&limit=10"),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as GuzzlersResponseBody;
+
+    expect(body.windows.map((w) => w.label)).toEqual(["1h"]);
+    expect(guzzlerAddresses(body.windows[0])).toEqual(["0xrecent"]);
+  });
+
+  test("rejects unknown requested windows", async () => {
+    const store = new FakeGuzzlerStore(new Map());
+    const response = await handleRequest(
+      new Request("http://example.test/guzzlers?window=2h"),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "window must be one of 5m, 20m, 1h, 6h, 24h",
+    });
   });
 
   test("rejects a limit above the 250 maximum", async () => {
@@ -193,6 +242,31 @@ describe("GET /guzzlers", () => {
       expect(window.count).toBe(0);
       expect(window.guzzlers).toEqual([]);
     }
+  });
+
+  test("zstd-compresses responses when accepted", async () => {
+    const store = new FakeGuzzlerStore(
+      new Map([["0xactive", [bucket(NOW - 1000, "100", "10")]]]),
+    );
+
+    const response = await handleRequest(
+      new Request("http://example.test/guzzlers?window=1h", {
+        headers: { "accept-encoding": "br, zstd" },
+      }),
+      emptyStorage,
+      { guzzlerStore: store },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBe("zstd");
+    expect(response.headers.get("vary")).toBe("Accept-Encoding");
+    const body = JSON.parse(
+      Buffer.from(Bun.zstdDecompressSync(Buffer.from(await response.arrayBuffer()))).toString(
+        "utf8",
+      ),
+    ) as GuzzlersResponseBody;
+    expect(body.windows.map((w) => w.label)).toEqual(["1h"]);
+    expect(guzzlerAddresses(body.windows[0])).toEqual(["0xactive"]);
   });
 
   test("returns 503 when guzzler tracking is disabled", async () => {
