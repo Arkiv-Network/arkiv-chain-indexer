@@ -8,6 +8,8 @@
  * (15s refresh) and we never want to recompute an icon we have already built.
  */
 
+export const ADDRESS_FACE_DATA_URI_PREFIX = "data:image/svg+xml,";
+
 const cache = new Map<string, string>();
 const SIZE = 8; // grid is 8x8 cells, mirrored horizontally
 const randseed = new Int32Array(4);
@@ -50,7 +52,7 @@ function createImageData(): number[] {
 }
 
 /** Returns an `data:image/svg+xml` URI for the address's identicon. */
-export function blockieDataUri(address: string): string {
+export function addressFaceDataUri(address: string): string {
   const key = address.trim().toLowerCase();
   const cached = cache.get(key);
   if (cached) return cached;
@@ -75,7 +77,9 @@ export function blockieDataUri(address: string): string {
     `shape-rendering="crispEdges" viewBox="0 0 ${SIZE} ${SIZE}">` +
     `<rect width="${SIZE}" height="${SIZE}" fill="${bgcolor}"/>${rects}</svg>`;
 
-  const uri = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  const uri = `${ADDRESS_FACE_DATA_URI_PREFIX}${encodeURIComponent(svg)}`;
   cache.set(key, uri);
   return uri;
 }
+
+export const blockieDataUri = addressFaceDataUri;
