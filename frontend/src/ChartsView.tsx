@@ -22,6 +22,12 @@ import {
   writeStoredStringRecord,
 } from "./localStorage";
 import { fmtDate } from "./format";
+import {
+  DEFAULT_PARAMETERS,
+  getAvailableParameters,
+  parseSelectedParameters,
+  type ParameterDef,
+} from "./chartParameters";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -31,6 +37,7 @@ interface ChartsViewProps {
   timeZone: string;
   transactionDataEnabled: boolean;
   tokenSymbol: string;
+  noBatcher: boolean;
 }
 
 interface ChartsFilters extends Record<string, string> {
@@ -87,253 +94,6 @@ const TIME_STEPS: TimeStep[] = [
   { label: "1m", ms: MINUTE_MS },
 ];
 
-const GWEI_IN_WEI = 1_000_000_000;
-const ETH_IN_WEI = 1_000_000_000_000_000_000;
-
-const AXIS_GAS_PRICE = "gas-price";
-const AXIS_BLOCK_GAS_LIMIT = "block-gas-limit";
-const AXIS_BATCHER = "batcher";
-
-interface ParameterDef {
-  key: string;
-  label: string;
-  axis: string;
-  axisLabel: string;
-  unit: string;
-  color: string;
-  toNumber: (value: string | number | undefined | null) => number | null;
-}
-
-const weiToGwei = (value: string | number | undefined | null): number | null => {
-  if (value === undefined || value === null) return null;
-  try {
-    const wei = typeof value === "string" ? BigInt(value) : BigInt(Math.round(value));
-    const whole = Number(wei / BigInt(GWEI_IN_WEI));
-    const rem = Number(wei % BigInt(GWEI_IN_WEI)) / GWEI_IN_WEI;
-    return whole + rem;
-  } catch {
-    return null;
-  }
-};
-
-const weiToEth = (value: string | number | undefined | null): number | null => {
-  if (value === undefined || value === null) return null;
-  try {
-    const wei = typeof value === "string" ? BigInt(value) : BigInt(Math.round(value));
-    const whole = Number(wei / BigInt(ETH_IN_WEI));
-    const rem = Number(wei % BigInt(ETH_IN_WEI)) / ETH_IN_WEI;
-    return whole + rem;
-  } catch {
-    return null;
-  }
-};
-
-const plainNumber = (value: string | number | undefined | null): number | null => {
-  if (value === undefined || value === null) return null;
-  try {
-    if (typeof value === "number") return value;
-    return Number(BigInt(value));
-  } catch {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-};
-
-const PARAMETERS: ParameterDef[] = [
-  {
-    key: "averageBaseFeeWei",
-    label: "Avg base fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#2e63d8",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "minBaseFeeWei",
-    label: "Min base fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#54a0ff",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "maxBaseFeeWei",
-    label: "Max base fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#0a3d91",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "averageFeePriceWei",
-    label: "Avg fee price",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#16a085",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "averagePriorityFeeWei",
-    label: "Avg priority fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#e67e22",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "averagePriorityFeeWeightedWei",
-    label: "Gas-weighted priority",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#d35400",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "minMaxGasInBlock",
-    label: "Min block gas limit",
-    axis: AXIS_BLOCK_GAS_LIMIT,
-    axisLabel: "Block gas limit",
-    unit: "gas",
-    color: "#7f8c8d",
-    toNumber: plainNumber,
-  },
-  {
-    key: "maxMaxGasInBlock",
-    label: "Max block gas limit",
-    axis: AXIS_BLOCK_GAS_LIMIT,
-    axisLabel: "Block gas limit",
-    unit: "gas",
-    color: "#2c3e50",
-    toNumber: plainNumber,
-  },
-  {
-    key: "totalGasUsed",
-    label: "Total gas used",
-    axis: "total-gas",
-    axisLabel: "Total gas used",
-    unit: "gas",
-    color: "#9b59b6",
-    toNumber: plainNumber,
-  },
-  {
-    key: "totalBlockRewardWei",
-    label: "Total reward",
-    axis: "total-reward-eth",
-    axisLabel: "Total reward (ETH)",
-    unit: "ETH",
-    color: "#27ae60",
-    toNumber: weiToEth,
-  },
-  {
-    key: "averageBlockRewardWei",
-    label: "Avg reward / block",
-    axis: "avg-reward-eth",
-    axisLabel: "Avg reward / block (ETH)",
-    unit: "ETH",
-    color: "#16a085",
-    toNumber: weiToEth,
-  },
-  {
-    key: "totalBurntFeesWei",
-    label: "Total burnt",
-    axis: "total-burnt-eth",
-    axisLabel: "Total burnt (ETH)",
-    unit: "ETH",
-    color: "#c0392b",
-    toNumber: weiToEth,
-  },
-  {
-    key: "averageBurntFeesWei",
-    label: "Avg burnt / block",
-    axis: "avg-burnt-eth",
-    axisLabel: "Avg burnt / block (ETH)",
-    unit: "ETH",
-    color: "#e74c3c",
-    toNumber: weiToEth,
-  },
-  {
-    key: "transactionCount",
-    label: "Tx count",
-    axis: "tx-count",
-    axisLabel: "Tx count",
-    unit: "count",
-    color: "#8e44ad",
-    toNumber: plainNumber,
-  },
-  {
-    key: "averageTransactionGasUsed",
-    label: "Avg tx gas",
-    axis: "avg-tx-gas",
-    axisLabel: "Avg tx gas",
-    unit: "gas",
-    color: "#34495e",
-    toNumber: plainNumber,
-  },
-  {
-    key: "averageBatcherQueueSize",
-    label: "Batcher queue",
-    axis: AXIS_BATCHER,
-    axisLabel: "Batcher value",
-    unit: "count",
-    color: "#b83280",
-    toNumber: plainNumber,
-  },
-  {
-    key: "averageBatcherIntensity",
-    label: "Batcher intensity",
-    axis: AXIS_BATCHER,
-    axisLabel: "Batcher value",
-    unit: "count",
-    color: "#6f42c1",
-    toNumber: plainNumber,
-  },
-  {
-    key: "averageBatcherLowerThreshold",
-    label: "Batcher lower",
-    axis: AXIS_BATCHER,
-    axisLabel: "Batcher value",
-    unit: "count",
-    color: "#0f766e",
-    toNumber: plainNumber,
-  },
-  {
-    key: "averageBatcherUpperThreshold",
-    label: "Batcher upper",
-    axis: AXIS_BATCHER,
-    axisLabel: "Batcher value",
-    unit: "count",
-    color: "#be123c",
-    toNumber: plainNumber,
-  },
-  {
-    key: "averageBatcherMaxBlockSize",
-    label: "Batcher max block",
-    axis: AXIS_BATCHER,
-    axisLabel: "Batcher value",
-    unit: "gas",
-    color: "#ca8a04",
-    toNumber: plainNumber,
-  },
-  {
-    key: "averageBatcherMaxTxSize",
-    label: "Batcher max tx",
-    axis: AXIS_BATCHER,
-    axisLabel: "Batcher value",
-    unit: "gas",
-    color: "#475569",
-    toNumber: plainNumber,
-  },
-];
-
-const PARAMETER_KEYS = new Set(PARAMETERS.map((p) => p.key));
-const DEFAULT_PARAMETERS = ["averageBaseFeeWei", "averagePriorityFeeWei"];
-
 const DEFAULT_FILTERS: ChartsFilters = {
   zoom: "0",
   startDate: "",
@@ -349,14 +109,6 @@ function clampZoomIndex(value: string): number {
   if (n < 0) return 0;
   if (n >= ZOOM_LEVELS.length) return ZOOM_LEVELS.length - 1;
   return n;
-}
-
-function parseSelected(value: string): string[] {
-  if (!value) return [...DEFAULT_PARAMETERS];
-  return value
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => PARAMETER_KEYS.has(s));
 }
 
 function normalizeIsoDate(value: string): string {
@@ -502,6 +254,7 @@ export function ChartsView({
   timeZone,
   transactionDataEnabled,
   tokenSymbol,
+  noBatcher,
 }: ChartsViewProps) {
   const [filters, setFilters] = useState<ChartsFilters>(() => loadFilters(locationSearch));
   const [points, setPoints] = useState<ChartPoint[]>([]);
@@ -513,7 +266,11 @@ export function ChartsView({
 
   const zoomIndex = clampZoomIndex(filters.zoom);
   const xAxisMode = parseXAxisMode(filters.xAxisMode);
-  const selected = useMemo(() => parseSelected(filters.parameters), [filters.parameters]);
+  const availableParameters = useMemo(() => getAvailableParameters(noBatcher), [noBatcher]);
+  const selected = useMemo(
+    () => parseSelectedParameters(filters.parameters, availableParameters),
+    [filters.parameters, availableParameters],
+  );
   const startDate = filters.startDate.trim();
   const blockWindow = useMemo(() => parseBlockWindow(filters), [filters]);
   const activeBlockWindow = zoomIndex === 0 ? blockWindow : null;
@@ -575,6 +332,16 @@ export function ChartsView({
     }
   }, []);
 
+  const updateFilters = useCallback(
+    (next: ChartsFilters) => {
+      setFilters(next);
+      if (writePermalink("charts", next)) {
+        onLocationChange();
+      }
+    },
+    [onLocationChange, setFilters],
+  );
+
   useEffect(() => {
     load(filters);
   }, [filters.zoom, filters.startDate, filters.blockStart, filters.blockEnd, load]);
@@ -602,20 +369,16 @@ export function ChartsView({
   }, [locationSearch, setFilters]);
 
   useEffect(() => {
+    const normalizedParameters = selected.join(",");
+    if (filters.parameters === normalizedParameters) return;
+    updateFilters({ ...filters, parameters: normalizedParameters });
+  }, [filters, selected, updateFilters]);
+
+  useEffect(() => {
     if (selectedPointKey !== null && !points.some((point) => pointKey(point) === selectedPointKey)) {
       setSelectedPointKey(null);
     }
   }, [points, selectedPointKey]);
-
-  const updateFilters = useCallback(
-    (next: ChartsFilters) => {
-      setFilters(next);
-      if (writePermalink("charts", next)) {
-        onLocationChange();
-      }
-    },
-    [onLocationChange, setFilters],
-  );
 
   const setZoomIndex = (next: number) => {
     const clamped = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, next));
@@ -656,7 +419,7 @@ export function ChartsView({
     const set = new Set(selected);
     if (set.has(key)) set.delete(key);
     else set.add(key);
-    const next = PARAMETERS.filter((p) => set.has(p.key)).map((p) => p.key);
+    const next = availableParameters.filter((p) => set.has(p.key)).map((p) => p.key);
     updateFilters({ ...filters, parameters: next.join(",") });
   };
 
@@ -722,8 +485,8 @@ export function ChartsView({
   };
 
   const { traces, layout } = useMemo(
-    () => buildPlot(points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol),
-    [points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol],
+    () => buildPlot(points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol, availableParameters),
+    [points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol, availableParameters],
   );
 
   const windowInfo = useMemo(() => {
@@ -887,7 +650,7 @@ export function ChartsView({
             <div className="sidebar-section">
               <span className="toolbar-label">Parameters</span>
               <div className="parameters-grid sidebar-params">
-                {PARAMETERS.map((p) => {
+                {availableParameters.map((p) => {
                   const isOn = selected.includes(p.key);
                   return (
                     <label key={p.key} className={`param-check${isOn ? " on" : ""}`}>
@@ -981,6 +744,7 @@ export function ChartsView({
               selectedKeys={selected}
               timeZone={timeZone}
               tokenSymbol={tokenSymbol}
+              availableParameters={availableParameters}
             />
           ) : (
             <div className="selection-empty">Click a chart point to view block or range details.</div>
@@ -1007,8 +771,9 @@ function buildPlot(
   timeZone: string,
   xAxisMode: XAxisMode,
   tokenSymbol: string,
+  availableParameters: readonly ParameterDef[],
 ): PlotBuildResult {
-  const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
+  const activeParams = availableParameters.filter((p) => selectedKeys.includes(p.key));
 
   const usedAxes: { axis: string; axisLabel: string }[] = [];
   for (const p of activeParams) {
@@ -1193,13 +958,15 @@ function SelectionDetails({
   selectedKeys,
   timeZone,
   tokenSymbol,
+  availableParameters,
 }: {
   point: ChartPoint;
   selectedKeys: string[];
   timeZone: string;
   tokenSymbol: string;
+  availableParameters: readonly ParameterDef[];
 }) {
-  const activeParams = PARAMETERS.filter((p) => selectedKeys.includes(p.key));
+  const activeParams = availableParameters.filter((p) => selectedKeys.includes(p.key));
   return (
     <div className="selection-content">
       <dl className="selection-meta">

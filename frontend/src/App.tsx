@@ -397,6 +397,7 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
+            noBatcher={pageSettings.noBatcher}
           />
         ) : activeView === "block" ? (
           <BlockView
@@ -404,6 +405,7 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
+            noBatcher={pageSettings.noBatcher}
           />
         ) : activeView === "transactions" ? (
           <TransactionsView
@@ -439,6 +441,7 @@ export function App() {
             timeZone={timeZone}
             transactionDataEnabled={transactionDataEnabled === true}
             tokenSymbol={pageSettings.tokenSymbol}
+            noBatcher={pageSettings.noBatcher}
           />
         ) : activeView === "baseload" ? (
           <BaseloadView

@@ -558,6 +558,7 @@ The frontend container reads these env vars:
 | `VITE_CHAIN_NAME` | `Arkiv` | Chain name shown in the frontend header and home copy. |
 | `VITE_TOKEN_SYMBOL` | `ETH` | Three-letter token symbol used in frontend native-token labels. |
 | `VITE_TRANSACTION_EXPLORER_BASE_URL` | `https://explorer.braga.hoodi.arkiv.network/tx/` | Base URL used for external transaction-detail links. |
+| `VITE_NO_BATCHER` | `false` | Set to `true` for networks without batcher metrics; hides batcher panels, fields, and chart options. |
 
 ### Developing the frontend locally
 

@@ -20,10 +20,12 @@ export interface PageSettings {
   histogramWindowMinutes: number;
   histogramRefreshMs: number;
   histogramClockTickMs: number;
+  noBatcher: boolean;
 }
 
 export type PageSettingsKey = keyof PageSettings;
-export type NumericPageSettingsKey = Exclude<PageSettingsKey, "chainName" | "tokenSymbol">;
+export type EditablePageSettingsKey = Exclude<PageSettingsKey, "noBatcher">;
+export type NumericPageSettingsKey = Exclude<EditablePageSettingsKey, "chainName" | "tokenSymbol">;
 
 interface TextSettingDefinition {
   key: "chainName" | "tokenSymbol";
@@ -57,6 +59,7 @@ export const DEFAULT_PAGE_SETTINGS: PageSettings = {
   histogramWindowMinutes: 60,
   histogramRefreshMs: 5_000,
   histogramClockTickMs: 1_000,
+  noBatcher: false,
 };
 
 export const PAGE_SETTING_DEFINITIONS: readonly PageSettingDefinition[] = [
@@ -126,7 +129,7 @@ export const PAGE_SETTING_DEFINITIONS: readonly PageSettingDefinition[] = [
 
 export const PAGE_SETTINGS_STORAGE_KEY = "page.settings";
 
-type SettingsDraft = Record<PageSettingsKey, string>;
+type SettingsDraft = Record<EditablePageSettingsKey, string>;
 
 function envValues(): Record<string, string | undefined> {
   return ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {});
@@ -144,6 +147,10 @@ export function parseTokenSymbol(value: string | undefined, fallback = DEFAULT_P
   const normalized = value.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(normalized)) return fallback;
   return normalized;
+}
+
+export function parseBooleanFlag(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === "true";
 }
 
 export function readBuildPageSettings(env: Record<string, string | undefined> = envValues()): PageSettings {
@@ -178,6 +185,7 @@ export function readBuildPageSettings(env: Record<string, string | undefined> = 
       env.VITE_HISTOGRAM_CLOCK_TICK_MS,
       DEFAULT_PAGE_SETTINGS.histogramClockTickMs,
     ),
+    noBatcher: parseBooleanFlag(env.VITE_NO_BATCHER),
   };
 }
 

@@ -3,6 +3,7 @@
 interface ImportMetaEnv {
   readonly VITE_TOKEN_SYMBOL?: string;
   readonly VITE_TRANSACTION_EXPLORER_BASE_URL?: string;
+  readonly VITE_NO_BATCHER?: string;
 }
 
 interface ImportMeta {
