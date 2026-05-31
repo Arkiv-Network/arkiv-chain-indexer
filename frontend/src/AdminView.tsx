@@ -3,7 +3,7 @@ import {
   BUILD_PAGE_SETTINGS,
   PAGE_SETTING_DEFINITIONS,
   type PageSettings,
-  type PageSettingsKey,
+  type EditablePageSettingsKey,
   normalizeSettingsDraft,
   settingsToDraft,
 } from "./pageSettings";
@@ -23,7 +23,7 @@ export function AdminView({ settings, onSettingsChange, onResetSettings }: Admin
     setDraft(settingsToDraft(settings));
   }, [settings]);
 
-  const updateDraft = (key: PageSettingsKey, value: string) => {
+  const updateDraft = (key: EditablePageSettingsKey, value: string) => {
     setDraft((current) => ({ ...current, [key]: value }));
     setMessage(null);
     setError(null);

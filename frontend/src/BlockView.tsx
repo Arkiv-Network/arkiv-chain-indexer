@@ -10,6 +10,7 @@ interface BlockViewProps {
   onLocationChange: () => void;
   timeZone: string;
   tokenSymbol: string;
+  noBatcher: boolean;
 }
 
 interface Column {
@@ -22,7 +23,7 @@ interface Column {
 
 const EMPTY_BLOCK = "";
 
-export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: BlockViewProps) {
+export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSymbol, noBatcher }: BlockViewProps) {
   const [blockNumber, setBlockNumber] = useState(() => readBlockFromSearch(locationSearch));
   const [appliedBlockNumber, setAppliedBlockNumber] = useState(blockNumber);
   const [data, setData] = useState<BlockInspectResponse | null>(null);
@@ -136,12 +137,16 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
               label="Gas-weighted priority"
               value={`${fmtGwei(block.averagePriorityFeeWeightedWei)} gwei`}
             />
-            <Metric label="Batcher queue" value={fmtInteger(block.batcherQueueSize)} />
-            <Metric label="Batcher intensity" value={fmtInteger(block.batcherIntensity)} />
-            <Metric label="Batcher lower" value={fmtInteger(block.batcherLowerThreshold)} />
-            <Metric label="Batcher upper" value={fmtInteger(block.batcherUpperThreshold)} />
-            <Metric label="Batcher max block" value={fmtInteger(block.batcherMaxBlockSize)} />
-            <Metric label="Batcher max tx" value={fmtInteger(block.batcherMaxTxSize)} />
+            {noBatcher ? null : (
+              <>
+                <Metric label="Batcher queue" value={fmtInteger(block.batcherQueueSize)} />
+                <Metric label="Batcher intensity" value={fmtInteger(block.batcherIntensity)} />
+                <Metric label="Batcher lower" value={fmtInteger(block.batcherLowerThreshold)} />
+                <Metric label="Batcher upper" value={fmtInteger(block.batcherUpperThreshold)} />
+                <Metric label="Batcher max block" value={fmtInteger(block.batcherMaxBlockSize)} />
+                <Metric label="Batcher max tx" value={fmtInteger(block.batcherMaxTxSize)} />
+              </>
+            )}
           </dl>
 
           {data.transactionLoadError ? (

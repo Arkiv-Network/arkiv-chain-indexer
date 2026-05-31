@@ -34,6 +34,7 @@ describe("frontend page settings", () => {
         VITE_BLOCK_TIME_MS: "12000",
         VITE_STUB_TICK_MS: "-1",
         VITE_HISTOGRAM_WINDOW_MINUTES: "30",
+        VITE_NO_BATCHER: "true",
       }),
     ).toMatchObject({
       chainName: "Hoodi",
@@ -41,7 +42,15 @@ describe("frontend page settings", () => {
       blockTimeMs: 12_000,
       stubTickMs: DEFAULT_PAGE_SETTINGS.stubTickMs,
       histogramWindowMinutes: 30,
+      noBatcher: true,
     });
+  });
+
+  test("only treats VITE_NO_BATCHER=true as disabling batcher UI", () => {
+    expect(readBuildPageSettings({ VITE_NO_BATCHER: "true" }).noBatcher).toBe(true);
+    expect(readBuildPageSettings({ VITE_NO_BATCHER: "TRUE" }).noBatcher).toBe(true);
+    expect(readBuildPageSettings({ VITE_NO_BATCHER: "false" }).noBatcher).toBe(false);
+    expect(readBuildPageSettings({ VITE_NO_BATCHER: "1" }).noBatcher).toBe(false);
   });
 
   test("defaults token symbol when Vite value is not exactly three letters", () => {

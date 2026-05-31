@@ -15,6 +15,7 @@ interface BlocksViewProps {
   onLocationChange: () => void;
   timeZone: string;
   tokenSymbol: string;
+  noBatcher: boolean;
 }
 
 interface Filters extends Record<string, string> {
@@ -44,8 +45,13 @@ interface Column<T> {
   render: (row: T) => ReactNode;
 }
 
-function blockColumns(timeZone: string, onLocationChange: () => void, tokenSymbol: string): Column<StoredBlock>[] {
-  return [
+function blockColumns(
+  timeZone: string,
+  onLocationChange: () => void,
+  tokenSymbol: string,
+  noBatcher: boolean,
+): Column<StoredBlock>[] {
+  const columns: Column<StoredBlock>[] = [
     {
       key: "block",
       label: "Block",
@@ -122,6 +128,11 @@ function blockColumns(timeZone: string, onLocationChange: () => void, tokenSymbo
       width: "15rem",
       render: (row) => fmtRatio(row.totalGasUsed, row.maxGasInBlock),
     },
+  ];
+  if (noBatcher) return columns;
+
+  return [
+    ...columns,
     {
       key: "batcherQueueSize",
       label: "Batcher queue",
@@ -181,7 +192,7 @@ function loadFilters(locationSearch: string): Filters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
-export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: BlocksViewProps) {
+export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSymbol, noBatcher }: BlocksViewProps) {
   const [filters, setFilters] = useState<Filters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<BlocksResponse | null>(null);
@@ -240,8 +251,8 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
     setFilters((prev) => ({ ...prev, limit: e.target.value }));
   };
   const columns = useMemo(
-    () => blockColumns(timeZone, onLocationChange, tokenSymbol),
-    [timeZone, onLocationChange, tokenSymbol],
+    () => blockColumns(timeZone, onLocationChange, tokenSymbol, noBatcher),
+    [timeZone, onLocationChange, tokenSymbol, noBatcher],
   );
 
   const sorted = data

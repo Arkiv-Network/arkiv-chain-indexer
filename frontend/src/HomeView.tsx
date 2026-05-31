@@ -863,46 +863,48 @@ function LiveHistograms({
         error={error}
         loaded={loaded}
       />
-      <MinAvgMaxPanel
-        title="Batcher Operation"
-        unitLabel="queue size"
-        blocks={blocks}
-        currentMinuteMs={currentMinuteMs}
-        histogramWindowMinutes={settings.histogramWindowMinutes}
-        colorVar="--ok"
-        colorFallback="#1f7a4d"
-        extractValue={(block) => {
-          if (block.batcherQueueSize === undefined || block.batcherQueueSize === null) return null;
-          try {
-            const queueSize = Number(BigInt(block.batcherQueueSize));
-            return Number.isFinite(queueSize) ? queueSize : null;
-          } catch {
-            return null;
+      {settings.noBatcher ? null : (
+        <MinAvgMaxPanel
+          title="Batcher Operation"
+          unitLabel="queue size"
+          blocks={blocks}
+          currentMinuteMs={currentMinuteMs}
+          histogramWindowMinutes={settings.histogramWindowMinutes}
+          colorVar="--ok"
+          colorFallback="#1f7a4d"
+          extractValue={(block) => {
+            if (block.batcherQueueSize === undefined || block.batcherQueueSize === null) return null;
+            try {
+              const queueSize = Number(BigInt(block.batcherQueueSize));
+              return Number.isFinite(queueSize) ? queueSize : null;
+            } catch {
+              return null;
+            }
+          }}
+          hoverLabel="Batcher queue"
+          yTickformat=".2s"
+          yTicksuffix=""
+          hoverFormat=".3s"
+          infoLabel="What is batcher operation?"
+          infoTitle="Batcher Operation"
+          infoBody={
+            <>
+              <p>
+                The batcher queue size reported by the collector for each block. The
+                solid line is the per-minute average queue size, and the band shows
+                the per-minute min/max range.
+              </p>
+              <p>
+                Missing collector readings are left out of the calculation so gaps
+                show where operation metrics were not available.
+              </p>
+            </>
           }
-        }}
-        hoverLabel="Batcher queue"
-        yTickformat=".2s"
-        yTicksuffix=""
-        hoverFormat=".3s"
-        infoLabel="What is batcher operation?"
-        infoTitle="Batcher Operation"
-        infoBody={
-          <>
-            <p>
-              The batcher queue size reported by the collector for each block. The
-              solid line is the per-minute average queue size, and the band shows
-              the per-minute min/max range.
-            </p>
-            <p>
-              Missing collector readings are left out of the calculation so gaps
-              show where operation metrics were not available.
-            </p>
-          </>
-        }
-        emptyLabel="No batcher queue data in this window."
-        error={error}
-        loaded={loaded}
-      />
+          emptyLabel="No batcher queue data in this window."
+          error={error}
+          loaded={loaded}
+        />
+      )}
       <MinAvgMaxPanel
         title="Base block fee"
         unitLabel="gwei"
