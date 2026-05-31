@@ -88,6 +88,14 @@ export function fmtInteger(value: string | number | null | undefined): string {
   }
 }
 
+/** Render a raw count in millions with two decimals and an "M" suffix (e.g. 53431992 → "53.43M"). */
+export function fmtMillions(value: string | number | null | undefined): string {
+  if (value === undefined || value === null) return "—";
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  return `${(num / 1_000_000).toFixed(2)}M`;
+}
+
 export function fmtBytes(value: string | number | null | undefined): string {
   if (value === undefined || value === null) return "—";
   const parsed = Number(value);

@@ -4,7 +4,7 @@ import Plotly from "plotly.js-dist-min";
 import { fetchGuzzlerHistory, type GuzzlerHistoryPoint, type GuzzlerHistoryResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { blockieDataUri } from "./blockies";
-import { fmtDate, fmtDurationSeconds, fmtEth, fmtInteger } from "./format";
+import { fmtDate, fmtDurationSeconds, fmtEth, fmtInteger, fmtMillions } from "./format";
 import {
   activityPlotRange,
   filterPointsByWindow,
@@ -204,7 +204,7 @@ export function GuzzlerActivityView({
         </div>
         <div>
           <dt>Gas used</dt>
-          <dd>{fmtInteger(summary.totalGasUsed)}</dd>
+          <dd>{fmtMillions(summary.totalGasUsed)}</dd>
         </div>
         <div>
           <dt>Fees ({tokenSymbol})</dt>
@@ -270,7 +270,10 @@ function buildActivityPlot(
   const color = METRIC_COLORS[metric];
 
   const xs = points.map((point) => point.startTime);
-  const ys = metricSeries(points, metric);
+  // Gas runs to tens of millions, so plot it in millions to keep the y-axis
+  // readable; the axis title ("… (millions) …") and tooltip are scaled to match.
+  const rawYs = metricSeries(points, metric);
+  const ys = metric === "gas" ? rawYs.map((value) => value / 1_000_000) : rawYs;
   // Hover shows every measure regardless of the plotted metric, so switching
   // tabs never hides context.
   const customdata = points.map(
@@ -278,7 +281,7 @@ function buildActivityPlot(
       [
         fmtDate(point.startTime, timeZone),
         fmtInteger(point.transactionCount),
-        fmtInteger(point.totalGasUsed),
+        fmtMillions(point.totalGasUsed),
         `${fmtEth(point.totalFeeWei)} ${tokenSymbol}`,
       ] as [string, string, string, string],
   );
@@ -305,29 +308,34 @@ function buildActivityPlot(
     margin: { l: 70, r: 20, t: 20, b: 50 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    font: { color: getCssColor("--fg", "#1a1d23") },
+    // Plotly's default "Open Sans" isn't bundled, so it falls back to an ugly
+    // system font; pin it to a webfont the app actually ships.
+    font: {
+      family: getCssVar("--font-mono", '"JetBrains Mono", ui-monospace, monospace'),
+      color: getCssVar("--fg", "#1a1d23"),
+    },
     bargap: 0.05,
     showlegend: false,
     hovermode: "x",
     xaxis: {
       type: "date",
       title: { text: "Time" } as Plotly.DataTitle,
-      gridcolor: getCssColor("--border", "#d6d9df"),
-      zerolinecolor: getCssColor("--border", "#d6d9df"),
+      gridcolor: getCssVar("--border", "#d6d9df"),
+      zerolinecolor: getCssVar("--border", "#d6d9df"),
       ...(range ? { range, autorange: false } : { autorange: true }),
     },
     yaxis: {
       title: { text: meta.axisTitle.replace("{token}", tokenSymbol) } as Plotly.DataTitle,
       rangemode: "tozero",
-      gridcolor: getCssColor("--border", "#d6d9df"),
-      zerolinecolor: getCssColor("--border", "#d6d9df"),
+      gridcolor: getCssVar("--border", "#d6d9df"),
+      zerolinecolor: getCssVar("--border", "#d6d9df"),
     },
   };
 
   return { traces, layout };
 }
 
-function getCssColor(varName: string, fallback: string): string {
+function getCssVar(varName: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
   try {
     const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();

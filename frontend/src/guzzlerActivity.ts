@@ -15,7 +15,7 @@ const WEI_PER_TOKEN = 1_000_000_000_000_000_000n; // 1e18
 const TOKEN_PRECISION = 1_000_000n; // 1e6 — six decimals of the native token
 
 /** Stable identifier for an activity-view time window (used in the permalink). */
-export type GuzzlerActivityWindowKey = "1h" | "6h" | "24h" | "all";
+export type GuzzlerActivityWindowKey = "1h" | "6h" | "24h";
 
 /** A selectable time span for the chart's x-axis. `ms === null` fits the data. */
 export interface GuzzlerActivityWindow {
@@ -26,16 +26,13 @@ export interface GuzzlerActivityWindow {
 }
 
 /**
- * Window tabs, smallest first. "All" fits the axis to the returned data so the
- * chart stays readable even when only a few minutes have been collected, while
- * the fixed windows pin the axis to the last N relative to now (up to the 24h
- * retention horizon).
+ * Window tabs, smallest first. Each pins the x-axis to the last N relative to
+ * now, up to the 24h retention horizon.
  */
 export const GUZZLER_ACTIVITY_WINDOWS: readonly GuzzlerActivityWindow[] = [
   { key: "1h", label: "1 hour", ms: HOUR_MS },
   { key: "6h", label: "6 hours", ms: 6 * HOUR_MS },
   { key: "24h", label: "24 hours", ms: 24 * HOUR_MS },
-  { key: "all", label: "All", ms: null },
 ];
 
 /** Which per-minute measure the chart plots. */
@@ -50,7 +47,7 @@ export interface GuzzlerActivityMetric {
 
 export const GUZZLER_ACTIVITY_METRICS: readonly GuzzlerActivityMetric[] = [
   { key: "transactions", label: "Transactions", axisTitle: "Transactions / min" },
-  { key: "gas", label: "Gas used", axisTitle: "Gas used / min" },
+  { key: "gas", label: "Gas used", axisTitle: "Gas used (millions) / min" },
   { key: "fees", label: "Fees", axisTitle: "Fees ({token}) / min" },
 ];
 

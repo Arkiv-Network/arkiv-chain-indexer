@@ -176,12 +176,13 @@ describe("activityWindowForMs", () => {
 
 describe("normalizeActivityWindowKey", () => {
   test("accepts the known window keys", () => {
-    for (const key of ["1h", "6h", "24h", "all"]) {
+    for (const key of ["1h", "6h", "24h"]) {
       expect(normalizeActivityWindowKey(key)).toBe(key);
     }
   });
 
   test("rejects unknown or leaderboard-only keys", () => {
+    expect(normalizeActivityWindowKey("all")).toBeNull();
     expect(normalizeActivityWindowKey("5m")).toBeNull();
     expect(normalizeActivityWindowKey("20m")).toBeNull();
     expect(normalizeActivityWindowKey("")).toBeNull();
