@@ -34,12 +34,7 @@ function redisStore(client: RecordingRedisClient): RedisGuzzlerStore {
 }
 
 describe("guzzler Redis bucket serialization", () => {
-  test("parses old unversioned object-array bucket values", () => {
-    const buckets = [bucket(T0)];
-    expect(parseBuckets(JSON.stringify(buckets))).toEqual(buckets);
-  });
-
-  test("parses new versioned tuple bucket values", () => {
+  test("parses versioned tuple bucket values", () => {
     const buckets = [bucket(T0)];
     const encoded = {
       v: 1,
@@ -86,5 +81,16 @@ describe("guzzler Redis bucket serialization", () => {
     };
 
     expect(parseBuckets(JSON.stringify(encoded))).toEqual([valid]);
+  });
+
+  test("preserves decimal string precision through compact tuple values", () => {
+    const preciseGas = "123456789012345678901234567890";
+    const preciseFee = "987654321098765432109876543210";
+    const buckets = [bucket(T0, preciseGas, preciseFee)];
+
+    const encoded = serializeBuckets(buckets);
+    expect(encoded.b[0]?.[2]).toBe(preciseGas);
+    expect(encoded.b[0]?.[3]).toBe(preciseFee);
+    expect(parseBuckets(JSON.stringify(encoded))).toEqual(buckets);
   });
 });
