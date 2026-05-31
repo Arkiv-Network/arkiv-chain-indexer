@@ -329,6 +329,34 @@ export interface GuzzlersResponse {
   windows: GuzzlerWindowLeaderboard[];
 }
 
+export const GUZZLER_STAT_RESPONSE_NAMES = [
+  "address",
+  "transactionCount",
+  "totalGasUsed",
+  "totalFeeWei",
+  "firstSeen",
+  "lastSeen",
+] as const satisfies readonly (keyof GuzzlerStat)[];
+
+export type GuzzlerStatResponseName = (typeof GUZZLER_STAT_RESPONSE_NAMES)[number];
+export type GuzzlerStatResponseValue = number | string | null;
+export type GuzzlerStatResponseRow = GuzzlerStatResponseValue[];
+
+interface CompactGuzzlerWindowLeaderboard {
+  label: string;
+  windowMs: number;
+  count: number;
+  guzzlers: GuzzlerStatResponseRow[];
+}
+
+interface CompactGuzzlersResponse {
+  generatedAt: string;
+  retentionMs: number;
+  limit: number;
+  names: string[];
+  windows: CompactGuzzlerWindowLeaderboard[];
+}
+
 export interface GuzzlerHistoryPoint {
   minute: number;
   startTime: string;
@@ -658,6 +686,20 @@ function expandGuzzlerHistoryResponse(
   };
 }
 
+function expandGuzzlersResponse(response: CompactGuzzlersResponse): GuzzlersResponse {
+  return {
+    generatedAt: response.generatedAt,
+    retentionMs: response.retentionMs,
+    limit: response.limit,
+    windows: response.windows.map((window) => ({
+      label: window.label,
+      windowMs: window.windowMs,
+      count: window.count,
+      guzzlers: window.guzzlers.map((row) => decodeGuzzlerStatResponseRow(row, response.names)),
+    })),
+  };
+}
+
 function namesForBlockResponseRow(row: BlockResponseRow): readonly string[] {
   return latestBlockResponseNames.length === row.length ? latestBlockResponseNames : BLOCK_RESPONSE_NAMES;
 }
@@ -760,6 +802,21 @@ function decodeGuzzlerHistoryPointResponseRow(
   return {
     minute: numberValue(values.get("minute") ?? null),
     startTime: stringValue(values.get("startTime") ?? null),
+    transactionCount: numberValue(values.get("transactionCount") ?? null),
+    totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    totalFeeWei: stringValue(values.get("totalFeeWei") ?? null),
+    firstSeen: stringValue(values.get("firstSeen") ?? null),
+    lastSeen: stringValue(values.get("lastSeen") ?? null),
+  };
+}
+
+function decodeGuzzlerStatResponseRow(
+  row: GuzzlerStatResponseRow,
+  names: readonly string[] = GUZZLER_STAT_RESPONSE_NAMES,
+): GuzzlerStat {
+  const values = valuesByName(names, row);
+  return {
+    address: stringValue(values.get("address") ?? null),
     transactionCount: numberValue(values.get("transactionCount") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
     totalFeeWei: stringValue(values.get("totalFeeWei") ?? null),
@@ -922,12 +979,15 @@ export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", new URLSearchParams());
 }
 
-export function fetchGuzzlers(limit?: number): Promise<GuzzlersResponse> {
+export function fetchGuzzlers(limit?: number, window?: string): Promise<GuzzlersResponse> {
   const params = new URLSearchParams();
   if (limit !== undefined) {
     params.set("limit", String(limit));
   }
-  return getJson<GuzzlersResponse>("/guzzlers", params);
+  if (window !== undefined) {
+    params.set("window", window);
+  }
+  return getJson<CompactGuzzlersResponse>("/guzzlers", params).then(expandGuzzlersResponse);
 }
 
 export function fetchGuzzlerHistory(address: string): Promise<GuzzlerHistoryResponse> {

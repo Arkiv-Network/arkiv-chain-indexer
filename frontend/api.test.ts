@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   BLOCK_RESPONSE_NAMES,
   GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
+  GUZZLER_STAT_RESPONSE_NAMES,
   RANGE_RESPONSE_NAMES,
   fetchBlockByNumber,
   deleteBaseloadConfig,
@@ -10,6 +11,7 @@ import {
   fetchBaseloadConfigs,
   fetchBaseloadState,
   fetchGuzzlerHistory,
+  fetchGuzzlers,
   fetchRanges,
   fetchTransactionRecords,
   fetchSenders,
@@ -316,6 +318,42 @@ describe("frontend API helpers", () => {
     ]);
   });
 
+  test("decodes compact guzzler leaderboard rows and sends an optional window", async () => {
+    let observedInput = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      observedInput = String(input);
+      return Response.json({
+        generatedAt: "2024-01-01T00:02:00.000Z",
+        retentionMs: 86_400_000,
+        limit: 10,
+        names: GUZZLER_STAT_RESPONSE_NAMES,
+        windows: [
+          {
+            label: "1h",
+            windowMs: 3_600_000,
+            count: 1,
+            guzzlers: [compactGuzzlerStatRow()],
+          },
+        ],
+      });
+    }) as typeof fetch;
+
+    const result = await fetchGuzzlers(10, "1h");
+
+    expect(observedInput).toBe("/api/guzzlers?limit=10&window=1h");
+    expect(result.windows).toHaveLength(1);
+    expect(result.windows[0]?.guzzlers).toEqual([
+      {
+        address: `0x${"ab".repeat(20)}`,
+        transactionCount: 3,
+        totalGasUsed: "63000",
+        totalFeeWei: "420000",
+        firstSeen: "2024-01-01T00:00:05.000Z",
+        lastSeen: "2024-01-01T00:00:55.000Z",
+      },
+    ]);
+  });
+
   test("fetches a block inspection from the stored block and transaction APIs", async () => {
     const observedInputs: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -466,6 +504,26 @@ function compactGuzzlerHistoryPointRow(): Array<number | string | null> {
         return 28_392_480;
       case "startTime":
         return "2024-01-01T00:00:00.000Z";
+      case "transactionCount":
+        return 3;
+      case "totalGasUsed":
+        return "63000";
+      case "totalFeeWei":
+        return "420000";
+      case "firstSeen":
+        return "2024-01-01T00:00:05.000Z";
+      case "lastSeen":
+        return "2024-01-01T00:00:55.000Z";
+    }
+    return null;
+  });
+}
+
+function compactGuzzlerStatRow(): Array<number | string | null> {
+  return GUZZLER_STAT_RESPONSE_NAMES.map((name) => {
+    switch (name) {
+      case "address":
+        return `0x${"ab".repeat(20)}`;
       case "transactionCount":
         return 3;
       case "totalGasUsed":

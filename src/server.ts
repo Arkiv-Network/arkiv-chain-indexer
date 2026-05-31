@@ -2,6 +2,7 @@ import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type BlockInspectionResult } from "./blockInspector";
 import {
   DEFAULT_GUZZLER_LIMIT,
+  GUZZLER_WINDOWS,
   MAX_GUZZLER_LIMIT,
   buildGuzzlerHistory,
   emptyLeaderboards,
@@ -9,7 +10,10 @@ import {
   type GuzzlerHistory,
   type GuzzlerHistoryPoint,
   type GuzzlerLeaderboards,
+  type GuzzlerStat,
   type GuzzlerStore,
+  type GuzzlerWindow,
+  type GuzzlerWindowLeaderboard,
 } from "./guzzlers";
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
@@ -113,7 +117,22 @@ export interface SendersResponseBody {
   senders: StoredSenderStats[];
 }
 
-export type GuzzlersResponseBody = GuzzlerLeaderboards;
+export interface GuzzlersResponseBody {
+  generatedAt: string;
+  /** How long buckets are retained - equal to the largest window. */
+  retentionMs: number;
+  /** The top-N cut applied to each window. */
+  limit: number;
+  names: typeof GUZZLER_STAT_RESPONSE_NAMES;
+  windows: GuzzlerWindowLeaderboardResponseRow[];
+}
+
+export interface GuzzlerWindowLeaderboardResponseRow {
+  label: string;
+  windowMs: number;
+  count: number;
+  guzzlers: GuzzlerStatResponseRow[];
+}
 
 export type GuzzlerHistoryResponseBody = Omit<GuzzlerHistory, "points"> & {
   names: typeof GUZZLER_HISTORY_POINT_RESPONSE_NAMES;
@@ -224,6 +243,18 @@ export const RANGE_RESPONSE_NAMES = [
 export type RangeResponseValue = number | string | null;
 export type RangeResponseRow = RangeResponseValue[];
 
+export const GUZZLER_STAT_RESPONSE_NAMES = [
+  "address",
+  "transactionCount",
+  "totalGasUsed",
+  "totalFeeWei",
+  "firstSeen",
+  "lastSeen",
+] as const satisfies readonly (keyof GuzzlerStat)[];
+
+export type GuzzlerStatResponseValue = number | string | null;
+export type GuzzlerStatResponseRow = GuzzlerStatResponseValue[];
+
 export const GUZZLER_HISTORY_POINT_RESPONSE_NAMES = [
   "minute",
   "startTime",
@@ -303,7 +334,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/guzzlers") {
-    return handleGetGuzzlers(url, options.guzzlerStore);
+    return handleGetGuzzlers(request, url, options.guzzlerStore);
   }
 
   const guzzlerHistoryMatch = url.pathname.match(/^\/guzzler\/(.+)$/);
@@ -312,7 +343,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/blocks") {
-    return handleGetBlocks(url, storage);
+    return handleGetBlocks(request, url, storage);
   }
 
   const singleBlockMatch = url.pathname.match(/^\/blocks\/(\d+)$/);
@@ -329,7 +360,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/ranges") {
-    return handleGetRanges(url, storage);
+    return handleGetRanges(request, url, storage);
   }
 
   if (url.pathname === "/transactions") {
@@ -608,7 +639,7 @@ async function handleGetBlockInspect(
   }
 }
 
-async function handleGetBlocks(url: URL, storage: ScannerStorage): Promise<Response> {
+async function handleGetBlocks(request: Request, url: URL, storage: ScannerStorage): Promise<Response> {
   let filter: BlockQueryFilter;
   try {
     filter = parseFilterFromQuery(url.searchParams);
@@ -633,14 +664,14 @@ async function handleGetBlocks(url: URL, storage: ScannerStorage): Promise<Respo
     blocks: blocks.map(blockToResponseRow),
   };
 
-  return jsonResponse(body);
+  return compressedJsonResponse(request, body);
 }
 
 export function blockToResponseRow(block: StoredBlock): BlockResponseRow {
   return BLOCK_RESPONSE_NAMES.map((name) => block[name] ?? null);
 }
 
-async function handleGetRanges(url: URL, storage: ScannerStorage): Promise<Response> {
+async function handleGetRanges(request: Request, url: URL, storage: ScannerStorage): Promise<Response> {
   let filter: BlockRangeQueryFilter;
   try {
     filter = parseRangeFilterFromQuery(url.searchParams);
@@ -667,7 +698,7 @@ async function handleGetRanges(url: URL, storage: ScannerStorage): Promise<Respo
     ranges: ranges.map(rangeToResponseRow),
   };
 
-  return jsonResponse(body);
+  return compressedJsonResponse(request, body);
 }
 
 export function rangeToResponseRow(range: StoredBlockRange): RangeResponseRow {
@@ -787,7 +818,22 @@ function parseGuzzlerLimit(params: URLSearchParams): number {
   return value;
 }
 
+function parseGuzzlerWindow(params: URLSearchParams): GuzzlerWindow | null {
+  const raw = params.get("window");
+  if (raw === null) {
+    return null;
+  }
+  const window = GUZZLER_WINDOWS.find((candidate) => candidate.label === raw);
+  if (!window) {
+    throw new Error(
+      `window must be one of ${GUZZLER_WINDOWS.map((candidate) => candidate.label).join(", ")}`,
+    );
+  }
+  return window;
+}
+
 async function handleGetGuzzlers(
+  request: Request,
   url: URL,
   guzzlerStore: GuzzlerStore | undefined,
 ): Promise<Response> {
@@ -796,8 +842,10 @@ async function handleGetGuzzlers(
   }
 
   let limit: number;
+  let requestedWindow: GuzzlerWindow | null;
   try {
     limit = parseGuzzlerLimit(url.searchParams);
+    requestedWindow = parseGuzzlerWindow(url.searchParams);
   } catch (error) {
     return jsonError(400, error instanceof Error ? error.message : String(error));
   }
@@ -805,11 +853,45 @@ async function handleGetGuzzlers(
   // The writer refreshes this cached board once a minute; the API just slices
   // it to the requested top-N. Before the first refresh, serve an empty board.
   const board = await guzzlerStore.loadLeaderboards();
-  const body: GuzzlersResponseBody = board
+  const sliced = board
     ? sliceLeaderboards(board, limit)
     : emptyLeaderboards(Date.now(), limit);
 
-  return jsonResponse(body);
+  const body = guzzlerLeaderboardsToResponseBody(sliced, requestedWindow);
+
+  return compressedJsonResponse(request, body);
+}
+
+function guzzlerLeaderboardsToResponseBody(
+  board: GuzzlerLeaderboards,
+  requestedWindow: GuzzlerWindow | null,
+): GuzzlersResponseBody {
+  const windows = requestedWindow
+    ? board.windows.filter((window) => window.label === requestedWindow.label)
+    : board.windows;
+
+  return {
+    generatedAt: board.generatedAt,
+    retentionMs: board.retentionMs,
+    limit: board.limit,
+    names: GUZZLER_STAT_RESPONSE_NAMES,
+    windows: windows.map(guzzlerWindowToResponseRow),
+  };
+}
+
+function guzzlerWindowToResponseRow(
+  window: GuzzlerWindowLeaderboard,
+): GuzzlerWindowLeaderboardResponseRow {
+  return {
+    label: window.label,
+    windowMs: window.windowMs,
+    count: window.count,
+    guzzlers: window.guzzlers.map(guzzlerStatToResponseRow),
+  };
+}
+
+function guzzlerStatToResponseRow(stat: GuzzlerStat): GuzzlerStatResponseRow {
+  return GUZZLER_STAT_RESPONSE_NAMES.map((name) => stat[name] ?? null);
 }
 
 async function handleGetGuzzlerHistory(
@@ -1123,6 +1205,48 @@ function clampLag(value: bigint): string {
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return Response.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init.headers ?? {}) } });
+}
+
+async function compressedJsonResponse(request: Request, body: unknown): Promise<Response> {
+  if (!acceptsEncoding(request, "zstd")) {
+    return jsonResponse(body);
+  }
+
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  const compressed = await Bun.zstdCompress(bytes, { level: 1 });
+  const responseBody = compressed.buffer.slice(
+    compressed.byteOffset,
+    compressed.byteOffset + compressed.byteLength,
+  ) as ArrayBuffer;
+  return new Response(responseBody, {
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json;charset=utf-8",
+      "Content-Encoding": "zstd",
+      "Content-Length": String(compressed.byteLength),
+      Vary: "Accept-Encoding",
+    },
+  });
+}
+
+function acceptsEncoding(request: Request, encoding: string): boolean {
+  const header = request.headers.get("accept-encoding");
+  if (!header) {
+    return false;
+  }
+  for (const part of header.split(",")) {
+    const [token, ...params] = part.split(";").map((value) => value.trim().toLowerCase());
+    if (token !== encoding) {
+      continue;
+    }
+    const q = params.find((param) => param.startsWith("q="));
+    if (q === undefined) {
+      return true;
+    }
+    const value = Number(q.slice(2));
+    return !Number.isFinite(value) || value > 0;
+  }
+  return false;
 }
 
 function jsonError(status: number, message: string): Response {

@@ -176,7 +176,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     let cancelled = false;
     const loadGuzzlers = async () => {
       try {
-        const board = await fetchGuzzlers(HOME_GUZZLER_LIMIT);
+        const board = await fetchGuzzlers(HOME_GUZZLER_LIMIT, HOME_GUZZLER_WINDOW);
         if (cancelled) return;
         const hourly = board.windows.find((w) => w.label === HOME_GUZZLER_WINDOW);
         setTopGuzzlers((hourly?.guzzlers ?? []).slice(0, HOME_GUZZLER_LIMIT));

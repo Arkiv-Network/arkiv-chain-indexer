@@ -47,6 +47,11 @@ function rangeValue(
   return row[RANGE_RESPONSE_NAMES.indexOf(name)] ?? null;
 }
 
+async function readZstdJson<T>(response: Response): Promise<T> {
+  const decompressed = Bun.zstdDecompressSync(Buffer.from(await response.arrayBuffer()));
+  return JSON.parse(Buffer.from(decompressed).toString("utf8")) as T;
+}
+
 async function withStorage(): Promise<ScannerStorage> {
   const { storage, cleanup } = await createIsolatedStorage("server");
   cleanups.push(cleanup);
@@ -240,6 +245,64 @@ describe("parseTransactionRecordsFilterFromQuery", () => {
     expect(() =>
       parseTransactionRecordsFilterFromQuery(new URLSearchParams("limit=21")),
     ).toThrow(/limit must be at most 20/);
+  });
+});
+
+describe("zstd JSON compression", () => {
+  test("compresses block list responses when zstd is accepted", async () => {
+    const storage = {
+      queryBlocks: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/blocks?limit=1", {
+        headers: { "accept-encoding": "gzip, zstd" },
+      }),
+      storage,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBe("zstd");
+    const body = await readZstdJson<BlocksResponseBody>(response);
+    expect(body.blocks).toEqual([]);
+    expect(body.names).toEqual(BLOCK_RESPONSE_NAMES);
+  });
+
+  test("compresses range list responses when zstd is accepted", async () => {
+    const storage = {
+      queryBlockRanges: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/ranges?limit=1", {
+        headers: { "accept-encoding": "zstd" },
+      }),
+      storage,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBe("zstd");
+    const body = await readZstdJson<RangesResponseBody>(response);
+    expect(body.ranges).toEqual([]);
+    expect(body.names).toEqual(RANGE_RESPONSE_NAMES);
+  });
+
+  test("does not compress when zstd is explicitly refused", async () => {
+    const storage = {
+      queryBlocks: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/blocks?limit=1", {
+        headers: { "accept-encoding": "zstd;q=0, gzip" },
+      }),
+      storage,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBeNull();
+    const body = (await response.json()) as BlocksResponseBody;
+    expect(body.blocks).toEqual([]);
   });
 });
 
