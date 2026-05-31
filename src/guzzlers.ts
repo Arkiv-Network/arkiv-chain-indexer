@@ -226,9 +226,8 @@ function minuteOf(timestampMs: number): number {
 
 /**
  * Whether a parsed value is a well-formed {@link GuzzlerBucket}. Used to reject
- * legacy or corrupt entries (e.g. the old per-transaction Redis format) before
- * they reach the tracker, where a missing `firstSeenMs` would surface as an
- * `Invalid Date`.
+ * malformed entries before they reach the tracker, where a missing `firstSeenMs`
+ * would surface as an `Invalid Date`.
  */
 export function isValidBucket(value: unknown): value is GuzzlerBucket {
   if (typeof value !== "object" || value === null) {
@@ -350,7 +349,7 @@ export class GuzzlerTracker {
     const map = new Map<number, MutableBucket>();
     for (const bucket of buckets) {
       if (!isValidBucket(bucket)) {
-        continue; // skip legacy/corrupt entries rather than crash downstream
+        continue;
       }
       map.set(bucket.minute, {
         minute: bucket.minute,

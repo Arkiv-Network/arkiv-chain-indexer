@@ -55,9 +55,8 @@ export class RedisGuzzlerStore implements GuzzlerStore {
   async loadAll(): Promise<Map<string, GuzzlerBucket[]>> {
     const raw = await this.client.hgetall(this.key);
     const result = new Map<string, GuzzlerBucket[]>();
-    // Opportunistically drop fields that no longer parse to valid buckets — e.g.
-    // data written by the previous per-transaction schema — so a deploy over an
-    // existing cache self-heals instead of carrying garbage forward.
+    // Opportunistically drop fields that no longer parse to retained buckets so
+    // corrupt cache entries do not get carried forward.
     const stale: string[] = [];
     for (const [address, json] of Object.entries(raw ?? {})) {
       const buckets = parseBuckets(json);
@@ -168,9 +167,6 @@ export function serializeBuckets(buckets: GuzzlerBucket[]): SerializedBucketEnve
 export function parseBuckets(json: string): GuzzlerBucket[] {
   try {
     const parsed = JSON.parse(json);
-    if (Array.isArray(parsed)) {
-      return parsed.filter(isValidBucket);
-    }
     if (isSerializedBucketEnvelope(parsed)) {
       return parsed.b.map(parseBucketTuple).filter((bucket): bucket is GuzzlerBucket => bucket !== null);
     }

@@ -201,39 +201,38 @@ describe("sliceLeaderboards", () => {
   });
 });
 
-describe("malformed/legacy bucket handling", () => {
-  // The previous schema stored per-transaction objects under the same Redis key.
-  const legacy = {
+describe("malformed bucket handling", () => {
+  const malformed = {
     hash: "0x1",
     timestampMs: T0,
     gasUsed: "21000",
     feeWei: "1000",
   } as unknown as GuzzlerBucket;
 
-  test("isValidBucket accepts buckets and rejects legacy/garbage shapes", () => {
+  test("isValidBucket accepts buckets and rejects malformed shapes", () => {
     expect(isValidBucket(bucket(T0, "1"))).toBe(true);
-    expect(isValidBucket(legacy)).toBe(false);
+    expect(isValidBucket(malformed)).toBe(false);
     expect(isValidBucket(null)).toBe(false);
     expect(isValidBucket({})).toBe(false);
   });
 
-  test("loadSender drops legacy entries instead of producing Invalid Date", () => {
+  test("loadSender drops malformed entries instead of producing Invalid Date", () => {
     const tracker = new GuzzlerTracker();
-    tracker.loadSender("0xa", [legacy, legacy]);
+    tracker.loadSender("0xa", [malformed, malformed]);
     expect(tracker.senderCount).toBe(0);
     expect(() => tracker.getLeaderboards(T0, 10)).not.toThrow();
   });
 
   test("loadSender keeps valid buckets and skips malformed ones", () => {
     const tracker = new GuzzlerTracker();
-    tracker.loadSender("0xa", [legacy, bucket(T0 - MINUTE, "100", "10")]);
+    tracker.loadSender("0xa", [malformed, bucket(T0 - MINUTE, "100", "10")]);
     const stats = tracker.getStatistics(T0);
     expect(stats.count).toBe(1);
     expect(stats.guzzlers[0]?.totalGasUsed).toBe("100");
   });
 
   test("buildGuzzlerHistory drops malformed buckets", () => {
-    const history = buildGuzzlerHistory("0xa", [legacy, bucket(T0 - MINUTE, "100", "10")], T0);
+    const history = buildGuzzlerHistory("0xa", [malformed, bucket(T0 - MINUTE, "100", "10")], T0);
     expect(history.count).toBe(1);
     expect(history.points[0]?.totalGasUsed).toBe("100");
   });
