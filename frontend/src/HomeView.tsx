@@ -40,7 +40,6 @@ interface HomeViewProps {
 
 const MINUTE_MS = 60_000;
 const REFRESH_INTERVAL_MS = 12_000;
-const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
 /** How many top wallets to preview on the home page, and over which window. */
 const HOME_GUZZLER_LIMIT = 10;
@@ -79,14 +78,9 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   const [blocksData, setBlocksData] = useState<BlocksResponse | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const [blocksLoading, setBlocksLoading] = useState(true);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [debugStats, setDebugStats] = useState<HomeDebugStats>(EMPTY_HOME_DEBUG_STATS);
   const [topGuzzlers, setTopGuzzlers] = useState<GuzzlerStat[] | null>(null);
   const [guzzlersUnavailable, setGuzzlersUnavailable] = useState(false);
-  const [simulateOffline, setSimulateOffline] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(SIMULATE_OFFLINE_STORAGE_KEY) === "true";
-  });
 
   const recordDebugRequest = useCallback(
     (kind: HomeDebugRequestKind, sample: BlockRequestDebugSample) => {
@@ -105,36 +99,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(SIMULATE_OFFLINE_STORAGE_KEY, String(simulateOffline));
-  }, [simulateOffline]);
-
-  // Debug only: when the simulate-offline toggle is on, fail all /api/blocks*
-  // requests at the fetch boundary. The rest of the component is unaware of
-  // the toggle and just sees a real connection failure.
-  useEffect(() => {
-    if (typeof window === "undefined" || !simulateOffline) return;
-    const originalFetch = window.fetch;
-    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input instanceof Request
-              ? input.url
-              : String(input);
-      if (url.includes("/api/blocks")) {
-        throw new Error("Simulated offline (debug)");
-      }
-      return originalFetch(input, init);
-    }) as typeof window.fetch;
-    return () => {
-      window.fetch = originalFetch;
-    };
-  }, [simulateOffline]);
-
-  useEffect(() => {
     let cancelled = false;
     let inFlight = false;
     let intervalId: number | undefined;
@@ -151,7 +115,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
         if (cancelled) return;
         setBlocksData(normalizeHomeBlocksResponse(nextBlocks, settings));
         setBlocksError(null);
-        setLastUpdatedAt(new Date());
         if (intervalId !== undefined) window.clearInterval(intervalId);
       } catch (error) {
         if (cancelled) return;
@@ -300,7 +263,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             settings,
           );
         });
-        setLastUpdatedAt(new Date());
       } catch (error) {
         if (cancelled) return;
         setBlocksError(error instanceof Error ? error.message : String(error));
@@ -345,12 +307,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     return () => window.clearInterval(interval);
   }, [settings]);
 
-  const blocksHref = buildPermalinkHref("blocks", { limit: "100" });
   const guzzlersHref = buildPermalinkHref("guzzlers", {});
-  const lastUpdatedLabel = useMemo(() => {
-    if (!lastUpdatedAt) return "Waiting for data";
-    return `Updated ${lastUpdatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
-  }, [lastUpdatedAt]);
   const latestBlockBehindLabel = useMemo(() => {
     if (!latestBlock) return null;
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
@@ -363,13 +320,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     if (!Number.isFinite(latestTimeMs)) return false;
     return nowMs - latestTimeMs >= settings.scannerDelayWarningAgeMs;
   }, [latestBlock, nowMs, blocksError, settings.scannerDelayWarningAgeMs]);
-
-  const openBlocksView = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    if (writePermalink("blocks", { limit: "100" })) {
-      onLocationChange();
-    }
-  };
 
   const openGuzzlersView = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -387,40 +337,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
 
   return (
     <section className="home-view">
-      <div className="home-hero">
-        <div>
-          <p className="home-kicker">{settings.chainName} chain explorer</p>
-          <h2>Explore the {settings.chainName} chain.</h2>
-          <p className="home-lede">
-            Newest indexed blocks and transactions on the {settings.chainName} data layer — searchable, time‑scoped,
-            verifiable.
-          </p>
-        </div>
-        <div className="home-status" aria-live="polite">
-          <span
-            className={blocksError ? "home-status-indicator offline" : "home-status-indicator"}
-            title={blocksError ?? undefined}
-          >
-            {blocksError
-              ? "No connection to scanner"
-              : blocksLoading
-                ? "Refreshing…"
-                : lastUpdatedLabel}
-          </span>
-          <a href={blocksHref} onClick={openBlocksView}>
-            View all blocks
-          </a>
-          <button
-            type="button"
-            className={`home-debug-toggle${simulateOffline ? " active" : ""}`}
-            onClick={() => setSimulateOffline((value) => !value)}
-            title="Debug: pretend the backend is unreachable"
-          >
-            {simulateOffline ? "● simulated offline (debug)" : "○ simulate offline (debug)"}
-          </button>
-        </div>
-      </div>
-
       {blocksError ? (
         <div className="home-connection-alert" role="alert" aria-live="polite">
           <span className="home-connection-alert__icon" aria-hidden="true">
@@ -454,7 +370,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
         <div className="home-section-head">
           <div>
             <p className="home-kicker">network at a glance</p>
-            <h3>Live statistics</h3>
+            <h3>{settings.chainName} live statistics</h3>
           </div>
         </div>
         <div className="home-stats home-stats--summary">

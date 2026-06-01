@@ -12,9 +12,17 @@ interface AdminViewProps {
   settings: PageSettings;
   onSettingsChange: (settings: PageSettings) => void;
   onResetSettings: () => void;
+  simulateOffline: boolean;
+  onToggleSimulateOffline: () => void;
 }
 
-export function AdminView({ settings, onSettingsChange, onResetSettings }: AdminViewProps) {
+export function AdminView({
+  settings,
+  onSettingsChange,
+  onResetSettings,
+  simulateOffline,
+  onToggleSimulateOffline,
+}: AdminViewProps) {
   const [draft, setDraft] = useState(() => settingsToDraft(settings));
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +115,28 @@ export function AdminView({ settings, onSettingsChange, onResetSettings }: Admin
           </button>
         </div>
       </form>
+
+      <div className="admin-debug-tools">
+        <h3>Debug tools</h3>
+        <div className="admin-debug-row">
+          <div>
+            <strong>Simulate offline</strong>
+            <p>
+              Fail all <span className="mono">/api/blocks</span> requests so the UI shows its
+              no-connection state. Persists in this browser until turned off.
+            </p>
+          </div>
+          <button
+            type="button"
+            className={`home-debug-toggle${simulateOffline ? " active" : ""}`}
+            aria-pressed={simulateOffline}
+            onClick={onToggleSimulateOffline}
+            title="Debug: pretend the backend is unreachable"
+          >
+            {simulateOffline ? "● simulated offline (debug)" : "○ simulate offline (debug)"}
+          </button>
+        </div>
+      </div>
     </section>
   );
 }

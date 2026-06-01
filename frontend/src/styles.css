@@ -2665,3 +2665,31 @@ a.home-feed-item {
 a.home-feed-item:hover {
   border-color: var(--ark-blue, #181ea9);
 }
+
+/* ---- Admin: debug tools ---- */
+.admin-debug-tools {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 1rem 1.25rem;
+}
+
+.admin-debug-tools h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.admin-debug-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-debug-row p {
+  margin: 0.2rem 0 0;
+  color: var(--ink-muted, #6b6b6b);
+  font-size: 0.85rem;
+  max-width: 48ch;
+}

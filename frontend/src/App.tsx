@@ -39,6 +39,7 @@ import { TransactionsView } from "./TransactionsView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
+const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
@@ -56,6 +57,9 @@ export function App() {
     readStoredPageSettings(BUILD_PAGE_SETTINGS),
   );
   const [adminVerified, setAdminVerified] = useState(false);
+  const [simulateOffline, setSimulateOffline] = useState(
+    () => readStoredString(SIMULATE_OFFLINE_STORAGE_KEY, "false") === "true",
+  );
   const [timeZone, setTimeZone] = useState<string>(() =>
     readStoredString(
       TIME_ZONE_STORAGE_KEY,
@@ -160,6 +164,36 @@ export function App() {
   useEffect(() => {
     writeStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, baseloadAdminToken);
   }, [baseloadAdminToken]);
+
+  useEffect(() => {
+    writeStoredString(SIMULATE_OFFLINE_STORAGE_KEY, String(simulateOffline));
+  }, [simulateOffline]);
+
+  // Debug only: when the simulate-offline toggle (in the Admin panel) is on,
+  // fail all /api/blocks requests at the fetch boundary so the UI shows the
+  // offline state. Lives here in App so the patch survives navigating between
+  // views. The rest of the app just sees a real connection failure.
+  useEffect(() => {
+    if (typeof window === "undefined" || !simulateOffline) return;
+    const originalFetch = window.fetch;
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input instanceof Request
+              ? input.url
+              : String(input);
+      if (url.includes("/api/blocks")) {
+        throw new Error("Simulated offline (debug)");
+      }
+      return originalFetch(input, init);
+    }) as typeof window.fetch;
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [simulateOffline]);
 
   useEffect(() => {
     const trimmed = baseloadAdminToken.trim();
@@ -472,6 +506,8 @@ export function App() {
             settings={pageSettings}
             onSettingsChange={savePageSettings}
             onResetSettings={resetPageSettings}
+            simulateOffline={simulateOffline}
+            onToggleSimulateOffline={() => setSimulateOffline((value) => !value)}
           />
         ) : (
           <HealthView timeZone={timeZone} />
