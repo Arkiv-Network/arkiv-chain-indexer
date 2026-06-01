@@ -141,6 +141,16 @@ export interface GuzzlerHistory {
   points: GuzzlerHistoryPoint[];
 }
 
+/** Health metadata for the persisted guzzler bucket cache. */
+export interface GuzzlerCacheSummary {
+  /** Total number of one-minute buckets currently represented in the cache. */
+  bucketCount: number;
+  /** ISO timestamp for the oldest cached bucket start, or null when empty. */
+  oldestBucket: string | null;
+  /** ISO timestamp for the newest cached bucket start, or null when empty. */
+  newestBucket: string | null;
+}
+
 /** The full guzzler statistics payload for a single window. */
 export interface GuzzlerStatistics {
   windowMs: number;
@@ -167,6 +177,8 @@ export interface GuzzlerLeaderboards {
   retentionMs: number;
   /** The top-N cut applied to each window. */
   limit: number;
+  /** Metadata about the bucket cache at the time this board was generated. */
+  cache: GuzzlerCacheSummary;
   windows: GuzzlerWindowLeaderboard[];
 }
 
@@ -439,6 +451,9 @@ export class GuzzlerTracker {
   ): GuzzlerLeaderboards {
     const safeLimit = Math.max(0, Math.floor(limit));
     const ranked: GuzzlerStat[][] = windows.map(() => []);
+    let bucketCount = 0;
+    let oldestMinute = Number.POSITIVE_INFINITY;
+    let newestMinute = Number.NEGATIVE_INFINITY;
 
     for (const [address, buckets] of this.senders) {
       const acc = windows.map(() => ({
@@ -450,6 +465,10 @@ export class GuzzlerTracker {
       }));
 
       for (const bucket of buckets.values()) {
+        bucketCount += 1;
+        if (bucket.minute < oldestMinute) oldestMinute = bucket.minute;
+        if (bucket.minute > newestMinute) newestMinute = bucket.minute;
+
         const age = nowMs - bucket.lastMs;
         // Skip the leading windows too small to contain this bucket; once a
         // window includes it, every larger window does too.
@@ -490,6 +509,13 @@ export class GuzzlerTracker {
       generatedAt: new Date(nowMs).toISOString(),
       retentionMs: this.retentionMs,
       limit: safeLimit,
+      cache: {
+        bucketCount,
+        oldestBucket:
+          bucketCount > 0 ? new Date(oldestMinute * GUZZLER_BUCKET_MS).toISOString() : null,
+        newestBucket:
+          bucketCount > 0 ? new Date(newestMinute * GUZZLER_BUCKET_MS).toISOString() : null,
+      },
       windows: windows.map((window, j) => {
         const bucket = ranked[j]!;
         bucket.sort(compareGuzzlers);
@@ -528,6 +554,7 @@ export function sliceLeaderboards(board: GuzzlerLeaderboards, limit: number): Gu
     generatedAt: board.generatedAt,
     retentionMs: board.retentionMs,
     limit: safeLimit,
+    cache: board.cache,
     windows: board.windows.map((window) => ({
       label: window.label,
       windowMs: window.windowMs,
@@ -583,6 +610,11 @@ export function emptyLeaderboards(
     generatedAt: new Date(nowMs).toISOString(),
     retentionMs,
     limit: Math.max(0, Math.floor(limit)),
+    cache: {
+      bucketCount: 0,
+      oldestBucket: null,
+      newestBucket: null,
+    },
     windows: windows.map((window) => ({
       label: window.label,
       windowMs: window.ms,

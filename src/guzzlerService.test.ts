@@ -176,6 +176,11 @@ describe("GuzzlerService", () => {
     const five = store.board?.windows.find((w) => w.label === "5m");
     expect(five?.guzzlers.map((g) => g.address)).toEqual(["0xaaa"]);
     expect(store.board?.limit).toBe(250);
+    expect(store.board?.cache).toEqual({
+      bucketCount: 1,
+      oldestBucket: new Date(Math.floor(T0 / MINUTE) * MINUTE).toISOString(),
+      newestBucket: new Date(Math.floor(T0 / MINUTE) * MINUTE).toISOString(),
+    });
   });
 
   test("recordBlock persists buckets but does not refresh the cached board", async () => {

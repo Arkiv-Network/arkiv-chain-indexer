@@ -95,9 +95,21 @@ export function HealthView({ timeZone }: HealthViewProps) {
               value={guzzlersEnabled ? fmtInteger(guzzlers?.entryCount) : "—"}
             />
             <Metric
+              label="Cached buckets"
+              value={guzzlersEnabled ? fmtInteger(guzzlers?.bucketCount) : "—"}
+            />
+            <Metric
               label="Cache size"
               value={guzzlersEnabled ? fmtBytes(guzzlers?.totalSizeBytes) : "—"}
               title={guzzlersEnabled ? bytesTitle(guzzlers?.totalSizeBytes) : undefined}
+            />
+            <Metric
+              label="Oldest bucket"
+              value={guzzlersEnabled ? fmtDate(guzzlers?.oldestBucket, timeZone) : "—"}
+            />
+            <Metric
+              label="Newest bucket"
+              value={guzzlersEnabled ? fmtDate(guzzlers?.newestBucket, timeZone) : "—"}
             />
           </dl>
         </section>

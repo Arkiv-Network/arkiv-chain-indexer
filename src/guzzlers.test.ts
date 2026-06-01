@@ -155,6 +155,20 @@ describe("GuzzlerTracker.getLeaderboards", () => {
     expect(byLabel["24h"]!.guzzlers.map((g) => g.address)).toEqual(["0xold", "0xmid", "0xrecent"]);
   });
 
+  test("reports cache bucket count and oldest/newest stored bucket starts", () => {
+    const tracker = new GuzzlerTracker();
+    tracker.loadSender("0xa", [bucket(T0 - 3 * MINUTE, "100"), bucket(T0 - MINUTE, "200")]);
+    tracker.loadSender("0xb", [bucket(T0 - 2 * MINUTE, "300")]);
+
+    const board = tracker.getLeaderboards(T0, 10);
+
+    expect(board.cache).toEqual({
+      bucketCount: 3,
+      oldestBucket: new Date(Math.floor((T0 - 3 * MINUTE) / MINUTE) * MINUTE).toISOString(),
+      newestBucket: new Date(Math.floor((T0 - MINUTE) / MINUTE) * MINUTE).toISOString(),
+    });
+  });
+
   test("sums a sender's buckets within a window", () => {
     const tracker = new GuzzlerTracker();
     tracker.loadSender("0xa", [
@@ -196,6 +210,7 @@ describe("sliceLeaderboards", () => {
     const sliced = sliceLeaderboards(full, 1);
     const five = sliced.windows.find((w) => w.label === "5m")!;
     expect(sliced.limit).toBe(1);
+    expect(sliced.cache).toEqual(full.cache);
     expect(five.count).toBe(3);
     expect(five.guzzlers.map((g) => g.address)).toEqual(["0xc"]);
   });
@@ -243,6 +258,7 @@ describe("emptyLeaderboards", () => {
     const board = emptyLeaderboards(T0, 100);
     expect(board.limit).toBe(100);
     expect(board.retentionMs).toBe(24 * HOUR);
+    expect(board.cache).toEqual({ bucketCount: 0, oldestBucket: null, newestBucket: null });
     expect(board.windows.map((w) => w.label)).toEqual(GUZZLER_WINDOWS.map((w) => w.label));
     for (const window of board.windows) {
       expect(window.count).toBe(0);
