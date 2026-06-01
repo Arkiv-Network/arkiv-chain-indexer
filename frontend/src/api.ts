@@ -440,6 +440,9 @@ export interface HealthResponse {
   guzzlers?: {
     enabled: boolean;
     entryCount: number | null;
+    bucketCount: number | null;
+    oldestBucket: string | null;
+    newestBucket: string | null;
     totalSizeBytes: string | null;
   };
 }

@@ -393,7 +393,7 @@ describe("GET /health guzzlers feature flag", () => {
   test("reports guzzler cache entry count and size", async () => {
     const store = new FakeGuzzlerStore(
       new Map([
-        ["0xa", [bucket(NOW, "100", "10")]],
+        ["0xa", [bucket(NOW - 2 * MINUTE, "100", "10"), bucket(NOW - MINUTE, "150", "15")]],
         ["0xb", [bucket(NOW, "200", "20")]],
       ]),
     );
@@ -404,12 +404,42 @@ describe("GET /health guzzlers feature flag", () => {
 
     expect(body.guzzlers.enabled).toBe(true);
     expect(body.guzzlers.entryCount).toBe(2);
+    expect(body.guzzlers.bucketCount).toBe(3);
+    expect(body.guzzlers.oldestBucket).toBe(
+      new Date(Math.floor((NOW - 2 * MINUTE) / MINUTE) * MINUTE).toISOString(),
+    );
+    expect(body.guzzlers.newestBucket).toBe(new Date(Math.floor(NOW / MINUTE) * MINUTE).toISOString());
     expect(Number(body.guzzlers.totalSizeBytes)).toBeGreaterThan(0);
+  });
+
+  test("reports null bucket metadata before the first cached leaderboard refresh", async () => {
+    const store = new FakeGuzzlerStore(new Map([["0xa", [bucket(NOW, "100", "10")]]]), {
+      withBoard: false,
+    });
+    const response = await handleRequest(new Request("http://example.test/health"), healthStorage, {
+      guzzlerStore: store,
+    });
+    const body = (await response.json()) as HealthResponseBody;
+
+    expect(body.guzzlers).toMatchObject({
+      enabled: true,
+      entryCount: 1,
+      bucketCount: null,
+      oldestBucket: null,
+      newestBucket: null,
+    });
   });
 
   test("reports a disabled cache when no store is configured", async () => {
     const response = await handleRequest(new Request("http://example.test/health"), healthStorage);
     const body = (await response.json()) as HealthResponseBody;
-    expect(body.guzzlers).toEqual({ enabled: false, entryCount: null, totalSizeBytes: null });
+    expect(body.guzzlers).toEqual({
+      enabled: false,
+      entryCount: null,
+      bucketCount: null,
+      oldestBucket: null,
+      newestBucket: null,
+      totalSizeBytes: null,
+    });
   });
 });

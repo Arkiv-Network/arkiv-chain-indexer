@@ -173,6 +173,12 @@ export interface HealthResponseBody {
     enabled: boolean;
     /** Number of senders held in the Redis cache, or null when disabled/unavailable. */
     entryCount: number | null;
+    /** Number of one-minute buckets held in the cached leaderboard snapshot, or null. */
+    bucketCount: number | null;
+    /** ISO timestamp for the oldest cached bucket start, or null. */
+    oldestBucket: string | null;
+    /** ISO timestamp for the newest cached bucket start, or null. */
+    newestBucket: string | null;
     /** Approximate total size of the cached entries in bytes, or null. */
     totalSizeBytes: string | null;
   };
@@ -779,19 +785,39 @@ async function readGuzzlerCacheHealth(
   guzzlerStore: GuzzlerStore | undefined,
 ): Promise<HealthResponseBody["guzzlers"]> {
   if (!guzzlerStore) {
-    return { enabled: false, entryCount: null, totalSizeBytes: null };
+    return {
+      enabled: false,
+      entryCount: null,
+      bucketCount: null,
+      oldestBucket: null,
+      newestBucket: null,
+      totalSizeBytes: null,
+    };
   }
   try {
-    const stats = await guzzlerStore.stats();
+    const [stats, board] = await Promise.all([
+      guzzlerStore.stats(),
+      guzzlerStore.loadLeaderboards(),
+    ]);
     return {
       enabled: true,
       entryCount: stats.entryCount,
+      bucketCount: board?.cache?.bucketCount ?? null,
+      oldestBucket: board?.cache?.oldestBucket ?? null,
+      newestBucket: board?.cache?.newestBucket ?? null,
       totalSizeBytes: stats.totalBytes.toString(),
     };
   } catch (error) {
     // Never let a transient cache hiccup take down the health endpoint.
     console.error("Failed to read guzzler cache stats", error);
-    return { enabled: true, entryCount: null, totalSizeBytes: null };
+    return {
+      enabled: true,
+      entryCount: null,
+      bucketCount: null,
+      oldestBucket: null,
+      newestBucket: null,
+      totalSizeBytes: null,
+    };
   }
 }
 
