@@ -37,8 +37,32 @@
   --r-lg: 14px;
 }
 
+/* Dark palette — applied when the user explicitly opts in via the header
+   toggle (data-theme="dark"), or when the OS prefers dark and the user has
+   not opted into light. The data-theme attribute wins over the OS hint. */
+:root[data-theme="dark"] {
+  --ink: #f4f1e9;
+  --ink-2: #d8d4c8;
+  --ink-muted: #8a8a8a;
+  --sand: #0d0d10;
+  --stone: #16161b;
+  --stone-2: #20202a;
+  --line: #ffffff14;
+  --line-strong: #ffffff2e;
+  --ark-blue: #6970ff;
+  --ark-blue-2: #8a8fff;
+
+  --bg: var(--sand);
+  --fg: var(--ink);
+  --muted: var(--ink-muted);
+  --border: var(--line);
+  --accent: var(--ark-blue);
+  --row-alt: var(--stone);
+  --row-hover: color-mix(in oklab, var(--stone-2) 70%, transparent);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ink: #f4f1e9;
     --ink-2: #d8d4c8;
     --ink-muted: #8a8a8a;
@@ -244,6 +268,43 @@ nav button.active::after {
   text-transform: uppercase;
 }
 
+.ui-toggles {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ui-toggle {
+  appearance: none;
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 0.3rem 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.ui-toggle:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.ui-toggle.active {
+  background: var(--ink);
+  color: var(--sand);
+  border-color: var(--ink);
+}
+
+.ui-toggle.active:hover {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
 footer {
   border-top: 1px solid var(--line);
   background: color-mix(in oklab, var(--sand) 88%, transparent);
@@ -306,6 +367,16 @@ main.fullscreen {
   padding: 0;
   display: flex;
   min-height: 0;
+}
+
+/* Full-width mode — the header toggle sets data-ui-width="full" on :root,
+   removing the 1600px (header/footer/home) and 1200px (admin) caps so every
+   view stretches to the viewport. */
+:root[data-ui-width="full"] .header-inner,
+:root[data-ui-width="full"] .footer-inner,
+:root[data-ui-width="full"] main.contained,
+:root[data-ui-width="full"] .admin-view {
+  max-width: none;
 }
 
 form {

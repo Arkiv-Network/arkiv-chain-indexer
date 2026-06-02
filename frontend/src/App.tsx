@@ -40,6 +40,10 @@ import { TransactionsView } from "./TransactionsView";
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
+const FULL_WIDTH_STORAGE_KEY = "ui.fullWidth";
+const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
+
+type ThemeOverride = "light" | "dark" | "";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
@@ -59,6 +63,16 @@ export function App() {
   const [adminVerified, setAdminVerified] = useState(false);
   const [simulateOffline, setSimulateOffline] = useState(
     () => readStoredString(SIMULATE_OFFLINE_STORAGE_KEY, "false") === "true",
+  );
+  const [fullWidth, setFullWidth] = useState(
+    () => readStoredString(FULL_WIDTH_STORAGE_KEY, "false") === "true",
+  );
+  const [themeOverride, setThemeOverride] = useState<ThemeOverride>(() =>
+    readStoredString(
+      THEME_OVERRIDE_STORAGE_KEY,
+      "",
+      (value) => value === "" || value === "light" || value === "dark",
+    ) as ThemeOverride,
   );
   const [timeZone, setTimeZone] = useState<string>(() =>
     readStoredString(
@@ -168,6 +182,46 @@ export function App() {
   useEffect(() => {
     writeStoredString(SIMULATE_OFFLINE_STORAGE_KEY, String(simulateOffline));
   }, [simulateOffline]);
+
+  useEffect(() => {
+    writeStoredString(FULL_WIDTH_STORAGE_KEY, String(fullWidth));
+    if (typeof document === "undefined") return;
+    if (fullWidth) {
+      document.documentElement.setAttribute("data-ui-width", "full");
+    } else {
+      document.documentElement.removeAttribute("data-ui-width");
+    }
+  }, [fullWidth]);
+
+  useEffect(() => {
+    writeStoredString(THEME_OVERRIDE_STORAGE_KEY, themeOverride);
+    if (typeof document === "undefined") return;
+    if (themeOverride === "light" || themeOverride === "dark") {
+      document.documentElement.setAttribute("data-theme", themeOverride);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+  }, [themeOverride]);
+
+  const toggleFullWidth = () => setFullWidth((value) => !value);
+  const toggleDarkMode = () => {
+    setThemeOverride((current) => {
+      if (current === "dark") return "light";
+      if (current === "light") return "dark";
+      const prefersDark =
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches;
+      return prefersDark ? "light" : "dark";
+    });
+  };
+
+  const darkModeActive =
+    themeOverride === "dark" ||
+    (themeOverride === "" &&
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   // Debug only: when the simulate-offline toggle (in the Admin panel) is on,
   // fail all /api/blocks requests at the fetch boundary so the UI shows the
@@ -415,6 +469,26 @@ export function App() {
               ))}
             </select>
           </label>
+          <div className="ui-toggles">
+            <button
+              type="button"
+              className={`ui-toggle${fullWidth ? " active" : ""}`}
+              onClick={toggleFullWidth}
+              aria-pressed={fullWidth}
+              title={fullWidth ? "Switch to constrained width" : "Switch to full-width view"}
+            >
+              Full width
+            </button>
+            <button
+              type="button"
+              className={`ui-toggle${darkModeActive ? " active" : ""}`}
+              onClick={toggleDarkMode}
+              aria-pressed={darkModeActive}
+              title={darkModeActive ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {darkModeActive ? "Dark" : "Light"}
+            </button>
+          </div>
           {adminVerified ? <span className="admin-mode-indicator">ADMIN MODE</span> : null}
         </div>
       </header>
