@@ -342,6 +342,55 @@ if (!hasPostgresForTests()) {
     });
   });
 
+  describe("ScannerStorage.findBlockGaps", () => {
+    test("reports internal holes between stored blocks", async () => {
+      const storage = await withStorage();
+      for (const blockNumber of [1n, 2n, 5n, 6n, 10n]) {
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+      }
+
+      const gaps = await storage.findBlockGaps();
+      expect(gaps).toEqual([
+        { gapStart: 3n, gapEnd: 4n, missingCount: 2n },
+        { gapStart: 7n, gapEnd: 9n, missingCount: 3n },
+      ]);
+    });
+
+    test("returns no gaps for a contiguous run", async () => {
+      const storage = await withStorage();
+      for (let blockNumber = 100n; blockNumber <= 105n; blockNumber += 1n) {
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+      }
+
+      expect(await storage.findBlockGaps()).toEqual([]);
+    });
+
+    test("never reports holes below the minimum or above the maximum stored block", async () => {
+      const storage = await withStorage();
+      for (const blockNumber of [10n, 11n, 15n]) {
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+      }
+
+      const gaps = await storage.findBlockGaps();
+      // Only the internal 12..14 hole — nothing below 10 or above 15.
+      expect(gaps).toEqual([{ gapStart: 12n, gapEnd: 14n, missingCount: 3n }]);
+    });
+
+    test("caps the number of gap ranges returned", async () => {
+      const storage = await withStorage();
+      // Blocks 0,2,4,6 -> three single-block gaps at 1, 3, 5.
+      for (const blockNumber of [0n, 2n, 4n, 6n]) {
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber }));
+      }
+
+      const gaps = await storage.findBlockGaps(2);
+      expect(gaps).toEqual([
+        { gapStart: 1n, gapEnd: 1n, missingCount: 1n },
+        { gapStart: 3n, gapEnd: 3n, missingCount: 1n },
+      ]);
+    });
+  });
+
   describe("ScannerStorage block ranges", () => {
     test("aggregateRangeIfComplete returns undefined for incomplete windows", async () => {
       const storage = await withStorage();

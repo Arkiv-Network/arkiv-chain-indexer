@@ -8,6 +8,7 @@
     "aggregate": "bun run src/aggregate.ts",
     "aggregate-all": "bun run src/aggregateAll.ts",
     "aggregate-senders": "bun run src/aggregateSenders.ts",
+    "fill-gaps": "bun run src/fillGaps.ts",
     "collect-batcher": "bun run src/batcherCollector.ts",
     "serve": "bun run src/serve.ts",
     "test": "bun test",

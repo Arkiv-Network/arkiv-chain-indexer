@@ -144,6 +144,27 @@ services:
     extra_hosts: *extra-hosts
     command: ["bun", "run", "aggregate-senders"]
 
+  gap-filler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
+      GAP_FILL_INTERVAL_MS: ${GAP_FILL_INTERVAL_MS:-60000}
+      GAP_FILL_MAX_BLOCKS_PER_CYCLE: ${GAP_FILL_MAX_BLOCKS_PER_CYCLE:-500}
+      SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
+      SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+    extra_hosts: *extra-hosts
+    command: ["bun", "run", "fill-gaps"]
+
   backend:
     build:
       context: .

@@ -225,6 +225,15 @@ export interface RangeBlockCoverage {
   firstMissingBlock?: bigint;
 }
 
+export interface BlockGap {
+  /** First missing block in the hole (inclusive). */
+  gapStart: bigint;
+  /** Last missing block in the hole (inclusive). */
+  gapEnd: bigint;
+  /** Number of missing blocks in the hole (gapEnd - gapStart + 1). */
+  missingCount: bigint;
+}
+
 export interface LatestCompleteBlockRange {
   rangeStart: bigint;
   rangeEnd: bigint;
@@ -2001,6 +2010,40 @@ export class ScannerStorage {
       minBlockDate: row.min_block_date,
       maxBlockDate: row.max_block_date,
     };
+  }
+
+  /**
+   * Find internal holes in the stored block sequence: maximal runs of absent block numbers that sit
+   * *between* two stored blocks. Detected with a LEAD window over the blocks primary key, so it is a
+   * single index scan rather than a generate_series over the whole span. Gaps below the minimum or
+   * above the maximum stored block are intentionally NOT reported — those are backfill/head concerns,
+   * not internal gaps. `limit` caps the number of gap ranges returned (ascending by block number).
+   */
+  async findBlockGaps(limit = 1000): Promise<BlockGap[]> {
+    const resolvedLimit = resolveLimit(limit, MAX_BLOCKS_PER_QUERY);
+    const result = await this.pool.query<{ gap_start: string; gap_end: string }>(
+      // Arithmetic and ORDER BY run on the BIGINT block_number; the ::text casts only shape the
+      // output for transport (the pg parser returns BIGINT as string). Do NOT order by a ::text
+      // alias — it would sort lexicographically.
+      `SELECT
+         (s.block_number + 1)::text AS gap_start,
+         (s.next_block - 1)::text AS gap_end
+       FROM (
+         SELECT
+           block_number,
+           LEAD(block_number) OVER (ORDER BY block_number) AS next_block
+         FROM ${this.qBlocks}
+       ) s
+       WHERE s.next_block IS NOT NULL AND s.next_block > s.block_number + 1
+       ORDER BY s.block_number
+       LIMIT $1`,
+      [resolvedLimit],
+    );
+    return result.rows.map((row) => {
+      const gapStart = BigInt(row.gap_start);
+      const gapEnd = BigInt(row.gap_end);
+      return { gapStart, gapEnd, missingCount: gapEnd - gapStart + 1n };
+    });
   }
 
   private async applyProgressUpdate(
