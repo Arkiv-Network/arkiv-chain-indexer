@@ -40,10 +40,23 @@ export async function aggregateRanges(
     return { written: 0, incomplete: 0, skippedComplete: 0 };
   }
 
-  const firstRangeStart = rangeStartFor(lowerBound, rangeSize);
+  let firstRangeStart = rangeStartFor(lowerBound, rangeSize);
+  if (firstRangeStart < minBlock) {
+    firstRangeStart += rangeSize;
+  }
   const lastRangeStart = rangeStartFor(upperBound, rangeSize);
   let processedFirstRangeStart = firstRangeStart;
   let skippedComplete = 0;
+
+  if (firstRangeStart > lastRangeStart) {
+    return {
+      written: 0,
+      incomplete: 0,
+      skippedComplete: 0,
+      firstRangeStart,
+      lastRangeStart,
+    };
+  }
 
   if (skipCompleted) {
     const latestCompleteRangeStart = await storage.getLatestCompleteRangeStart(
