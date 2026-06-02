@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { AddressFace } from "./AddressFace";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
@@ -10,7 +10,7 @@ import {
   normalizeAddressInput,
   type GuzzlerActivityWindowKey,
 } from "./guzzlerActivity";
-import { writePermalink } from "./permalinks";
+import { buildPermalinkHref, shouldHandleClientNavigation, writePermalink } from "./permalinks";
 
 interface GuzzlersViewProps {
   locationSearch: string;
@@ -221,7 +221,8 @@ function GuzzlerLeaderboard({
             nowMs={now}
             tokenSymbol={tokenSymbol}
             // Carry the leaderboard's window selection into the activity view.
-            onSelect={(address) => onSelectAddress(address, activityWindowForMs(selectedWindow.ms))}
+            activityWindowKey={activityWindowForMs(selectedWindow.ms)}
+            onSelect={onSelectAddress}
           />
         ))}
       </ol>
@@ -241,6 +242,7 @@ function GuzzlerCard({
   maxGas,
   nowMs,
   tokenSymbol,
+  activityWindowKey,
   onSelect,
 }: {
   rank: number;
@@ -248,28 +250,24 @@ function GuzzlerCard({
   maxGas: bigint;
   nowMs: number;
   tokenSymbol: string;
-  onSelect: (address: string) => void;
+  activityWindowKey: GuzzlerActivityWindowKey;
+  onSelect: (address: string, windowKey: GuzzlerActivityWindowKey) => void;
 }) {
   const display = addressDisplay(guzzler.address);
   const gas = toBigInt(guzzler.totalGasUsed);
   const barPct = maxGas > 0n ? Number((gas * 1000n) / maxGas) / 10 : 0;
   const lastSeenAgo = secondsSince(nowMs, guzzler.lastSeen);
-  const open = () => onSelect(guzzler.address);
+  const href = buildPermalinkHref("guzzlers", { address: guzzler.address, window: activityWindowKey });
+  const label = `View activity for ${display.label}`;
+  const open = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!shouldHandleClientNavigation(event)) return;
+    event.preventDefault();
+    onSelect(guzzler.address, activityWindowKey);
+  };
 
   return (
-    <li
-      className="guzzler-card clickable"
-      role="button"
-      tabIndex={0}
-      aria-label={`View activity for ${display.label}`}
-      onClick={open}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          open();
-        }
-      }}
-    >
+    <li className="guzzler-card clickable">
+      <a className="guzzler-card-hitbox" href={href} onClick={open} aria-label={label} />
       <span className={`guzzler-rank${rank <= 3 ? " top" : ""}`}>{rank}</span>
       <AddressFace address={guzzler.address} loading="lazy" />
       <div className="guzzler-main">
