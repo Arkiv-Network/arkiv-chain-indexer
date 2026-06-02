@@ -13,6 +13,42 @@ export type View =
   | "baseload";
 
 const VIEW_PARAM = "view";
+const VIEW_PATHS: Record<View, string> = {
+  home: "/",
+  blocks: "/blocks",
+  block: "/block",
+  transactions: "/transactions",
+  "transaction-records": "/records",
+  senders: "/senders",
+  ranges: "/ranges",
+  charts: "/charts",
+  guzzlers: "/activity",
+  health: "/health",
+  admin: "/admin",
+  baseload: "/baseload",
+};
+
+const VIEW_PATH_ALIASES: Record<string, View> = {
+  "/": "home",
+  "/blocks": "blocks",
+  "/block": "block",
+  "/transactions": "transactions",
+  "/transaction-records": "transaction-records",
+  "/records": "transaction-records",
+  "/senders": "senders",
+  "/ranges": "ranges",
+  "/charts": "charts",
+  "/guzzlers": "guzzlers",
+  "/activity": "guzzlers",
+  "/health": "health",
+  "/admin": "admin",
+  "/baseload": "baseload",
+};
+
+export interface ClientLocation {
+  pathname: string;
+  search: string;
+}
 
 export interface ClientNavigationClick {
   button: number;
@@ -26,9 +62,22 @@ export interface ClientNavigationClick {
   };
 }
 
+export function getCurrentLocation(): ClientLocation {
+  if (typeof window === "undefined") return { pathname: "/", search: "" };
+  return { pathname: window.location.pathname, search: window.location.search };
+}
+
 export function getCurrentSearch(): string {
   if (typeof window === "undefined") return "";
   return window.location.search;
+}
+
+function normalizePathname(pathname: string): string {
+  const prefixed = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  if (prefixed.length > 1 && prefixed.endsWith("/")) {
+    return prefixed.replace(/\/+$/, "");
+  }
+  return prefixed;
 }
 
 export function readViewFromSearch(search: string): View {
@@ -47,6 +96,19 @@ export function readViewFromSearch(search: string): View {
   if (value === "admin") return "admin";
   if (value === "baseload") return "baseload";
   return "home";
+}
+
+export function readViewFromLocation(location: ClientLocation): View {
+  const pathname = normalizePathname(location.pathname);
+  if (pathname === "/") {
+    const legacyView = readViewFromSearch(location.search);
+    if (legacyView !== "home") return legacyView;
+  }
+
+  const pathView = VIEW_PATH_ALIASES[pathname];
+  if (pathView) return pathView;
+
+  return readViewFromSearch(location.search);
 }
 
 export function readFiltersFromSearch<T extends Record<string, string>>(
@@ -79,14 +141,34 @@ export function filtersEqual<T extends Record<string, string>>(
   return keys.every((key) => left[key] === right[key]);
 }
 
-export function buildPermalinkHref(view: View, filters: Record<string, string>): string {
-  if (typeof window === "undefined") return "";
+export function routePathForView(view: View): string {
+  return VIEW_PATHS[view];
+}
 
-  const url = new URL(window.location.href);
-  url.search = "";
-  url.searchParams.set(VIEW_PARAM, view);
+export function buildRouteHref(view: View, filters: Record<string, string>): string {
+  const path = routePathForView(view);
+  const params = new URLSearchParams();
 
   for (const [key, value] of Object.entries(filters)) {
+    if (key === VIEW_PARAM) continue;
+    const trimmed = value.trim();
+    if (trimmed) params.set(key, trimmed);
+  }
+
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+export function buildPermalinkHref(view: View, filters: Record<string, string>): string {
+  if (typeof window === "undefined") return buildRouteHref(view, filters);
+
+  const url = new URL(window.location.href);
+  url.pathname = routePathForView(view);
+  url.search = "";
+  url.hash = "";
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === VIEW_PARAM) continue;
     const trimmed = value.trim();
     if (trimmed) url.searchParams.set(key, trimmed);
   }

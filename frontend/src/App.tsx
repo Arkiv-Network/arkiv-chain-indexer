@@ -31,7 +31,7 @@ import {
   type PageSettings,
   writeStoredPageSettings,
 } from "./pageSettings";
-import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
+import { getCurrentLocation, readViewFromLocation, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
 import { RecordTransactionsView } from "./RecordTransactionsView";
 import { SendersView } from "./SendersView";
@@ -47,7 +47,7 @@ const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
 type ThemeOverride = "light" | "dark" | "";
 
 export function App() {
-  const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
+  const [clientLocation, setClientLocation] = useState(getCurrentLocation);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
@@ -84,7 +84,8 @@ export function App() {
       (value) => TIME_ZONE_OPTIONS.some((option) => option.value === value),
     ),
   );
-  const view = readViewFromSearch(locationSearch);
+  const locationSearch = clientLocation.search;
+  const view = readViewFromLocation(clientLocation);
   const activeView =
     transactionDataEnabled !== true && (view === "block" || view === "transactions" || view === "senders")
       ? "blocks"
@@ -94,7 +95,7 @@ export function App() {
     navItems.find((item) => item.view === activeView)?.label ?? navLabelForView(activeView) ?? "Menu";
 
   useEffect(() => {
-    const onPopState = () => setLocationSearch(getCurrentSearch());
+    const onPopState = () => setClientLocation(getCurrentLocation());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -182,11 +183,11 @@ export function App() {
       (view === "block" || view === "transactions" || view === "senders") &&
       writePermalink("blocks", {})
     ) {
-      setLocationSearch(getCurrentSearch());
+      setClientLocation(getCurrentLocation());
     }
   }, [transactionDataEnabled, view]);
 
-  const refreshFromLocation = () => setLocationSearch(getCurrentSearch());
+  const refreshFromLocation = () => setClientLocation(getCurrentLocation());
 
   const setView = (nextView: typeof view) => {
     if (writePermalink(nextView, {})) {

@@ -1,3 +1,5 @@
+import { buildRouteHref } from "./permalinks";
+
 export const DEFAULT_TX_EXPLORER_BASE_URL = "https://explorer.braga.hoodi.arkiv.network/tx/";
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -39,9 +41,5 @@ export function addressSearchHref(address: string | null | undefined): string | 
   const value = address?.trim();
   if (!value || !ADDRESS_RE.test(value)) return null;
 
-  const params = new URLSearchParams();
-  params.set("view", "transactions");
-  params.set("address", value);
-  params.set("page", "1");
-  return `?${params.toString()}`;
+  return buildRouteHref("transactions", { address: value, page: "1" });
 }

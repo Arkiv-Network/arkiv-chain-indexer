@@ -1,13 +1,10 @@
-import { writePermalink } from "./permalinks";
+import { buildRouteHref, writePermalink } from "./permalinks";
 import type { MouseEvent } from "react";
 
 export function blockPanelHref(blockNumber: string | number | null | undefined): string {
   const value = String(blockNumber ?? "").trim();
-  if (!value) return "?view=block";
-  const params = new URLSearchParams();
-  params.set("view", "block");
-  params.set("block", value);
-  return `?${params.toString()}`;
+  if (!value) return buildRouteHref("block", {});
+  return buildRouteHref("block", { block: value });
 }
 
 export function BlockNumberLink({
