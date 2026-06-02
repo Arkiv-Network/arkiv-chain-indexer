@@ -72,6 +72,50 @@ describe("aggregateRanges incremental mode", () => {
     expect(result.processedLastRangeStart).toBeUndefined();
     expect(storage.aggregateCalls).toEqual([]);
   });
+
+  test("skips a permanently incomplete prefix range before the earliest stored block", async () => {
+    const storage = new FakeAggregateStorage({
+      minBlock: 1n,
+      maxBlock: 5n,
+      completeRangeStarts: [2n, 4n],
+    });
+
+    const result = await aggregateRanges(storage.asScannerStorage(), {
+      rangeSize: 2n,
+      stopAfterIncomplete: true,
+    });
+
+    expect(result.written).toBe(2);
+    expect(result.incomplete).toBe(0);
+    expect(result.skippedComplete).toBe(0);
+    expect(result.firstRangeStart).toBe(2n);
+    expect(result.lastRangeStart).toBe(4n);
+    expect(result.processedFirstRangeStart).toBe(2n);
+    expect(result.processedLastRangeStart).toBe(4n);
+    expect(storage.aggregateCalls).toEqual([2n, 4n]);
+  });
+
+  test("returns zero counts when prefix alignment leaves no eligible ranges", async () => {
+    const storage = new FakeAggregateStorage({
+      minBlock: 1n,
+      maxBlock: 1n,
+      completeRangeStarts: [],
+    });
+
+    const result = await aggregateRanges(storage.asScannerStorage(), {
+      rangeSize: 2n,
+      stopAfterIncomplete: true,
+    });
+
+    expect(result).toEqual({
+      written: 0,
+      incomplete: 0,
+      skippedComplete: 0,
+      firstRangeStart: 2n,
+      lastRangeStart: 0n,
+    });
+    expect(storage.aggregateCalls).toEqual([]);
+  });
 });
 
 if (!hasPostgresForTests()) {
