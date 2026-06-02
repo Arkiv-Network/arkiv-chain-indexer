@@ -544,6 +544,44 @@ if (!hasPostgresForTests()) {
       expect(ascending.map((row) => row.address)).toEqual([quietAddress]);
     });
 
+    test("orders senders numerically by transaction_count across digit boundaries", async () => {
+      const storage = await withStorage();
+      const highAddress = "0xcccccccccccccccccccccccccccccccccccccccc";
+      const lowAddress = "0xdddddddddddddddddddddddddddddddddddddddd";
+
+      const makeTransactions = (from: string, count: number, prefix: string) =>
+        Array.from({ length: count }, (_unused, index) =>
+          transactionFixture({
+            position: index,
+            hash: `${prefix}${index}` as `0x${string}`,
+            from: from as `0x${string}`,
+            nonce: index.toString(),
+          }),
+        );
+
+      // 10 transactions for the high sender, 9 for the low sender. Lexicographically "9" > "10",
+      // so a string sort would rank the low sender first; numerically 10 > 9 must win.
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 200n, transactionCount: 10 }),
+        { kind: "lastSuccessfulBlock" },
+        makeTransactions(highAddress, 10, "0xhigh"),
+      );
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 201n, transactionCount: 9 }),
+        { kind: "lastSuccessfulBlock" },
+        makeTransactions(lowAddress, 9, "0xlow"),
+      );
+
+      expect(await storage.aggregateSenderStats()).toBe(2);
+
+      const descending = await storage.querySenderStats();
+      expect(descending.map((row) => row.address)).toEqual([highAddress, lowAddress]);
+      expect(descending.map((row) => row.transactionCount)).toEqual(["10", "9"]);
+
+      const ascending = await storage.querySenderStats({ order: "asc" });
+      expect(ascending.map((row) => row.address)).toEqual([lowAddress, highAddress]);
+    });
+
     test("saves and queries transactions with block context", async () => {
       const storage = await withStorage();
       await storage.saveBlockMetrics(

@@ -1492,17 +1492,20 @@ export class ScannerStorage {
     const order = resolveQueryOrder(filter.order);
     const tieOrder = order === "DESC" ? "DESC" : "ASC";
     const result = await this.pool.query<SenderStatsRow>(
+      // transaction_count / *_block_number are BIGINT; the pg type parser (OID 20) already returns
+      // them as strings, so no ::text cast is needed. Do NOT cast: a transaction_count::text output
+      // column would shadow the BIGINT in ORDER BY and rank lexicographically (e.g. "9" > "1000").
       `SELECT
          address,
          latest_nonce,
-         transaction_count::text AS transaction_count,
+         transaction_count,
          total_gas_used,
          total_transaction_fee_wei,
          total_value_wei,
          average_gas_used,
          average_transaction_fee_wei,
-         first_block_number::text AS first_block_number,
-         last_block_number::text AS last_block_number,
+         first_block_number,
+         last_block_number,
          first_block_date,
          last_block_date,
          to_char(aggregated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS aggregated_at_utc
