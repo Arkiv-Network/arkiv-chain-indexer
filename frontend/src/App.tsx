@@ -23,6 +23,7 @@ import { GuzzlersView } from "./GuzzlersView";
 import { HealthView } from "./HealthView";
 import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
+import { navLabelForView, visibleNavItems } from "./navigation";
 import {
   BUILD_PAGE_SETTINGS,
   readStoredPageSettings,
@@ -30,7 +31,7 @@ import {
   type PageSettings,
   writeStoredPageSettings,
 } from "./pageSettings";
-import { getCurrentSearch, readViewFromSearch, writePermalink, type View } from "./permalinks";
+import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
 import { RangesView } from "./RangesView";
 import { RecordTransactionsView } from "./RecordTransactionsView";
 import { SendersView } from "./SendersView";
@@ -88,25 +89,9 @@ export function App() {
     transactionDataEnabled !== true && (view === "block" || view === "transactions" || view === "senders")
       ? "blocks"
       : view;
-  const navItems: { view: View; label: string }[] = [
-    { view: "home", label: "Home" },
-    { view: "blocks", label: "Blocks" },
-    ...(transactionDataEnabled === true
-      ? [
-          { view: "block" as const, label: "Block" },
-          { view: "transactions" as const, label: "Address" },
-          { view: "senders" as const, label: "Senders" },
-        ]
-      : []),
-    { view: "transaction-records", label: "Records" },
-    { view: "ranges", label: "Ranges" },
-    { view: "charts", label: "Charts" },
-    { view: "guzzlers", label: "Activity" },
-    { view: "health", label: "Health" },
-    { view: "admin", label: "Admin" },
-    { view: "baseload", label: "Baseload" },
-  ];
-  const activeNavLabel = navItems.find((item) => item.view === activeView)?.label ?? "Menu";
+  const navItems = visibleNavItems(adminVerified, transactionDataEnabled);
+  const activeNavLabel =
+    navItems.find((item) => item.view === activeView)?.label ?? navLabelForView(activeView) ?? "Menu";
 
   useEffect(() => {
     const onPopState = () => setLocationSearch(getCurrentSearch());
