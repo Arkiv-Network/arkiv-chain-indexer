@@ -53,7 +53,22 @@ function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): Aggr
   };
 }
 
+function formatDate(date: string | undefined): string {
+  return date !== undefined && date.length > 0 ? date : "?";
+}
+
 async function runSweep(storage: ScannerStorage): Promise<void> {
+  const bounds = await storage.getStoredBlockBounds();
+  if (!bounds) {
+    console.log("sweep: no blocks stored yet — nothing to aggregate");
+    return;
+  }
+
+  console.log(
+    `sweep start: stored blocks ${bounds.minBlock.toString()} (${formatDate(bounds.minBlockDate)})` +
+      ` .. ${bounds.maxBlock.toString()} (${formatDate(bounds.maxBlockDate)})`,
+  );
+
   for (const rangeSize of SUPPORTED_RANGE_SIZES) {
     const startedAt = Date.now();
     const result = await aggregateRanges(storage, {
@@ -62,8 +77,35 @@ async function runSweep(storage: ScannerStorage): Promise<void> {
       stopAfterIncomplete: true,
     });
     const elapsedMs = Date.now() - startedAt;
+
+    const latestComplete = await storage.getLatestCompleteBlockRange(rangeSize);
+    const lastCompleteText = latestComplete
+      ? `${latestComplete.rangeStart.toString()}..${latestComplete.rangeEnd.toString()}` +
+        ` (${formatDate(latestComplete.maxBlockDate)})`
+      : "none";
+
+    let nextRangeText = "none";
+    if (result.incomplete > 0 && result.processedLastRangeStart !== undefined) {
+      const coverage = await storage.getRangeBlockCoverage(result.processedLastRangeStart, rangeSize);
+      const latestInRange =
+        coverage.latestBlock !== undefined
+          ? `${coverage.latestBlock.toString()} (${formatDate(coverage.latestBlockDate)})`
+          : "none";
+      // How many blocks the indexer still needs before this range *could* complete. A positive
+      // value means we are simply waiting for the chain head; 0 with present<expected means an
+      // internal gap is blocking the range.
+      const headGap = coverage.rangeEnd > bounds.maxBlock ? coverage.rangeEnd - bounds.maxBlock : 0n;
+      nextRangeText =
+        `${coverage.rangeStart.toString()}..${coverage.rangeEnd.toString()}` +
+        ` present=${coverage.blocksPresent.toString()}/${coverage.blocksExpected.toString()}` +
+        ` latest_in_range=${latestInRange}` +
+        ` head_gap=${headGap.toString()}`;
+    }
+
     console.log(
-      `range_size=${rangeSize.toString()} written=${result.written} incomplete=${result.incomplete} skipped_complete=${result.skippedComplete} elapsed_ms=${elapsedMs}`,
+      `range_size=${rangeSize.toString()} written=${result.written} incomplete=${result.incomplete}` +
+        ` skipped_complete=${result.skippedComplete} elapsed_ms=${elapsedMs}` +
+        ` last_complete_range=${lastCompleteText} next_range=${nextRangeText}`,
     );
   }
 }

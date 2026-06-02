@@ -207,6 +207,29 @@ export interface DatabaseStats {
   tables: DatabaseTableStats[];
 }
 
+export interface StoredBlockBounds {
+  minBlock: bigint;
+  minBlockDate: string;
+  maxBlock: bigint;
+  maxBlockDate: string;
+}
+
+export interface RangeBlockCoverage {
+  rangeStart: bigint;
+  rangeEnd: bigint;
+  blocksPresent: number;
+  blocksExpected: number;
+  latestBlock?: bigint;
+  latestBlockDate?: string;
+}
+
+export interface LatestCompleteBlockRange {
+  rangeStart: bigint;
+  rangeEnd: bigint;
+  minBlockDate: string;
+  maxBlockDate: string;
+}
+
 export interface StoredBaseloadConfigSummary {
   name: string;
   workerCount: number;
@@ -1881,6 +1904,85 @@ export class ScannerStorage {
     );
     const row = result.rows[0];
     return row && row.value !== null ? BigInt(row.value) : undefined;
+  }
+
+  async getStoredBlockBounds(): Promise<StoredBlockBounds | undefined> {
+    const result = await this.pool.query<{
+      min_block: string | null;
+      min_block_date: string | null;
+      max_block: string | null;
+      max_block_date: string | null;
+    }>(
+      `SELECT
+         (SELECT block_number::text FROM ${this.qBlocks} ORDER BY block_number ASC LIMIT 1) AS min_block,
+         (SELECT block_date FROM ${this.qBlocks} ORDER BY block_number ASC LIMIT 1) AS min_block_date,
+         (SELECT block_number::text FROM ${this.qBlocks} ORDER BY block_number DESC LIMIT 1) AS max_block,
+         (SELECT block_date FROM ${this.qBlocks} ORDER BY block_number DESC LIMIT 1) AS max_block_date`,
+    );
+    const row = result.rows[0];
+    if (!row || row.min_block === null || row.max_block === null) {
+      return undefined;
+    }
+    return {
+      minBlock: BigInt(row.min_block),
+      minBlockDate: row.min_block_date ?? "",
+      maxBlock: BigInt(row.max_block),
+      maxBlockDate: row.max_block_date ?? "",
+    };
+  }
+
+  async getRangeBlockCoverage(rangeStart: bigint, rangeSize: bigint): Promise<RangeBlockCoverage> {
+    assertSupportedRangeSize(rangeSize);
+    const rangeEnd = rangeEndFor(rangeStart, rangeSize);
+    const result = await this.pool.query<{
+      present: string;
+      latest_block: string | null;
+      latest_block_date: string | null;
+    }>(
+      `SELECT
+         COUNT(*)::text AS present,
+         MAX(block_number)::text AS latest_block,
+         MAX(block_date) AS latest_block_date
+       FROM ${this.qBlocks}
+       WHERE block_number >= $1 AND block_number <= $2`,
+      [rangeStart.toString(), rangeEnd.toString()],
+    );
+    const row = result.rows[0];
+    return {
+      rangeStart,
+      rangeEnd,
+      blocksPresent: Number(row?.present ?? "0"),
+      blocksExpected: Number(rangeSize),
+      ...(row?.latest_block != null ? { latestBlock: BigInt(row.latest_block) } : {}),
+      ...(row?.latest_block_date != null ? { latestBlockDate: row.latest_block_date } : {}),
+    };
+  }
+
+  async getLatestCompleteBlockRange(rangeSize: bigint): Promise<LatestCompleteBlockRange | undefined> {
+    assertSupportedRangeSize(rangeSize);
+    const result = await this.pool.query<{
+      range_start: string;
+      range_end: string;
+      min_block_date: string;
+      max_block_date: string;
+    }>(
+      `SELECT range_start::text, range_end::text, min_block_date, max_block_date
+       FROM ${this.qBlockRanges}
+       WHERE range_size = $1 AND is_complete = TRUE
+       ORDER BY range_start DESC
+       LIMIT 1`,
+      [rangeSize.toString()],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return undefined;
+    }
+    return {
+      rangeStart: BigInt(row.range_start),
+      rangeEnd: BigInt(row.range_end),
+      minBlockDate: row.min_block_date,
+      maxBlockDate: row.max_block_date,
+    };
   }
 
   private async applyProgressUpdate(
