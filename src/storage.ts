@@ -221,6 +221,8 @@ export interface RangeBlockCoverage {
   blocksExpected: number;
   latestBlock?: bigint;
   latestBlockDate?: string;
+  /** Lowest block number in [rangeStart, rangeEnd] that is absent from storage, if any. */
+  firstMissingBlock?: bigint;
 }
 
 export interface LatestCompleteBlockRange {
@@ -1944,13 +1946,19 @@ export class ScannerStorage {
       present: string;
       latest_block: string | null;
       latest_block_date: string | null;
+      first_missing: string | null;
     }>(
+      // LEFT JOIN every block number the range expects against stored blocks. This yields the present
+      // count and — key for diagnosing a stuck range — the first block that is absent. The MIN/MAX
+      // aggregates run on the BIGINT before the ::text cast, so they stay numeric (no lexicographic
+      // sorting); the cast only affects how the result is transported back.
       `SELECT
-         COUNT(*)::text AS present,
-         MAX(block_number)::text AS latest_block,
-         MAX(block_date) AS latest_block_date
-       FROM ${this.qBlocks}
-       WHERE block_number >= $1 AND block_number <= $2`,
+         COUNT(b.block_number)::text AS present,
+         MAX(b.block_number)::text AS latest_block,
+         MAX(b.block_date) AS latest_block_date,
+         (MIN(expected.block_number) FILTER (WHERE b.block_number IS NULL))::text AS first_missing
+       FROM generate_series($1::bigint, $2::bigint) AS expected(block_number)
+       LEFT JOIN ${this.qBlocks} AS b ON b.block_number = expected.block_number`,
       [rangeStart.toString(), rangeEnd.toString()],
     );
     const row = result.rows[0];
@@ -1961,6 +1969,7 @@ export class ScannerStorage {
       blocksExpected: Number(rangeSize),
       ...(row?.latest_block != null ? { latestBlock: BigInt(row.latest_block) } : {}),
       ...(row?.latest_block_date != null ? { latestBlockDate: row.latest_block_date } : {}),
+      ...(row?.first_missing != null ? { firstMissingBlock: BigInt(row.first_missing) } : {}),
     };
   }
 

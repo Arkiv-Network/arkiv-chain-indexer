@@ -91,15 +91,37 @@ async function runSweep(storage: ScannerStorage): Promise<void> {
         coverage.latestBlock !== undefined
           ? `${coverage.latestBlock.toString()} (${formatDate(coverage.latestBlockDate)})`
           : "none";
-      // How many blocks the indexer still needs before this range *could* complete. A positive
-      // value means we are simply waiting for the chain head; 0 with present<expected means an
-      // internal gap is blocking the range.
-      const headGap = coverage.rangeEnd > bounds.maxBlock ? coverage.rangeEnd - bounds.maxBlock : 0n;
+      const firstMissing =
+        coverage.firstMissingBlock !== undefined ? coverage.firstMissingBlock.toString() : "none";
+      // Classify why this range is stuck. A range only completes once every block in it is stored, so
+      // the sweep parks on the first incomplete one. Split its missing blocks into three buckets:
+      //   below_min — blocks before the earliest stored block. They predate our data and will never
+      //               arrive, so the range can never complete. This hits the first range of a size
+      //               whenever minBlock is not aligned to rangeSize, because rangeStartFor() floors
+      //               the range start below minBlock (e.g. minBlock 661015 -> size-10 range 661010).
+      //   head_gap  — blocks past the latest stored block; we are simply waiting for the indexer.
+      //   internal  — a genuine hole inside [minBlock, maxBlock]; first_missing names the block to
+      //               backfill.
+      const missing = coverage.blocksExpected - coverage.blocksPresent;
+      const belowMin =
+        coverage.rangeStart < bounds.minBlock ? Number(bounds.minBlock - coverage.rangeStart) : 0;
+      const headGap =
+        coverage.rangeEnd > bounds.maxBlock ? Number(coverage.rangeEnd - bounds.maxBlock) : 0;
+      const internalMissing = Math.max(0, missing - belowMin - headGap);
+      const reason =
+        internalMissing > 0
+          ? "internal_gap"
+          : belowMin > 0
+            ? "below_min"
+            : headGap > 0
+              ? "awaiting_head"
+              : "unknown";
       nextRangeText =
         `${coverage.rangeStart.toString()}..${coverage.rangeEnd.toString()}` +
         ` present=${coverage.blocksPresent.toString()}/${coverage.blocksExpected.toString()}` +
+        ` first_missing=${firstMissing}` +
         ` latest_in_range=${latestInRange}` +
-        ` head_gap=${headGap.toString()}`;
+        ` below_min=${belowMin.toString()} head_gap=${headGap.toString()} reason=${reason}`;
     }
 
     console.log(
