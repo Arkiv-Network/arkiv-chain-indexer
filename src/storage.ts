@@ -1913,11 +1913,14 @@ export class ScannerStorage {
       max_block: string | null;
       max_block_date: string | null;
     }>(
+      // ORDER BY is qualified (b.block_number) so it binds to the BIGINT column. An unqualified
+      // ORDER BY would resolve to the block_number::text output column and sort lexicographically
+      // ("1000000" < "999999"), producing a bogus min > max.
       `SELECT
-         (SELECT block_number::text FROM ${this.qBlocks} ORDER BY block_number ASC LIMIT 1) AS min_block,
-         (SELECT block_date FROM ${this.qBlocks} ORDER BY block_number ASC LIMIT 1) AS min_block_date,
-         (SELECT block_number::text FROM ${this.qBlocks} ORDER BY block_number DESC LIMIT 1) AS max_block,
-         (SELECT block_date FROM ${this.qBlocks} ORDER BY block_number DESC LIMIT 1) AS max_block_date`,
+         (SELECT b.block_number::text FROM ${this.qBlocks} b ORDER BY b.block_number ASC LIMIT 1) AS min_block,
+         (SELECT b.block_date FROM ${this.qBlocks} b ORDER BY b.block_number ASC LIMIT 1) AS min_block_date,
+         (SELECT b.block_number::text FROM ${this.qBlocks} b ORDER BY b.block_number DESC LIMIT 1) AS max_block,
+         (SELECT b.block_date FROM ${this.qBlocks} b ORDER BY b.block_number DESC LIMIT 1) AS max_block_date`,
     );
     const row = result.rows[0];
     if (!row || row.min_block === null || row.max_block === null) {
@@ -1966,10 +1969,13 @@ export class ScannerStorage {
       min_block_date: string;
       max_block_date: string;
     }>(
-      `SELECT range_start::text, range_end::text, min_block_date, max_block_date
-       FROM ${this.qBlockRanges}
-       WHERE range_size = $1 AND is_complete = TRUE
-       ORDER BY range_start DESC
+      // ORDER BY is qualified (r.range_start) so it binds to the BIGINT column rather than the
+      // range_start::text output column, which would otherwise sort lexicographically and report
+      // "999900" as latest instead of a numerically larger start such as "1000050".
+      `SELECT r.range_start::text, r.range_end::text, r.min_block_date, r.max_block_date
+       FROM ${this.qBlockRanges} r
+       WHERE r.range_size = $1 AND r.is_complete = TRUE
+       ORDER BY r.range_start DESC
        LIMIT 1`,
       [rangeSize.toString()],
     );
