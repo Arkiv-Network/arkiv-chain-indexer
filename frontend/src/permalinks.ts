@@ -14,6 +14,18 @@ export type View =
 
 const VIEW_PARAM = "view";
 
+export interface ClientNavigationClick {
+  button: number;
+  defaultPrevented: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  currentTarget: {
+    getAttribute(name: string): string | null;
+  };
+}
+
 export function getCurrentSearch(): string {
   if (typeof window === "undefined") return "";
   return window.location.search;
@@ -80,6 +92,19 @@ export function buildPermalinkHref(view: View, filters: Record<string, string>):
   }
 
   return url.toString();
+}
+
+export function shouldHandleClientNavigation(event: ClientNavigationClick): boolean {
+  const target = event.currentTarget.getAttribute("target");
+  return (
+    event.button === 0 &&
+    !event.defaultPrevented &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    (!target || target === "_self")
+  );
 }
 
 export function writePermalink(view: View, filters: Record<string, string>): boolean {

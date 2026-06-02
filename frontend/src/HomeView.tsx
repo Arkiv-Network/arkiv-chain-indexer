@@ -15,7 +15,7 @@ import { addressDisplay } from "./addressAliases";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { InfoTooltip } from "./InfoTooltip";
-import { buildPermalinkHref, writePermalink } from "./permalinks";
+import { buildPermalinkHref, shouldHandleClientNavigation, writePermalink } from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
 import {
@@ -322,6 +322,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   }, [latestBlock, nowMs, blocksError, settings.scannerDelayWarningAgeMs]);
 
   const openGuzzlersView = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();
     if (writePermalink("guzzlers", {})) {
       onLocationChange();
@@ -329,6 +330,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   };
 
   const openGuzzler = (event: React.MouseEvent<HTMLAnchorElement>, address: string) => {
+    if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();
     if (writePermalink("guzzlers", { address })) {
       onLocationChange();

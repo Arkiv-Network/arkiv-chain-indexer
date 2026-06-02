@@ -1,5 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { readViewFromSearch } from "./src/permalinks";
+import { readViewFromSearch, shouldHandleClientNavigation, type ClientNavigationClick } from "./src/permalinks";
+
+function clickEvent(overrides: Partial<ClientNavigationClick> = {}): ClientNavigationClick {
+  return {
+    button: 0,
+    defaultPrevented: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    currentTarget: {
+      getAttribute: () => null,
+    },
+    ...overrides,
+  };
+}
 
 describe("frontend permalink helpers", () => {
   test("reads the home view", () => {
@@ -40,5 +55,32 @@ describe("frontend permalink helpers", () => {
 
   test("falls back to home for unknown views", () => {
     expect(readViewFromSearch("?view=unknown")).toBe("home");
+  });
+});
+
+describe("frontend client navigation click handling", () => {
+  test("handles plain left clicks inside the client app", () => {
+    expect(shouldHandleClientNavigation(clickEvent())).toBe(true);
+  });
+
+  test("leaves middle-clicks and modified clicks to the browser", () => {
+    expect(shouldHandleClientNavigation(clickEvent({ button: 1 }))).toBe(false);
+    expect(shouldHandleClientNavigation(clickEvent({ ctrlKey: true }))).toBe(false);
+    expect(shouldHandleClientNavigation(clickEvent({ metaKey: true }))).toBe(false);
+    expect(shouldHandleClientNavigation(clickEvent({ shiftKey: true }))).toBe(false);
+    expect(shouldHandleClientNavigation(clickEvent({ altKey: true }))).toBe(false);
+  });
+
+  test("does not handle links with external targets or prior cancellation", () => {
+    expect(shouldHandleClientNavigation(clickEvent({ defaultPrevented: true }))).toBe(false);
+    expect(
+      shouldHandleClientNavigation(
+        clickEvent({
+          currentTarget: {
+            getAttribute: (name) => (name === "target" ? "_blank" : null),
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 });

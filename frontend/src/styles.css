@@ -1928,6 +1928,7 @@ td.num {
 }
 
 .guzzler-card {
+  position: relative;
   display: grid;
   grid-template-columns: 2.25rem 40px minmax(0, 1fr) auto;
   align-items: center;
@@ -1939,6 +1940,13 @@ td.num {
   /* Render only the cards near the viewport — keeps the full (large) list smooth. */
   content-visibility: auto;
   contain-intrinsic-size: auto 64px;
+}
+
+.guzzler-card-hitbox {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
 }
 
 .guzzler-rank {
@@ -2196,10 +2204,18 @@ td.num {
 }
 
 .guzzler-card.clickable:hover,
-.guzzler-card.clickable:focus-visible {
+.guzzler-card.clickable:focus-within {
   border-color: var(--accent);
   background: var(--stone);
+}
+
+.guzzler-card-hitbox:focus-visible {
   outline: none;
+}
+
+.guzzler-address .copy-cell-button {
+  position: relative;
+  z-index: 2;
 }
 
 /* ---- Charts view ---- */
