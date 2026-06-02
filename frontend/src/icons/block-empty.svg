@@ -25,13 +25,29 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="18.234375"
      inkscape:cx="10.913453"
-     inkscape:cy="20.538132"
+     inkscape:cy="29.312768"
      inkscape:window-width="3440"
      inkscape:window-height="1369"
      inkscape:window-x="-8"
      inkscape:window-y="-8"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg5" />
+  <path
+     d="M 16.017661,2.0685819 28.763799,7.3907037 16.017661,12.712827 3.2715222,7.3907037 Z"
+     stroke="#111111"
+     stroke-width="1.94131"
+     stroke-linejoin="miter"
+     fill="none"
+     opacity="0.45"
+     id="path3-8"
+     style="fill:none;fill-opacity:1;stroke:#999999;stroke-opacity:1" />
+  <rect
+     style="fill:#d8d8d8;fill-opacity:1;stroke:#d8d8d8;stroke-width:0.253341;stroke-opacity:1"
+     id="rect1"
+     width="0.98345631"
+     height="16.504662"
+     x="15.453542"
+     y="13.703714" />
   <path
      d="M 16.044779,1.4687017 28.790917,6.7908235 16.044779,12.112946 3.2986397,6.7908235 Z"
      stroke="#111111"
@@ -40,7 +56,7 @@
      fill="none"
      opacity="0.45"
      id="path3"
-     style="opacity:1;fill:none;stroke:#999999;stroke-opacity:1" />
+     style="opacity:1;fill:#f9f9f9;stroke:#999999;stroke-opacity:1" />
   <path
      d="M 1.5356684,8.6688837 14.765049,14.192802 V 28.923261 L 1.5356684,23.399341 Z"
      stroke="#111111"
