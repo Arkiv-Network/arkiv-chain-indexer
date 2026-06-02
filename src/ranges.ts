@@ -136,7 +136,7 @@ export function computeBlockRange(
   let transactionGasNumerator = 0n;
   let txWeightedPriorityFeeNumerator = 0n;
   const batcherQueueSizes: bigint[] = [];
-  const batcherIntensities: bigint[] = [];
+  const batcherIntensities: number[] = [];
   const batcherLowerThresholds: bigint[] = [];
   const batcherUpperThresholds: bigint[] = [];
   const batcherMaxBlockSizes: bigint[] = [];
@@ -175,7 +175,7 @@ export function computeBlockRange(
       block.transactionCount,
     );
     pushOptionalBigInt(batcherQueueSizes, block.batcherQueueSize);
-    pushOptionalBigInt(batcherIntensities, block.batcherIntensity);
+    pushOptionalNumber(batcherIntensities, block.batcherIntensity);
     pushOptionalBigInt(batcherLowerThresholds, block.batcherLowerThreshold);
     pushOptionalBigInt(batcherUpperThresholds, block.batcherUpperThreshold);
     pushOptionalBigInt(batcherMaxBlockSizes, block.batcherMaxBlockSize);
@@ -219,7 +219,7 @@ export function computeBlockRange(
     averagePriorityFeeWeightedWei: averagePriorityFeeWeighted.toString(),
     averagePriorityFeeWei: averagePriorityFee.toString(),
     ...rangeStats("BatcherQueueSize", batcherQueueSizes, true),
-    ...rangeStats("BatcherIntensity", batcherIntensities),
+    ...numberAverageStat("BatcherIntensity", batcherIntensities),
     ...rangeStats("BatcherLowerThreshold", batcherLowerThresholds),
     ...rangeStats("BatcherUpperThreshold", batcherUpperThresholds),
     ...rangeStats("BatcherMaxBlockSize", batcherMaxBlockSizes),
@@ -230,6 +230,27 @@ export function computeBlockRange(
 function pushOptionalBigInt(values: bigint[], value: string | null | undefined): void {
   if (value === undefined || value === null) return;
   values.push(BigInt(value));
+}
+
+// batcherIntensity is stored as text but can hold fractional values (e.g.
+// "0.000002848359418402778"), so it cannot go through BigInt. Precision is not
+// important here, so parse it as a plain number.
+function pushOptionalNumber(values: number[], value: string | null | undefined): void {
+  if (value === undefined || value === null) return;
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) return;
+  values.push(parsed);
+}
+
+function numberAverageStat(
+  fieldSuffix: string,
+  values: number[],
+): Record<string, string | null> {
+  if (values.length === 0) {
+    return { [`average${fieldSuffix}`]: null };
+  }
+  const sum = values.reduce((acc, value) => acc + value, 0);
+  return { [`average${fieldSuffix}`]: (sum / values.length).toString() };
 }
 
 function rangeStats(

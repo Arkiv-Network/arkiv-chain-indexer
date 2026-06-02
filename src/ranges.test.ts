@@ -308,6 +308,18 @@ describe("computeBlockRange", () => {
     expect(range.averageBatcherMaxTxSize).toBe("100");
   });
 
+  test("averages fractional batcher intensity without throwing on decimals", () => {
+    const blocks = makeBlocks(0n, 2n, (offset) =>
+      offset === 0n
+        ? { batcherIntensity: "0.000002848359418402778" }
+        : { batcherIntensity: "0.000001151640581597222" },
+    );
+
+    const range = computeBlockRange(0n, 2n, blocks);
+
+    expect(range.averageBatcherIntensity).toBe("0.000002");
+  });
+
   test("uses null batcher range values when no block has collector data", () => {
     const blocks = makeBlocks(0n, 2n, () => ({}));
 
