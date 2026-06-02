@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   deleteBaseloadConfig,
   fetchBaseloadState,
@@ -30,7 +30,7 @@ import {
   type PageSettings,
   writeStoredPageSettings,
 } from "./pageSettings";
-import { getCurrentSearch, readViewFromSearch, writePermalink } from "./permalinks";
+import { getCurrentSearch, readViewFromSearch, writePermalink, type View } from "./permalinks";
 import { RangesView } from "./RangesView";
 import { RecordTransactionsView } from "./RecordTransactionsView";
 import { SendersView } from "./SendersView";
@@ -47,6 +47,8 @@ type ThemeOverride = "light" | "dark" | "";
 
 export function App() {
   const [locationSearch, setLocationSearch] = useState(getCurrentSearch);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
   const [baseloadConfig, setBaseloadConfig] = useState<BaseloadConfig>(EMPTY_BASELOAD_CONFIG);
   const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
@@ -86,12 +88,52 @@ export function App() {
     transactionDataEnabled !== true && (view === "block" || view === "transactions" || view === "senders")
       ? "blocks"
       : view;
+  const navItems: { view: View; label: string }[] = [
+    { view: "home", label: "Home" },
+    { view: "blocks", label: "Blocks" },
+    ...(transactionDataEnabled === true
+      ? [
+          { view: "block" as const, label: "Block" },
+          { view: "transactions" as const, label: "Address" },
+          { view: "senders" as const, label: "Senders" },
+        ]
+      : []),
+    { view: "transaction-records", label: "Records" },
+    { view: "ranges", label: "Ranges" },
+    { view: "charts", label: "Charts" },
+    { view: "guzzlers", label: "Activity" },
+    { view: "health", label: "Health" },
+    { view: "admin", label: "Admin" },
+    { view: "baseload", label: "Baseload" },
+  ];
+  const activeNavLabel = navItems.find((item) => item.view === activeView)?.label ?? "Menu";
 
   useEffect(() => {
     const onPopState = () => setLocationSearch(getCurrentSearch());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     fetchHealth()
@@ -165,6 +207,7 @@ export function App() {
     if (writePermalink(nextView, {})) {
       refreshFromLocation();
     }
+    setMenuOpen(false);
   };
 
   const onTimeZoneChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -359,7 +402,7 @@ export function App() {
     setPageSettings(settings);
   };
 
-  const mainClassName = activeView === "charts" ? "fullscreen" : activeView === "home" ? "contained" : undefined;
+  const mainClassName = activeView === "charts" ? "fullscreen" : "contained";
 
   return (
     <>
@@ -369,127 +412,82 @@ export function App() {
             <span className="brand-name">{pageSettings.chainName}</span>
             <span className="brand-sub">Scanner</span>
           </h1>
-          <nav>
-            <button
-              type="button"
-              className={activeView === "home" ? "active" : ""}
-              onClick={() => setView("home")}
-            >
-              Home
-            </button>
-            <button
-              type="button"
-              className={activeView === "blocks" ? "active" : ""}
-              onClick={() => setView("blocks")}
-            >
-              Blocks
-            </button>
-            {transactionDataEnabled === true ? (
-              <>
-                <button
-                  type="button"
-                  className={activeView === "block" ? "active" : ""}
-                  onClick={() => setView("block")}
-                >
-                  Block
-                </button>
-                <button
-                  type="button"
-                  className={activeView === "transactions" ? "active" : ""}
-                  onClick={() => setView("transactions")}
-                >
-                  Address
-                </button>
-                <button
-                  type="button"
-                  className={activeView === "senders" ? "active" : ""}
-                  onClick={() => setView("senders")}
-                >
-                  Senders
-                </button>
-              </>
-            ) : null}
-            <button
-              type="button"
-              className={activeView === "transaction-records" ? "active" : ""}
-              onClick={() => setView("transaction-records")}
-            >
-              Records
-            </button>
-            <button
-              type="button"
-              className={activeView === "ranges" ? "active" : ""}
-              onClick={() => setView("ranges")}
-            >
-              Ranges
-            </button>
-            <button
-              type="button"
-              className={activeView === "charts" ? "active" : ""}
-              onClick={() => setView("charts")}
-            >
-              Charts
-            </button>
-            <button
-              type="button"
-              className={activeView === "guzzlers" ? "active" : ""}
-              onClick={() => setView("guzzlers")}
-            >
-              Activity
-            </button>
-            <button
-              type="button"
-              className={activeView === "health" ? "active" : ""}
-              onClick={() => setView("health")}
-            >
-              Health
-            </button>
-            <button
-              type="button"
-              className={activeView === "admin" ? "active" : ""}
-              onClick={() => setView("admin")}
-            >
-              Admin
-            </button>
-            <button
-              type="button"
-              className={activeView === "baseload" ? "active" : ""}
-              onClick={() => setView("baseload")}
-            >
-              Baseload
-            </button>
-          </nav>
-          <label className="timezone-select">
-            Time zone
-            <select value={timeZone} onChange={onTimeZoneChange}>
-              {TIME_ZONE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="ui-toggles">
-            <button
-              type="button"
-              className={`ui-toggle${fullWidth ? " active" : ""}`}
-              onClick={toggleFullWidth}
-              aria-pressed={fullWidth}
-              title={fullWidth ? "Switch to constrained width" : "Switch to full-width view"}
-            >
-              Full width
-            </button>
-            <button
-              type="button"
-              className={`ui-toggle${darkModeActive ? " active" : ""}`}
-              onClick={toggleDarkMode}
-              aria-pressed={darkModeActive}
-              title={darkModeActive ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {darkModeActive ? "Dark" : "Light"}
-            </button>
-          </div>
           {adminVerified ? <span className="admin-mode-indicator">ADMIN MODE</span> : null}
+          <div className="header-menu" ref={menuRef}>
+            <button
+              type="button"
+              className={`menu-button${menuOpen ? " active" : ""}`}
+              onClick={() => setMenuOpen((value) => !value)}
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+              title="Navigation menu"
+            >
+              <span className="menu-button-icon" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="menu-button-label">{activeNavLabel}</span>
+            </button>
+            {menuOpen ? (
+              <div className="menu-panel" role="menu">
+                <div className="menu-section">
+                  <div className="menu-section-title">Pages</div>
+                  <nav className="menu-nav" aria-label="Primary navigation">
+                    {navItems.map((item) => (
+                      <button
+                        key={item.view}
+                        type="button"
+                        role="menuitem"
+                        className={activeView === item.view ? "active" : ""}
+                        onClick={() => setView(item.view)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+                <div className="menu-section">
+                  <div className="menu-section-title">Display</div>
+                  <div className="menu-control-row">
+                    <span>Full width</span>
+                    <button
+                      type="button"
+                      className={`ui-toggle${fullWidth ? " active" : ""}`}
+                      onClick={toggleFullWidth}
+                      aria-pressed={fullWidth}
+                      title={fullWidth ? "Switch to constrained width" : "Switch to full-width view"}
+                    >
+                      {fullWidth ? "On" : "Off"}
+                    </button>
+                  </div>
+                  <div className="menu-control-row">
+                    <span>Theme</span>
+                    <button
+                      type="button"
+                      className={`ui-toggle${darkModeActive ? " active" : ""}`}
+                      onClick={toggleDarkMode}
+                      aria-pressed={darkModeActive}
+                      title={darkModeActive ? "Switch to light mode" : "Switch to dark mode"}
+                    >
+                      {darkModeActive ? "Dark" : "Light"}
+                    </button>
+                  </div>
+                  <label className="timezone-select">
+                    Time zone
+                    <select value={timeZone} onChange={onTimeZoneChange}>
+                      {TIME_ZONE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
       <main className={mainClassName}>
