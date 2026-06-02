@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { readViewFromSearch, shouldHandleClientNavigation, type ClientNavigationClick } from "./src/permalinks";
+import {
+  buildRouteHref,
+  readViewFromLocation,
+  shouldHandleClientNavigation,
+  type ClientNavigationClick,
+} from "./src/permalinks";
 
 function clickEvent(overrides: Partial<ClientNavigationClick> = {}): ClientNavigationClick {
   return {
@@ -17,44 +22,58 @@ function clickEvent(overrides: Partial<ClientNavigationClick> = {}): ClientNavig
 }
 
 describe("frontend permalink helpers", () => {
-  test("reads the home view", () => {
-    expect(readViewFromSearch("?view=home")).toBe("home");
+  test("reads the home route", () => {
+    expect(readViewFromLocation({ pathname: "/", search: "" })).toBe("home");
   });
 
   test("defaults to the home view", () => {
-    expect(readViewFromSearch("")).toBe("home");
+    expect(readViewFromLocation({ pathname: "/unknown", search: "" })).toBe("home");
   });
 
-  test("reads the blocks view", () => {
-    expect(readViewFromSearch("?view=blocks&limit=100")).toBe("blocks");
+  test("reads the blocks route", () => {
+    expect(readViewFromLocation({ pathname: "/blocks", search: "?limit=100" })).toBe("blocks");
   });
 
-  test("reads the block view", () => {
-    expect(readViewFromSearch("?view=block&block=42")).toBe("block");
+  test("reads the block route", () => {
+    expect(readViewFromLocation({ pathname: "/block", search: "?block=42" })).toBe("block");
   });
 
-  test("reads the transactions view", () => {
-    expect(readViewFromSearch("?view=transactions&block=42")).toBe("transactions");
+  test("reads the transactions route", () => {
+    expect(readViewFromLocation({ pathname: "/transactions", search: "?block=42" })).toBe("transactions");
   });
 
-  test("reads the transaction records view", () => {
-    expect(readViewFromSearch("?view=transaction-records")).toBe("transaction-records");
+  test("reads the transaction records route", () => {
+    expect(readViewFromLocation({ pathname: "/records", search: "" })).toBe("transaction-records");
   });
 
-  test("reads the senders view", () => {
-    expect(readViewFromSearch("?view=senders")).toBe("senders");
+  test("reads the senders route", () => {
+    expect(readViewFromLocation({ pathname: "/senders", search: "" })).toBe("senders");
   });
 
-  test("reads the health view", () => {
-    expect(readViewFromSearch("?view=health")).toBe("health");
+  test("reads the health route", () => {
+    expect(readViewFromLocation({ pathname: "/health", search: "" })).toBe("health");
   });
 
-  test("reads the baseload view", () => {
-    expect(readViewFromSearch("?view=baseload")).toBe("baseload");
+  test("reads the baseload route", () => {
+    expect(readViewFromLocation({ pathname: "/baseload", search: "" })).toBe("baseload");
   });
 
-  test("falls back to home for unknown views", () => {
-    expect(readViewFromSearch("?view=unknown")).toBe("home");
+  test("reads compatibility aliases", () => {
+    expect(readViewFromLocation({ pathname: "/transaction-records", search: "" })).toBe("transaction-records");
+    expect(readViewFromLocation({ pathname: "/guzzlers", search: "" })).toBe("guzzlers");
+  });
+
+  test("falls back to legacy query view at the root", () => {
+    expect(readViewFromLocation({ pathname: "/", search: "?view=charts" })).toBe("charts");
+    expect(readViewFromLocation({ pathname: "/unknown", search: "?view=charts" })).toBe("charts");
+  });
+
+  test("builds browser route hrefs without legacy view parameters", () => {
+    expect(buildRouteHref("transactions", { address: "0xabc", page: "1", view: "blocks" })).toBe(
+      "/transactions?address=0xabc&page=1",
+    );
+    expect(buildRouteHref("transaction-records", {})).toBe("/records");
+    expect(buildRouteHref("guzzlers", { address: "" })).toBe("/activity");
   });
 });
 

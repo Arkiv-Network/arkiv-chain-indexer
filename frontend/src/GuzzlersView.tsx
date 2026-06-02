@@ -19,7 +19,7 @@ interface GuzzlersViewProps {
   tokenSymbol: string;
 }
 
-/** The drill-in address from the URL (`?view=guzzlers&address=0x…`), if valid. */
+/** The drill-in address from the URL (`/activity?address=0x...`), if valid. */
 function readSelectedAddress(search: string): string | null {
   return normalizeAddressInput(new URLSearchParams(search).get("address"));
 }

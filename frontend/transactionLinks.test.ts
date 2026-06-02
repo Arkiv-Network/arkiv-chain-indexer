@@ -40,7 +40,7 @@ describe("transaction links", () => {
 
   test("builds internal address search links on page one", () => {
     expect(addressSearchHref("0x1234567890abcdef1234567890ABCDEF12345678")).toBe(
-      "?view=transactions&address=0x1234567890abcdef1234567890ABCDEF12345678&page=1",
+      "/transactions?address=0x1234567890abcdef1234567890ABCDEF12345678&page=1",
     );
   });
 
