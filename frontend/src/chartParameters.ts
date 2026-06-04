@@ -5,6 +5,11 @@ const AXIS_GAS_PRICE = "gas-price";
 const AXIS_BLOCK_GAS_LIMIT = "block-gas-limit";
 const AXIS_BATCHER = "batcher";
 
+export interface BandDef {
+  minKey: string;
+  maxKey: string;
+}
+
 export interface ParameterDef {
   key: string;
   label: string;
@@ -13,6 +18,12 @@ export interface ParameterDef {
   unit: string;
   color: string;
   toNumber: (value: string | number | undefined | null) => number | null;
+  /**
+   * When set, this parameter renders as a min/max band (filled area) with `key`
+   * as the average line on top, mirroring the home view's MinAvgMaxPanel.
+   * `minKey`/`maxKey` reference the lower/upper value keys in ChartPoint.values.
+   */
+  band?: BandDef;
 }
 
 const weiToGwei = (value: string | number | undefined | null): number | null => {
@@ -53,30 +64,13 @@ const plainNumber = (value: string | number | undefined | null): number | null =
 export const PARAMETERS: ParameterDef[] = [
   {
     key: "averageBaseFeeWei",
-    label: "Avg base fee",
+    label: "Base fee",
     axis: AXIS_GAS_PRICE,
     axisLabel: "Gas price (gwei)",
     unit: "gwei",
     color: "#2e63d8",
     toNumber: weiToGwei,
-  },
-  {
-    key: "minBaseFeeWei",
-    label: "Min base fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#54a0ff",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "maxBaseFeeWei",
-    label: "Max base fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#0a3d91",
-    toNumber: weiToGwei,
+    band: { minKey: "minBaseFeeWei", maxKey: "maxBaseFeeWei" },
   },
   {
     key: "averageFeePriceWei",
@@ -194,6 +188,7 @@ export const PARAMETERS: ParameterDef[] = [
     unit: "count",
     color: "#b83280",
     toNumber: plainNumber,
+    band: { minKey: "minBatcherQueueSize", maxKey: "maxBatcherQueueSize" },
   },
   {
     key: "averageBatcherIntensity",
