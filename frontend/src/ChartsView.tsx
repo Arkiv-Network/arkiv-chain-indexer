@@ -93,6 +93,11 @@ const AXIS_GAS_PRICE = "gas-price";
 const AXIS_BLOCK_GAS_LIMIT = "block-gas-limit";
 const AXIS_BATCHER = "batcher";
 
+interface BandDef {
+  minKey: string;
+  maxKey: string;
+}
+
 interface ParameterDef {
   key: string;
   label: string;
@@ -101,6 +106,12 @@ interface ParameterDef {
   unit: string;
   color: string;
   toNumber: (value: string | number | undefined | null) => number | null;
+  /**
+   * When set, this parameter is rendered as a min/max band (filled area) with
+   * `key` as the average line on top, mirroring the home view's MinAvgMaxPanel.
+   * `minKey`/`maxKey` reference the lower/upper value keys in ChartPoint.values.
+   */
+  band?: BandDef;
 }
 
 const weiToGwei = (value: string | number | undefined | null): number | null => {
@@ -141,30 +152,13 @@ const plainNumber = (value: string | number | undefined | null): number | null =
 const PARAMETERS: ParameterDef[] = [
   {
     key: "averageBaseFeeWei",
-    label: "Avg base fee",
+    label: "Base fee",
     axis: AXIS_GAS_PRICE,
     axisLabel: "Gas price (gwei)",
     unit: "gwei",
     color: "#2e63d8",
     toNumber: weiToGwei,
-  },
-  {
-    key: "minBaseFeeWei",
-    label: "Min base fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#54a0ff",
-    toNumber: weiToGwei,
-  },
-  {
-    key: "maxBaseFeeWei",
-    label: "Max base fee",
-    axis: AXIS_GAS_PRICE,
-    axisLabel: "Gas price (gwei)",
-    unit: "gwei",
-    color: "#0a3d91",
-    toNumber: weiToGwei,
+    band: { minKey: "minBaseFeeWei", maxKey: "maxBaseFeeWei" },
   },
   {
     key: "averageFeePriceWei",
@@ -282,6 +276,7 @@ const PARAMETERS: ParameterDef[] = [
     unit: "count",
     color: "#b83280",
     toNumber: plainNumber,
+    band: { minKey: "minBatcherQueueSize", maxKey: "maxBatcherQueueSize" },
   },
   {
     key: "averageBatcherIntensity",
@@ -442,6 +437,8 @@ function blockToPoint(b: StoredBlock): ChartPoint {
       averageBurntFeesWei: b.burntFeesWei,
       transactionCount: b.transactionCount,
       averageTransactionGasUsed: b.averageTransactionGasUsed,
+      minBatcherQueueSize: b.batcherQueueSize,
+      maxBatcherQueueSize: b.batcherQueueSize,
       averageBatcherQueueSize: b.batcherQueueSize,
       averageBatcherIntensity: b.batcherIntensity,
       averageBatcherLowerThreshold: b.batcherLowerThreshold,
@@ -481,6 +478,8 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
       averageBurntFeesWei: r.averageBurntFeesWei,
       transactionCount: r.transactionCount,
       averageTransactionGasUsed: r.averageTransactionGasUsed,
+      minBatcherQueueSize: r.minBatcherQueueSize,
+      maxBatcherQueueSize: r.maxBatcherQueueSize,
       averageBatcherQueueSize: r.averageBatcherQueueSize,
       averageBatcherIntensity: r.averageBatcherIntensity,
       averageBatcherLowerThreshold: r.averageBatcherLowerThreshold,
@@ -1019,15 +1018,15 @@ function buildPlot(
     (pt) => [pt.rangeStart, pt.rangeEnd, fmtShortDate(pt.midDate, timeZone)] as [number, number, string],
   );
 
-  const traces: Partial<Plotly.PlotData>[] = activeParams.map((p) => {
-    const ys = points.map((pt) => p.toNumber(pt.values[p.key]));
-    const trace: Partial<Plotly.PlotData> = {
+  const traces: Partial<Plotly.PlotData>[] = activeParams.flatMap((p) => {
+    const yaxis = axisRef[p.axis];
+    const avgTrace: Partial<Plotly.PlotData> = {
       type: "scatter",
       mode: "lines+markers",
       name: p.label,
       x: xs,
-      y: ys as number[],
-      yaxis: axisRef[p.axis],
+      y: points.map((pt) => p.toNumber(pt.values[p.key])) as number[],
+      yaxis,
       line: { color: p.color, width: 1.5 },
       marker: { color: p.color, size: 5 },
       customdata: customdata as unknown as Plotly.Datum[],
@@ -1037,7 +1036,45 @@ function buildPlot(
         "blocks %{customdata[0]}–%{customdata[1]}<br>" +
         `%{y:.4~f} ${p.unit}<extra></extra>`,
     };
-    return trace;
+
+    if (!p.band) {
+      return [avgTrace];
+    }
+
+    // Render a min/max band (filled area) with the average line on top,
+    // mirroring the home view's MinAvgMaxPanel.
+    const band = p.band;
+    const bandFill = withAlpha(p.color, 0.18);
+    const bandLine = withAlpha(p.color, 0.5);
+    const maxTrace: Partial<Plotly.PlotData> = {
+      type: "scatter",
+      mode: "lines",
+      name: `${p.label} max`,
+      x: xs,
+      y: points.map((pt) => p.toNumber(pt.values[band.maxKey])) as number[],
+      yaxis,
+      connectgaps: true,
+      line: { color: bandLine, width: 1 },
+      hoverinfo: "skip",
+      showlegend: false,
+    };
+    // `fill: "tonexty"` fills the gap down to the immediately-preceding trace
+    // (maxTrace), producing the shaded band between min and max.
+    const minTrace: Partial<Plotly.PlotData> = {
+      type: "scatter",
+      mode: "lines",
+      name: `${p.label} min`,
+      x: xs,
+      y: points.map((pt) => p.toNumber(pt.values[band.minKey])) as number[],
+      yaxis,
+      connectgaps: true,
+      fill: "tonexty",
+      fillcolor: bandFill,
+      line: { color: bandLine, width: 1 },
+      hoverinfo: "skip",
+      showlegend: false,
+    };
+    return [maxTrace, minTrace, avgTrace];
   });
 
   const sideAxisCount = Math.max(0, usedAxes.length - 1);
@@ -1229,20 +1266,46 @@ function SelectionDetails({
   );
 }
 
+function formatParamNumber(param: ParameterDef, value: number): string {
+  if (param.unit === "gwei") {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  }
+  if (param.unit === "ETH") {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 8 });
+  }
+  if (param.unit === "gas" || param.unit === "count") {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  return value.toLocaleString();
+}
+
 function formatMetricValue(param: ParameterDef, point: ChartPoint): string {
   const value = param.toNumber(point.values[param.key]);
   if (value === null || !Number.isFinite(value)) return "—";
 
-  if (param.unit === "gwei") {
-    return `${value.toLocaleString(undefined, { maximumFractionDigits: 4 })} gwei`;
+  const avg = `${formatParamNumber(param, value)} ${param.unit}`;
+  if (!param.band) return avg;
+
+  const min = param.toNumber(point.values[param.band.minKey]);
+  const max = param.toNumber(point.values[param.band.maxKey]);
+  if (min === null || max === null || !Number.isFinite(min) || !Number.isFinite(max)) {
+    return avg;
   }
-  if (param.unit === "ETH") {
-    return `${value.toLocaleString(undefined, { maximumFractionDigits: 8 })} ETH`;
+  return `${avg} (${formatParamNumber(param, min)}–${formatParamNumber(param, max)})`;
+}
+
+function withAlpha(color: string, alpha: number): string {
+  if (color.startsWith("#")) {
+    let hex = color.slice(1);
+    if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+    if (hex.length !== 6) return color;
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    if ([r, g, b].some((c) => Number.isNaN(c))) return color;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
-  if (param.unit === "gas" || param.unit === "count") {
-    return `${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${param.unit}`;
-  }
-  return `${value.toLocaleString()} ${param.unit}`;
+  return color;
 }
 
 function getCssColor(varName: string, fallback: string): string {

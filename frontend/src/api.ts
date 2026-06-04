@@ -127,6 +127,106 @@ export interface RangesResponse {
   ranges: StoredBlockRange[];
 }
 
+export const RANGE_RESPONSE_NAMES = [
+  "rangeSize",
+  "rangeStart",
+  "rangeEnd",
+  "minBlockDate",
+  "maxBlockDate",
+  "minBaseFeeWei",
+  "maxBaseFeeWei",
+  "averageBaseFeeWei",
+  "totalGasUsed",
+  "totalMaxGas",
+  "minMaxGasInBlock",
+  "maxMaxGasInBlock",
+  "transactionCount",
+  "totalBlockRewardWei",
+  "totalBurntFeesWei",
+  "averageBlockRewardWei",
+  "averageBurntFeesWei",
+  "averageFeePriceWei",
+  "averageTransactionGasUsed",
+  "averagePriorityFeeWeightedWei",
+  "averagePriorityFeeWei",
+  "minBatcherQueueSize",
+  "maxBatcherQueueSize",
+  "averageBatcherQueueSize",
+  "averageBatcherIntensity",
+  "averageBatcherLowerThreshold",
+  "averageBatcherUpperThreshold",
+  "averageBatcherMaxBlockSize",
+  "averageBatcherMaxTxSize",
+] as const satisfies readonly (keyof StoredBlockRange)[];
+
+type RangeResponseValue = number | string | null;
+type RangeResponseRow = RangeResponseValue[];
+
+// The /ranges endpoint may respond either as full objects or in a compact
+// columnar form (a `names` header + rows of values), mirroring /blocks.
+interface CompactRangesResponse {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  names?: string[];
+  ranges: RangeResponseRow[] | StoredBlockRange[];
+}
+
+const RANGE_NUMBER_KEYS = new Set<string>([
+  "rangeSize",
+  "rangeStart",
+  "rangeEnd",
+  "transactionCount",
+]);
+
+const RANGE_NULLABLE_KEYS = new Set<string>([
+  "minBatcherQueueSize",
+  "maxBatcherQueueSize",
+  "averageBatcherQueueSize",
+  "averageBatcherIntensity",
+  "averageBatcherLowerThreshold",
+  "averageBatcherUpperThreshold",
+  "averageBatcherMaxBlockSize",
+  "averageBatcherMaxTxSize",
+]);
+
+function decodeRangeResponseRow(
+  row: RangeResponseRow,
+  names: readonly string[],
+): StoredBlockRange {
+  const record: Record<string, number | string | null> = {};
+  names.forEach((name, index) => {
+    const value = row[index] ?? null;
+    if (RANGE_NUMBER_KEYS.has(name)) {
+      record[name] = typeof value === "number" ? value : Number(value ?? 0);
+    } else if (RANGE_NULLABLE_KEYS.has(name)) {
+      record[name] = value === null ? null : String(value);
+    } else {
+      record[name] = value === null ? "" : String(value);
+    }
+  });
+  return record as unknown as StoredBlockRange;
+}
+
+function expandRangesResponse(response: CompactRangesResponse): RangesResponse {
+  const rawRanges = response.ranges ?? [];
+  const isCompact = Array.isArray(rawRanges[0]);
+  const ranges = isCompact
+    ? (rawRanges as RangeResponseRow[]).map((row) =>
+        decodeRangeResponseRow(
+          row,
+          response.names && response.names.length > 0 ? response.names : RANGE_RESPONSE_NAMES,
+        ),
+      )
+    : (rawRanges as StoredBlockRange[]);
+  return {
+    count: response.count,
+    limit: response.limit,
+    truncated: response.truncated,
+    ranges,
+  };
+}
+
 export interface InspectedTransaction {
   blockNumber?: number;
   blockNumberDecimal?: string;
@@ -650,7 +750,7 @@ function byteLength(value: string): number {
 }
 
 export function fetchRanges(params: URLSearchParams): Promise<RangesResponse> {
-  return getJson<RangesResponse>("/ranges", params);
+  return getJson<CompactRangesResponse>("/ranges", params).then(expandRangesResponse);
 }
 
 export async function fetchBlockInspect(blockNumber: string): Promise<BlockInspectResponse> {
