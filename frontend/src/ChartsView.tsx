@@ -29,6 +29,13 @@ import {
   parseSelectedParameters,
   type ParameterDef,
 } from "./chartParameters";
+import {
+  chartRequestLimit,
+  CHART_POINT_COUNT_OPTIONS,
+  DEFAULT_CHART_POINT_COUNT,
+  normalizeChartPointCount,
+  parseChartPointCount,
+} from "./chartPointCounts";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -44,6 +51,7 @@ interface ChartsViewProps {
 
 interface ChartsFilters extends Record<string, string> {
   zoom: string;
+  points: string;
   startDate: string;
   blockStart: string;
   blockEnd: string;
@@ -51,8 +59,7 @@ interface ChartsFilters extends Record<string, string> {
   parameters: string;
 }
 
-const FETCH_LIMIT = 1000;
-const FILTER_KEYS = ["zoom", "startDate", "blockStart", "blockEnd", "xAxisMode", "parameters"] as const;
+const FILTER_KEYS = ["zoom", "points", "startDate", "blockStart", "blockEnd", "xAxisMode", "parameters"] as const;
 const STORAGE_SECTION = "charts.";
 const FILTERS_STORAGE_KEY = `${STORAGE_SECTION}filters`;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = `${STORAGE_SECTION}sidebarCollapsed`;
@@ -98,6 +105,7 @@ const TIME_STEPS: TimeStep[] = [
 
 const DEFAULT_FILTERS: ChartsFilters = {
   zoom: "0",
+  points: String(DEFAULT_CHART_POINT_COUNT),
   startDate: "",
   blockStart: "",
   blockEnd: "",
@@ -148,6 +156,7 @@ function loadFilters(locationSearch: string): ChartsFilters {
   const merged = readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
   return {
     ...merged,
+    points: normalizeChartPointCount(merged.points),
     startDate: normalizeIsoDate(merged.startDate),
     xAxisMode: parseXAxisMode(merged.xAxisMode),
   };
@@ -272,6 +281,7 @@ export function ChartsView({
   const [selectedPointKey, setSelectedPointKey] = useState<string | null>(null);
 
   const zoomIndex = clampZoomIndex(filters.zoom);
+  const pointCount = parseChartPointCount(filters.points);
   const xAxisMode = parseXAxisMode(filters.xAxisMode);
   const availableParameters = useMemo(() => getAvailableParameters(noBatcher), [noBatcher]);
   const selected = useMemo(
@@ -286,6 +296,7 @@ export function ChartsView({
   const load = useCallback((f: ChartsFilters) => {
     const idx = clampZoomIndex(f.zoom);
     const lvl = ZOOM_LEVELS[idx];
+    const requestedPoints = parseChartPointCount(f.points);
     const anchor = normalizeIsoDate(f.startDate);
     const blockRange = parseBlockWindow(f);
     setLoading(true);
@@ -296,12 +307,12 @@ export function ChartsView({
     if (lvl.rangeSize === 1) {
       if (blockRange) {
         const blockCount = blockRange.end - blockRange.start + 1;
-        params.set("limit", String(Math.min(FETCH_LIMIT, blockCount)));
+        params.set("limit", String(chartRequestLimit(requestedPoints, blockCount)));
         params.set("order", "asc");
         if (blockRange.start > 0) params.set("blockGt", String(blockRange.start - 1));
         params.set("blockLt", String(blockRange.end + 1));
       } else {
-        params.set("limit", String(FETCH_LIMIT));
+        params.set("limit", String(chartRequestLimit(requestedPoints)));
         params.set("order", "desc");
         if (anchor) params.set("dateLt", anchor);
       }
@@ -320,7 +331,7 @@ export function ChartsView({
         })
         .finally(() => setLoading(false));
     } else {
-      params.set("limit", String(FETCH_LIMIT));
+      params.set("limit", String(chartRequestLimit(requestedPoints)));
       params.set("order", "desc");
       if (anchor) params.set("dateLt", anchor);
       params.set("rangeSize", String(lvl.rangeSize));
@@ -352,7 +363,7 @@ export function ChartsView({
 
   useEffect(() => {
     load(filters);
-  }, [filters.zoom, filters.startDate, filters.blockStart, filters.blockEnd, load]);
+  }, [filters.zoom, filters.points, filters.startDate, filters.blockStart, filters.blockEnd, load]);
 
   useEffect(() => {
     if (filtersEqual(filters, DEFAULT_FILTERS, FILTER_KEYS)) {
@@ -392,6 +403,12 @@ export function ChartsView({
     const clamped = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, next));
     if (clamped === zoomIndex) return;
     updateFilters(clearBlockWindow({ ...filters, zoom: String(clamped) }));
+  };
+
+  const setPointCount = (next: number) => {
+    const normalized = normalizeChartPointCount(String(next));
+    if (normalized === filters.points) return;
+    updateFilters({ ...filters, points: normalized });
   };
 
   const panTime = (deltaMs: number) => {
@@ -644,6 +661,22 @@ export function ChartsView({
                 >
                   +
                 </button>
+              </div>
+            </div>
+
+            <div className="sidebar-section">
+              <span className="toolbar-label">Points</span>
+              <div className="point-count-toggle" role="group" aria-label="Chart point count">
+                {CHART_POINT_COUNT_OPTIONS.map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    className={pointCount === count ? "active" : ""}
+                    onClick={() => setPointCount(count)}
+                  >
+                    {count}
+                  </button>
+                ))}
               </div>
             </div>
 

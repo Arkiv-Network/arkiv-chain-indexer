@@ -2409,6 +2409,17 @@ td.num {
   padding: 0.2rem;
 }
 
+.point-count-toggle {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem;
+}
+
+.point-count-toggle button,
 .axis-mode-toggle button {
   border: 1px solid transparent;
   background: transparent;
@@ -2419,10 +2430,17 @@ td.num {
   font-size: 0.82rem;
 }
 
+.point-count-toggle button {
+  padding: 0.35rem 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.point-count-toggle button:hover,
 .axis-mode-toggle button:hover {
   border-color: var(--accent);
 }
 
+.point-count-toggle button.active,
 .axis-mode-toggle button.active {
   background: rgba(46, 99, 216, 0.1);
   border-color: var(--accent);
