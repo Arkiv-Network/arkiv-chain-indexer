@@ -11,6 +11,7 @@ import {
   buildPermalinkHref,
   filtersEqual,
   readFiltersFromSearch,
+  type View,
   writePermalink,
 } from "./permalinks";
 import {
@@ -38,6 +39,7 @@ interface ChartsViewProps {
   transactionDataEnabled: boolean;
   tokenSymbol: string;
   noBatcher: boolean;
+  presentationMode?: "standard" | "fullscreen";
 }
 
 interface ChartsFilters extends Record<string, string> {
@@ -259,6 +261,7 @@ export function ChartsView({
   transactionDataEnabled,
   tokenSymbol,
   noBatcher,
+  presentationMode = "standard",
 }: ChartsViewProps) {
   const [filters, setFilters] = useState<ChartsFilters>(() => loadFilters(locationSearch));
   const [points, setPoints] = useState<ChartPoint[]>([]);
@@ -278,6 +281,7 @@ export function ChartsView({
   const startDate = filters.startDate.trim();
   const blockWindow = useMemo(() => parseBlockWindow(filters), [filters]);
   const activeBlockWindow = zoomIndex === 0 ? blockWindow : null;
+  const routeView: View = presentationMode === "fullscreen" ? "chart-fullscreen" : "charts";
 
   const load = useCallback((f: ChartsFilters) => {
     const idx = clampZoomIndex(f.zoom);
@@ -339,11 +343,11 @@ export function ChartsView({
   const updateFilters = useCallback(
     (next: ChartsFilters) => {
       setFilters(next);
-      if (writePermalink("charts", next)) {
+      if (writePermalink(routeView, next)) {
         onLocationChange();
       }
     },
-    [onLocationChange, setFilters],
+    [onLocationChange, routeView, setFilters],
   );
 
   useEffect(() => {
@@ -438,7 +442,7 @@ export function ChartsView({
     setSelectedPointKey(null);
     setCopyStatus("");
     setFilters(DEFAULT_FILTERS);
-    if (writePermalink("charts", {})) {
+    if (writePermalink(routeView, {})) {
       onLocationChange();
     }
   };
@@ -452,6 +456,11 @@ export function ChartsView({
       setCopyStatus(href);
     }
   };
+
+  const fullscreenHref = useMemo(
+    () => buildPermalinkHref("chart-fullscreen", filters),
+    [filters],
+  );
 
   const selectedPoint = useMemo(
     () => points.find((point) => pointKey(point) === selectedPointKey) ?? null,
@@ -492,6 +501,31 @@ export function ChartsView({
     () => buildPlot(points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol, availableParameters),
     [points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol, availableParameters],
   );
+  const chartConfig = useMemo(
+    () => ({
+      displaylogo: false,
+      responsive: true,
+      ...(presentationMode === "fullscreen" ? { displayModeBar: false } : {}),
+    }),
+    [presentationMode],
+  );
+
+  const chartContent = error ? (
+    <div className="chart-empty">Failed: {error}</div>
+  ) : selected.length === 0 ? (
+    <div className="chart-empty">Select at least one parameter to plot.</div>
+  ) : points.length === 0 && !loading ? (
+    <div className="chart-empty">No data in the selected window.</div>
+  ) : (
+    <Plot
+      data={traces}
+      layout={layout}
+      useResizeHandler
+      style={{ width: "100%", height: "100%" }}
+      config={chartConfig}
+      onClick={presentationMode === "fullscreen" ? undefined : handlePlotClick}
+    />
+  );
 
   const windowInfo = useMemo(() => {
     if (points.length === 0) return null;
@@ -502,6 +536,14 @@ export function ChartsView({
       lastDate: points[points.length - 1].midDate,
     };
   }, [points]);
+
+  if (presentationMode === "fullscreen") {
+    return (
+      <section className="view charts-view chart-only-view">
+        <div className="chart-only-frame">{chartContent}</div>
+      </section>
+    );
+  }
 
   return (
     <section className={`view charts-view${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
@@ -677,6 +719,15 @@ export function ChartsView({
                 <button type="button" className="secondary" onClick={copyPermalink}>
                   Copy link
                 </button>
+                <a
+                  className="secondary-link"
+                  href={fullscreenHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open chart-only permalink in a new tab"
+                >
+                  Fullscreen chart
+                </a>
                 <button type="button" className="secondary" onClick={resetChartSettings}>
                   Reset to defaults
                 </button>
@@ -688,20 +739,7 @@ export function ChartsView({
 
         <div className="chart-area">
           <div className="chart-card">
-            {selected.length === 0 ? (
-              <div className="chart-empty">Select at least one parameter in the sidebar to plot.</div>
-            ) : points.length === 0 && !loading ? (
-              <div className="chart-empty">No data in the selected window.</div>
-            ) : (
-              <Plot
-                data={traces}
-                layout={layout}
-                useResizeHandler
-                style={{ width: "100%", height: "100%" }}
-                config={{ displaylogo: false, responsive: true }}
-                onClick={handlePlotClick}
-              />
-            )}
+            {chartContent}
           </div>
         </div>
         <aside className="selection-panel">

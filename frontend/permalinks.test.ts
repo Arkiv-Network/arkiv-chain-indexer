@@ -63,6 +63,10 @@ describe("frontend permalink helpers", () => {
     expect(readViewFromLocation({ pathname: "/guzzlers", search: "" })).toBe("guzzlers");
   });
 
+  test("reads the chart fullscreen route", () => {
+    expect(readViewFromLocation({ pathname: "/charts/fullscreen", search: "?zoom=6" })).toBe("chart-fullscreen");
+  });
+
   test("falls back to legacy query view at the root", () => {
     expect(readViewFromLocation({ pathname: "/", search: "?view=charts" })).toBe("charts");
     expect(readViewFromLocation({ pathname: "/unknown", search: "?view=charts" })).toBe("charts");
@@ -71,6 +75,9 @@ describe("frontend permalink helpers", () => {
   test("builds browser route hrefs without legacy view parameters", () => {
     expect(buildRouteHref("transactions", { address: "0xabc", page: "1", view: "blocks" })).toBe(
       "/transactions?address=0xabc&page=1",
+    );
+    expect(buildRouteHref("chart-fullscreen", { zoom: "6", parameters: "averageFeePriceWei" })).toBe(
+      "/charts/fullscreen?zoom=6&parameters=averageFeePriceWei",
     );
     expect(buildRouteHref("transaction-records", {})).toBe("/records");
     expect(buildRouteHref("guzzlers", { address: "" })).toBe("/activity");

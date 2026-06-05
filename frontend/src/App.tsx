@@ -90,6 +90,7 @@ export function App() {
     transactionDataEnabled !== true && (view === "block" || view === "transactions" || view === "senders")
       ? "blocks"
       : view;
+  const chartFullscreen = activeView === "chart-fullscreen";
   const navItems = visibleNavItems(adminVerified, transactionDataEnabled);
   const activeNavLabel =
     navItems.find((item) => item.view === activeView)?.label ?? navLabelForView(activeView) ?? "Menu";
@@ -389,6 +390,22 @@ export function App() {
   };
 
   const mainClassName = activeView === "charts" ? "fullscreen" : "contained";
+
+  if (chartFullscreen) {
+    return (
+      <main className="fullscreen chart-fullscreen-main">
+        <ChartsView
+          locationSearch={locationSearch}
+          onLocationChange={refreshFromLocation}
+          timeZone={timeZone}
+          transactionDataEnabled={transactionDataEnabled === true}
+          tokenSymbol={pageSettings.tokenSymbol}
+          noBatcher={pageSettings.noBatcher}
+          presentationMode="fullscreen"
+        />
+      </main>
+    );
+  }
 
   return (
     <>
