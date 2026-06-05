@@ -7,6 +7,7 @@ export type View =
   | "senders"
   | "ranges"
   | "charts"
+  | "chart-fullscreen"
   | "guzzlers"
   | "health"
   | "admin"
@@ -22,6 +23,7 @@ const VIEW_PATHS: Record<View, string> = {
   senders: "/senders",
   ranges: "/ranges",
   charts: "/charts",
+  "chart-fullscreen": "/charts/fullscreen",
   guzzlers: "/activity",
   health: "/health",
   admin: "/admin",
@@ -38,6 +40,7 @@ const VIEW_PATH_ALIASES: Record<string, View> = {
   "/senders": "senders",
   "/ranges": "ranges",
   "/charts": "charts",
+  "/charts/fullscreen": "chart-fullscreen",
   "/guzzlers": "guzzlers",
   "/activity": "guzzlers",
   "/health": "health",
@@ -91,6 +94,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "senders") return "senders";
   if (value === "ranges") return "ranges";
   if (value === "charts") return "charts";
+  if (value === "chart-fullscreen") return "chart-fullscreen";
   if (value === "guzzlers") return "guzzlers";
   if (value === "health") return "health";
   if (value === "admin") return "admin";

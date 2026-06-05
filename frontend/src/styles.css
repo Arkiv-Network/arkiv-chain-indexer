@@ -495,6 +495,12 @@ main.fullscreen {
   min-height: 0;
 }
 
+main.chart-fullscreen-main {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+}
+
 /* Full-width mode — the header toggle sets data-ui-width="full" on :root,
    removing the 1600px (header/footer/home) and 1200px (admin) caps so every
    view stretches to the viewport. */
@@ -539,13 +545,33 @@ form button {
   cursor: pointer;
 }
 
-button.secondary {
+button.secondary,
+.secondary-link {
   padding: 0.35rem 0.65rem;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--fg);
   border-radius: 4px;
   cursor: pointer;
+}
+
+button.secondary {
+  font: inherit;
+}
+
+.secondary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.secondary-link:hover,
+.secondary-link:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .button-row {
@@ -2227,6 +2253,11 @@ td.num {
   width: 100%;
 }
 
+.chart-only-view {
+  height: 100%;
+  background: var(--bg);
+}
+
 .charts-layout {
   display: flex;
   flex: 1;
@@ -2648,6 +2679,19 @@ th:not(.num) .sort-header {
 }
 
 .chart-card .js-plotly-plot {
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-only-frame {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: var(--bg);
+}
+
+.chart-only-frame .js-plotly-plot {
   flex: 1;
   min-height: 0;
 }
