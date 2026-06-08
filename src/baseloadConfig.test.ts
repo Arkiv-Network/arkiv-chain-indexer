@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createBaseloadWorkerDraft,
   createBaseloadWorkerFromDraft,
   deriveBaseloadWalletAddress,
   normalizeBaseloadConfig,
+  readBaseloadConfigFile,
   parseBaseloadRuntimeConfig,
 } from "./baseloadConfig";
 
@@ -40,5 +44,40 @@ describe("backend baseload config", () => {
         BASELOAD_MNEMONIC: " test test test test test test test test test test test junk ",
       }).rpcUrl,
     ).toBe("https://rpc.example.test");
+  });
+
+  test("reads initial baseload config files with backend normalization", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "baseload-config-"));
+    try {
+      const path = join(dir, "config.json");
+      await writeFile(path, JSON.stringify({ workers: [{ walletNumber: 3 }] }), "utf8");
+
+      const config = await readBaseloadConfigFile(path);
+
+      expect(config.workers).toHaveLength(1);
+      expect(config.workers[0]?.id).toBe("wallet-3");
+      expect(config.workers[0]?.createsPerMinute).toBe(1);
+      expect(config.workers[0]?.walletAddress).toBe(deriveBaseloadWalletAddress(3));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reports initial baseload config file path failures", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "baseload-config-"));
+    try {
+      const missingPath = join(dir, "missing.json");
+      await expect(readBaseloadConfigFile(missingPath)).rejects.toThrow(
+        `Unable to read Baseload config file at ${missingPath}`,
+      );
+
+      const invalidPath = join(dir, "invalid.json");
+      await writeFile(invalidPath, "{", "utf8");
+      await expect(readBaseloadConfigFile(invalidPath)).rejects.toThrow(
+        `Invalid Baseload config file at ${invalidPath}`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

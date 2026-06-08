@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { mnemonicToAccount } from "viem/accounts";
 
 export interface BaseloadWorkerConfig {
@@ -176,6 +177,24 @@ export function parseBaseloadConfigJson(
     throw new Error("Configuration file is not valid JSON");
   }
   return normalizeBaseloadConfig(parsed, mnemonic);
+}
+
+export async function readBaseloadConfigFile(
+  path: string,
+  mnemonic = DEFAULT_BASELOAD_MNEMONIC,
+): Promise<BaseloadConfig> {
+  let json: string;
+  try {
+    json = await readFile(path, "utf8");
+  } catch (error) {
+    throw new Error(`Unable to read Baseload config file at ${path}: ${describeError(error)}`);
+  }
+
+  try {
+    return parseBaseloadConfigJson(json, mnemonic);
+  } catch (error) {
+    throw new Error(`Invalid Baseload config file at ${path}: ${describeError(error)}`);
+  }
 }
 
 export function serializeBaseloadConfig(config: BaseloadConfig): string {
@@ -358,4 +377,9 @@ function defaultNumberFor(label: string): number {
     default:
       return 0;
   }
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error);
 }

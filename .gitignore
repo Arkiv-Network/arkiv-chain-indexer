@@ -10,3 +10,5 @@ frontend/tsconfig.tsbuildinfo
 bun.lock
 # Debug screenshots from local Playwright / dev runs (root only, not recursive).
 /*.png
+/baseload-config/*
+!/baseload-config/.gitkeep
