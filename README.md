@@ -22,6 +22,9 @@ cp .env.example .env
 # edit .env and set SCANNER_RPC_FULL_NODE to your JSON-RPC endpoint
 docker compose up --build
 ```
+
+Set `ARKIV_JS_SDK` in `.env` before building if you need the Docker image to use a specific
+`arkiv-sdk-js` branch, tag, or commit. It defaults to `develop`.
  
 Open:
 

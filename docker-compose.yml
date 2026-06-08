@@ -34,6 +34,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
@@ -61,6 +62,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
@@ -89,6 +91,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
@@ -115,6 +118,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
@@ -132,6 +136,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
@@ -149,6 +154,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
@@ -170,6 +176,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        ARKIV_JS_SDK: ${ARKIV_JS_SDK:-develop}
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
