@@ -200,6 +200,50 @@ Backend configuration:
 | `BASELOAD_RPC_NODE` | unset | Arkiv JSON-RPC endpoint used by backend workers for block reads, transaction sends, and receipt polling. |
 | `BASELOAD_MNEMONIC` | deterministic development mnemonic | Mnemonic used by the backend to derive worker wallets at `m/44'/60'/0'/0/<walletNumber>`. |
 | `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token required for mutating Baseload worker configuration requests. Readonly requests stay public. |
+| `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional container path to a Baseload worker config JSON file that the backend loads once at startup. |
+
+### Initial Baseload config with Docker Compose
+
+By default the Compose stack does not load any initial Baseload workers. To let an external integration provide
+the initial `config.json`, write the file into a host directory and point Compose at that directory:
+
+```sh
+# .env
+BASELOAD_CONFIG_DIR=/absolute/path/from/external-integration
+BASELOAD_INITIAL_CONFIG_PATH=/app/baseload-config/config.json
+```
+
+`docker-compose.yml` mounts `BASELOAD_CONFIG_DIR` read-only at `/app/baseload-config` inside the backend
+container. The backend reads `BASELOAD_INITIAL_CONFIG_PATH` once during `bun run serve` startup, validates it with
+the same backend Baseload config rules used by the API, and then starts the configured workers if `BASELOAD_RPC_NODE`
+is also set.
+
+Expected file shape:
+
+```json
+{
+  "version": 1,
+  "workers": [
+    {
+      "walletNumber": 0,
+      "maxGasPriceGwei": 1000,
+      "createsPerMinute": 1,
+      "singleCreatePayloadSize": 5000,
+      "singleCreateStringArgumentCount": 2,
+      "singleCreateNumberArgumentCount": 2,
+      "startBlock": 0,
+      "endBlock": null,
+      "durationSeconds": null,
+      "ttlSeconds": 3600
+    }
+  ]
+}
+```
+
+Missing worker fields use the backend defaults where supported, and wallet addresses are derived from
+`BASELOAD_MNEMONIC`. Leave `BASELOAD_INITIAL_CONFIG_PATH` unset to keep the existing empty startup config. Local
+JSON files under `baseload-config/` are ignored by Git and by Docker builds so integration-provided configs are not
+committed or copied into the image.
 
 Worker behavior:
 

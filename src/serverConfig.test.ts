@@ -14,6 +14,7 @@ describe("parseServerConfig", () => {
     expect(config.hostname).toBeUndefined();
     expect(config.transactionDataEnabled).toBe(true);
     expect(config.baseloadAdminBearerToken).toBeUndefined();
+    expect(config.baseloadInitialConfigPath).toBeUndefined();
   });
 
   test("requires DATABASE_URL", () => {
@@ -29,12 +30,14 @@ describe("parseServerConfig", () => {
       SERVER_HOSTNAME: "0.0.0.0",
       SAVE_TRANSACTION_DATA: "false",
       BASELOAD_ADMIN_BEARER_TOKEN: "env-secret",
+      BASELOAD_INITIAL_CONFIG_PATH: "/app/baseload-config/config.json",
     });
     expect(config.databaseUrl).toBe("postgres://envhost/db");
     expect(config.port).toBe(4500);
     expect(config.hostname).toBe("0.0.0.0");
     expect(config.transactionDataEnabled).toBe(false);
     expect(config.baseloadAdminBearerToken).toBe("env-secret");
+    expect(config.baseloadInitialConfigPath).toBe("/app/baseload-config/config.json");
   });
 
   test("server-specific transaction data flag overrides shared env", () => {
@@ -59,12 +62,15 @@ describe("parseServerConfig", () => {
         "false",
         "--baseload-admin-bearer-token",
         "cli-secret",
+        "--baseload-initial-config",
+        "/tmp/baseload.json",
       ],
       {
         DATABASE_URL: "postgres://env/db",
         SERVER_PORT: "1234",
         SERVER_TRANSACTION_DATA_ENABLED: "true",
         BASELOAD_ADMIN_BEARER_TOKEN: "env-secret",
+        BASELOAD_INITIAL_CONFIG_PATH: "/app/baseload-config/config.json",
       },
     );
     expect(config.databaseUrl).toBe("postgres://cli/db");
@@ -72,6 +78,7 @@ describe("parseServerConfig", () => {
     expect(config.hostname).toBe("127.0.0.1");
     expect(config.transactionDataEnabled).toBe(false);
     expect(config.baseloadAdminBearerToken).toBe("cli-secret");
+    expect(config.baseloadInitialConfigPath).toBe("/tmp/baseload.json");
   });
 
   test("rejects an invalid port", () => {

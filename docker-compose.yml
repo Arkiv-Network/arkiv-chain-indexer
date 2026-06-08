@@ -194,9 +194,12 @@ services:
       BASELOAD_RPC_NODE: ${BASELOAD_RPC_NODE:-}
       BASELOAD_MNEMONIC: ${BASELOAD_MNEMONIC:-}
       BASELOAD_ADMIN_BEARER_TOKEN: ${BASELOAD_ADMIN_BEARER_TOKEN:-}
+      BASELOAD_INITIAL_CONFIG_PATH: ${BASELOAD_INITIAL_CONFIG_PATH:-}
       PORTAL_BASE_URL: ${PORTAL_BASE_URL:-https://scanner.arkiv-global.net}
     ports:
       - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - ${BASELOAD_CONFIG_DIR:-./baseload-config}:/app/baseload-config:ro
     extra_hosts: *extra-hosts
     command: ["bun", "run", "serve"]
     healthcheck:
