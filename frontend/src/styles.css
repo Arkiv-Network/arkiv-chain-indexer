@@ -2544,6 +2544,40 @@ th:not(.num) .sort-header {
   text-overflow: ellipsis;
 }
 
+/* Address cell with a trailing activity link (senders table). */
+.sender-address {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.row-activity-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+.row-activity-link:hover,
+.row-activity-link:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 1;
+}
+
+.row-activity-link svg {
+  display: block;
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
 /* Combined block-number + date cell (senders First/Last tx columns). */
 .block-meta {
   display: flex;
@@ -2573,7 +2607,8 @@ th:not(.num) .sort-header {
 
 /* Keep the copy button hugging the address: shrink-wrap the cell to its
    content so it doesn't stretch (and leave trailing space) across the column. */
-.sender-table .copy-cell {
+.sender-table .copy-cell,
+.tx-table .copy-cell {
   grid-template-columns: minmax(0, max-content) 1.25rem;
   justify-content: start;
   width: max-content;

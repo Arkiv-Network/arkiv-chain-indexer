@@ -100,29 +100,18 @@ function transactionColumns(timeZone: string, onLocationChange: () => void, toke
   {
     key: "blockNumber",
     label: "Block",
-    className: "num",
-    width: "8rem",
-    render: (row) => (
-      <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
-    ),
-  },
-  {
-    key: "blockDate",
-    label: "Date",
     width: "13rem",
-    render: (row) => fmtDate(row.blockDate, timeZone),
-  },
-  {
-    key: "position",
-    label: "Pos",
-    className: "num",
-    width: "5rem",
-    render: (row) => row.position,
+    render: (row) => (
+      <div className="block-meta">
+        <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
+        <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
+      </div>
+    ),
   },
   {
     key: "hash",
     label: "Hash",
-    width: "16rem",
+    width: "13rem",
     render: (row) => (
       <CopyCell
         value={row.hash}
@@ -140,19 +129,6 @@ function transactionColumns(timeZone: string, onLocationChange: () => void, toke
     render: (row) => <AddressCell address={row.from} />,
   },
   {
-    key: "to",
-    label: "To / contract",
-    width: "12rem",
-    render: (row) => <AddressCell address={row.to ?? row.contractAddress} />,
-  },
-  {
-    key: "type",
-    label: "Type",
-    className: "num",
-    width: "5rem",
-    render: (row) => row.type ?? "-",
-  },
-  {
     key: "nonce",
     label: "Nonce",
     className: "num",
@@ -160,59 +136,11 @@ function transactionColumns(timeZone: string, onLocationChange: () => void, toke
     render: (row) => row.nonce ?? "-",
   },
   {
-    key: "status",
-    label: "Status",
-    width: "6rem",
-    render: (row) => statusLabel(row.status),
-  },
-  {
-    key: "valueWei",
-    label: `Value (${tokenSymbol})`,
-    className: "num",
-    width: "9rem",
-    render: (row) => fmtEth(row.valueWei),
-  },
-  {
-    key: "gasLimit",
-    label: "Gas limit",
-    className: "num",
-    width: "9rem",
-    render: (row) => fmtInteger(row.gasLimit),
-  },
-  {
     key: "gasUsed",
-    label: "Gas used",
+    label: "Gas (used / limit)",
     className: "num",
-    width: "9rem",
-    render: (row) => fmtInteger(row.gasUsed),
-  },
-  {
-    key: "cumulativeGasUsed",
-    label: "Cumulative gas",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtInteger(row.cumulativeGasUsed),
-  },
-  {
-    key: "baseBlockFeeWei",
-    label: "Base fee (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.baseBlockFeeWei),
-  },
-  {
-    key: "gasPriceWei",
-    label: "Gas price (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.gasPriceWei),
-  },
-  {
-    key: "maxFeePerGasWei",
-    label: "Max fee (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.maxFeePerGasWei),
+    width: "12rem",
+    render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
   },
   {
     key: "effectiveGasPriceWei",
@@ -220,20 +148,6 @@ function transactionColumns(timeZone: string, onLocationChange: () => void, toke
     className: "num",
     width: "12rem",
     render: (row) => fmtGwei(row.effectiveGasPriceWei),
-  },
-  {
-    key: "priorityFeeWei",
-    label: "Priority fee (gwei)",
-    className: "num",
-    width: "12rem",
-    render: (row) => fmtGwei(row.priorityFeeWei),
-  },
-  {
-    key: "maxPriorityFeePerGasWei",
-    label: "Max priority (gwei)",
-    className: "num",
-    width: "12rem",
-    render: (row) => fmtGwei(row.maxPriorityFeePerGasWei),
   },
   {
     key: "transactionFeeWei",
@@ -726,10 +640,4 @@ function shortHash(value: string | null | undefined): string {
   if (!value) return "-";
   if (value.length <= 18) return value;
   return `${value.slice(0, 10)}...${value.slice(-8)}`;
-}
-
-function statusLabel(value: string | null): string {
-  if (value === "1") return "Success";
-  if (value === "0") return "Failed";
-  return value ?? "-";
 }

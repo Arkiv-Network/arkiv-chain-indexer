@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchSenders, type SendersResponse } from "./api";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtMillions, fmtThousands } from "./format";
-import { buildPermalinkHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
+import { buildPermalinkHref, buildRouteHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { AddressCell } from "./TransactionsView";
 
@@ -118,7 +118,7 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
       <div className="table-wrap">
         <table className="data-table sender-table">
           <colgroup>
-            <col style={{ width: "13rem" }} />{/* Address */}
+            <col style={{ width: "14.5rem" }} />{/* Address */}
             <col style={{ width: "7.5rem" }} />{/* Tx count */}
             <col style={{ width: "7.5rem" }} />{/* Gas used */}
             <col style={{ width: "8.5rem" }} />{/* Fees spent */}
@@ -133,17 +133,20 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
               <th scope="col" className="num">Tx count</th>
               <th scope="col" className="num">Gas used</th>
               <th scope="col" className="num">Fees spent ({tokenSymbol})</th>
-              <th scope="col" className="num">Avg gas</th>
+              <th scope="col" className="num">Avg gas per tx</th>
               <th scope="col" className="num">Avg fee ({tokenSymbol})</th>
-              <th scope="col">First tx</th>
-              <th scope="col">Last tx</th>
+              <th scope="col">First tx (block/date)</th>
+              <th scope="col">Last tx (block/date)</th>
             </tr>
           </thead>
           <tbody>
             {(data?.senders ?? []).map((row) => (
               <tr key={row.address}>
                 <td data-label="Address">
-                  <AddressCell address={row.address} />
+                  <div className="sender-address">
+                    <AddressCell address={row.address} />
+                    <ActivityLink address={row.address} onLocationChange={onLocationChange} />
+                  </div>
                 </td>
                 <td className="num" data-label="Tx count">{txCountFromNonce(row.latestNonce)}</td>
                 <td className="num" data-label="Gas used">{fmtMillions(row.totalGasUsed)}</td>
@@ -174,6 +177,30 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
         </table>
       </div>
     </section>
+  );
+}
+
+/** Per-row link to the address's activity view (`/activity?address=0x…`). */
+function ActivityLink({ address, onLocationChange }: { address: string; onLocationChange: () => void }) {
+  const filters = { address, window: "24h" };
+  const onClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (writePermalink("guzzlers", filters)) {
+      onLocationChange();
+    }
+  };
+  return (
+    <a
+      className="row-activity-link"
+      href={buildRouteHref("guzzlers", filters)}
+      onClick={onClick}
+      title="View activity"
+      aria-label={`View activity for ${address}`}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+      </svg>
+    </a>
   );
 }
 
