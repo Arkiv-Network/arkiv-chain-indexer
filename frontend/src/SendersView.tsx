@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchSenders, type SendersResponse } from "./api";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtEth, fmtInteger, fmtMillions, fmtThousands } from "./format";
+import { fmtDate, fmtEth, fmtMillions, fmtThousands } from "./format";
 import { buildPermalinkHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { AddressCell } from "./TransactionsView";
@@ -118,33 +118,25 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
       <div className="table-wrap">
         <table className="data-table sender-table">
           <colgroup>
-            <col style={{ width: "13rem" }} />
-            <col style={{ width: "8rem" }} />
-            <col style={{ width: "8rem" }} />
-            <col style={{ width: "10rem" }} />
-            <col style={{ width: "11rem" }} />
-            <col style={{ width: "11rem" }} />
-            <col style={{ width: "10rem" }} />
-            <col style={{ width: "10rem" }} />
-            <col style={{ width: "9rem" }} />
-            <col style={{ width: "13rem" }} />
-            <col style={{ width: "9rem" }} />
-            <col style={{ width: "13rem" }} />
+            <col style={{ width: "13rem" }} />{/* Address */}
+            <col style={{ width: "7.5rem" }} />{/* Tx count */}
+            <col style={{ width: "7.5rem" }} />{/* Gas used */}
+            <col style={{ width: "8.5rem" }} />{/* Fees spent */}
+            <col style={{ width: "7rem" }} />{/* Avg gas */}
+            <col style={{ width: "8rem" }} />{/* Avg fee */}
+            <col style={{ width: "13rem" }} />{/* First tx */}
+            <col style={{ width: "13rem" }} />{/* Last tx */}
           </colgroup>
           <thead>
             <tr>
               <th scope="col">Address</th>
-              <th scope="col" className="num">Tx found</th>
-              <th scope="col" className="num">Latest nonce</th>
+              <th scope="col" className="num">Tx count</th>
               <th scope="col" className="num">Gas used</th>
               <th scope="col" className="num">Fees spent ({tokenSymbol})</th>
-              <th scope="col" className="num">Value sent ({tokenSymbol})</th>
               <th scope="col" className="num">Avg gas</th>
               <th scope="col" className="num">Avg fee ({tokenSymbol})</th>
-              <th scope="col" className="num">First tx block</th>
-              <th scope="col">First tx date</th>
-              <th scope="col" className="num">Last tx block</th>
-              <th scope="col">Last tx date</th>
+              <th scope="col">First tx</th>
+              <th scope="col">Last tx</th>
             </tr>
           </thead>
           <tbody>
@@ -153,38 +145,28 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
                 <td data-label="Address">
                   <AddressCell address={row.address} />
                 </td>
-                <td className="num" data-label="Tx found">{fmtInteger(row.transactionCount)}</td>
-                <td className="num" data-label="Latest nonce">{fmtInteger(row.latestNonce)}</td>
+                <td className="num" data-label="Tx count">{txCountFromNonce(row.latestNonce)}</td>
                 <td className="num" data-label="Gas used">{fmtMillions(row.totalGasUsed)}</td>
                 <td className="num" data-label={`Fees spent (${tokenSymbol})`}>{fmtEth(row.totalTransactionFeeWei, { trimZeros: false })}</td>
-                <td className="num" data-label={`Value sent (${tokenSymbol})`}>{fmtEth(row.totalValueWei)}</td>
                 <td className="num" data-label="Avg gas">{fmtThousands(row.averageGasUsed)}</td>
                 <td className="num" data-label={`Avg fee (${tokenSymbol})`}>{fmtEth(row.averageTransactionFeeWei)}</td>
-                <td className="num" data-label="First tx block">
-                  <BlockNumberLink
-                    blockNumber={row.firstBlockNumberDecimal}
-                    onLocationChange={onLocationChange}
-                  />
+                <td data-label="First tx">
+                  <div className="block-meta">
+                    <BlockNumberLink
+                      blockNumber={row.firstBlockNumberDecimal}
+                      onLocationChange={onLocationChange}
+                    />
+                    <span className="block-meta-date">{fmtDate(row.firstBlockDate, timeZone)}</span>
+                  </div>
                 </td>
-                <td data-label="First tx date">
-                  <BlockNumberLink
-                    blockNumber={row.firstBlockNumberDecimal}
-                    label={fmtDate(row.firstBlockDate, timeZone)}
-                    onLocationChange={onLocationChange}
-                  />
-                </td>
-                <td className="num" data-label="Last tx block">
-                  <BlockNumberLink
-                    blockNumber={row.lastBlockNumberDecimal}
-                    onLocationChange={onLocationChange}
-                  />
-                </td>
-                <td data-label="Last tx date">
-                  <BlockNumberLink
-                    blockNumber={row.lastBlockNumberDecimal}
-                    label={fmtDate(row.lastBlockDate, timeZone)}
-                    onLocationChange={onLocationChange}
-                  />
+                <td data-label="Last tx">
+                  <div className="block-meta">
+                    <BlockNumberLink
+                      blockNumber={row.lastBlockNumberDecimal}
+                      onLocationChange={onLocationChange}
+                    />
+                    <span className="block-meta-date">{fmtDate(row.lastBlockDate, timeZone)}</span>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -193,6 +175,16 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
       </div>
     </section>
   );
+}
+
+/** An account's transaction count is its latest nonce + 1 (nonces start at 0). */
+function txCountFromNonce(latestNonce: string | null): string {
+  if (latestNonce === null) return "—";
+  try {
+    return (BigInt(latestNonce) + 1n).toString();
+  } catch {
+    return latestNonce;
+  }
 }
 
 function filtersToParams(filters: SenderFilters): URLSearchParams {
