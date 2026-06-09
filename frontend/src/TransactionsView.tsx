@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
+import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import {
+  buildAddressPermalinkHref,
   buildPermalinkHref,
   filtersEqual,
   readFiltersFromSearch,
   transactionDetailHref,
+  writeAddressPermalink,
   writePermalink,
   writeTransactionPermalink,
 } from "./permalinks";
@@ -19,6 +22,12 @@ interface TransactionsViewProps {
   onLocationChange: () => void;
   timeZone: string;
   tokenSymbol: string;
+  /**
+   * When set (the `/address/<0x…>` route) the address is fixed: the address
+   * input is replaced by a read-only header and all filters/permalinks operate
+   * within that address scope.
+   */
+  lockedAddress?: string | null;
 }
 
 interface TransactionFilters extends Record<string, string> {
@@ -97,9 +106,19 @@ const EMPTY: TransactionFilters = {
   page: "1",
 };
 
-function transactionColumns(timeZone: string, onLocationChange: () => void, tokenSymbol: string): Column[] {
-  return [
-  {
+// "Clear" resets to this baseline rather than fully empty: the view needs at
+// least one scoped filter to load anything, so block > 0 shows all transactions
+// instead of the empty "enter an address…" prompt.
+const BASELINE_BLOCK_GT = "0";
+const CLEARED: TransactionFilters = { ...EMPTY, blockGt: BASELINE_BLOCK_GT };
+
+function transactionColumns(
+  timeZone: string,
+  onLocationChange: () => void,
+  tokenSymbol: string,
+  addressSelected: boolean,
+): Column[] {
+  const block: Column = {
     key: "blockNumber",
     label: "Block",
     width: "13rem",
@@ -109,8 +128,8 @@ function transactionColumns(timeZone: string, onLocationChange: () => void, toke
         <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
       </div>
     ),
-  },
-  {
+  };
+  const hash: Column = {
     key: "hash",
     label: "Hash",
     width: "13rem",
@@ -126,57 +145,90 @@ function transactionColumns(timeZone: string, onLocationChange: () => void, toke
         }}
       />
     ),
-  },
-  {
+  };
+  const from: Column = {
     key: "from",
     label: "From",
     width: "12rem",
     render: (row) => <AddressCell address={row.from} />,
-  },
-  {
+  };
+  const nonce: Column = {
     key: "nonce",
     label: "Nonce",
     className: "num",
     width: "7rem",
     render: (row) => row.nonce ?? "-",
-  },
-  {
+  };
+  const gas: Column = {
     key: "gasUsed",
     label: "Gas (used / limit)",
     className: "num",
     width: "12rem",
     render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
-  },
-  {
+  };
+  const effectiveFee: Column = {
     key: "effectiveGasPriceWei",
     label: "Effective fee (gwei)",
     className: "num",
     width: "12rem",
     render: (row) => fmtGwei(row.effectiveGasPriceWei),
-  },
-  {
+  };
+  const txFee: Column = {
     key: "transactionFeeWei",
     label: `Tx fee (${tokenSymbol})`,
     className: "num",
     width: "10rem",
     render: (row) => fmtEth(row.transactionFeeWei),
-  },
-  ];
+  };
+
+  // When scoped to a single address every row shares the same sender, so the
+  // From column is redundant — lead with the nonce instead.
+  if (addressSelected) {
+    return [nonce, block, hash, gas, effectiveFee, txFee];
+  }
+  return [block, hash, from, nonce, gas, effectiveFee, txFee];
 }
 
-function loadFilters(locationSearch: string): TransactionFilters {
+function loadFilters(locationSearch: string, lockedAddress: string | null): TransactionFilters {
+  if (lockedAddress) {
+    // Address is fixed by the path; read the remaining filters from the query.
+    // Skip the shared localStorage so this view never clobbers (or inherits)
+    // the free /transactions view's stored address.
+    const fromSearch = readFiltersFromSearch(locationSearch, FILTER_KEYS, EMPTY);
+    return { ...fromSearch, address: lockedAddress };
+  }
   const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
-export function TransactionsView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: TransactionsViewProps) {
-  const [filters, setFilters] = useState<TransactionFilters>(() => loadFilters(locationSearch));
+export function TransactionsView({
+  locationSearch,
+  onLocationChange,
+  timeZone,
+  tokenSymbol,
+  lockedAddress = null,
+}: TransactionsViewProps) {
+  const locked = Boolean(lockedAddress?.trim());
+  const lockedAddr = locked ? lockedAddress!.trim() : "";
+  const [filters, setFilters] = useState<TransactionFilters>(() => loadFilters(locationSearch, lockedAddr || null));
   const [applied, setApplied] = useState<TransactionFilters>(filters);
   const [data, setData] = useState<TransactionsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [sort, setSort] = useState<SortState | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+
+  // Address lives in the path here, so permalinks/share-links must route to
+  // /address/<addr>; the free view keeps using /transactions?address=…
+  const scopedWritePermalink = (f: TransactionFilters): boolean =>
+    locked
+      ? writeAddressPermalink(lockedAddr, permalinkFilters(f))
+      : writePermalink("transactions", permalinkFilters(f));
+  const scopedPermalinkHref = (f: TransactionFilters): string =>
+    locked
+      ? buildAddressPermalinkHref(lockedAddr, permalinkFilters(f))
+      : buildPermalinkHref("transactions", permalinkFilters(f));
 
   const load = useCallback((f: TransactionFilters) => {
     if (!hasScopedFilters(f)) {
@@ -202,27 +254,40 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone, t
   }, [applied, load]);
 
   useEffect(() => {
+    if (locked) return;
     writeStoredStringRecord(STORAGE_KEY, filters, FILTER_KEYS);
-  }, [filters]);
+  }, [filters, locked]);
 
   useEffect(() => {
-    const next = loadFilters(locationSearch);
+    const next = loadFilters(locationSearch, lockedAddr || null);
     setFilters((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
     setApplied((current) => (filtersEqual(current, next, FILTER_KEYS) ? current : next));
     setCopyStatus("");
-  }, [locationSearch, setFilters]);
+  }, [locationSearch, lockedAddr, setFilters]);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (writePermalink("transactions", permalinkFilters(filters))) {
+    if (scopedWritePermalink(filters)) {
       onLocationChange();
     } else {
       setApplied(filters);
     }
   };
 
+  const clearFilters = () => {
+    // A locked address already scopes the query, so clearing can drop every
+    // other filter; the free view needs block > 0 to keep showing rows.
+    const cleared = locked ? { ...EMPTY, address: lockedAddr } : CLEARED;
+    setFilters(cleared);
+    if (scopedWritePermalink(cleared)) {
+      onLocationChange();
+    } else {
+      setApplied(cleared);
+    }
+  };
+
   const copyPermalink = async () => {
-    const href = buildPermalinkHref("transactions", permalinkFilters(applied));
+    const href = scopedPermalinkHref(applied);
     try {
       await navigator.clipboard.writeText(href);
       setCopyStatus("Copied");
@@ -236,9 +301,10 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone, t
     if (sort === null) return transactions;
     return transactions.slice().sort((a, b) => compareRows(a, b, sort));
   }, [data, sort]);
+  const addressSelected = applied.address.trim() !== "";
   const columns = useMemo(
-    () => transactionColumns(timeZone, onLocationChange, tokenSymbol),
-    [timeZone, onLocationChange, tokenSymbol],
+    () => transactionColumns(timeZone, onLocationChange, tokenSymbol, addressSelected),
+    [timeZone, onLocationChange, tokenSymbol, addressSelected],
   );
 
   const setSortKey = (key: SortKey) => {
@@ -259,7 +325,7 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone, t
   const goToPage = (page: number) => {
     const next = { ...applied, page: String(Math.max(1, page)) };
     setFilters(next);
-    if (writePermalink("transactions", permalinkFilters(next))) {
+    if (scopedWritePermalink(next)) {
       onLocationChange();
     } else {
       setApplied(next);
@@ -267,66 +333,115 @@ export function TransactionsView({ locationSearch, onLocationChange, timeZone, t
   };
 
   const hasAppliedFilters = hasScopedFilters(applied);
+  const activeFilterCount = countActiveFilters(filters, locked);
   const transactionLabel = applied.address.trim() ? "outgoing transactions" : "transactions";
 
   return (
     <section className="view transactions-view">
       <h2>Address transactions</h2>
-      <form onSubmit={onSubmit} className="transactions-form">
-        <label className="wide-field">
-          address
-          <input type="text" value={filters.address} onChange={setFilter("address")} />
-        </label>
-        <label>
-          block
-          <input type="text" inputMode="numeric" value={filters.block} onChange={setFilter("block")} />
-        </label>
-        <label>
-          block &gt;
-          <input
-            type="text"
-            inputMode="numeric"
-            value={filters.blockGt}
-            onChange={setFilter("blockGt")}
-            disabled={Boolean(filters.block.trim())}
-          />
-        </label>
-        <label>
-          block &lt;
-          <input
-            type="text"
-            inputMode="numeric"
-            value={filters.blockLt}
-            onChange={setFilter("blockLt")}
-            disabled={Boolean(filters.block.trim())}
-          />
-        </label>
-        <label>
-          nonce &gt;
-          <input type="text" inputMode="numeric" value={filters.nonceGt} onChange={setFilter("nonceGt")} />
-        </label>
-        <label>
-          nonce &lt;
-          <input type="text" inputMode="numeric" value={filters.nonceLt} onChange={setFilter("nonceLt")} />
-        </label>
-        <label>
-          date &gt;
-          <input type="text" value={filters.dateGt} onChange={setFilter("dateGt")} />
-        </label>
-        <label>
-          date &lt;
-          <input type="text" value={filters.dateLt} onChange={setFilter("dateLt")} />
-        </label>
-        <label>
-          page size
-          <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
-        </label>
-        <label>
-          page
-          <input type="text" inputMode="numeric" value={filters.page} onChange={setFilter("page")} />
-        </label>
-        <button type="submit">Query</button>
-      </form>
+      {locked ? (
+        <div className="address-id">
+          <AddressFace address={lockedAddr} />
+          <CopyCell value={lockedAddr} label={lockedAddr} copyLabel="address" />
+        </div>
+      ) : null}
+      <div className={`filters-panel${filtersOpen ? " open" : ""}`}>
+        <div className="filters-panel-head">
+          <button
+            type="button"
+            className="filters-toggle"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <span className="filters-toggle-chevron" aria-hidden="true" />
+            <span>Filters</span>
+            {activeFilterCount > 0 ? <span className="filters-count">{activeFilterCount}</span> : null}
+          </button>
+          {activeFilterCount > 0 ? (
+            <button type="button" className="link-button filters-clear" onClick={clearFilters}>
+              Clear all
+            </button>
+          ) : null}
+        </div>
+        {filtersOpen ? (
+          <form onSubmit={onSubmit} className="transactions-form">
+            {locked ? null : (
+              <label className="wide-field">
+                address
+                <input type="text" value={filters.address} onChange={setFilter("address")} />
+              </label>
+            )}
+            <fieldset className="filter-group">
+              <legend>Block</legend>
+              <label>
+                exact
+                <input type="text" inputMode="numeric" value={filters.block} onChange={setFilter("block")} />
+              </label>
+              <label>
+                &gt;
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={filters.blockGt}
+                  onChange={setFilter("blockGt")}
+                  disabled={Boolean(filters.block.trim())}
+                />
+              </label>
+              <label>
+                &lt;
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={filters.blockLt}
+                  onChange={setFilter("blockLt")}
+                  disabled={Boolean(filters.block.trim())}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="filter-group">
+              <legend>Nonce</legend>
+              <label>
+                &gt;
+                <input type="text" inputMode="numeric" value={filters.nonceGt} onChange={setFilter("nonceGt")} />
+              </label>
+              <label>
+                &lt;
+                <input type="text" inputMode="numeric" value={filters.nonceLt} onChange={setFilter("nonceLt")} />
+              </label>
+            </fieldset>
+            <fieldset className="filter-group">
+              <legend>Date</legend>
+              <label>
+                &gt;
+                <input type="text" value={filters.dateGt} onChange={setFilter("dateGt")} />
+              </label>
+              <label>
+                &lt;
+                <input type="text" value={filters.dateLt} onChange={setFilter("dateLt")} />
+              </label>
+            </fieldset>
+            <fieldset className="filter-group">
+              <legend>Paging</legend>
+              <label>
+                page size
+                <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
+              </label>
+              <label>
+                page
+                <input type="text" inputMode="numeric" value={filters.page} onChange={setFilter("page")} />
+              </label>
+            </fieldset>
+            <div className="transactions-form-actions">
+              {activeFilterCount > 0 ? (
+                <button type="button" className="secondary" onClick={clearFilters}>
+                  Clear
+                </button>
+              ) : null}
+              <button type="submit">Query</button>
+            </div>
+          </form>
+        ) : null}
+      </div>
 
       <p className={`summary${error ? " error" : ""}`}>
         {loading
@@ -556,6 +671,21 @@ function permalinkFilters(filters: TransactionFilters): TransactionFilters {
     ...filters,
     block: "",
   };
+}
+
+function countActiveFilters(filters: TransactionFilters, ignoreAddress = false): number {
+  return [
+    // On the locked /address page the address is the page scope, not a filter.
+    ignoreAddress ? "" : filters.address,
+    filters.block,
+    // block > 0 is the "show everything" baseline, not a real narrowing filter
+    filters.blockGt === BASELINE_BLOCK_GT ? "" : filters.blockGt,
+    filters.blockLt,
+    filters.nonceGt,
+    filters.nonceLt,
+    filters.dateGt,
+    filters.dateLt,
+  ].filter((value) => value.trim() !== "").length;
 }
 
 function hasScopedFilters(filters: TransactionFilters): boolean {

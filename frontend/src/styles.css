@@ -1620,12 +1620,134 @@ button.secondary {
   background: transparent !important;
 }
 
+/* ---- Collapsible filter panel ---- */
+
+.filters-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+
+.filters-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--stone);
+}
+
+.filters-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.15rem 0.1rem;
+  cursor: pointer;
+}
+
+.filters-toggle-chevron {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid currentColor;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.filters-panel.open .filters-toggle-chevron {
+  transform: rotate(0deg);
+}
+
+.filters-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.filters-clear {
+  font-size: 0.8rem;
+}
+
+/* Grouped filter form (flex so field groups size to their contents) */
+.transactions-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.7rem 0.9rem;
+  margin: 0;
+  padding: 0.75rem 0.6rem;
+}
+
 .transactions-form .wide-field {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.4rem 0.6rem;
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0.3rem 0.6rem 0.55rem;
+}
+
+.filter-group legend {
+  padding: 0 0.35rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.filter-group input {
+  width: 7.5rem;
+}
+
+.transactions-form-actions {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.1rem;
 }
 
 .transactions-actions {
   flex-wrap: wrap;
+}
+
+/* Read-only address header on the locked /address/<0x…> page */
+.address-id {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.1rem 0 0.85rem;
+}
+
+.address-id .copy-cell {
+  grid-template-columns: minmax(0, max-content) 1.45rem;
+  width: max-content;
+  max-width: 100%;
+  font-size: 0.95rem;
 }
 
 .record-category-stack {

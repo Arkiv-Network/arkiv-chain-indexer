@@ -33,6 +33,7 @@ import {
 } from "./pageSettings";
 import {
   getCurrentLocation,
+  readAddressFromLocation,
   readTransactionHashFromLocation,
   readViewFromLocation,
   writePermalink,
@@ -93,11 +94,13 @@ export function App() {
   const locationSearch = clientLocation.search;
   const view = readViewFromLocation(clientLocation);
   const transactionHash = readTransactionHashFromLocation(clientLocation);
+  const addressParam = readAddressFromLocation(clientLocation);
   const activeView =
     transactionDataEnabled !== true &&
     (view === "block" ||
       view === "transactions" ||
       view === "transaction" ||
+      view === "address" ||
       view === "senders")
       ? "blocks"
       : view;
@@ -192,7 +195,11 @@ export function App() {
   useEffect(() => {
     if (
       transactionDataEnabled === false &&
-      (view === "block" || view === "transactions" || view === "transaction" || view === "senders") &&
+      (view === "block" ||
+        view === "transactions" ||
+        view === "transaction" ||
+        view === "address" ||
+        view === "senders") &&
       writePermalink("blocks", {})
     ) {
       setClientLocation(getCurrentLocation());
@@ -540,6 +547,14 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
+          />
+        ) : activeView === "address" ? (
+          <TransactionsView
+            locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
+            lockedAddress={addressParam}
           />
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView

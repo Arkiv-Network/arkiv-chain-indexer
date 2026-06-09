@@ -4,6 +4,7 @@ export type View =
   | "block"
   | "transactions"
   | "transaction"
+  | "address"
   | "transaction-records"
   | "senders"
   | "ranges"
@@ -21,6 +22,7 @@ const VIEW_PATHS: Record<View, string> = {
   block: "/block",
   transactions: "/transactions",
   transaction: "/tx",
+  address: "/address",
   "transaction-records": "/records",
   senders: "/senders",
   ranges: "/ranges",
@@ -38,6 +40,7 @@ const VIEW_PATH_ALIASES: Record<string, View> = {
   "/block": "block",
   "/transactions": "transactions",
   "/tx": "transaction",
+  "/address": "address",
   "/transaction-records": "transaction-records",
   "/records": "transaction-records",
   "/senders": "senders",
@@ -94,6 +97,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "block") return "block";
   if (value === "transactions") return "transactions";
   if (value === "transaction") return "transaction";
+  if (value === "address") return "address";
   if (value === "transaction-records") return "transaction-records";
   if (value === "senders") return "senders";
   if (value === "ranges") return "ranges";
@@ -116,6 +120,9 @@ export function readViewFromLocation(location: ClientLocation): View {
   // Detail route with a dynamic hash segment: /tx/<hash>
   if (pathname === "/tx" || pathname.startsWith("/tx/")) return "transaction";
 
+  // Detail route with a dynamic address segment: /address/<0x…>
+  if (pathname === "/address" || pathname.startsWith("/address/")) return "address";
+
   const pathView = VIEW_PATH_ALIASES[pathname];
   if (pathView) return pathView;
 
@@ -137,6 +144,58 @@ export function readTransactionHashFromLocation(location: ClientLocation): strin
 /** Build a client-side href for the transaction detail panel (`/tx/<hash>`). */
 export function transactionDetailHref(hash: string): string {
   return `${routePathForView("transaction")}/${encodeURIComponent(hash.trim())}`;
+}
+
+/** Extract the address from an `/address/<0x…>` path, or null if absent. */
+export function readAddressFromLocation(location: ClientLocation): string | null {
+  const pathname = normalizePathname(location.pathname);
+  const match = pathname.match(/^\/address\/(.+)$/);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]).trim() || null;
+  } catch {
+    return match[1].trim() || null;
+  }
+}
+
+/** Build a client-side href for the address page (`/address/<0x…>?<filters>`). */
+export function addressDetailHref(address: string, filters: Record<string, string> = {}): string {
+  const base = `${routePathForView("address")}/${encodeURIComponent(address.trim())}`;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === VIEW_PARAM || key === "address") continue;
+    const trimmed = value.trim();
+    if (trimmed) params.set(key, trimmed);
+  }
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
+}
+
+/** Absolute href for the address page — used for the shareable "Copy link". */
+export function buildAddressPermalinkHref(address: string, filters: Record<string, string>): string {
+  if (typeof window === "undefined") return addressDetailHref(address, filters);
+
+  const url = new URL(window.location.href);
+  url.pathname = `${routePathForView("address")}/${encodeURIComponent(address.trim())}`;
+  url.search = "";
+  url.hash = "";
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === VIEW_PARAM || key === "address") continue;
+    const trimmed = value.trim();
+    if (trimmed) url.searchParams.set(key, trimmed);
+  }
+  return url.toString();
+}
+
+/** Navigate to the address page (address in the path, other filters in the query). */
+export function writeAddressPermalink(address: string, filters: Record<string, string>): boolean {
+  if (typeof window === "undefined") return false;
+
+  const href = buildAddressPermalinkHref(address, filters);
+  if (href === window.location.href) return false;
+
+  window.history.pushState(null, "", href);
+  return true;
 }
 
 /** Navigate to the transaction detail panel via history.pushState. */
