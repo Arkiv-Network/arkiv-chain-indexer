@@ -3,7 +3,7 @@ import { fetchBlockInspect, type BlockInspectResponse, type InspectedTransaction
 import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
-import { transactionExplorerHref } from "./transactionLinks";
+import { TransactionHashLink } from "./TransactionView";
 
 interface BlockViewProps {
   locationSearch: string;
@@ -83,7 +83,10 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   const block = data?.block;
-  const columns = useMemo(() => transactionColumns(tokenSymbol), [tokenSymbol]);
+  const columns = useMemo(
+    () => transactionColumns(tokenSymbol, onLocationChange),
+    [tokenSymbol, onLocationChange],
+  );
 
   return (
     <section className="view block-view">
@@ -197,7 +200,7 @@ function Metric({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function transactionColumns(tokenSymbol: string): Column[] {
+function transactionColumns(tokenSymbol: string, onLocationChange: () => void): Column[] {
   return [
     {
       key: "position",
@@ -210,7 +213,7 @@ function transactionColumns(tokenSymbol: string): Column[] {
       key: "hash",
       label: "Hash",
       width: "16rem",
-      render: (row) => <TransactionHashLink hash={row.hash} />,
+      render: (row) => <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />,
     },
     {
       key: "from",
@@ -278,29 +281,6 @@ function transactionColumns(tokenSymbol: string): Column[] {
 function readBlockFromSearch(search: string): string {
   const value = new URLSearchParams(search).get("block");
   return value?.trim() ?? EMPTY_BLOCK;
-}
-
-function TransactionHashLink({ hash }: { hash: string | null | undefined }) {
-  const href = transactionExplorerHref(hash);
-  if (!href) {
-    return (
-      <span className="mono truncate" title={hash ?? undefined}>
-        {shortHash(hash)}
-      </span>
-    );
-  }
-
-  return (
-    <a className="mono truncate block-link" href={href} target="_blank" rel="noreferrer" title={hash ?? undefined}>
-      {shortHash(hash)}
-    </a>
-  );
-}
-
-function shortHash(value: string | null | undefined): string {
-  if (!value) return "-";
-  if (value.length <= 18) return value;
-  return `${value.slice(0, 10)}...${value.slice(-8)}`;
 }
 
 function statusLabel(value: string | null): string {

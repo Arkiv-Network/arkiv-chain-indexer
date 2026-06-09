@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { BlockNumberLink } from "./blockLinks";
@@ -7,10 +7,12 @@ import {
   buildPermalinkHref,
   filtersEqual,
   readFiltersFromSearch,
+  transactionDetailHref,
   writePermalink,
+  writeTransactionPermalink,
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
-import { addressSearchHref, transactionExplorerHref } from "./transactionLinks";
+import { addressSearchHref } from "./transactionLinks";
 
 interface TransactionsViewProps {
   locationSearch: string;
@@ -117,8 +119,11 @@ function transactionColumns(timeZone: string, onLocationChange: () => void, toke
         value={row.hash}
         label={shortHash(row.hash)}
         copyLabel="transaction hash"
-        href={transactionExplorerHref(row.hash)}
-        external
+        href={transactionDetailHref(row.hash)}
+        onClick={(event) => {
+          event.preventDefault();
+          if (writeTransactionPermalink(row.hash)) onLocationChange();
+        }}
       />
     ),
   },
@@ -415,6 +420,7 @@ function CopyCell({
   copyLabel,
   href,
   external = false,
+  onClick,
 }: {
   value: string | null | undefined;
   label: string;
@@ -422,6 +428,7 @@ function CopyCell({
   copyLabel: string;
   href?: string | null;
   external?: boolean;
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const copyValue = value?.trim();
   const [copied, setCopied] = useState(false);
@@ -453,6 +460,7 @@ function CopyCell({
       href={href}
       target={external ? "_blank" : undefined}
       rel={external ? "noreferrer" : undefined}
+      onClick={onClick}
     >
       {label}
     </a>

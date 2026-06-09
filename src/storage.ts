@@ -1346,6 +1346,39 @@ export class ScannerStorage {
     return Number(result.rows[0]?.count ?? "0");
   }
 
+  async getTransactionByHash(hash: string): Promise<StoredTransaction | null> {
+    const result = await this.pool.query<TransactionRow>(
+      `SELECT
+        block_number,
+        block_date,
+        base_block_fee_wei,
+        position,
+        hash,
+        from_address,
+        to_address,
+        transaction_type,
+        nonce,
+        value_wei,
+        gas_limit,
+        gas_used,
+        cumulative_gas_used,
+        gas_price_wei,
+        max_fee_per_gas_wei,
+        max_priority_fee_per_gas_wei,
+        effective_gas_price_wei,
+        priority_fee_wei,
+        transaction_fee_wei,
+        status,
+        contract_address
+      FROM ${this.qTransactions}
+      WHERE hash = $1
+      LIMIT 1`,
+      [hash.toLowerCase()],
+    );
+    const row = result.rows[0];
+    return row ? mapTransactionRow(row) : null;
+  }
+
   async queryTransactionRecords(
     filter: TransactionRecordsQueryFilter = {},
   ): Promise<StoredTransactionRecordsByCategory> {

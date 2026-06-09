@@ -102,6 +102,10 @@ export interface TransactionsResponseBody {
   transactions: StoredTransaction[];
 }
 
+export interface TransactionByHashResponseBody {
+  transaction: StoredTransaction;
+}
+
 export interface TransactionRecordsResponseBody {
   limit: number;
   records: StoredTransactionRecordsByCategory;
@@ -374,6 +378,14 @@ export async function handleRequest(
       return jsonError(404, "Transaction data is disabled");
     }
     return handleGetTransactions(url, storage);
+  }
+
+  const transactionByHashMatch = url.pathname.match(/^\/transaction\/(0x[0-9a-fA-F]{64})$/);
+  if (transactionByHashMatch?.[1]) {
+    if (!transactionDataEnabled) {
+      return jsonError(404, "Transaction data is disabled");
+    }
+    return handleGetTransactionByHash(transactionByHashMatch[1], storage);
   }
 
   if (url.pathname === "/transaction-records") {
@@ -758,6 +770,14 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
   };
 
   return jsonResponse(body);
+}
+
+async function handleGetTransactionByHash(hash: string, storage: ScannerStorage): Promise<Response> {
+  const transaction = await storage.getTransactionByHash(hash);
+  if (!transaction) {
+    return jsonError(404, `Transaction ${hash} was not found in storage`);
+  }
+  return jsonResponse({ transaction } satisfies TransactionByHashResponseBody);
 }
 
 async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): Promise<Response> {

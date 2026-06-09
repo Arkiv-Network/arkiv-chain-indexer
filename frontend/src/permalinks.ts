@@ -3,6 +3,7 @@ export type View =
   | "blocks"
   | "block"
   | "transactions"
+  | "transaction"
   | "transaction-records"
   | "senders"
   | "ranges"
@@ -19,6 +20,7 @@ const VIEW_PATHS: Record<View, string> = {
   blocks: "/blocks",
   block: "/block",
   transactions: "/transactions",
+  transaction: "/tx",
   "transaction-records": "/records",
   senders: "/senders",
   ranges: "/ranges",
@@ -35,6 +37,7 @@ const VIEW_PATH_ALIASES: Record<string, View> = {
   "/blocks": "blocks",
   "/block": "block",
   "/transactions": "transactions",
+  "/tx": "transaction",
   "/transaction-records": "transaction-records",
   "/records": "transaction-records",
   "/senders": "senders",
@@ -90,6 +93,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "blocks") return "blocks";
   if (value === "block") return "block";
   if (value === "transactions") return "transactions";
+  if (value === "transaction") return "transaction";
   if (value === "transaction-records") return "transaction-records";
   if (value === "senders") return "senders";
   if (value === "ranges") return "ranges";
@@ -109,10 +113,46 @@ export function readViewFromLocation(location: ClientLocation): View {
     if (legacyView !== "home") return legacyView;
   }
 
+  // Detail route with a dynamic hash segment: /tx/<hash>
+  if (pathname === "/tx" || pathname.startsWith("/tx/")) return "transaction";
+
   const pathView = VIEW_PATH_ALIASES[pathname];
   if (pathView) return pathView;
 
   return readViewFromSearch(location.search);
+}
+
+/** Extract the transaction hash from a `/tx/<hash>` path, or null if absent. */
+export function readTransactionHashFromLocation(location: ClientLocation): string | null {
+  const pathname = normalizePathname(location.pathname);
+  const match = pathname.match(/^\/tx\/(.+)$/);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]).trim() || null;
+  } catch {
+    return match[1].trim() || null;
+  }
+}
+
+/** Build a client-side href for the transaction detail panel (`/tx/<hash>`). */
+export function transactionDetailHref(hash: string): string {
+  return `${routePathForView("transaction")}/${encodeURIComponent(hash.trim())}`;
+}
+
+/** Navigate to the transaction detail panel via history.pushState. */
+export function writeTransactionPermalink(hash: string): boolean {
+  if (typeof window === "undefined") return false;
+
+  const url = new URL(window.location.href);
+  url.pathname = transactionDetailHref(hash);
+  url.search = "";
+  url.hash = "";
+
+  const href = url.toString();
+  if (href === window.location.href) return false;
+
+  window.history.pushState(null, "", href);
+  return true;
 }
 
 export function readFiltersFromSearch<T extends Record<string, string>>(

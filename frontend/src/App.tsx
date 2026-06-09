@@ -31,12 +31,18 @@ import {
   type PageSettings,
   writeStoredPageSettings,
 } from "./pageSettings";
-import { getCurrentLocation, readViewFromLocation, writePermalink } from "./permalinks";
+import {
+  getCurrentLocation,
+  readTransactionHashFromLocation,
+  readViewFromLocation,
+  writePermalink,
+} from "./permalinks";
 import { RangesView } from "./RangesView";
 import { RecordTransactionsView } from "./RecordTransactionsView";
 import { SendersView } from "./SendersView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
+import { TransactionView } from "./TransactionView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
@@ -86,8 +92,13 @@ export function App() {
   );
   const locationSearch = clientLocation.search;
   const view = readViewFromLocation(clientLocation);
+  const transactionHash = readTransactionHashFromLocation(clientLocation);
   const activeView =
-    transactionDataEnabled !== true && (view === "block" || view === "transactions" || view === "senders")
+    transactionDataEnabled !== true &&
+    (view === "block" ||
+      view === "transactions" ||
+      view === "transaction" ||
+      view === "senders")
       ? "blocks"
       : view;
   const chartFullscreen = activeView === "chart-fullscreen";
@@ -181,7 +192,7 @@ export function App() {
   useEffect(() => {
     if (
       transactionDataEnabled === false &&
-      (view === "block" || view === "transactions" || view === "senders") &&
+      (view === "block" || view === "transactions" || view === "transaction" || view === "senders") &&
       writePermalink("blocks", {})
     ) {
       setClientLocation(getCurrentLocation());
@@ -519,6 +530,13 @@ export function App() {
         ) : activeView === "transactions" ? (
           <TransactionsView
             locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+            tokenSymbol={pageSettings.tokenSymbol}
+          />
+        ) : activeView === "transaction" ? (
+          <TransactionView
+            hash={transactionHash}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}

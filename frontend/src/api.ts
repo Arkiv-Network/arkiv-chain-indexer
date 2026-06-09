@@ -970,6 +970,21 @@ export function fetchTransactions(params: URLSearchParams): Promise<Transactions
   return getJson<TransactionsResponse>("/transactions", params);
 }
 
+export interface TransactionByHashResponse {
+  transaction: StoredTransaction;
+}
+
+export async function fetchTransactionByHash(hash: string): Promise<StoredTransaction | null> {
+  const response = await fetch(`/api/transaction/${encodeURIComponent(hash)}`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  const body = (await response.json()) as TransactionByHashResponse;
+  return body.transaction;
+}
+
 export function fetchTransactionRecords(params: URLSearchParams): Promise<TransactionRecordsResponse> {
   return getJson<TransactionRecordsResponse>("/transaction-records", params);
 }

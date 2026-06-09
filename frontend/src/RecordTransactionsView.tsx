@@ -8,7 +8,7 @@ import {
 import { addressDisplay } from "./addressAliases";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
-import { transactionExplorerHref } from "./transactionLinks";
+import { TransactionHashLink } from "./TransactionView";
 
 interface RecordTransactionsViewProps {
   onLocationChange: () => void;
@@ -143,15 +143,7 @@ function RecordCategoryTable({
                   </td>
                   <td data-label="Date">{fmtDate(row.blockDate, timeZone)}</td>
                   <td data-label="Hash">
-                    <a
-                      className="mono truncate"
-                      href={transactionExplorerHref(row.hash) ?? undefined}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={row.hash}
-                    >
-                      {shortHash(row.hash)}
-                    </a>
+                    <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />
                   </td>
                   <td data-label="From">
                     <AddressText address={row.from} />
@@ -179,8 +171,4 @@ function AddressText({ address }: { address: string | null | undefined }) {
       {display.label}
     </span>
   );
-}
-
-function shortHash(hash: string): string {
-  return hash.length <= 14 ? hash : `${hash.slice(0, 8)}...${hash.slice(-6)}`;
 }
