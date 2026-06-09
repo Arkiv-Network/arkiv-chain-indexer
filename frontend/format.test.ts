@@ -6,8 +6,10 @@ import {
   fmtEth,
   fmtGwei,
   fmtInteger,
+  fmtMillions,
   fmtRatio,
   fmtSig,
+  fmtThousands,
   fmtUtcDate,
 } from "./src/format";
 
@@ -55,6 +57,24 @@ describe("frontend format helpers", () => {
     expect(fmtSig(1_234_567)).toBe("1234567.0");
     expect(fmtSig(-1.234567)).toBe("-1.235");
     expect(fmtSig(-0.0001345)).toBe("-0.0001345");
+  });
+
+  test("keeps trailing zeros when trimZeros is false", () => {
+    // 9.3797992667 ETH rounds to 4 significant digits as "9.380" — the trailing
+    // zero must survive instead of collapsing to "9.38".
+    expect(fmtEth("9379799266705438590", { trimZeros: false })).toBe("9.380");
+    expect(fmtEth("9379799266705438590")).toBe("9.38");
+    expect(fmtSig(9.38, { trimZeros: false })).toBe("9.380");
+    expect(fmtSig(0.1, { trimZeros: false })).toBe("0.1000");
+  });
+
+  test("formats raw counts in millions and thousands", () => {
+    expect(fmtMillions(null)).toBe("—");
+    expect(fmtMillions("7068398560")).toBe("7068.40M");
+    expect(fmtMillions("not-a-number")).toBe("not-a-number");
+    expect(fmtThousands(null)).toBe("—");
+    expect(fmtThousands("2025329")).toBe("2025.33K");
+    expect(fmtThousands("not-a-number")).toBe("not-a-number");
   });
 
   test("formats ratios and integers without changing stored precision", () => {

@@ -19,10 +19,13 @@ export function fmtGwei(weiStr: string | null | undefined): string {
   }
 }
 
-export function fmtEth(weiStr: string | null | undefined): string {
+export function fmtEth(
+  weiStr: string | null | undefined,
+  options: FmtSigOptions = {},
+): string {
   if (weiStr === undefined || weiStr === null) return "—";
   try {
-    return fmtSig(weiToScaledNumber(BigInt(weiStr), ETH_IN_WEI));
+    return fmtSig(weiToScaledNumber(BigInt(weiStr), ETH_IN_WEI), options);
   } catch {
     return String(weiStr);
   }
@@ -41,6 +44,12 @@ export function fmtRatio(usedStr: string | null | undefined, limitStr: string | 
   }
 }
 
+export interface FmtSigOptions {
+  /** Trim trailing zeros from the fractional part (default true). Set false to keep
+   *  the full significant-digit width, e.g. "9.380" instead of "9.38". */
+  trimZeros?: boolean;
+}
+
 /**
  * Renders a number with up to 4 significant digits, picking a sensible width:
  *   - |x| < 1e-8       → "0"
@@ -48,7 +57,11 @@ export function fmtRatio(usedStr: string | null | undefined, limitStr: string | 
  *   - otherwise        → 4 significant digits, capped at 9 decimals, trailing
  *                        zeros trimmed ("0.0001345", "1.234", "999.9")
  */
-export function fmtSig(value: number | string | null | undefined): string {
+export function fmtSig(
+  value: number | string | null | undefined,
+  options: FmtSigOptions = {},
+): string {
+  const { trimZeros = true } = options;
   if (value === undefined || value === null) return "—";
   const num = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(num)) return String(value);
@@ -65,7 +78,7 @@ export function fmtSig(value: number | string | null | undefined): string {
   const decimals = Math.min(MAX_DECIMALS, Math.max(0, SIG_DIGITS - 1 - exp));
   let result = num.toFixed(decimals);
 
-  if (result.includes(".")) {
+  if (trimZeros && result.includes(".")) {
     result = result.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
   }
   return result;
@@ -94,6 +107,14 @@ export function fmtMillions(value: string | number | null | undefined): string {
   const num = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(num)) return String(value);
   return `${(num / 1_000_000).toFixed(2)}M`;
+}
+
+/** Render a raw count in thousands with two decimals and a "K" suffix (e.g. 2025329 → "2025.33K"). */
+export function fmtThousands(value: string | number | null | undefined): string {
+  if (value === undefined || value === null) return "—";
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  return `${(num / 1_000).toFixed(2)}K`;
 }
 
 export function fmtBytes(value: string | number | null | undefined): string {

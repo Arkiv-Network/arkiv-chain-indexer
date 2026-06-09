@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchSenders, type SendersResponse } from "./api";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtEth, fmtInteger } from "./format";
+import { fmtDate, fmtEth, fmtInteger, fmtMillions, fmtThousands } from "./format";
 import { buildPermalinkHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { AddressCell } from "./TransactionsView";
@@ -155,10 +155,10 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
                 </td>
                 <td className="num" data-label="Tx found">{fmtInteger(row.transactionCount)}</td>
                 <td className="num" data-label="Latest nonce">{fmtInteger(row.latestNonce)}</td>
-                <td className="num" data-label="Gas used">{fmtInteger(row.totalGasUsed)}</td>
-                <td className="num" data-label={`Fees spent (${tokenSymbol})`}>{fmtEth(row.totalTransactionFeeWei)}</td>
+                <td className="num" data-label="Gas used">{fmtMillions(row.totalGasUsed)}</td>
+                <td className="num" data-label={`Fees spent (${tokenSymbol})`}>{fmtEth(row.totalTransactionFeeWei, { trimZeros: false })}</td>
                 <td className="num" data-label={`Value sent (${tokenSymbol})`}>{fmtEth(row.totalValueWei)}</td>
-                <td className="num" data-label="Avg gas">{fmtInteger(row.averageGasUsed)}</td>
+                <td className="num" data-label="Avg gas">{fmtThousands(row.averageGasUsed)}</td>
                 <td className="num" data-label={`Avg fee (${tokenSymbol})`}>{fmtEth(row.averageTransactionFeeWei)}</td>
                 <td className="num" data-label="First tx block">
                   <BlockNumberLink
