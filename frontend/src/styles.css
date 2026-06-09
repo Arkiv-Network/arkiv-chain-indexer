@@ -2177,6 +2177,11 @@ td.num {
   gap: 0.1rem;
 }
 
+/* Reserve width so changing gas/fee values don't shift neighbouring stats on refresh */
+.guzzler-activity-stats > div.stat-wide {
+  min-width: 8rem;
+}
+
 .guzzler-activity-stats dt {
   order: 2;
   font-size: 0.68rem;
@@ -2450,6 +2455,12 @@ td.num {
 button.secondary:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Reserve width for the wider "Refreshing" label so the button doesn't resize on refresh */
+button.secondary.guzzler-refresh {
+  min-width: 6.5rem;
+  text-align: center;
 }
 
 .block-inspector-form {

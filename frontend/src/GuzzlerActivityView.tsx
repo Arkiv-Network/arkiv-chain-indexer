@@ -148,7 +148,7 @@ export function GuzzlerActivityView({
               </button>
             ))}
           </div>
-          <button type="button" className="secondary" onClick={load} disabled={loading}>
+          <button type="button" className="secondary guzzler-refresh" onClick={load} disabled={loading}>
             {loading ? "Refreshing" : "Refresh"}
           </button>
         </div>
@@ -196,11 +196,11 @@ export function GuzzlerActivityView({
           <dt>Transactions</dt>
           <dd>{fmtInteger(summary.totalTransactions)}</dd>
         </div>
-        <div>
+        <div className="stat-wide">
           <dt>Gas used</dt>
           <dd>{fmtMillions(summary.totalGasUsed)}</dd>
         </div>
-        <div>
+        <div className="stat-wide">
           <dt>Fees ({tokenSymbol})</dt>
           <dd>{fmtEth(summary.totalFeeWei)}</dd>
         </div>
