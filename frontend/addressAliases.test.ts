@@ -19,7 +19,7 @@ describe("address aliases", () => {
     const display = addressDisplay("0x1234567890abcdef1234567890ABCDEF12345678");
 
     expect(display).toEqual({
-      label: "0x12345678...12345678",
+      label: "0x12345678…12345678",
       title: "0x1234567890abcdef1234567890ABCDEF12345678",
     });
   });

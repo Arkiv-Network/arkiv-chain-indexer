@@ -31,5 +31,5 @@ function normalizeAddress(value: string | null | undefined): string | null {
 
 function shortAddress(value: string): string {
   if (value.length <= 18) return value;
-  return `${value.slice(0, 10)}...${value.slice(-8)}`;
+  return `${value.slice(0, 10)}…${value.slice(-8)}`;
 }
