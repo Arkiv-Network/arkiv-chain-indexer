@@ -1,4 +1,5 @@
-import pg from "pg";
+import { SQL } from "bun";
+import type { ReservedSQL, SQL as BunSQL } from "bun";
 import {
   DEFAULT_RANGE_SIZE,
   assertSupportedRangeSize,
@@ -10,10 +11,6 @@ import type { BlockMetrics, Hex } from "./types";
 import type { InspectedBlock, InspectedTransaction } from "./blockInspector";
 import type { BaseloadConfig } from "./baseloadConfig";
 import type { BatcherMetrics } from "./batcher";
-
-const { Pool, types } = pg;
-
-types.setTypeParser(20, (value: string) => value);
 
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
 const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
@@ -252,6 +249,57 @@ export interface StoredBaseloadConfig extends StoredBaseloadConfigSummary {
   config: BaseloadConfig;
 }
 
+interface QueryResult<T> {
+  rows: T[];
+  rowCount: number;
+}
+
+interface Queryable {
+  query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
+}
+
+interface TransactionClient extends Queryable {
+  release(): void;
+}
+
+class BunSqlPool implements Queryable {
+  constructor(private readonly sql: BunSQL) {}
+
+  async query<T>(query: string, params: unknown[] = []): Promise<QueryResult<T>> {
+    return queryBunSql(this.sql, query, params);
+  }
+
+  async connect(): Promise<TransactionClient> {
+    const reserved = await this.sql.reserve();
+    return new BunSqlTransactionClient(reserved);
+  }
+
+  async end(): Promise<void> {
+    await this.sql.close();
+  }
+}
+
+class BunSqlTransactionClient implements TransactionClient {
+  constructor(private readonly sql: ReservedSQL) {}
+
+  async query<T>(query: string, params: unknown[] = []): Promise<QueryResult<T>> {
+    return queryBunSql(this.sql, query, params);
+  }
+
+  release(): void {
+    this.sql.release();
+  }
+}
+
+async function queryBunSql<T>(
+  sql: BunSQL | ReservedSQL,
+  query: string,
+  params: unknown[] = [],
+): Promise<QueryResult<T>> {
+  const rows = await sql.unsafe<T[]>(query, params);
+  return { rows, rowCount: rows.length };
+}
+
 export class ScannerStorage {
   private readonly schema: string;
   private readonly qBlocks: string;
@@ -263,7 +311,7 @@ export class ScannerStorage {
   private readonly qBaseloadConfigs: string;
 
   private constructor(
-    private readonly pool: pg.Pool,
+    private readonly pool: BunSqlPool,
     options: ScannerStorageOptions = {},
   ) {
     this.schema = options.schema ?? "public";
@@ -280,19 +328,27 @@ export class ScannerStorage {
     connectionString: string,
     options: ScannerStorageOptions = {},
   ): Promise<ScannerStorage> {
-    const pool = new Pool({ connectionString });
+    const pool = new BunSqlPool(new SQL(connectionString));
+    const storage = new ScannerStorage(pool, options);
+    await storage.initSchema();
+    return storage;
+  }
+
+  static async fromSql(
+    sql: BunSQL,
+    options: ScannerStorageOptions = {},
+  ): Promise<ScannerStorage> {
+    const pool = new BunSqlPool(sql);
     const storage = new ScannerStorage(pool, options);
     await storage.initSchema();
     return storage;
   }
 
   static async fromPool(
-    pool: pg.Pool,
+    sql: BunSQL,
     options: ScannerStorageOptions = {},
   ): Promise<ScannerStorage> {
-    const storage = new ScannerStorage(pool, options);
-    await storage.initSchema();
-    return storage;
+    return ScannerStorage.fromSql(sql, options);
   }
 
   private async initSchema(): Promise<void> {
@@ -594,18 +650,18 @@ export class ScannerStorage {
   }
 
   async getScannerProgress(): Promise<ScannerProgress> {
+    const stateKeys = [
+      LAST_SUCCESSFUL_BLOCK_KEY,
+      BACKFILL_NEXT_BLOCK_KEY,
+      LATEST_OBSERVED_BLOCK_KEY,
+      SAFE_HEAD_BLOCK_KEY,
+      LATEST_OBSERVED_AT_KEY,
+    ];
+    const stateKeyPlaceholders = stateKeys.map((_key, index) => `$${index + 1}`).join(", ");
     const stateResult = await this.pool.query<{ key: string; value: string }>(
       `SELECT key, value FROM ${this.qScannerState}
-       WHERE key = ANY($1::text[])`,
-      [
-        [
-          LAST_SUCCESSFUL_BLOCK_KEY,
-          BACKFILL_NEXT_BLOCK_KEY,
-          LATEST_OBSERVED_BLOCK_KEY,
-          SAFE_HEAD_BLOCK_KEY,
-          LATEST_OBSERVED_AT_KEY,
-        ],
-      ],
+       WHERE key IN (${stateKeyPlaceholders})`,
+      stateKeys,
     );
     const state = new Map<string, string>(stateResult.rows.map((row) => [row.key, row.value]));
 
@@ -832,7 +888,7 @@ export class ScannerStorage {
   }
 
   private async deleteTransactionRecordsForBlock(
-    client: pg.PoolClient,
+    client: TransactionClient,
     blockNumber: bigint,
   ): Promise<void> {
     await client.query(`DELETE FROM ${this.qTransactionRecords} WHERE block_number = $1`, [
@@ -841,7 +897,7 @@ export class ScannerStorage {
   }
 
   private async upsertTransactionRecords(
-    client: pg.PoolClient,
+    client: TransactionClient,
     metrics: BlockMetrics,
     transactions: InspectedTransaction[],
   ): Promise<void> {
@@ -873,7 +929,7 @@ export class ScannerStorage {
   }
 
   private async getCurrentRecordMinimum(
-    client: pg.PoolClient,
+    client: TransactionClient,
     category: TransactionRecordCategory,
   ): Promise<bigint | undefined> {
     const result = await client.query<{ record_value: string }>(
@@ -890,7 +946,7 @@ export class ScannerStorage {
   }
 
   private async insertTransactionRecordRows(
-    client: pg.PoolClient,
+    client: TransactionClient,
     metrics: BlockMetrics,
     rows: Array<{
       category: TransactionRecordCategory;
@@ -988,7 +1044,7 @@ export class ScannerStorage {
   }
 
   private async pruneTransactionRecords(
-    client: pg.PoolClient,
+    client: TransactionClient,
     category: TransactionRecordCategory,
   ): Promise<void> {
     await client.query(
@@ -1006,7 +1062,7 @@ export class ScannerStorage {
   }
 
   private async replaceTransactionsForBlock(
-    client: pg.PoolClient,
+    client: TransactionClient,
     metrics: BlockMetrics,
     transactions: InspectedTransaction[],
   ): Promise<void> {
@@ -1250,7 +1306,8 @@ export class ScannerStorage {
          batcher_upper_threshold = COALESCE($5, batcher_upper_threshold),
          batcher_max_block_size = COALESCE($6, batcher_max_block_size),
          batcher_max_tx_size = COALESCE($7, batcher_max_tx_size)
-       WHERE block_number = $1`,
+       WHERE block_number = $1
+       RETURNING 1`,
       [
         blockNumber.toString(),
         metrics.batcherQueueSize ?? null,
@@ -1261,7 +1318,7 @@ export class ScannerStorage {
         metrics.batcherMaxTxSize ?? null,
       ],
     );
-    return (result.rowCount ?? 0) > 0;
+    return result.rowCount > 0;
   }
 
   async queryTransactions(filter: TransactionQueryFilter = {}): Promise<StoredTransaction[]> {
@@ -1519,10 +1576,11 @@ export class ScannerStorage {
           NOW() AS aggregated_at
         FROM ${this.qTransactions}
         WHERE from_address IS NOT NULL
-        GROUP BY LOWER(from_address)`,
+        GROUP BY LOWER(from_address)
+        RETURNING 1`,
       );
       await client.query("COMMIT");
-      return result.rowCount ?? 0;
+      return result.rowCount;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -1536,8 +1594,8 @@ export class ScannerStorage {
     const order = resolveQueryOrder(filter.order);
     const tieOrder = order === "DESC" ? "DESC" : "ASC";
     const result = await this.pool.query<SenderStatsRow>(
-      // transaction_count / *_block_number are BIGINT; the pg type parser (OID 20) already returns
-      // them as strings, so no ::text cast is needed. Do NOT cast: a transaction_count::text output
+      // transaction_count / *_block_number are BIGINT; Bun returns large numbers as strings by
+      // default, so no ::text cast is needed. Do NOT cast: a transaction_count::text output
       // column would shadow the BIGINT in ORDER BY and rank lexicographically (e.g. "9" > "1000").
       `SELECT
          address,
@@ -1619,8 +1677,11 @@ export class ScannerStorage {
   }
 
   async deleteBaseloadConfig(name: string): Promise<boolean> {
-    const result = await this.pool.query(`DELETE FROM ${this.qBaseloadConfigs} WHERE name = $1`, [name]);
-    return (result.rowCount ?? 0) > 0;
+    const result = await this.pool.query(
+      `DELETE FROM ${this.qBaseloadConfigs} WHERE name = $1 RETURNING 1`,
+      [name],
+    );
+    return result.rowCount > 0;
   }
 
   async aggregateRangeIfComplete(
@@ -1960,8 +2021,8 @@ export class ScannerStorage {
       max_block: string | null;
       max_block_date: string | null;
     }>(
-      // block_number is BIGINT and the pg type parser (OID 20) already returns it as a string, so
-      // no ::text cast is needed. Do NOT cast here: a block_number::text output column would shadow
+      // block_number is BIGINT and Bun returns large numbers as strings by default, so no ::text
+      // cast is needed. Do NOT cast here: a block_number::text output column would shadow
       // the BIGINT in ORDER BY and sort lexicographically ("1000000" < "999999"), giving min > max.
       `SELECT
          (SELECT block_number FROM ${this.qBlocks} ORDER BY block_number ASC LIMIT 1) AS min_block,
@@ -2023,8 +2084,8 @@ export class ScannerStorage {
       min_block_date: string;
       max_block_date: string;
     }>(
-      // range_start/range_end are BIGINT and the pg type parser (OID 20) already returns them as
-      // strings, so no ::text cast is needed. Do NOT cast: a range_start::text output column would
+      // range_start/range_end are BIGINT and Bun returns large numbers as strings by default, so no
+      // ::text cast is needed. Do NOT cast: a range_start::text output column would
       // shadow the BIGINT in ORDER BY and sort lexicographically ("999900" > "1000050").
       `SELECT range_start, range_end, min_block_date, max_block_date
        FROM ${this.qBlockRanges}
@@ -2056,7 +2117,7 @@ export class ScannerStorage {
     const resolvedLimit = resolveLimit(limit, MAX_BLOCKS_PER_QUERY);
     const result = await this.pool.query<{ gap_start: string; gap_end: string }>(
       // Arithmetic and ORDER BY run on the BIGINT block_number; the ::text casts only shape the
-      // output for transport (the pg parser returns BIGINT as string). Do NOT order by a ::text
+      // output for transport. Do NOT order by a ::text
       // alias — it would sort lexicographically.
       `SELECT
          (s.block_number + 1)::text AS gap_start,
@@ -2080,7 +2141,7 @@ export class ScannerStorage {
   }
 
   private async applyProgressUpdate(
-    client: pg.PoolClient,
+    client: TransactionClient,
     metrics: BlockMetrics,
     progressUpdate: BlockProgressUpdate,
   ): Promise<void> {
@@ -2097,7 +2158,7 @@ export class ScannerStorage {
   }
 
   private async upsertStateValue(
-    client: pg.PoolClient,
+    client: TransactionClient,
     key: string,
     value: string,
   ): Promise<void> {

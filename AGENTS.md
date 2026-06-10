@@ -47,8 +47,8 @@ docker compose up --build
 
 - Runtime code lives in `src/`.
 - `src/rpc.ts` intentionally uses raw JSON-RPC over `fetch` to avoid runtime dependencies.
-- `src/storage.ts` uses `pg` (node-postgres) with a connection pool. The whole storage API is async. Optionally
-  takes a `schema` so tests can run in isolated schemas against a shared database.
+- `src/storage.ts` uses Bun native SQL with a connection pool. The whole storage API is async. Optionally takes
+  a `schema` so tests can run in isolated schemas against a shared database.
 - `src/scanner.ts` owns retry and resume behavior.
 - `src/metrics.ts` owns all block metric calculations.
 - `src/server.ts` exposes `GET /blocks` and `GET /ranges` (built on `Bun.serve`) plus a `GET /health` probe.

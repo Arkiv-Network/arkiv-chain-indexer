@@ -1,18 +1,16 @@
-import pg from "pg";
+import { SQL } from "bun";
 import { ScannerStorage } from "./storage";
-
-const { Pool } = pg;
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
 export const hasPostgresForTests = (): boolean => Boolean(TEST_DATABASE_URL);
 
-const adminPools: pg.Pool[] = [];
+const adminClients: SQL[] = [];
 
-function adminPool(url: string): pg.Pool {
-  const pool = new Pool({ connectionString: url, max: 2 });
-  adminPools.push(pool);
-  return pool;
+function adminClient(url: string): SQL {
+  const sql = new SQL(url, { max: 2 });
+  adminClients.push(sql);
+  return sql;
 }
 
 export async function createIsolatedStorage(prefix = "test"): Promise<{
@@ -25,8 +23,8 @@ export async function createIsolatedStorage(prefix = "test"): Promise<{
 
   const suffix = Math.random().toString(36).slice(2, 10);
   const schema = `${prefix}_${suffix}`.toLowerCase();
-  const admin = adminPool(TEST_DATABASE_URL);
-  await admin.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+  const admin = adminClient(TEST_DATABASE_URL);
+  await admin.unsafe(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
 
   const storage = await ScannerStorage.open(TEST_DATABASE_URL, { schema });
 
@@ -37,7 +35,7 @@ export async function createIsolatedStorage(prefix = "test"): Promise<{
       // ignore
     }
     try {
-      await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      await admin.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     } catch {
       // ignore
     }
@@ -47,11 +45,11 @@ export async function createIsolatedStorage(prefix = "test"): Promise<{
 }
 
 export async function closeTestPools(): Promise<void> {
-  while (adminPools.length > 0) {
-    const pool = adminPools.pop();
-    if (pool) {
+  while (adminClients.length > 0) {
+    const sql = adminClients.pop();
+    if (sql) {
       try {
-        await pool.end();
+        await sql.close();
       } catch {
         // ignore
       }
