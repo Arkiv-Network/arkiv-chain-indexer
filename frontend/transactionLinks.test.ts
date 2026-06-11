@@ -38,9 +38,9 @@ describe("transaction links", () => {
     expect(transactionExplorerHref("0x1234")).toBeNull();
   });
 
-  test("builds internal address search links on page one", () => {
+  test("builds internal address detail links", () => {
     expect(addressSearchHref("0x1234567890abcdef1234567890ABCDEF12345678")).toBe(
-      "/transactions?address=0x1234567890abcdef1234567890ABCDEF12345678&page=1",
+      "/address/0x1234567890abcdef1234567890ABCDEF12345678",
     );
   });
 
