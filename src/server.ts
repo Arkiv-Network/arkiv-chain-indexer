@@ -1,4 +1,5 @@
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
+import { type ArkivOperationSummaryEntry } from "./arkivOperations";
 import { type BlockInspectionResult } from "./blockInspector";
 import {
   DEFAULT_GUZZLER_LIMIT,
@@ -745,6 +746,15 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
     storage.countTransactions(filter),
   ]);
   const totalPages = Math.ceil(totalCount / effectiveLimit);
+  const operationsSummaries: Map<string, ArkivOperationSummaryEntry[]> =
+    transactions.length > 0
+      ? await storage.getOperationsSummaryForTransactions(
+          transactions.map((transaction) => ({
+            blockNumber: transaction.blockNumberDecimal,
+            position: transaction.position,
+          })),
+        )
+      : new Map();
 
   const body: TransactionsResponseBody = {
     count: transactions.length,
@@ -766,7 +776,12 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
       dateGt: filter.dateGt ?? null,
       dateLt: filter.dateLt ?? null,
     },
-    transactions,
+    transactions: transactions.map((transaction) => {
+      const operationsSummary = operationsSummaries.get(
+        `${transaction.blockNumberDecimal}:${transaction.position}`,
+      );
+      return operationsSummary ? { ...transaction, operationsSummary } : transaction;
+    }),
   };
 
   return jsonResponse(body);
@@ -777,7 +792,10 @@ async function handleGetTransactionByHash(hash: string, storage: ScannerStorage)
   if (!transaction) {
     return jsonError(404, `Transaction ${hash} was not found in storage`);
   }
-  return jsonResponse({ transaction } satisfies TransactionByHashResponseBody);
+  const operations = await storage.getOperationsByHash(hash);
+  return jsonResponse({
+    transaction: { ...transaction, operations },
+  } satisfies TransactionByHashResponseBody);
 }
 
 async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): Promise<Response> {

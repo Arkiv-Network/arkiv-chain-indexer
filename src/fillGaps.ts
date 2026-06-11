@@ -6,6 +6,7 @@ import {
   parseCli,
   type CliSpec,
 } from "./cli";
+import { ArkivDecoderClient } from "./arkivOperations";
 import { EthereumRpcClient } from "./rpc";
 import { scanOneBlock } from "./scanner";
 import { ScannerStorage, type BlockGap } from "./storage";
@@ -28,6 +29,7 @@ interface FillGapsConfig {
   txReceiptConcurrency: number;
   saveTransactionData: boolean;
   once: boolean;
+  decoderUrl?: string;
 }
 
 class FillGapsHelpRequested extends CliHelpRequested {}
@@ -90,6 +92,12 @@ progress are left untouched.`,
       env: ["SCANNER_SAVE_TRANSACTION_DATA", "SAVE_TRANSACTION_DATA"],
       default: "true",
     },
+    {
+      flags: "--decoder-url <url>",
+      description:
+        "Optional arkiv-transaction-decoder base URL. When set (and transaction rows are stored), filled blocks also get Arkiv operation metadata (no payload).",
+      env: ["DECODER_URL", "SCANNER_DECODER_URL"],
+    },
     { flags: "--once", description: "Run a single gap-fill cycle then exit." },
   ],
 };
@@ -111,6 +119,8 @@ function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): Fill
     throw new Error("DATABASE_URL (or --database-url) is required");
   }
 
+  const decoderUrl = cli.value("decoder-url");
+
   return {
     databaseUrl,
     rpcUrl,
@@ -128,6 +138,7 @@ function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): Fill
     ),
     saveTransactionData: coerceBoolean("--save-transaction-data", cli.value("save-transaction-data")!),
     once: cli.flag("once"),
+    ...(decoderUrl ? { decoderUrl } : {}),
   };
 }
 
@@ -165,6 +176,7 @@ async function fillBlockWithRetry(
   rpc: EthereumRpcClient,
   storage: ScannerStorage,
   config: FillGapsConfig,
+  decoderClient?: ArkivDecoderClient,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= config.maxRetries; attempt += 1) {
     try {
@@ -176,6 +188,9 @@ async function fillBlockWithRetry(
         { kind: "none" },
         {},
         config.saveTransactionData,
+        undefined,
+        undefined,
+        decoderClient,
       );
       return true;
     } catch (error) {
@@ -200,6 +215,7 @@ async function runCycle(
   storage: ScannerStorage,
   config: FillGapsConfig,
   isStopping: () => boolean,
+  decoderClient?: ArkivDecoderClient,
 ): Promise<void> {
   const startedAt = Date.now();
   const gaps = await storage.findBlockGaps(config.maxBlocksPerCycle);
@@ -216,7 +232,7 @@ async function runCycle(
     if (isStopping()) {
       break;
     }
-    const ok = await fillBlockWithRetry(block, rpc, storage, config);
+    const ok = await fillBlockWithRetry(block, rpc, storage, config, decoderClient);
     if (ok) {
       filled += 1;
     } else {
@@ -245,6 +261,7 @@ async function main(): Promise<void> {
   try {
     const config = parseConfig(process.argv.slice(2));
     const rpc = new EthereumRpcClient(config.rpcUrl);
+    const decoderClient = config.decoderUrl ? new ArkivDecoderClient(config.decoderUrl) : undefined;
     storage = await ScannerStorage.open(config.databaseUrl);
 
     console.log(
@@ -255,7 +272,7 @@ async function main(): Promise<void> {
     while (!stopping) {
       const startedAt = Date.now();
       try {
-        await runCycle(rpc, storage, config, () => stopping);
+        await runCycle(rpc, storage, config, () => stopping, decoderClient);
       } catch (error) {
         console.error("Gap-fill cycle failed:", error);
       }

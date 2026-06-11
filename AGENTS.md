@@ -29,6 +29,9 @@ docker compose up --build
   `COMMIT` / `ROLLBACK`).
 - Preserve wei and gas precision. Store large integer values as decimal strings and use `bigint` for calculations.
 - Fetch transaction receipts sequentially for the current block so the scanner handles transactions one by one.
+- Transaction payloads/calldata are never persisted — only Arkiv operation metadata, the payload size, and the
+  transaction hash. The decoder's `payload.hex` / `payload.text` and the raw `input` field must never reach the
+  database.
 - Keep network-dependent tests opt-in. Normal `bun test` should not require an RPC endpoint **or** a database;
   storage / aggregator / server tests skip themselves unless `TEST_DATABASE_URL` is set.
 
@@ -47,6 +50,12 @@ docker compose up --build
 
 - Runtime code lives in `src/`.
 - `src/rpc.ts` intentionally uses raw JSON-RPC over `fetch` to avoid runtime dependencies.
+- `src/arkivOperations.ts` talks to the external arkiv-transaction-decoder microservice (compose service
+  `decoder`, env `DECODER_URL`, defaulted by compose to `http://decoder:3000`). Decoded operation metadata is
+  stored in `transaction_operations` (no payloads) in the same transaction as the block's transaction rows. A
+  decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes the whole block
+  retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
+  `GET /transactions` rows that have stored operations.
 - `src/storage.ts` uses `pg` (node-postgres) with a connection pool. The whole storage API is async. Optionally
   takes a `schema` so tests can run in isolated schemas against a shared database.
 - `src/scanner.ts` owns retry and resume behavior.

@@ -8,6 +8,12 @@ import {
 } from "./ranges";
 import type { BlockMetrics, Hex } from "./types";
 import type { InspectedBlock, InspectedTransaction } from "./blockInspector";
+import type {
+  ArkivOperation,
+  ArkivOperationAttribute,
+  ArkivOperationSummaryEntry,
+  TransactionArkivOperations,
+} from "./arkivOperations";
 import type { BaseloadConfig } from "./baseloadConfig";
 import type { BatcherMetrics } from "./batcher";
 
@@ -116,6 +122,8 @@ export interface StoredTransaction extends InspectedTransaction {
   blockNumberDecimal: string;
   blockDate: string;
   baseBlockFeeWei: string;
+  operations?: ArkivOperation[];
+  operationsSummary?: ArkivOperationSummaryEntry[];
 }
 
 export interface StoredTransactionRecord extends StoredTransaction {
@@ -258,6 +266,7 @@ export class ScannerStorage {
   private readonly qScannerState: string;
   private readonly qBlockRanges: string;
   private readonly qTransactions: string;
+  private readonly qTransactionOperations: string;
   private readonly qTransactionRecords: string;
   private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
@@ -271,6 +280,7 @@ export class ScannerStorage {
     this.qScannerState = `${quoteIdent(this.schema)}.scanner_state`;
     this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
     this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
+    this.qTransactionOperations = `${quoteIdent(this.schema)}.transaction_operations`;
     this.qTransactionRecords = `${quoteIdent(this.schema)}.transaction_records`;
     this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
@@ -427,6 +437,36 @@ export class ScannerStorage {
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_from_address_block_idx")}
        ON ${this.qTransactions} (LOWER(from_address), block_number, position)`,
+    );
+    // Decoded Arkiv operation metadata per transaction. Payloads/calldata are
+    // never stored — only payload_size_bytes. expires_at_blocks is BIGINT
+    // because uint32 max exceeds the int4 range.
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qTransactionOperations} (
+        block_number BIGINT NOT NULL,
+        position INTEGER NOT NULL,
+        op_index INTEGER NOT NULL,
+        hash TEXT NOT NULL,
+        block_date TEXT NOT NULL,
+        operation_type INTEGER NOT NULL,
+        operation TEXT NOT NULL,
+        entity_key TEXT,
+        content_type TEXT,
+        payload_size_bytes INTEGER NOT NULL DEFAULT 0,
+        attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        expires_at_blocks BIGINT,
+        new_owner TEXT,
+        scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (block_number, position, op_index)
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_hash_idx")}
+       ON ${this.qTransactionOperations} (hash)`,
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_entity_key_idx")}
+       ON ${this.qTransactionOperations} (entity_key)`,
     );
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactionRecords} (
@@ -639,6 +679,11 @@ export class ScannerStorage {
         regclassName: regclassName(this.schema, "transactions"),
       },
       {
+        name: "transaction_operations",
+        qualifiedName: this.qTransactionOperations,
+        regclassName: regclassName(this.schema, "transaction_operations"),
+      },
+      {
         name: "transaction_records",
         qualifiedName: this.qTransactionRecords,
         regclassName: regclassName(this.schema, "transaction_records"),
@@ -732,6 +777,7 @@ export class ScannerStorage {
     progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
     transactions?: InspectedTransaction[],
     recordCandidates: InspectedTransaction[] = transactions ?? [],
+    operations?: TransactionArkivOperations[],
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -818,6 +864,7 @@ export class ScannerStorage {
       );
       if (transactions !== undefined) {
         await this.replaceTransactionsForBlock(client, metrics, transactions);
+        await this.replaceOperationsForBlock(client, metrics, operations);
       }
       await this.deleteTransactionRecordsForBlock(client, metrics.blockNumber);
       await this.upsertTransactionRecords(client, metrics, recordCandidates);
@@ -1078,6 +1125,151 @@ export class ScannerStorage {
       ) VALUES ${values.join(", ")}`,
       params,
     );
+  }
+
+  /**
+   * Replace decoded Arkiv operation rows for one block. Always deletes first so
+   * re-scans never leave stale rows; only operation metadata is written — no
+   * payload bytes or calldata.
+   */
+  private async replaceOperationsForBlock(
+    client: pg.PoolClient,
+    metrics: BlockMetrics,
+    transactionOperations: TransactionArkivOperations[] | undefined,
+  ): Promise<void> {
+    await client.query(`DELETE FROM ${this.qTransactionOperations} WHERE block_number = $1`, [
+      metrics.blockNumber.toString(),
+    ]);
+
+    const rows = (transactionOperations ?? []).flatMap((transaction) =>
+      transaction.operations.map((operation) => ({ transaction, operation })),
+    );
+    if (rows.length === 0) {
+      return;
+    }
+
+    // Postgres caps one statement at 65,535 bind parameters and a single
+    // transaction can pack thousands of cheap operations, so insert in bounded
+    // chunks. Still atomic: saveBlockMetrics wraps this in BEGIN/COMMIT.
+    const columnsPerRow = 13;
+    const maxRowsPerInsert = 2_000;
+    for (let start = 0; start < rows.length; start += maxRowsPerInsert) {
+      const chunk = rows.slice(start, start + maxRowsPerInsert);
+      const params: Array<string | number | null> = [];
+      const values = chunk.map(({ transaction, operation }, rowIndex) => {
+        const offset = rowIndex * columnsPerRow;
+        params.push(
+          metrics.blockNumber.toString(),
+          transaction.position,
+          operation.opIndex,
+          transaction.hash,
+          metrics.blockDate,
+          operation.operationType,
+          operation.operation,
+          operation.entityKey,
+          operation.contentType,
+          operation.payloadSizeBytes,
+          JSON.stringify(operation.attributes),
+          operation.expiresAtBlocks.toString(),
+          operation.newOwner,
+        );
+        const placeholders = Array.from(
+          { length: columnsPerRow },
+          (_unused, columnIndex) => `$${offset + columnIndex + 1}`,
+        );
+        placeholders[10] = `${placeholders[10]}::jsonb`;
+        return `(${placeholders.join(", ")})`;
+      });
+
+      await client.query(
+        `INSERT INTO ${this.qTransactionOperations} (
+          block_number,
+          position,
+          op_index,
+          hash,
+          block_date,
+          operation_type,
+          operation,
+          entity_key,
+          content_type,
+          payload_size_bytes,
+          attributes,
+          expires_at_blocks,
+          new_owner
+        ) VALUES ${values.join(", ")}`,
+        params,
+      );
+    }
+  }
+
+  async getOperationsByHash(hash: string): Promise<ArkivOperation[]> {
+    const result = await this.pool.query<TransactionOperationRow>(
+      `SELECT
+        op_index,
+        operation_type,
+        operation,
+        entity_key,
+        content_type,
+        payload_size_bytes,
+        attributes,
+        expires_at_blocks,
+        new_owner
+      FROM ${this.qTransactionOperations}
+      WHERE hash = $1
+      ORDER BY block_number, position, op_index`,
+      [hash.toLowerCase()],
+    );
+    return result.rows.map(mapTransactionOperationRow);
+  }
+
+  /**
+   * Aggregate stored operation counts for the given `(blockNumber, position)`
+   * keys. The result map is keyed by `"${blockNumber}:${position}"` and only
+   * contains entries for transactions with at least one stored operation;
+   * entries are ordered by operation type ascending.
+   */
+  async getOperationsSummaryForTransactions(
+    keys: Array<{ blockNumber: string; position: number }>,
+  ): Promise<Map<string, ArkivOperationSummaryEntry[]>> {
+    const summaries = new Map<string, ArkivOperationSummaryEntry[]>();
+    if (keys.length === 0) {
+      return summaries;
+    }
+
+    const params: Array<string | number> = [];
+    const pairs = keys.map((key) => {
+      params.push(key.blockNumber);
+      const blockParam = params.length;
+      params.push(key.position);
+      return `($${blockParam}::bigint, $${params.length}::integer)`;
+    });
+
+    const result = await this.pool.query<{
+      block_number: string;
+      position: number;
+      operation: string;
+      operation_type: number;
+      count: number;
+    }>(
+      `SELECT block_number, position, operation, operation_type, COUNT(*)::int AS count
+       FROM ${this.qTransactionOperations}
+       WHERE (block_number, position) IN (${pairs.join(", ")})
+       GROUP BY block_number, position, operation, operation_type
+       ORDER BY operation_type ASC`,
+      params,
+    );
+
+    for (const row of result.rows) {
+      const key = `${row.block_number}:${row.position}`;
+      const entries = summaries.get(key) ?? [];
+      entries.push({
+        operation: row.operation,
+        operationType: row.operation_type,
+        count: row.count,
+      });
+      summaries.set(key, entries);
+    }
+    return summaries;
   }
 
   async queryBlocks(filter: BlockQueryFilter = {}): Promise<StoredBlock[]> {
@@ -2248,6 +2440,18 @@ type TransactionRecordRow = {
   recorded_at_utc: string;
 } & TransactionRow;
 
+interface TransactionOperationRow {
+  op_index: number;
+  operation_type: number;
+  operation: string;
+  entity_key: string | null;
+  content_type: string | null;
+  payload_size_bytes: number;
+  attributes: ArkivOperationAttribute[];
+  expires_at_blocks: string | null;
+  new_owner: string | null;
+}
+
 interface TransactionRow {
   block_number: string;
   block_date: string;
@@ -2357,6 +2561,22 @@ function parseTransactionRecordCategory(value: string): TransactionRecordCategor
     return value;
   }
   throw new Error(`Unknown transaction record category: ${value}`);
+}
+
+function mapTransactionOperationRow(row: TransactionOperationRow): ArkivOperation {
+  return {
+    opIndex: row.op_index,
+    operationType: row.operation_type,
+    operation: row.operation,
+    entityKey: row.entity_key,
+    contentType: row.content_type,
+    payloadSizeBytes: row.payload_size_bytes,
+    // attributes arrive already parsed from jsonb; expires_at_blocks is BIGINT
+    // and arrives as a string via the type-20 parser.
+    attributes: row.attributes,
+    expiresAtBlocks: Number(row.expires_at_blocks ?? 0),
+    newOwner: row.new_owner,
+  };
 }
 
 function mapTransactionRow(row: TransactionRow): StoredTransaction {

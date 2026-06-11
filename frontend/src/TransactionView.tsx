@@ -1,8 +1,8 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import { fetchTransactionByHash, type StoredTransaction } from "./api";
+import { fetchTransactionByHash, type ArkivOperation, type StoredTransaction } from "./api";
 import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtBytes, fmtDate, fmtDurationSeconds, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { transactionDetailHref, writeTransactionPermalink } from "./permalinks";
 import { transactionExplorerHref } from "./transactionLinks";
 
@@ -11,13 +11,20 @@ interface TransactionViewProps {
   onLocationChange: () => void;
   timeZone: string;
   tokenSymbol: string;
+  blockTimeMs: number;
 }
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
 type LoadStatus = "idle" | "loading" | "loaded" | "notfound" | "error";
 
-export function TransactionView({ hash, onLocationChange, timeZone, tokenSymbol }: TransactionViewProps) {
+export function TransactionView({
+  hash,
+  onLocationChange,
+  timeZone,
+  tokenSymbol,
+  blockTimeMs,
+}: TransactionViewProps) {
   const [query, setQuery] = useState(hash ?? "");
   const [formError, setFormError] = useState<string | null>(null);
   const [data, setData] = useState<StoredTransaction | null>(null);
@@ -107,6 +114,7 @@ export function TransactionView({ hash, onLocationChange, timeZone, tokenSymbol 
           transaction={data}
           timeZone={timeZone}
           tokenSymbol={tokenSymbol}
+          blockTimeMs={blockTimeMs}
           onLocationChange={onLocationChange}
         />
       ) : null}
@@ -118,16 +126,19 @@ function TransactionDetail({
   transaction,
   timeZone,
   tokenSymbol,
+  blockTimeMs,
   onLocationChange,
 }: {
   transaction: StoredTransaction;
   timeZone: string;
   tokenSymbol: string;
+  blockTimeMs: number;
   onLocationChange: () => void;
 }) {
   const status = statusInfo(transaction.status);
   const explorerHref = transactionExplorerHref(transaction.hash);
   const isContractCreation = !transaction.to && Boolean(transaction.contractAddress);
+  const operations = transaction.operations ?? [];
 
   return (
     <div className="tx-detail-card">
@@ -200,8 +211,73 @@ function TransactionDetail({
           </dl>
         </section>
       </div>
+
+      {operations.length > 0 ? (
+        <section className="tx-detail-group tx-detail-operations">
+          <h3>Arkiv operations ({operations.length})</h3>
+          {operations.map((operation) => (
+            <OperationCard key={operation.opIndex} operation={operation} blockTimeMs={blockTimeMs} />
+          ))}
+        </section>
+      ) : null}
     </div>
   );
+}
+
+function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; blockTimeMs: number }) {
+  const entityKey =
+    operation.entityKey && !isAllZeroBytes32(operation.entityKey) ? operation.entityKey : null;
+  const expirySeconds = (operation.expiresAtBlocks * blockTimeMs) / 1000;
+
+  return (
+    <div className="op-card">
+      <div className="op-card-head">
+        <span className={`op-badge op-${operation.operation}`}>{operation.operation}</span>
+        <span className="tx-muted">#{operation.opIndex}</span>
+      </div>
+      <dl className="tx-detail-grid">
+        <Row label="Entity key">
+          {entityKey ? (
+            <span className="tx-inline">
+              <span className="mono">{entityKey}</span>
+              <CopyButton value={entityKey} label="entity key" />
+            </span>
+          ) : (
+            "—"
+          )}
+        </Row>
+        <Row label="Content type">{operation.contentType ?? "—"}</Row>
+        <Row label="Payload size" title={`${fmtInteger(operation.payloadSizeBytes)} bytes`}>
+          {fmtBytes(operation.payloadSizeBytes)}
+        </Row>
+        {operation.attributes.length > 0 ? (
+          <Row label="Attributes">
+            <div className="op-attributes">
+              {operation.attributes.map((attribute, index) => (
+                <div key={`${attribute.key}:${index}`} title={attribute.valueTypeName}>
+                  {attribute.key} = <span className="mono">{attribute.value}</span>
+                </div>
+              ))}
+            </div>
+          </Row>
+        ) : null}
+        {operation.expiresAtBlocks > 0 ? (
+          <Row label="Expires">
+            {fmtInteger(operation.expiresAtBlocks)} blocks (~{fmtDurationSeconds(expirySeconds)})
+          </Row>
+        ) : null}
+        {operation.newOwner ? (
+          <Row label="New owner">
+            <AddressCell address={operation.newOwner} />
+          </Row>
+        ) : null}
+      </dl>
+    </div>
+  );
+}
+
+function isAllZeroBytes32(value: string): boolean {
+  return /^0x0{64}$/i.test(value.trim());
 }
 
 function Row({ label, children, title }: { label: string; children: ReactNode; title?: string }) {

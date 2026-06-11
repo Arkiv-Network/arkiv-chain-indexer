@@ -17,6 +17,11 @@
   --line-strong: #11111133;
   --ok: #1f7a4d;
 
+  /* Arkiv operation badge hues (create/update reuse --ok / --ark-blue). */
+  --op-amber: #b25e09;
+  --op-purple: #7a3fb8;
+  --op-red: #b3261e;
+
   /* Legacy aliases — map the existing variable names to the new palette
      so existing rules keep working without per-file rewrites. */
   --bg: var(--sand);
@@ -51,6 +56,9 @@
   --line-strong: #ffffff2e;
   --ark-blue: #6970ff;
   --ark-blue-2: #8a8fff;
+  --op-amber: #e8a34c;
+  --op-purple: #b48cf0;
+  --op-red: #f08a82;
 
   --bg: var(--sand);
   --fg: var(--ink);
@@ -73,6 +81,9 @@
     --line-strong: #ffffff2e;
     --ark-blue: #6970ff;
     --ark-blue-2: #8a8fff;
+    --op-amber: #e8a34c;
+    --op-purple: #b48cf0;
+    --op-red: #f08a82;
 
     --bg: var(--sand);
     --fg: var(--ink);
@@ -2964,6 +2975,81 @@ th:not(.num) .sort-header {
 .tx-muted {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+/* Arkiv operation badges — same visual language as .tx-status-badge, with the
+   per-operation hue carried by the --op-color custom property. */
+.op-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--op-color, var(--muted));
+  background: color-mix(in oklab, var(--op-color, var(--muted)) 14%, transparent);
+  border: 1px solid color-mix(in oklab, var(--op-color, var(--muted)) 38%, transparent);
+}
+
+.op-badge.op-create {
+  --op-color: var(--ok);
+}
+
+.op-badge.op-update {
+  --op-color: var(--ark-blue);
+}
+
+.op-badge.op-extend {
+  --op-color: var(--op-amber);
+}
+
+.op-badge.op-transfer {
+  --op-color: var(--op-purple);
+}
+
+.op-badge.op-delete {
+  --op-color: var(--op-red);
+}
+
+.op-badge.op-expire {
+  --op-color: var(--muted);
+}
+
+.op-badge-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.tx-detail-operations {
+  border-top: 1px solid var(--border);
+}
+
+.op-card {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.op-card:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.op-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.op-attributes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
 .charts-status {

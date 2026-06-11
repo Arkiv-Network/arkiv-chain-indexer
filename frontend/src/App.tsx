@@ -547,6 +547,7 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
+            blockTimeMs={pageSettings.blockTimeMs}
           />
         ) : activeView === "address" ? (
           <TransactionsView

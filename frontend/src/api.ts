@@ -178,6 +178,31 @@ interface CompactRangesResponse {
   ranges: RangeResponseRow[];
 }
 
+export interface ArkivOperationAttribute {
+  key: string;
+  valueType: number;
+  valueTypeName: string; // "uint" | "string" | "entityKey" | "unknown"
+  value: string;
+}
+
+export interface ArkivOperation {
+  opIndex: number; // 0-based index of the operation within the tx's execute() call
+  operationType: number; // 1=create 2=update 3=extend 4=transfer 5=delete 6=expire
+  operation: string; // "create" | "update" | "extend" | "transfer" | "delete" | "expire" | "unknown(N)"
+  entityKey: string | null; // bytes32 hex as returned by decoder
+  contentType: string | null; // decoded MIME-ish string or null
+  payloadSizeBytes: number; // SIZE ONLY — the payload bytes/hex/text are NEVER stored anywhere
+  attributes: ArkivOperationAttribute[];
+  expiresAtBlocks: number; // uint32 from decoder (0 when not applicable)
+  newOwner: string | null; // address for transfer ops, null otherwise
+}
+
+export interface ArkivOperationSummaryEntry {
+  operation: string;
+  operationType: number;
+  count: number;
+}
+
 export interface InspectedTransaction {
   blockNumber?: number;
   blockNumberDecimal?: string;
@@ -201,6 +226,10 @@ export interface InspectedTransaction {
   transactionFeeWei: string;
   status: string | null;
   contractAddress: string | null;
+  /** Decoded Arkiv operations; present on /transaction/<hash> detail responses. */
+  operations?: ArkivOperation[];
+  /** Per-operation-type counts; present on /transactions list rows that have stored operations. */
+  operationsSummary?: ArkivOperationSummaryEntry[];
 }
 
 export interface InspectedBlock {

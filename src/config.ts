@@ -22,6 +22,7 @@ export interface ScannerConfig {
   backfillSleepMs: number;
   batcherCollectorUrl?: string;
   redisUrl?: string;
+  decoderUrl?: string;
 }
 
 const DEFAULT_CONFIRMATION_DEPTH = 3n;
@@ -113,6 +114,12 @@ const SPEC: CliSpec = {
         "Optional Redis connection string. When set, recent senders are tracked for the guzzlers API.",
       env: ["REDIS_URL", "SCANNER_REDIS_URL"],
     },
+    {
+      flags: "--decoder-url <url>",
+      description:
+        "Optional arkiv-transaction-decoder base URL. When set (and transaction rows are stored), Arkiv registry transactions are decoded and operation metadata (no payload) is stored.",
+      env: ["DECODER_URL", "SCANNER_DECODER_URL"],
+    },
   ],
 };
 
@@ -138,6 +145,7 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
 
   const batcherCollectorUrl = cli.value("batcher-collector-url");
   const redisUrl = cli.value("redis-url");
+  const decoderUrl = cli.value("decoder-url");
 
   return {
     rpcUrl,
@@ -156,5 +164,6 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
     backfillSleepMs: coerceInt("--backfill-sleep-ms", cli.value("backfill-sleep-ms")!),
     ...(batcherCollectorUrl ? { batcherCollectorUrl } : {}),
     ...(redisUrl ? { redisUrl } : {}),
+    ...(decoderUrl ? { decoderUrl } : {}),
   };
 }

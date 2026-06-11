@@ -13,9 +13,9 @@ stats, and optional transaction rows; a small static frontend lets you browse th
 
 ## Quick start with Docker Compose
 
-The supplied compose stack spins up Postgres, the forward scanner, the historical backfill scanner, the batcher
-collector enrichment loop, the range aggregator loop, the sender aggregator loop, the backend, and the static
-frontend.
+The supplied compose stack spins up Postgres, the forward scanner, the historical backfill scanner, the Arkiv
+transaction decoder, the batcher collector enrichment loop, the range aggregator loop, the sender aggregator
+loop, the backend, and the static frontend.
 
 ```sh
 cp .env.example .env
@@ -41,6 +41,13 @@ The frontend container is a tiny Node `server.js` that serves the Vite-built Rea
 The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so production-style mainnet scans keep
 block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
+
+The `decoder` compose service builds the
+[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) microservice from its
+pinned `v0.1.0` tag. The scanners send Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL` (compose
+defaults it to `http://decoder:3000`) and store the decoded operation metadata in the `transaction_operations`
+table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
+payload size. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
 
 The main `scanner` container only ever scans forward near the safe chain head (it always runs with
 `SCANNER_DISABLE_BACKFILL=true`). Historical backfill runs exclusively in the separate `backfill-scanner` container
@@ -159,6 +166,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
+| `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder base URL. When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads). The gap filler accepts the same option. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Show help:
@@ -321,6 +329,15 @@ sum(priorityFee * receipt.gasUsed) / sum(receipt.gasUsed)
 ```
 
 For empty blocks all averages are stored as `0`.
+
+### Arkiv operation metadata
+
+When a decoder URL is configured and transaction rows are stored, decoded Arkiv operations land in the
+`transaction_operations` table, keyed by `(block_number, position, op_index)` and indexed by transaction hash and
+entity key. Each row stores metadata only: operation type and name, entity key, content type, attribute key/value
+pairs (JSONB), expiry in blocks, new owner, and the payload size in bytes. Transaction payloads and calldata are
+never persisted. Re-scanning a block replaces its operation rows in the same database transaction as its
+transaction rows.
 
 ### Range Aggregates
 
@@ -525,6 +542,17 @@ Example:
 ```sh
 curl 'http://localhost:3000/transactions?dateGt=2024-01-01T00:00:00Z&dateLt=2024-01-02T00:00:00Z&limit=1000'
 ```
+
+Rows for Arkiv registry transactions with stored operations additionally carry an `operationsSummary` array of
+`{ operation, operationType, count }` entries (ordered by operation type); rows without stored operations omit
+the field.
+
+### `GET /transaction/:hash`
+
+Returns one stored transaction as `{ "transaction": ... }`. The transaction always includes an `operations`
+array with the decoded Arkiv operation metadata recorded for it (empty when none): operation type/name, entity
+key, content type, attributes, expiry, new owner, and `payloadSizeBytes`. Payload bytes are never stored or
+returned. Returns `404` when the hash is unknown or transaction data is disabled.
 
 ### `GET /senders`
 

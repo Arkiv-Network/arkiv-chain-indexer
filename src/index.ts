@@ -1,4 +1,5 @@
 import { parseConfig, HelpRequested } from "./config";
+import { ArkivDecoderClient } from "./arkivOperations";
 import { HttpBatcherCollector } from "./batcher";
 import { GuzzlerService } from "./guzzlerService";
 import { RedisGuzzlerStore } from "./guzzlerStore";
@@ -16,6 +17,7 @@ async function main(): Promise<void> {
     const batcherCollector = config.batcherCollectorUrl
       ? new HttpBatcherCollector(config.batcherCollectorUrl)
       : undefined;
+    const decoderClient = config.decoderUrl ? new ArkivDecoderClient(config.decoderUrl) : undefined;
     storage = await ScannerStorage.open(config.databaseUrl);
 
     if (config.redisUrl) {
@@ -24,7 +26,7 @@ async function main(): Promise<void> {
       await guzzlerService.start();
     }
 
-    await runScanner(config, rpc, storage, undefined, batcherCollector, guzzlerService);
+    await runScanner(config, rpc, storage, undefined, batcherCollector, guzzlerService, decoderClient);
   } catch (error) {
     if (error instanceof HelpRequested) {
       console.log(error.message);

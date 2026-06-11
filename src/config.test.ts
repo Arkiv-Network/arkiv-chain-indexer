@@ -230,4 +230,22 @@ describe("parseConfig", () => {
       }).batcherCollectorUrl,
     ).toBe("https://cli.example");
   });
+
+  test("reads decoder URL from env and lets CLI override it", () => {
+    expect(parseConfig([], baseEnv).decoderUrl).toBeUndefined();
+
+    expect(
+      parseConfig([], {
+        ...baseEnv,
+        DECODER_URL: "https://decoder.example",
+      }).decoderUrl,
+    ).toBe("https://decoder.example");
+
+    expect(
+      parseConfig(["--decoder-url", "https://cli-decoder.example"], {
+        ...baseEnv,
+        DECODER_URL: "https://decoder.example",
+      }).decoderUrl,
+    ).toBe("https://cli-decoder.example");
+  });
 });

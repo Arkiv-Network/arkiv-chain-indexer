@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import pg from "pg";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
@@ -8,10 +9,12 @@ import {
 } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import {
+  TEST_DATABASE_URL,
   closeTestPools,
   createIsolatedStorage,
   hasPostgresForTests,
 } from "./testPostgres";
+import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperations";
 import type { BlockMetrics } from "./types";
 import type { InspectedTransaction } from "./blockInspector";
 
@@ -146,6 +149,7 @@ if (!hasPostgresForTests()) {
       expect(stats.tables.map((table) => table.tableName)).toEqual([
         "blocks",
         "transactions",
+        "transaction_operations",
         "transaction_records",
         "block_ranges",
         "sender_stats",
@@ -154,6 +158,7 @@ if (!hasPostgresForTests()) {
       ]);
       expect(byName.get("blocks")?.rowCount).toBe("2");
       expect(byName.get("transactions")?.rowCount).toBe("2");
+      expect(byName.get("transaction_operations")?.rowCount).toBe("0");
       expect(byName.get("transaction_records")?.rowCount).toBe("6");
       expect(byName.get("block_ranges")?.rowCount).toBe("1");
       expect(byName.get("sender_stats")?.rowCount).toBe("0");
@@ -892,6 +897,195 @@ if (!hasPostgresForTests()) {
       expect(await storage.getMaxStoredBlock()).toBe(10n);
     });
   });
+
+  describe("ScannerStorage transaction operations", () => {
+    test("saves operation metadata with a block and reads it back by hash", async () => {
+      const storage = await withStorage();
+      const operations = arkivOperationsFixture("0xfeed", 0);
+
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 42n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xfeed" })],
+        undefined,
+        operations,
+      );
+
+      const stored = await storage.getOperationsByHash("0xFEED");
+      expect(stored).toEqual(operations[0]!.operations);
+      // Attributes roundtrip through jsonb; uint32-max expiry survives BIGINT.
+      expect(stored[0]?.attributes).toEqual([
+        { key: "project", valueType: 2, valueTypeName: "string", value: "demo" },
+        { key: "version", valueType: 1, valueTypeName: "uint", value: "7" },
+      ]);
+      expect(stored[0]?.expiresAtBlocks).toBe(4_294_967_295);
+      expect(await storage.getOperationsByHash("0xother")).toEqual([]);
+    });
+
+    test("aggregates operation summaries per transaction ordered by operation type", async () => {
+      const storage = await withStorage();
+      const deleteOperation: ArkivOperation = {
+        opIndex: 2,
+        operationType: 5,
+        operation: "delete",
+        entityKey: `0x${"cd".repeat(32)}`,
+        contentType: null,
+        payloadSizeBytes: 0,
+        attributes: [],
+        expiresAtBlocks: 0,
+        newOwner: null,
+      };
+      const operations: TransactionArkivOperations[] = [
+        {
+          position: 0,
+          hash: "0xaaa",
+          operations: [
+            { ...deleteOperation, opIndex: 0 },
+            ...arkivOperationsFixture("0xaaa", 0)[0]!.operations.map((operation, index) => ({
+              ...operation,
+              opIndex: index + 1,
+            })),
+          ],
+        },
+      ];
+
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 100n, transactionCount: 2 }),
+        { kind: "lastSuccessfulBlock" },
+        [
+          transactionFixture({ position: 0, hash: "0xaaa" }),
+          transactionFixture({ position: 1, hash: "0xbbb" }),
+        ],
+        undefined,
+        operations,
+      );
+
+      const summaries = await storage.getOperationsSummaryForTransactions([
+        { blockNumber: "100", position: 0 },
+        { blockNumber: "100", position: 1 },
+      ]);
+      expect(summaries.get("100:0")).toEqual([
+        { operation: "create", operationType: 1, count: 1 },
+        { operation: "transfer", operationType: 4, count: 1 },
+        { operation: "delete", operationType: 5, count: 1 },
+      ]);
+      expect(summaries.has("100:1")).toBe(false);
+
+      expect(await storage.getOperationsSummaryForTransactions([])).toEqual(new Map());
+    });
+
+    test("clears stored operations when a block is re-saved without them", async () => {
+      const storage = await withStorage();
+      const metrics = blockMetricsFixture({ blockNumber: 42n, transactionCount: 1 });
+      const transactions = [transactionFixture({ position: 0, hash: "0xfeed" })];
+
+      await storage.saveBlockMetrics(
+        metrics,
+        { kind: "lastSuccessfulBlock" },
+        transactions,
+        undefined,
+        arkivOperationsFixture("0xfeed", 0),
+      );
+      expect(await storage.getOperationsByHash("0xfeed")).toHaveLength(2);
+
+      await storage.saveBlockMetrics(metrics, { kind: "lastSuccessfulBlock" }, transactions);
+      expect(await storage.getOperationsByHash("0xfeed")).toEqual([]);
+    });
+
+    test("chunks operation inserts past the bind-parameter limit", async () => {
+      const storage = await withStorage();
+      // 5,050 rows × 13 columns would exceed Postgres's 65,535 bind-parameter
+      // cap in a single INSERT; the writer must split into chunked statements.
+      const operationCount = 5_050;
+      const baseOperation = arkivOperationsFixture("0xfeed", 0)[0]!.operations[1]!;
+      const operations: TransactionArkivOperations[] = [
+        {
+          position: 0,
+          hash: "0xfeed",
+          operations: Array.from({ length: operationCount }, (_unused, index) => ({
+            ...baseOperation,
+            opIndex: index,
+          })),
+        },
+      ];
+
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 7n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xfeed" })],
+        undefined,
+        operations,
+      );
+
+      expect(await storage.getOperationsByHash("0xfeed")).toHaveLength(operationCount);
+    });
+
+    test("transaction_operations stores only the payload size, never payload bytes", async () => {
+      await withStorage();
+      const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL, max: 1 });
+      try {
+        const result = await pool.query<{ column_name: string }>(
+          `SELECT DISTINCT column_name
+           FROM information_schema.columns
+           WHERE table_name = 'transaction_operations'`,
+        );
+        expect(result.rows.map((row) => row.column_name).sort()).toEqual([
+          "attributes",
+          "block_date",
+          "block_number",
+          "content_type",
+          "entity_key",
+          "expires_at_blocks",
+          "hash",
+          "new_owner",
+          "op_index",
+          "operation",
+          "operation_type",
+          "payload_size_bytes",
+          "position",
+          "scanned_at",
+        ]);
+      } finally {
+        await pool.end();
+      }
+    });
+  });
+}
+
+function arkivOperationsFixture(hash: string, position: number): TransactionArkivOperations[] {
+  return [
+    {
+      position,
+      hash: hash as `0x${string}`,
+      operations: [
+        {
+          opIndex: 0,
+          operationType: 1,
+          operation: "create",
+          entityKey: `0x${"ab".repeat(32)}`,
+          contentType: "application/json",
+          payloadSizeBytes: 512,
+          attributes: [
+            { key: "project", valueType: 2, valueTypeName: "string", value: "demo" },
+            { key: "version", valueType: 1, valueTypeName: "uint", value: "7" },
+          ],
+          expiresAtBlocks: 4_294_967_295,
+          newOwner: null,
+        },
+        {
+          opIndex: 1,
+          operationType: 4,
+          operation: "transfer",
+          entityKey: `0x${"cd".repeat(32)}`,
+          contentType: null,
+          payloadSizeBytes: 0,
+          attributes: [],
+          expiresAtBlocks: 0,
+          newOwner: "0x9999999999999999999999999999999999999999",
+        },
+      ],
+    },
+  ];
 }
 
 async function saveCompleteRange(

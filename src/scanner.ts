@@ -1,4 +1,5 @@
 import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format";
+import { decodeBlockArkivOperations, type ArkivDecoderClient } from "./arkivOperations";
 import { inspectBlockFromRpc } from "./blockInspector";
 import { readBuildInfo } from "./buildInfo";
 import { computeBlockMetrics } from "./metrics";
@@ -29,16 +30,33 @@ export async function runScanner(
   runtime: ScannerRuntime = defaultRuntime,
   batcherCollector?: BatcherMetricsSource,
   guzzlerRecorder?: GuzzlerRecorder,
+  decoderClient?: ArkivDecoderClient,
 ): Promise<void> {
   logBuildInfo();
   console.log(`Transaction row storage: ${config.saveTransactionData ? "enabled" : "disabled"}`);
   console.log(`Guzzler tracking: ${guzzlerRecorder ? "enabled" : "disabled"}`);
+  console.log(
+    `Arkiv operation decoding: ${decoderClient ? `enabled (${decoderClient.baseUrl})` : "disabled"}`,
+  );
+  if (decoderClient && !config.saveTransactionData) {
+    console.warn(
+      "Arkiv operation decoding is skipped because transaction row storage is disabled",
+    );
+  }
   if (config.backfillOnly) {
-    await runBackfillScanner(config, rpc, storage, runtime, batcherCollector);
+    await runBackfillScanner(config, rpc, storage, runtime, batcherCollector, decoderClient);
     return;
   }
 
-  await runNearHeadBackfillScanner(config, rpc, storage, runtime, batcherCollector, guzzlerRecorder);
+  await runNearHeadBackfillScanner(
+    config,
+    rpc,
+    storage,
+    runtime,
+    batcherCollector,
+    guzzlerRecorder,
+    decoderClient,
+  );
 }
 
 function logBuildInfo(): void {
@@ -55,6 +73,7 @@ async function runNearHeadBackfillScanner(
   runtime: ScannerRuntime,
   batcherCollector: BatcherMetricsSource | undefined,
   guzzlerRecorder: GuzzlerRecorder | undefined,
+  decoderClient: ArkivDecoderClient | undefined,
 ): Promise<void> {
   if (config.disableBackfill) {
     console.log("Starting near-head scanner with backfill disabled");
@@ -75,6 +94,7 @@ async function runNearHeadBackfillScanner(
         storage,
         runtime,
         batcherCollector,
+        decoderClient,
       );
     }
 
@@ -88,6 +108,7 @@ async function runNearHeadBackfillScanner(
       runtime,
       batcherCollector,
       guzzlerRecorder,
+      decoderClient,
     );
     await fillRecentMissingBatcherMetrics(storage, batcherCollector);
 
@@ -103,6 +124,7 @@ async function runBackfillScanner(
   storage: ScannerStorage,
   runtime: ScannerRuntime,
   batcherCollector: BatcherMetricsSource | undefined,
+  decoderClient: ArkivDecoderClient | undefined,
 ): Promise<void> {
   if (config.disableBackfill) {
     console.log("Backfill-only scanner started with backfill disabled; idling without scanning");
@@ -124,6 +146,7 @@ async function runBackfillScanner(
       storage,
       runtime,
       batcherCollector,
+      decoderClient,
     );
     await fillRecentMissingBatcherMetrics(storage, batcherCollector);
 
@@ -162,6 +185,7 @@ export async function backfillDownForSlice(
   storage: ScannerStorage,
   runtime: ScannerRuntime = defaultRuntime,
   batcherCollector?: BatcherMetricsSource,
+  decoderClient?: ArkivDecoderClient,
 ): Promise<bigint | undefined> {
   let nextBackfillBlock = await storage.getBackfillNextBlock();
   if (nextBackfillBlock === undefined || nextBackfillBlock > safeHead) {
@@ -183,6 +207,8 @@ export async function backfillDownForSlice(
       "backfill",
       { safeHead },
       batcherCollector,
+      undefined,
+      decoderClient,
     );
 
     lowestBackfilledBlock = blockToScan;
@@ -204,6 +230,7 @@ export async function scanForwardToSafeHead(
   runtime: ScannerRuntime = defaultRuntime,
   batcherCollector?: BatcherMetricsSource,
   guzzlerRecorder?: GuzzlerRecorder,
+  decoderClient?: ArkivDecoderClient,
 ): Promise<boolean> {
   const lastSuccessfulBlock = await storage.getLastSuccessfulBlock();
   // Cold start: no prior progress — jump to the lower bound (typically the
@@ -226,6 +253,7 @@ export async function scanForwardToSafeHead(
       { safeHead },
       batcherCollector,
       guzzlerRecorder,
+      decoderClient,
     );
 
     scanned = true;
@@ -246,6 +274,7 @@ async function scanBlockWithRetry(
   summaryContext: BlockSummaryContext = {},
   batcherCollector?: BatcherMetricsSource,
   guzzlerRecorder?: GuzzlerRecorder,
+  decoderClient?: ArkivDecoderClient,
 ): Promise<void> {
   while (true) {
     try {
@@ -259,6 +288,7 @@ async function scanBlockWithRetry(
         config.saveTransactionData,
         batcherCollector,
         guzzlerRecorder,
+        decoderClient,
       );
       return;
     } catch (error) {
@@ -281,6 +311,7 @@ export async function scanOneBlock(
   saveTransactionData = true,
   batcherCollector?: BatcherMetricsSource,
   guzzlerRecorder?: GuzzlerRecorder,
+  decoderClient?: ArkivDecoderClient,
 ): Promise<void> {
   const startedAt = performance.now();
   const rpcStatsBefore = rpc.getStatsSnapshot();
@@ -293,7 +324,19 @@ export async function scanOneBlock(
   );
   const inspectedTransactions = inspectBlockFromRpc(block, receipts).transactions;
   const transactions = saveTransactionData ? inspectedTransactions : undefined;
-  await storage.saveBlockMetrics(metrics, progressUpdate, transactions, inspectedTransactions);
+  // A decoder failure throws here and is retried by scanBlockWithRetry, so a
+  // decoder outage cannot create silent gaps in stored operations.
+  const operations =
+    decoderClient && saveTransactionData
+      ? await decodeBlockArkivOperations(block, decoderClient)
+      : undefined;
+  await storage.saveBlockMetrics(
+    metrics,
+    progressUpdate,
+    transactions,
+    inspectedTransactions,
+    operations,
+  );
   await recordGuzzlerTransactions(guzzlerRecorder, metrics.blockDate, inspectedTransactions);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);

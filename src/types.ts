@@ -13,6 +13,7 @@ export interface RpcTransaction {
   gasPrice?: Hex;
   maxFeePerGas?: Hex;
   maxPriorityFeePerGas?: Hex;
+  input?: Hex;
 }
 
 export interface RpcBlock {

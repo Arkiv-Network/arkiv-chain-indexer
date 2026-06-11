@@ -16,9 +16,11 @@ import {
   type HealthResponseBody,
   type RangesResponseBody,
   type SendersResponseBody,
+  type TransactionByHashResponseBody,
   type TransactionRecordsResponseBody,
   type TransactionsResponseBody,
 } from "./server";
+import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperations";
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
 import type { ScannerStorage, StoredTransactionRecord } from "./storage";
@@ -813,6 +815,7 @@ describe("GET /transactions", () => {
         ];
       },
       countTransactions: async () => 51,
+      getOperationsSummaryForTransactions: async () => new Map(),
     } as unknown as ScannerStorage;
 
     const response = await handleRequest(
@@ -837,7 +840,42 @@ describe("GET /transactions", () => {
     expect(body.filters.nonceLt).toBe("5");
     expect(body.transactions[0]?.blockNumber).toBe(42);
     expect(body.transactions[0]?.position).toBe(0);
+    expect(body.transactions[0]?.operationsSummary).toBeUndefined();
     expect(queryFilter).toMatchObject({ order: "desc" });
+  });
+
+  test("attaches operationsSummary only to transactions with stored operations", async () => {
+    let requestedKeys: unknown;
+    const summary: ArkivOperationSummaryEntry[] = [
+      { operation: "create", operationType: 1, count: 2 },
+      { operation: "delete", operationType: 5, count: 1 },
+    ];
+    const storage = {
+      queryTransactions: async () => [
+        { ...storedTransactionFixture(), position: 0, hash: "0xaaa" },
+        { ...storedTransactionFixture(), position: 1, hash: "0xbbb" },
+      ],
+      countTransactions: async () => 2,
+      getOperationsSummaryForTransactions: async (keys: unknown) => {
+        requestedKeys = keys;
+        return new Map([["42:0", summary]]);
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/transactions?block=42"),
+      storage,
+    );
+    const body = (await response.json()) as TransactionsResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(requestedKeys).toEqual([
+      { blockNumber: "42", position: 0 },
+      { blockNumber: "42", position: 1 },
+    ]);
+    expect(body.transactions[0]?.operationsSummary).toEqual(summary);
+    expect(body.transactions[1]?.operationsSummary).toBeUndefined();
+    expect(body.transactions[0]?.operations).toBeUndefined();
   });
 
   test("rejects invalid transaction filters", async () => {
@@ -860,6 +898,77 @@ describe("GET /transactions", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Transaction data is disabled",
     });
+  });
+});
+
+describe("GET /transaction/:hash", () => {
+  const hash = `0x${"ab".repeat(32)}` as `0x${string}`;
+
+  test("attaches stored Arkiv operations to the transaction", async () => {
+    const operations: ArkivOperation[] = [
+      {
+        opIndex: 0,
+        operationType: 1,
+        operation: "create",
+        entityKey: `0x${"11".repeat(32)}`,
+        contentType: "text/plain",
+        payloadSizeBytes: 64,
+        attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
+        expiresAtBlocks: 100,
+        newOwner: null,
+      },
+    ];
+    const requestedHashes: string[] = [];
+    const storage = {
+      getTransactionByHash: async (requested: string) => ({
+        ...storedTransactionFixture(),
+        hash: requested,
+      }),
+      getOperationsByHash: async (requested: string) => {
+        requestedHashes.push(requested);
+        return operations;
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request(`http://example.test/transaction/${hash}`),
+      storage,
+    );
+    const body = (await response.json()) as TransactionByHashResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(requestedHashes).toEqual([hash]);
+    expect(body.transaction.hash).toBe(hash);
+    expect(body.transaction.operations).toEqual(operations);
+  });
+
+  test("returns an empty operations array when none are stored", async () => {
+    const storage = {
+      getTransactionByHash: async () => storedTransactionFixture(),
+      getOperationsByHash: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request(`http://example.test/transaction/${hash}`),
+      storage,
+    );
+    const body = (await response.json()) as TransactionByHashResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.transaction.operations).toEqual([]);
+  });
+
+  test("returns 404 when the transaction is unknown", async () => {
+    const storage = {
+      getTransactionByHash: async () => null,
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request(`http://example.test/transaction/${hash}`),
+      storage,
+    );
+
+    expect(response.status).toBe(404);
   });
 });
 
@@ -1338,6 +1447,33 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     averagePriorityFeeWeightedWei: "10",
     averagePriorityFeeWei: "10",
     ...overrides,
+  };
+}
+
+function storedTransactionFixture() {
+  return {
+    blockNumber: 42,
+    blockNumberDecimal: "42",
+    blockDate: "2024-01-01T00:00:00.000Z",
+    baseBlockFeeWei: "100",
+    position: 0,
+    hash: "0xaaa",
+    from: "0x111",
+    to: "0x222",
+    type: "2",
+    nonce: "1",
+    valueWei: "0",
+    gasLimit: "21000",
+    gasUsed: "21000",
+    cumulativeGasUsed: "21000",
+    gasPriceWei: "110",
+    maxFeePerGasWei: "200",
+    maxPriorityFeePerGasWei: "10",
+    effectiveGasPriceWei: "110",
+    priorityFeeWei: "10",
+    transactionFeeWei: "2310000",
+    status: "1",
+    contractAddress: null,
   };
 }
 

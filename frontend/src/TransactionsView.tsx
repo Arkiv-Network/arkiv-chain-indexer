@@ -70,7 +70,8 @@ type SortKey =
   | "effectiveGasPriceWei"
   | "priorityFeeWei"
   | "maxPriorityFeePerGasWei"
-  | "transactionFeeWei";
+  | "transactionFeeWei"
+  | "arkivOps";
 
 interface Column {
   key: SortKey;
@@ -146,6 +147,23 @@ function transactionColumns(
       />
     ),
   };
+  const arkivOps: Column = {
+    key: "arkivOps",
+    label: "Arkiv ops",
+    width: "10rem",
+    render: (row) =>
+      row.operationsSummary?.length ? (
+        <span className="op-badge-list">
+          {row.operationsSummary.map((entry) => (
+            <span key={entry.operationType} className={`op-badge op-${entry.operation}`}>
+              {entry.count > 1 ? `${entry.operation} ×${entry.count}` : entry.operation}
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span className="tx-muted">—</span>
+      ),
+  };
   const from: Column = {
     key: "from",
     label: "From",
@@ -184,9 +202,9 @@ function transactionColumns(
   // When scoped to a single address every row shares the same sender, so the
   // From column is redundant — lead with the nonce instead.
   if (addressSelected) {
-    return [nonce, block, hash, gas, effectiveFee, txFee];
+    return [nonce, block, hash, arkivOps, gas, effectiveFee, txFee];
   }
-  return [block, hash, from, nonce, gas, effectiveFee, txFee];
+  return [block, hash, arkivOps, from, nonce, gas, effectiveFee, txFee];
 }
 
 function loadFilters(locationSearch: string, lockedAddress: string | null): TransactionFilters {
@@ -721,6 +739,9 @@ function compareRows(a: StoredTransaction, b: StoredTransaction, sort: SortState
 }
 
 function sortValue(row: StoredTransaction, key: SortKey): string | bigint {
+  if (key === "arkivOps") {
+    return BigInt((row.operationsSummary ?? []).reduce((total, entry) => total + entry.count, 0));
+  }
   if (
     key === "blockNumber" ||
     key === "position" ||

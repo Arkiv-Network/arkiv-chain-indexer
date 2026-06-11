@@ -29,6 +29,13 @@ services:
       timeout: 5s
       retries: 20
 
+  # arkiv-transaction-decoder microservice used by the scanners to decode Arkiv
+  # registry execute() calldata into operation metadata (payloads are never stored).
+  decoder:
+    build:
+      context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#v0.1.0
+    restart: unless-stopped
+
   scanner:
     build:
       context: .
@@ -43,10 +50,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      decoder:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
+      DECODER_URL: ${DECODER_URL-http://decoder:3000}
       # The scanner container only ever scans forward from the safe head.
       SCANNER_DISABLE_BACKFILL: true
       SCANNER_CONFIRMATION_DEPTH: ${SCANNER_CONFIRMATION_DEPTH:-3}
@@ -69,9 +79,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      decoder:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
+      DECODER_URL: ${DECODER_URL-http://decoder:3000}
       SCANNER_BACKFILL_ONLY: "true"
       # Master switch: when true (the default) this container idles and does no
       # backfill. Set SCANNER_DISABLE_BACKFILL=false in .env to run the backfill.
@@ -161,9 +174,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      decoder:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
+      DECODER_URL: ${DECODER_URL-http://decoder:3000}
       GAP_FILL_INTERVAL_MS: ${GAP_FILL_INTERVAL_MS:-60000}
       GAP_FILL_MAX_BLOCKS_PER_CYCLE: ${GAP_FILL_MAX_BLOCKS_PER_CYCLE:-500}
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}

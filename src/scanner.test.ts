@@ -6,6 +6,12 @@ import {
   scanForwardToSafeHead,
   scanOneBlock,
 } from "./scanner";
+import {
+  ARKIV_REGISTRY_ADDRESS,
+  type ArkivDecoderClient,
+  type ArkivOperation,
+  type TransactionArkivOperations,
+} from "./arkivOperations";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { BatcherMetrics, BatcherMetricsSource } from "./batcher";
@@ -162,6 +168,64 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics[0]?.transactionCount).toBe(2);
     expect(storage.savedTransactions[0]?.map((entry) => entry.hash)).toEqual([txHash(0), txHash(2)]);
     expect(storage.savedTransactions[0]?.map((entry) => entry.position)).toEqual([0, 2]);
+  });
+
+  test("stores decoded Arkiv operations alongside transaction rows", async () => {
+    const block = blockWithTransactions(2);
+    block.transactions[1] = {
+      ...block.transactions[1]!,
+      to: ARKIV_REGISTRY_ADDRESS as Hex,
+      input: "0x1234" as Hex,
+    };
+    const rpc = new StaticBlockRpc(block);
+    const storage = new FakeStorage();
+    const decoder = new FakeDecoderClient();
+
+    await scanOneBlock(
+      1n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+      { kind: "lastSuccessfulBlock" },
+      {},
+      true,
+      undefined,
+      undefined,
+      decoder as unknown as ArkivDecoderClient,
+    );
+
+    expect(decoder.requestedData).toEqual(["0x1234"]);
+    expect(storage.savedOperations).toEqual([
+      [{ position: 1, hash: txHash(1), operations: decoder.operations }],
+    ]);
+  });
+
+  test("skips Arkiv decoding when transaction row storage is disabled", async () => {
+    const block = blockWithTransactions(1);
+    block.transactions[0] = {
+      ...block.transactions[0]!,
+      to: ARKIV_REGISTRY_ADDRESS as Hex,
+      input: "0x1234" as Hex,
+    };
+    const rpc = new StaticBlockRpc(block);
+    const storage = new FakeStorage();
+    const decoder = new FakeDecoderClient();
+
+    await scanOneBlock(
+      1n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+      { kind: "lastSuccessfulBlock" },
+      {},
+      false,
+      undefined,
+      undefined,
+      decoder as unknown as ArkivDecoderClient,
+    );
+
+    expect(decoder.requestedData).toEqual([]);
+    expect(storage.savedOperations).toEqual([]);
   });
 
   test("does not store metrics or transactions when a receipt read fails", async () => {
@@ -556,6 +620,7 @@ class FakeStorage {
   savedMetrics: BlockMetrics[] = [];
   savedTransactions: InspectedTransaction[][] = [];
   savedRecordCandidates: InspectedTransaction[][] = [];
+  savedOperations: TransactionArkivOperations[][] = [];
   savedBatcherMetrics: Array<{ blockNumber: bigint; metrics: BatcherMetrics }> = [];
   recentBlocksMissingBatcherMetrics: BlockMetrics[] = [];
   aggregatedRanges: bigint[] = [];
@@ -576,12 +641,16 @@ class FakeStorage {
     progressUpdate: BlockProgressUpdate = { kind: "lastSuccessfulBlock" },
     transactions?: InspectedTransaction[],
     recordCandidates: InspectedTransaction[] = transactions ?? [],
+    operations?: TransactionArkivOperations[],
   ): Promise<void> {
     this.savedMetrics.push(metrics);
     if (transactions !== undefined) {
       this.savedTransactions.push(transactions);
     }
     this.savedRecordCandidates.push(recordCandidates);
+    if (operations !== undefined) {
+      this.savedOperations.push(operations);
+    }
 
     switch (progressUpdate.kind) {
       case "lastSuccessfulBlock":
@@ -606,6 +675,51 @@ class FakeStorage {
 
   async saveChainProgress(latestBlock: bigint, safeHead: bigint): Promise<void> {
     this.chainProgress.push({ latestBlock, safeHead });
+  }
+}
+
+class StaticBlockRpc {
+  readonly rpcUrl = "https://example.test";
+
+  constructor(private readonly block: RpcBlock) {}
+
+  getStatsSnapshot(): RpcStats {
+    return { calls: 0, requestBytes: 0, responseBytes: 0 };
+  }
+
+  getStatsSince(_snapshot: RpcStats): RpcStats {
+    return { calls: 0, requestBytes: 0, responseBytes: 0 };
+  }
+
+  async getBlockWithTransactions(_blockNumber: bigint): Promise<RpcBlock> {
+    return this.block;
+  }
+
+  async getTransactionReceipt(hash: Hex): Promise<RpcReceipt> {
+    return receiptFor(hash);
+  }
+}
+
+class FakeDecoderClient {
+  readonly baseUrl = "http://decoder.test";
+  requestedData: Hex[] = [];
+  readonly operations: ArkivOperation[] = [
+    {
+      opIndex: 0,
+      operationType: 1,
+      operation: "create",
+      entityKey: `0x${"11".repeat(32)}`,
+      contentType: "text/plain",
+      payloadSizeBytes: 4,
+      attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
+      expiresAtBlocks: 100,
+      newOwner: null,
+    },
+  ];
+
+  async decodeCalldata(data: Hex): Promise<ArkivOperation[] | null> {
+    this.requestedData.push(data);
+    return this.operations;
   }
 }
 
