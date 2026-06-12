@@ -280,138 +280,160 @@ export function BaseloadView({
         </div>
       </div>
 
-      <form className="baseload-form" onSubmit={addWorker} noValidate>
-        <label>
-          Behavior
-          <select value={draftBehavior} onChange={onDraftChange("behavior")}>
-            {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
-              <option key={behavior} value={behavior}>
-                {BASELOAD_BEHAVIOR_LABELS[behavior]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Max gas price accepted gwei
-          <input
-            type="number"
-            min="0"
-            step="0.1"
-            value={draft.maxGasPriceGwei}
-            onChange={onDraftChange("maxGasPriceGwei")}
-          />
-        </label>
-        <label>
-          Operations per minute
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={draft.opsPerMinute}
-            onChange={onDraftChange("opsPerMinute")}
-          />
-        </label>
-        <label>
-          Single create payload size
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={draft.singleCreatePayloadSize}
-            onChange={onDraftChange("singleCreatePayloadSize")}
-          />
-        </label>
-        <label>
-          String argument number
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={draft.singleCreateStringArgumentCount}
-            onChange={onDraftChange("singleCreateStringArgumentCount")}
-          />
-        </label>
-        <label>
-          Number argument number
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={draft.singleCreateNumberArgumentCount}
-            onChange={onDraftChange("singleCreateNumberArgumentCount")}
-          />
-        </label>
-        {behaviorUsesPool(draftBehavior) ? (
-          <label>
-            Entity pool size
+      <form className="add-worker-panel" data-behavior={draftBehavior} onSubmit={addWorker} noValidate>
+        <header className="add-worker-head">
+          <h3>Add worker</h3>
+          <span className="add-worker-hint">{BASELOAD_BEHAVIOR_LABELS[draftBehavior]}</span>
+        </header>
+
+        <div className="behavior-picker" role="radiogroup" aria-label="Worker behavior">
+          {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
+            <label
+              key={behavior}
+              className="behavior-option"
+              data-behavior={behavior}
+              title={BASELOAD_BEHAVIOR_LABELS[behavior]}
+            >
+              <input
+                type="radio"
+                name="draft-behavior"
+                value={behavior}
+                checked={draftBehavior === behavior}
+                onChange={onDraftChange("behavior")}
+              />
+              <span>{BEHAVIOR_BADGES[behavior]}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="add-worker-fields">
+          <Field label="Wallet">
+            <select
+              value={draft.walletNumber}
+              onChange={onDraftChange("walletNumber")}
+              disabled={availableWallets.length === 0}
+            >
+              {availableWallets.map((wallet) => (
+                <option key={wallet} value={wallet}>
+                  #{wallet}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Max gas gwei">
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={draft.maxGasPriceGwei}
+              onChange={onDraftChange("maxGasPriceGwei")}
+            />
+          </Field>
+          <Field label="Ops / min">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.opsPerMinute}
+              onChange={onDraftChange("opsPerMinute")}
+            />
+          </Field>
+          <Field label="Payload bytes">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.singleCreatePayloadSize}
+              onChange={onDraftChange("singleCreatePayloadSize")}
+            />
+          </Field>
+          <Field label="String args">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.singleCreateStringArgumentCount}
+              onChange={onDraftChange("singleCreateStringArgumentCount")}
+            />
+          </Field>
+          <Field label="Number args">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.singleCreateNumberArgumentCount}
+              onChange={onDraftChange("singleCreateNumberArgumentCount")}
+            />
+          </Field>
+          {behaviorUsesPool(draftBehavior) ? (
+            <Field label="Pool size">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={draft.entityPoolSize}
+                onChange={onDraftChange("entityPoolSize")}
+              />
+            </Field>
+          ) : null}
+          {draftBehavior === "time-bomb" ? (
+            <Field label="Bomb offset s">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={draft.timeBombOffsetSeconds}
+                onChange={onDraftChange("timeBombOffsetSeconds")}
+              />
+            </Field>
+          ) : null}
+          <Field label="Start block">
+            <input type="number" min="0" step="1" value={draft.startBlock} onChange={onDraftChange("startBlock")} />
+          </Field>
+          <Field label="End block">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              placeholder="Infinity"
+              value={draft.endBlock}
+              onChange={onDraftChange("endBlock")}
+            />
+          </Field>
+          <Field label="Duration s">
             <input
               type="number"
               min="1"
               step="1"
-              value={draft.entityPoolSize}
-              onChange={onDraftChange("entityPoolSize")}
+              placeholder="Forever"
+              value={draft.durationSeconds}
+              onChange={onDraftChange("durationSeconds")}
             />
-          </label>
-        ) : null}
-        {draftBehavior === "time-bomb" ? (
-          <label>
-            Time bomb offset seconds
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={draft.timeBombOffsetSeconds}
-              onChange={onDraftChange("timeBombOffsetSeconds")}
-            />
-          </label>
-        ) : null}
-        <label>
-          Wallet number
-          <select
-            value={draft.walletNumber}
-            onChange={onDraftChange("walletNumber")}
-            disabled={availableWallets.length === 0}
-          >
-            {availableWallets.map((wallet) => (
-              <option key={wallet} value={wallet}>
-                {wallet}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Start block
-          <input type="number" min="0" step="1" value={draft.startBlock} onChange={onDraftChange("startBlock")} />
-        </label>
-        <label>
-          End block
-          <input type="number" min="0" step="1" value={draft.endBlock} onChange={onDraftChange("endBlock")} />
-        </label>
-        <label>
-          Duration seconds
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={draft.durationSeconds}
-            onChange={onDraftChange("durationSeconds")}
-          />
-        </label>
-        {draftBehavior !== "time-bomb" ? (
-          <label>
-            Entry TTL seconds
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={draft.ttlSeconds}
-              onChange={onDraftChange("ttlSeconds")}
-            />
-          </label>
-        ) : null}
-        <button type="submit" disabled={availableWallets.length === 0}>
-          Add worker
-        </button>
+          </Field>
+          {draftBehavior === "time-bomb" ? (
+            <Field label="TTL s">
+              <span className="wfield-static" title="TTL targets the detonation moment automatically">
+                auto
+              </span>
+            </Field>
+          ) : (
+            <Field label="TTL s">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={draft.ttlSeconds}
+                onChange={onDraftChange("ttlSeconds")}
+              />
+            </Field>
+          )}
+        </div>
+
+        <div className="add-worker-actions">
+          <button type="submit" className="add-worker-submit" disabled={availableWallets.length === 0}>
+            ✚ Add worker{availableWallets.length === 0 ? "" : ` #${draft.walletNumber}`}
+          </button>
+        </div>
       </form>
 
       <p className={`summary${error || backendError || displayedConfigManagerError ? " error" : ""}`}>
