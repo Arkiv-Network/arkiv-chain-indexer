@@ -1,18 +1,16 @@
-import pg from "pg";
+import { openDb, type Db } from "./db";
 import { ScannerStorage } from "./storage";
-
-const { Pool } = pg;
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
 export const hasPostgresForTests = (): boolean => Boolean(TEST_DATABASE_URL);
 
-const adminPools: pg.Pool[] = [];
+const adminDbs: Db[] = [];
 
-function adminPool(url: string): pg.Pool {
-  const pool = new Pool({ connectionString: url, max: 2 });
-  adminPools.push(pool);
-  return pool;
+function adminDb(url: string): Db {
+  const db = openDb(url, { max: 2 });
+  adminDbs.push(db);
+  return db;
 }
 
 export async function createIsolatedStorage(prefix = "test"): Promise<{
@@ -25,7 +23,7 @@ export async function createIsolatedStorage(prefix = "test"): Promise<{
 
   const suffix = Math.random().toString(36).slice(2, 10);
   const schema = `${prefix}_${suffix}`.toLowerCase();
-  const admin = adminPool(TEST_DATABASE_URL);
+  const admin = adminDb(TEST_DATABASE_URL);
   await admin.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
 
   const storage = await ScannerStorage.open(TEST_DATABASE_URL, { schema });
@@ -47,11 +45,11 @@ export async function createIsolatedStorage(prefix = "test"): Promise<{
 }
 
 export async function closeTestPools(): Promise<void> {
-  while (adminPools.length > 0) {
-    const pool = adminPools.pop();
-    if (pool) {
+  while (adminDbs.length > 0) {
+    const db = adminDbs.pop();
+    if (db) {
       try {
-        await pool.end();
+        await db.close();
       } catch {
         // ignore
       }

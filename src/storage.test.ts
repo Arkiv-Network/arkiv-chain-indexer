@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import pg from "pg";
+import { openDb } from "./db";
 import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
@@ -1025,9 +1025,9 @@ if (!hasPostgresForTests()) {
 
     test("transaction_operations stores only the payload size, never payload bytes", async () => {
       await withStorage();
-      const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL, max: 1 });
+      const db = openDb(TEST_DATABASE_URL!, { max: 1 });
       try {
-        const result = await pool.query<{ column_name: string }>(
+        const result = await db.query<{ column_name: string }>(
           `SELECT DISTINCT column_name
            FROM information_schema.columns
            WHERE table_name = 'transaction_operations'`,
@@ -1049,7 +1049,7 @@ if (!hasPostgresForTests()) {
           "scanned_at",
         ]);
       } finally {
-        await pool.end();
+        await db.close();
       }
     });
   });

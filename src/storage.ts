@@ -1,4 +1,4 @@
-import pg from "pg";
+import { openDb, textArrayLiteral, type Db, type DbQueryable } from "./db";
 import {
   DEFAULT_RANGE_SIZE,
   assertSupportedRangeSize,
@@ -16,10 +16,6 @@ import type {
 } from "./arkivOperations";
 import type { BaseloadConfig } from "./baseloadConfig";
 import type { BatcherMetrics } from "./batcher";
-
-const { Pool, types } = pg;
-
-types.setTypeParser(20, (value: string) => value);
 
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
 const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
@@ -272,7 +268,7 @@ export class ScannerStorage {
   private readonly qBaseloadConfigs: string;
 
   private constructor(
-    private readonly pool: pg.Pool,
+    private readonly db: Db,
     options: ScannerStorageOptions = {},
   ) {
     this.schema = options.schema ?? "public";
@@ -290,26 +286,26 @@ export class ScannerStorage {
     connectionString: string,
     options: ScannerStorageOptions = {},
   ): Promise<ScannerStorage> {
-    const pool = new Pool({ connectionString });
-    const storage = new ScannerStorage(pool, options);
+    const db = openDb(connectionString);
+    const storage = new ScannerStorage(db, options);
     await storage.initSchema();
     return storage;
   }
 
-  static async fromPool(
-    pool: pg.Pool,
+  static async fromDb(
+    db: Db,
     options: ScannerStorageOptions = {},
   ): Promise<ScannerStorage> {
-    const storage = new ScannerStorage(pool, options);
+    const storage = new ScannerStorage(db, options);
     await storage.initSchema();
     return storage;
   }
 
   private async initSchema(): Promise<void> {
     if (this.schema !== "public") {
-      await this.pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(this.schema)}`);
+      await this.db.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(this.schema)}`);
     }
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBlocks} (
         block_number BIGINT PRIMARY KEY,
         block_date TEXT NOT NULL,
@@ -338,39 +334,39 @@ export class ScannerStorage {
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS block_reward_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS total_transaction_fee_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS fee_price_sum_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS priority_fee_sum_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS priority_fee_weighted_numerator_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS priority_fee_gas_weighted_numerator_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS average_fee_price_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
     );
@@ -380,14 +376,14 @@ export class ScannerStorage {
     await this.addNullableTextColumn(this.qBlocks, "batcher_upper_threshold");
     await this.addNullableTextColumn(this.qBlocks, "batcher_max_block_size");
     await this.addNullableTextColumn(this.qBlocks, "batcher_max_tx_size");
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qScannerState} (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBaseloadConfigs} (
         name TEXT PRIMARY KEY,
         config_json JSONB NOT NULL,
@@ -395,7 +391,7 @@ export class ScannerStorage {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactions} (
         block_number BIGINT NOT NULL,
         block_date TEXT NOT NULL,
@@ -422,26 +418,26 @@ export class ScannerStorage {
         PRIMARY KEY (block_number, position)
       )
     `);
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_block_date_idx")}
        ON ${this.qTransactions} (block_date)`,
     );
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_hash_idx")}
        ON ${this.qTransactions} (hash)`,
     );
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_from_address_nonce_idx")}
        ON ${this.qTransactions} (LOWER(from_address), (nonce::numeric), block_number, position)`,
     );
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_from_address_block_idx")}
        ON ${this.qTransactions} (LOWER(from_address), block_number, position)`,
     );
     // Decoded Arkiv operation metadata per transaction. Payloads/calldata are
     // never stored — only payload_size_bytes. expires_at_blocks is BIGINT
     // because uint32 max exceeds the int4 range.
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactionOperations} (
         block_number BIGINT NOT NULL,
         position INTEGER NOT NULL,
@@ -460,15 +456,15 @@ export class ScannerStorage {
         PRIMARY KEY (block_number, position, op_index)
       )
     `);
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_hash_idx")}
        ON ${this.qTransactionOperations} (hash)`,
     );
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_entity_key_idx")}
        ON ${this.qTransactionOperations} (entity_key)`,
     );
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactionRecords} (
         category TEXT NOT NULL,
         record_value TEXT NOT NULL,
@@ -497,15 +493,15 @@ export class ScannerStorage {
         PRIMARY KEY (category, block_number, position)
       )
     `);
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_category_rank_idx")}
        ON ${this.qTransactionRecords} (category, (record_value::numeric) DESC, block_number DESC, position DESC)`,
     );
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_hash_idx")}
        ON ${this.qTransactionRecords} (hash)`,
     );
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qSenderStats} (
         address TEXT PRIMARY KEY,
         latest_nonce TEXT,
@@ -522,11 +518,11 @@ export class ScannerStorage {
         aggregated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    await this.pool.query(
+    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("sender_stats_activity_idx")}
        ON ${this.qSenderStats} (transaction_count DESC, last_block_number DESC, address ASC)`,
     );
-    await this.pool.query(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBlockRanges} (
         range_size BIGINT NOT NULL,
         range_start BIGINT NOT NULL,
@@ -562,27 +558,27 @@ export class ScannerStorage {
         PRIMARY KEY (range_size, range_start)
       )
     `);
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS total_block_reward_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS total_burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS average_block_reward_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS average_burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS average_fee_price_wei TEXT NOT NULL DEFAULT '0'`,
     );
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
     );
@@ -594,14 +590,14 @@ export class ScannerStorage {
     await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_upper_threshold");
     await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_block_size");
     await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_tx_size");
-    await this.pool.query(
+    await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS is_complete BOOLEAN NOT NULL DEFAULT TRUE`,
     );
   }
 
   private async addNullableTextColumn(table: string, column: string): Promise<void> {
-    await this.pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT`);
+    await this.db.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT`);
   }
 
   async getLastSuccessfulBlock(): Promise<bigint | undefined> {
@@ -618,33 +614,26 @@ export class ScannerStorage {
     observedAt: Date = new Date(),
   ): Promise<void> {
     const observedAtIso = observedAt.toISOString();
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await this.upsertStateValue(client, LATEST_OBSERVED_BLOCK_KEY, latestObservedBlock.toString());
-      await this.upsertStateValue(client, SAFE_HEAD_BLOCK_KEY, safeHeadBlock.toString());
-      await this.upsertStateValue(client, LATEST_OBSERVED_AT_KEY, observedAtIso);
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    await this.db.transaction(async (tx) => {
+      await this.upsertStateValue(tx, LATEST_OBSERVED_BLOCK_KEY, latestObservedBlock.toString());
+      await this.upsertStateValue(tx, SAFE_HEAD_BLOCK_KEY, safeHeadBlock.toString());
+      await this.upsertStateValue(tx, LATEST_OBSERVED_AT_KEY, observedAtIso);
+    });
   }
 
   async getScannerProgress(): Promise<ScannerProgress> {
-    const stateResult = await this.pool.query<{ key: string; value: string }>(
+    const stateResult = await this.db.query<{ key: string; value: string }>(
       `SELECT key, value FROM ${this.qScannerState}
        WHERE key = ANY($1::text[])`,
       [
-        [
+        // Bun.sql does not serialize JS arrays to Postgres array literals.
+        textArrayLiteral([
           LAST_SUCCESSFUL_BLOCK_KEY,
           BACKFILL_NEXT_BLOCK_KEY,
           LATEST_OBSERVED_BLOCK_KEY,
           SAFE_HEAD_BLOCK_KEY,
           LATEST_OBSERVED_AT_KEY,
-        ],
+        ]),
       ],
     );
     const state = new Map<string, string>(stateResult.rows.map((row) => [row.key, row.value]));
@@ -711,12 +700,12 @@ export class ScannerStorage {
     ];
 
     const [databaseSizeResult, tableStats] = await Promise.all([
-      this.pool.query<{ total_size_bytes: string }>(
+      this.db.query<{ total_size_bytes: string }>(
         `SELECT pg_database_size(current_database())::text AS total_size_bytes`,
       ),
       Promise.all(
         appTables.map(async (table) => {
-          const result = await this.pool.query<{
+          const result = await this.db.query<{
             row_count: string;
             table_size_bytes: string;
             indexes_size_bytes: string;
@@ -749,7 +738,7 @@ export class ScannerStorage {
   }
 
   private async getStateBigInt(key: string): Promise<bigint | undefined> {
-    const result = await this.pool.query<{ value: string }>(
+    const result = await this.db.query<{ value: string }>(
       `SELECT value FROM ${this.qScannerState} WHERE key = $1`,
       [key],
     );
@@ -760,7 +749,7 @@ export class ScannerStorage {
   private async getStoredBlockTiming(
     blockNumber: bigint,
   ): Promise<{ blockDate: string; scannedAt: string } | undefined> {
-    const result = await this.pool.query<{ block_date: string; scanned_at_utc: string }>(
+    const result = await this.db.query<{ block_date: string; scanned_at_utc: string }>(
       `SELECT
          block_date,
          to_char(scanned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS scanned_at_utc
@@ -779,9 +768,7 @@ export class ScannerStorage {
     recordCandidates: InspectedTransaction[] = transactions ?? [],
     operations?: TransactionArkivOperations[],
   ): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
+    await this.db.transaction(async (client) => {
       await client.query(
         `INSERT INTO ${this.qBlocks} AS existing (
           block_number,
@@ -869,17 +856,11 @@ export class ScannerStorage {
       await this.deleteTransactionRecordsForBlock(client, metrics.blockNumber);
       await this.upsertTransactionRecords(client, metrics, recordCandidates);
       await this.applyProgressUpdate(client, metrics, progressUpdate);
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   private async deleteTransactionRecordsForBlock(
-    client: pg.PoolClient,
+    client: DbQueryable,
     blockNumber: bigint,
   ): Promise<void> {
     await client.query(`DELETE FROM ${this.qTransactionRecords} WHERE block_number = $1`, [
@@ -888,7 +869,7 @@ export class ScannerStorage {
   }
 
   private async upsertTransactionRecords(
-    client: pg.PoolClient,
+    client: DbQueryable,
     metrics: BlockMetrics,
     transactions: InspectedTransaction[],
   ): Promise<void> {
@@ -920,7 +901,7 @@ export class ScannerStorage {
   }
 
   private async getCurrentRecordMinimum(
-    client: pg.PoolClient,
+    client: DbQueryable,
     category: TransactionRecordCategory,
   ): Promise<bigint | undefined> {
     const result = await client.query<{ record_value: string }>(
@@ -937,7 +918,7 @@ export class ScannerStorage {
   }
 
   private async insertTransactionRecordRows(
-    client: pg.PoolClient,
+    client: DbQueryable,
     metrics: BlockMetrics,
     rows: Array<{
       category: TransactionRecordCategory;
@@ -1035,7 +1016,7 @@ export class ScannerStorage {
   }
 
   private async pruneTransactionRecords(
-    client: pg.PoolClient,
+    client: DbQueryable,
     category: TransactionRecordCategory,
   ): Promise<void> {
     await client.query(
@@ -1053,7 +1034,7 @@ export class ScannerStorage {
   }
 
   private async replaceTransactionsForBlock(
-    client: pg.PoolClient,
+    client: DbQueryable,
     metrics: BlockMetrics,
     transactions: InspectedTransaction[],
   ): Promise<void> {
@@ -1133,7 +1114,7 @@ export class ScannerStorage {
    * payload bytes or calldata.
    */
   private async replaceOperationsForBlock(
-    client: pg.PoolClient,
+    client: DbQueryable,
     metrics: BlockMetrics,
     transactionOperations: TransactionArkivOperations[] | undefined,
   ): Promise<void> {
@@ -1203,7 +1184,7 @@ export class ScannerStorage {
   }
 
   async getOperationsByHash(hash: string): Promise<ArkivOperation[]> {
-    const result = await this.pool.query<TransactionOperationRow>(
+    const result = await this.db.query<TransactionOperationRow>(
       `SELECT
         op_index,
         operation_type,
@@ -1244,7 +1225,7 @@ export class ScannerStorage {
       return `($${blockParam}::bigint, $${params.length}::integer)`;
     });
 
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       block_number: string;
       position: number;
       operation: string;
@@ -1331,7 +1312,7 @@ export class ScannerStorage {
       LIMIT $${params.length}
     `;
 
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       block_number: string;
       block_date: string;
       base_block_fee_wei: string;
@@ -1404,7 +1385,7 @@ export class ScannerStorage {
     const newestEligible = new Date(now.getTime() - 2_000).toISOString();
     const oldestEligible = new Date(now.getTime() - 60 * 60 * 1_000).toISOString();
     const resolvedLimit = resolveLimit(limit, MAX_BLOCKS_PER_QUERY);
-    const result = await this.pool.query<{ block_number: string }>(
+    const result = await this.db.query<{ block_number: string }>(
       `SELECT block_number
        FROM ${this.qBlocks}
        WHERE block_date > $1
@@ -1433,7 +1414,7 @@ export class ScannerStorage {
   }
 
   async saveBatcherMetricsForBlock(blockNumber: bigint, metrics: BatcherMetrics): Promise<boolean> {
-    const result = await this.pool.query(
+    const result = await this.db.query(
       `UPDATE ${this.qBlocks}
        SET
          batcher_queue_size = COALESCE($2, batcher_queue_size),
@@ -1500,7 +1481,7 @@ export class ScannerStorage {
       OFFSET $${offsetParam}
     `;
 
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       block_number: string;
       block_date: string;
       base_block_fee_wei: string;
@@ -1529,7 +1510,7 @@ export class ScannerStorage {
 
   async countTransactions(filter: TransactionQueryFilter = {}): Promise<number> {
     const { where, params } = buildTransactionWhereClause(filter);
-    const result = await this.pool.query<{ count: string }>(
+    const result = await this.db.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count
        FROM ${this.qTransactions}
        ${where}`,
@@ -1539,7 +1520,7 @@ export class ScannerStorage {
   }
 
   async getTransactionByHash(hash: string): Promise<StoredTransaction | null> {
-    const result = await this.pool.query<TransactionRow>(
+    const result = await this.db.query<TransactionRow>(
       `SELECT
         block_number,
         block_date,
@@ -1578,7 +1559,7 @@ export class ScannerStorage {
     const result: StoredTransactionRecordsByCategory = emptyTransactionRecordsByCategory();
 
     for (const category of TRANSACTION_RECORD_CATEGORIES) {
-      const rows = await this.pool.query<TransactionRecordRow>(
+      const rows = await this.db.query<TransactionRecordRow>(
         `SELECT
            category,
            record_value,
@@ -1675,9 +1656,7 @@ export class ScannerStorage {
   }
 
   async aggregateSenderStats(): Promise<number> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
+    return this.db.transaction(async (client) => {
       await client.query(`DELETE FROM ${this.qSenderStats}`);
       const result = await client.query(
         `INSERT INTO ${this.qSenderStats} (
@@ -1713,22 +1692,16 @@ export class ScannerStorage {
         WHERE from_address IS NOT NULL
         GROUP BY LOWER(from_address)`,
       );
-      await client.query("COMMIT");
-      return result.rowCount ?? 0;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+      return result.rowCount;
+    });
   }
 
   async querySenderStats(filter: SenderStatsQueryFilter = {}): Promise<StoredSenderStats[]> {
     const limit = resolveLimit(filter.limit, MAX_SENDERS_PER_QUERY);
     const order = resolveQueryOrder(filter.order);
     const tieOrder = order === "DESC" ? "DESC" : "ASC";
-    const result = await this.pool.query<SenderStatsRow>(
-      // transaction_count / *_block_number are BIGINT; the pg type parser (OID 20) already returns
+    const result = await this.db.query<SenderStatsRow>(
+      // transaction_count / *_block_number are BIGINT; Bun.sql already returns
       // them as strings, so no ::text cast is needed. Do NOT cast: a transaction_count::text output
       // column would shadow the BIGINT in ORDER BY and rank lexicographically (e.g. "9" > "1000").
       `SELECT
@@ -1754,7 +1727,7 @@ export class ScannerStorage {
   }
 
   async listBaseloadConfigs(): Promise<StoredBaseloadConfigSummary[]> {
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       name: string;
       worker_count: number;
       created_at_utc: string;
@@ -1773,7 +1746,7 @@ export class ScannerStorage {
   }
 
   async getBaseloadConfig(name: string): Promise<StoredBaseloadConfig | undefined> {
-    const result = await this.pool.query<BaseloadConfigRow>(
+    const result = await this.db.query<BaseloadConfigRow>(
       `SELECT
          name,
          config_json::text AS config_json,
@@ -1790,7 +1763,7 @@ export class ScannerStorage {
   }
 
   async saveBaseloadConfig(name: string, config: BaseloadConfig): Promise<StoredBaseloadConfig> {
-    const result = await this.pool.query<BaseloadConfigRow>(
+    const result = await this.db.query<BaseloadConfigRow>(
       `INSERT INTO ${this.qBaseloadConfigs} (name, config_json, created_at, updated_at)
        VALUES ($1, $2::jsonb, NOW(), NOW())
        ON CONFLICT (name) DO UPDATE SET
@@ -1811,7 +1784,7 @@ export class ScannerStorage {
   }
 
   async deleteBaseloadConfig(name: string): Promise<boolean> {
-    const result = await this.pool.query(`DELETE FROM ${this.qBaseloadConfigs} WHERE name = $1`, [name]);
+    const result = await this.db.query(`DELETE FROM ${this.qBaseloadConfigs} WHERE name = $1`, [name]);
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -1841,7 +1814,7 @@ export class ScannerStorage {
     }
 
     if (fromRangeStart !== undefined) {
-      const result = await this.pool.query<{ range_start: string | null }>(
+      const result = await this.db.query<{ range_start: string | null }>(
         `WITH complete_ranges AS (
            SELECT
              range_start,
@@ -1864,7 +1837,7 @@ export class ScannerStorage {
       return value === null || value === undefined ? undefined : BigInt(value);
     }
 
-    const result = await this.pool.query<{ range_start: string | null }>(
+    const result = await this.db.query<{ range_start: string | null }>(
       `SELECT MAX(range_start)::text AS range_start
        FROM ${this.qBlockRanges}
        WHERE range_size = $1
@@ -1882,7 +1855,7 @@ export class ScannerStorage {
         `Range start ${rangeStart.toString()} must be a non-negative multiple of ${rangeSize.toString()}`,
       );
     }
-    const result = await this.pool.query<{ exists: boolean }>(
+    const result = await this.db.query<{ exists: boolean }>(
       `SELECT EXISTS (
          SELECT 1
          FROM ${this.qBlockRanges}
@@ -1897,7 +1870,7 @@ export class ScannerStorage {
 
   async saveBlockRange(metrics: BlockRangeMetrics): Promise<void> {
     assertSupportedRangeSize(metrics.rangeSize);
-    await this.pool.query(
+    await this.db.query(
       `INSERT INTO ${this.qBlockRanges} (
         range_size,
         range_start,
@@ -2064,7 +2037,7 @@ export class ScannerStorage {
       LIMIT $${params.length}
     `;
 
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       range_size: string;
       range_start: string;
       range_end: string;
@@ -2130,7 +2103,7 @@ export class ScannerStorage {
   }
 
   async getMinStoredBlock(): Promise<bigint | undefined> {
-    const result = await this.pool.query<{ value: string | null }>(
+    const result = await this.db.query<{ value: string | null }>(
       `SELECT MIN(block_number)::text AS value FROM ${this.qBlocks}`,
     );
     const row = result.rows[0];
@@ -2138,7 +2111,7 @@ export class ScannerStorage {
   }
 
   async getMaxStoredBlock(): Promise<bigint | undefined> {
-    const result = await this.pool.query<{ value: string | null }>(
+    const result = await this.db.query<{ value: string | null }>(
       `SELECT MAX(block_number)::text AS value FROM ${this.qBlocks}`,
     );
     const row = result.rows[0];
@@ -2146,13 +2119,13 @@ export class ScannerStorage {
   }
 
   async getStoredBlockBounds(): Promise<StoredBlockBounds | undefined> {
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       min_block: string | null;
       min_block_date: string | null;
       max_block: string | null;
       max_block_date: string | null;
     }>(
-      // block_number is BIGINT and the pg type parser (OID 20) already returns it as a string, so
+      // block_number is BIGINT and Bun.sql already returns it as a string, so
       // no ::text cast is needed. Do NOT cast here: a block_number::text output column would shadow
       // the BIGINT in ORDER BY and sort lexicographically ("1000000" < "999999"), giving min > max.
       `SELECT
@@ -2176,7 +2149,7 @@ export class ScannerStorage {
   async getRangeBlockCoverage(rangeStart: bigint, rangeSize: bigint): Promise<RangeBlockCoverage> {
     assertSupportedRangeSize(rangeSize);
     const rangeEnd = rangeEndFor(rangeStart, rangeSize);
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       present: string;
       latest_block: string | null;
       latest_block_date: string | null;
@@ -2209,13 +2182,13 @@ export class ScannerStorage {
 
   async getLatestCompleteBlockRange(rangeSize: bigint): Promise<LatestCompleteBlockRange | undefined> {
     assertSupportedRangeSize(rangeSize);
-    const result = await this.pool.query<{
+    const result = await this.db.query<{
       range_start: string;
       range_end: string;
       min_block_date: string;
       max_block_date: string;
     }>(
-      // range_start/range_end are BIGINT and the pg type parser (OID 20) already returns them as
+      // range_start/range_end are BIGINT and Bun.sql already returns them as
       // strings, so no ::text cast is needed. Do NOT cast: a range_start::text output column would
       // shadow the BIGINT in ORDER BY and sort lexicographically ("999900" > "1000050").
       `SELECT range_start, range_end, min_block_date, max_block_date
@@ -2246,9 +2219,9 @@ export class ScannerStorage {
    */
   async findBlockGaps(limit = 1000): Promise<BlockGap[]> {
     const resolvedLimit = resolveLimit(limit, MAX_BLOCKS_PER_QUERY);
-    const result = await this.pool.query<{ gap_start: string; gap_end: string }>(
+    const result = await this.db.query<{ gap_start: string; gap_end: string }>(
       // Arithmetic and ORDER BY run on the BIGINT block_number; the ::text casts only shape the
-      // output for transport (the pg parser returns BIGINT as string). Do NOT order by a ::text
+      // output for transport (Bun.sql returns BIGINT as string). Do NOT order by a ::text
       // alias — it would sort lexicographically.
       `SELECT
          (s.block_number + 1)::text AS gap_start,
@@ -2272,7 +2245,7 @@ export class ScannerStorage {
   }
 
   private async applyProgressUpdate(
-    client: pg.PoolClient,
+    client: DbQueryable,
     metrics: BlockMetrics,
     progressUpdate: BlockProgressUpdate,
   ): Promise<void> {
@@ -2289,7 +2262,7 @@ export class ScannerStorage {
   }
 
   private async upsertStateValue(
-    client: pg.PoolClient,
+    client: DbQueryable,
     key: string,
     value: string,
   ): Promise<void> {
@@ -2302,7 +2275,7 @@ export class ScannerStorage {
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    await this.db.close();
   }
 }
 
@@ -2447,7 +2420,7 @@ interface TransactionOperationRow {
   entity_key: string | null;
   content_type: string | null;
   payload_size_bytes: number;
-  attributes: ArkivOperationAttribute[];
+  attributes: string;
   expires_at_blocks: string | null;
   new_owner: string | null;
 }
@@ -2571,9 +2544,9 @@ function mapTransactionOperationRow(row: TransactionOperationRow): ArkivOperatio
     entityKey: row.entity_key,
     contentType: row.content_type,
     payloadSizeBytes: row.payload_size_bytes,
-    // attributes arrive already parsed from jsonb; expires_at_blocks is BIGINT
-    // and arrives as a string via the type-20 parser.
-    attributes: row.attributes,
+    // Bun.sql returns jsonb columns as raw JSON strings (the pg driver parsed
+    // them); expires_at_blocks is BIGINT and arrives as a string.
+    attributes: JSON.parse(row.attributes) as ArkivOperationAttribute[],
     expiresAtBlocks: Number(row.expires_at_blocks ?? 0),
     newOwner: row.new_owner,
   };
