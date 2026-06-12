@@ -23,6 +23,7 @@ import {
   type StoredBaseloadConfigSummary,
 } from "./api";
 import { fmtEth } from "./format";
+import { addressDetailHref } from "./permalinks";
 import {
   readStoredString,
   readStoredStringRecord,
@@ -603,20 +604,27 @@ function WorkerCard({
   return (
     <article className="worker-card" data-behavior={worker.behavior}>
       <header className="worker-card-head">
-        <span className="worker-card-wallet">
-          wallet <strong>#{worker.walletNumber}</strong>
-        </span>
-        <span className="behavior-badge" title={BASELOAD_BEHAVIOR_LABELS[worker.behavior]}>
-          {BEHAVIOR_BADGES[worker.behavior]}
-        </span>
+        <span className="worker-num-tile">#{worker.walletNumber}</span>
+        <div className="worker-card-title">
+          <span className="behavior-badge" title={BASELOAD_BEHAVIOR_LABELS[worker.behavior]}>
+            {BEHAVIOR_BADGES[worker.behavior]}
+          </span>
+          {worker.walletAddress ? (
+            <a
+              className="worker-card-addr"
+              href={addressDetailHref(worker.walletAddress)}
+              title={worker.walletAddress}
+            >
+              {shortAddress(worker.walletAddress)}
+            </a>
+          ) : (
+            <span className="worker-card-addr">address pending</span>
+          )}
+        </div>
         <button type="button" className="worker-card-delete" title="Delete worker" onClick={onDelete}>
           ×
         </button>
       </header>
-
-      <div className="worker-card-address" title={worker.walletAddress}>
-        {worker.walletAddress || "address pending"}
-      </div>
 
       <div className="worker-card-status-row">
         <StatusChip status={status} />
@@ -978,6 +986,10 @@ function ErrorBanner({
 
 function shortHash(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function shortAddress(value: string): string {
+  return value.length <= 16 ? value : `${value.slice(0, 8)}…${value.slice(-6)}`;
 }
 
 function editableStorageKey(workerId: string, field: keyof BaseloadWorkerConfig): string {
