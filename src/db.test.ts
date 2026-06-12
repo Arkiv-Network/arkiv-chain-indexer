@@ -40,12 +40,26 @@ if (!hasPostgresForTests()) {
       expect(result.rows[0]!.i).toBe(42);
     });
 
-    test("jsonb columns arrive as raw JSON strings", async () => {
-      const result = await db.query<{ j: unknown }>(`SELECT $1::jsonb AS j`, [
-        JSON.stringify([{ k: "a", v: 1 }]),
+    test("jsonb columns are parsed to JS values on read", async () => {
+      const result = await db.query<{ j: unknown }>(`SELECT '[{"k":"a","v":1}]'::jsonb AS j`);
+      expect(result.rows[0]!.j).toEqual([{ k: "a", v: 1 }]);
+    });
+
+    test("JS objects bound to jsonb params serialize as documents", async () => {
+      const result = await db.query<{ t: string; len: number }>(
+        `SELECT jsonb_typeof($1::jsonb) AS t,
+                jsonb_array_length($1::jsonb->'workers') AS len`,
+        [{ workers: [{ id: 1 }] }],
+      );
+      expect(result.rows[0]!.t).toBe("object");
+      expect(result.rows[0]!.len).toBe(1);
+    });
+
+    test("pre-stringified JSON bound to jsonb params double-encodes (do not do this)", async () => {
+      const result = await db.query<{ t: string }>(`SELECT jsonb_typeof($1::jsonb) AS t`, [
+        JSON.stringify({ workers: [] }),
       ]);
-      expect(typeof result.rows[0]!.j).toBe("string");
-      expect(JSON.parse(result.rows[0]!.j as string)).toEqual([{ k: "a", v: 1 }]);
+      expect(result.rows[0]!.t).toBe("string");
     });
 
     test("textArrayLiteral works with ANY($1::text[])", async () => {

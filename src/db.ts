@@ -7,8 +7,10 @@ import { SQL } from "bun";
  * Decoding notes (verified against Bun 1.3.x / Postgres 17):
  * - BIGINT/NUMERIC/COUNT(*) columns arrive as strings, matching the previous
  *   pg driver with its OID-20 type parser.
- * - JSONB columns arrive as raw JSON strings (pg parsed them); callers must
- *   JSON.parse.
+ * - JSONB columns are parsed to JS values on read, like pg. Bind JS
+ *   objects/arrays directly to jsonb params: binding a pre-stringified JSON
+ *   string double-encodes it into a jsonb string scalar (pg treated such
+ *   strings as raw JSON documents).
  * - JS array params are not serialized to Postgres array literals; use
  *   textArrayLiteral() for `= ANY($1::text[])` parameters.
  */

@@ -594,6 +594,20 @@ export class ScannerStorage {
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS is_complete BOOLEAN NOT NULL DEFAULT TRUE`,
     );
+    // Repair jsonb values that were double-encoded into string scalars by the
+    // initial Bun.sql migration (it bound pre-stringified JSON params, which
+    // Bun encodes as JSON strings): unwrap the inner document. Idempotent —
+    // matches nothing once repaired.
+    await this.db.query(
+      `UPDATE ${this.qBaseloadConfigs}
+       SET config_json = (config_json #>> '{}')::jsonb
+       WHERE jsonb_typeof(config_json) = 'string'`,
+    );
+    await this.db.query(
+      `UPDATE ${this.qTransactionOperations}
+       SET attributes = (attributes #>> '{}')::jsonb
+       WHERE jsonb_typeof(attributes) = 'string'`,
+    );
   }
 
   private async addNullableTextColumn(table: string, column: string): Promise<void> {
@@ -1136,7 +1150,7 @@ export class ScannerStorage {
     const maxRowsPerInsert = 2_000;
     for (let start = 0; start < rows.length; start += maxRowsPerInsert) {
       const chunk = rows.slice(start, start + maxRowsPerInsert);
-      const params: Array<string | number | null> = [];
+      const params: Array<string | number | null | ArkivOperationAttribute[]> = [];
       const values = chunk.map(({ transaction, operation }, rowIndex) => {
         const offset = rowIndex * columnsPerRow;
         params.push(
@@ -1150,7 +1164,10 @@ export class ScannerStorage {
           operation.entityKey,
           operation.contentType,
           operation.payloadSizeBytes,
-          JSON.stringify(operation.attributes),
+          // Bind the array itself: Bun.sql serializes JS objects/arrays to
+          // jsonb documents but double-encodes pre-stringified JSON strings
+          // into jsonb string scalars.
+          operation.attributes,
           operation.expiresAtBlocks.toString(),
           operation.newOwner,
         );
@@ -1775,7 +1792,9 @@ export class ScannerStorage {
          jsonb_array_length(COALESCE(config_json->'workers', '[]'::jsonb)) AS worker_count,
          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at_utc,
          to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at_utc`,
-      [name, JSON.stringify(config)],
+      // Bind the object itself — a JSON.stringify'd string would be
+      // double-encoded into a jsonb string scalar by Bun.sql.
+      [name, config],
     );
 
     const row = result.rows[0];
@@ -2420,7 +2439,7 @@ interface TransactionOperationRow {
   entity_key: string | null;
   content_type: string | null;
   payload_size_bytes: number;
-  attributes: string;
+  attributes: ArkivOperationAttribute[] | string;
   expires_at_blocks: string | null;
   new_owner: string | null;
 }
@@ -2544,9 +2563,13 @@ function mapTransactionOperationRow(row: TransactionOperationRow): ArkivOperatio
     entityKey: row.entity_key,
     contentType: row.content_type,
     payloadSizeBytes: row.payload_size_bytes,
-    // Bun.sql returns jsonb columns as raw JSON strings (the pg driver parsed
-    // them); expires_at_blocks is BIGINT and arrives as a string.
-    attributes: JSON.parse(row.attributes) as ArkivOperationAttribute[],
+    // Bun.sql parses jsonb on read, so attributes normally arrive as an array.
+    // Rows written while Bun double-encoded stringified params surface as JSON
+    // strings instead; parse those. expires_at_blocks is BIGINT (string).
+    attributes:
+      typeof row.attributes === "string"
+        ? (JSON.parse(row.attributes) as ArkivOperationAttribute[])
+        : row.attributes,
     expiresAtBlocks: Number(row.expires_at_blocks ?? 0),
     newOwner: row.new_owner,
   };
