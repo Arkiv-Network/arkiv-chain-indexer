@@ -690,6 +690,35 @@ export function BaseloadView({
   );
 }
 
+const ERROR_SUMMARY_MAX_LENGTH = 160;
+const CELL_ERROR_SUMMARY_MAX_LENGTH = 80;
+
+// Worker errors carry full describeError output (stack, cause chain, RPC
+// bodies). Render only the first line by default so a failing fleet doesn't
+// turn the panel into a wall of stack traces; the full text stays one click
+// away.
+function ErrorDetail({
+  message,
+  className,
+  maxLength = ERROR_SUMMARY_MAX_LENGTH,
+}: {
+  message: string;
+  className?: string;
+  maxLength?: number;
+}) {
+  const firstLine = message.split("\n", 1)[0] ?? message;
+  const summary = firstLine.length > maxLength ? `${firstLine.slice(0, maxLength)}…` : firstLine;
+  if (summary === message) {
+    return <span className={className ?? "error-detail"}>{message}</span>;
+  }
+  return (
+    <details className="error-detail-expander">
+      <summary className={className ?? "error-detail"}>{summary}</summary>
+      <pre className="error-detail-full">{message}</pre>
+    </details>
+  );
+}
+
 function BalanceCell({ balance, tokenSymbol }: { balance: BaseloadWorkerBalance | undefined; tokenSymbol: string }) {
   if (!balance) return <span title="No balance reported yet">—</span>;
   const label = `${fmtEth(balance.balanceWei)} ${tokenSymbol}`;
@@ -697,7 +726,11 @@ function BalanceCell({ balance, tokenSymbol }: { balance: BaseloadWorkerBalance 
     return (
       <span className="balance-error" title={`${balance.balanceWei} wei (last updated ${balance.updatedAt})`}>
         <span>{label}</span>
-        <span className="cell-error-message">RPC error: {balance.error}</span>
+        <ErrorDetail
+          className="cell-error-message"
+          message={`RPC error: ${balance.error}`}
+          maxLength={CELL_ERROR_SUMMARY_MAX_LENGTH}
+        />
       </span>
     );
   }
@@ -736,7 +769,11 @@ function TaskStatusCell({ status }: { status: BaseloadTaskStatus | undefined }) 
         <span className="cell-detail">boom @ {status.detonationAt}</span>
       ) : null}
       {isError && status.message ? (
-        <span className="cell-error-message">{status.message}</span>
+        <ErrorDetail
+          className="cell-error-message"
+          message={status.message}
+          maxLength={CELL_ERROR_SUMMARY_MAX_LENGTH}
+        />
       ) : null}
     </span>
   );
@@ -790,24 +827,24 @@ function ErrorBanner({
       <ul>
         {formError ? (
           <li>
-            <strong>Form:</strong> <span className="error-detail">{formError}</span>
+            <strong>Form:</strong> <ErrorDetail message={formError} />
           </li>
         ) : null}
         {backendError ? (
           <li>
-            <strong>Backend:</strong> <span className="error-detail">{backendError}</span>
+            <strong>Backend:</strong> <ErrorDetail message={backendError} />
           </li>
         ) : null}
         {configManagerError ? (
           <li>
-            <strong>Saved configs:</strong> <span className="error-detail">{configManagerError}</span>
+            <strong>Saved configs:</strong> <ErrorDetail message={configManagerError} />
           </li>
         ) : null}
         {workerErrors.map((entry, index) => (
           <li key={`${entry.workerId}-${entry.source}-${index}`}>
             <strong>Wallet {entry.walletNumber}</strong> ({entry.source}
             {entry.updatedAt ? ` @ ${entry.updatedAt}` : ""}):{" "}
-            <span className="error-detail">{entry.message}</span>
+            <ErrorDetail message={entry.message} />
           </li>
         ))}
       </ul>
