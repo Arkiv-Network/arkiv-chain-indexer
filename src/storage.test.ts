@@ -40,11 +40,7 @@ afterAll(async () => {
 });
 
 if (!hasPostgresForTests()) {
-  describe.skip("ScannerStorage (skipped: set TEST_DATABASE_URL to run)", () => {
-    test("placeholder", () => {
-      expect(true).toBe(true);
-    });
-  });
+  describe.skip("ScannerStorage (skipped: set TEST_DATABASE_URL to run)", () => {});
 } else {
   describe("ScannerStorage", () => {
     test("saves block metrics and resumes from the last successful block", async () => {

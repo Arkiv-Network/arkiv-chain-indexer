@@ -119,11 +119,7 @@ describe("aggregateRanges incremental mode", () => {
 });
 
 if (!hasPostgresForTests()) {
-  describe.skip("aggregateRanges (skipped: set TEST_DATABASE_URL to run)", () => {
-    test("placeholder", () => {
-      expect(true).toBe(true);
-    });
-  });
+  describe.skip("aggregateRanges (skipped: set TEST_DATABASE_URL to run)", () => {});
 } else {
   describe("aggregateRanges", () => {
     test("returns zero counts when there are no stored blocks", async () => {
