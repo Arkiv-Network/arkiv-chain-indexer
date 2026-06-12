@@ -78,6 +78,20 @@ describe("baseload task helpers", () => {
     expect(attributes).toEqual([BASELOAD_PROJECT_ATTRIBUTE]);
   });
 
+  test("sorts mixed attributes by key for the registry contract", () => {
+    const attributes = createBaseloadAttributes(
+      createWorker({
+        singleCreateStringArgumentCount: 2,
+        singleCreateNumberArgumentCount: 2,
+      }),
+      fixedRandomBytes,
+    );
+
+    const keys = attributes.map((attribute) => attribute.key);
+    expect(keys).toEqual([...keys].sort());
+    expect(keys[0]).toBe(BASELOAD_PROJECT_ATTRIBUTE.key);
+  });
+
   test("converts gwei decimals to wei", () => {
     expect(parseGweiToWei(1)).toBe(1_000_000_000n);
     expect(parseGweiToWei(0.1)).toBe(100_000_000n);

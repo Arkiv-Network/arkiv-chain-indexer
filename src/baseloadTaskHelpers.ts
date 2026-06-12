@@ -174,7 +174,9 @@ export function createBaseloadAttributes(
     });
   }
 
-  return attributes;
+  // The Arkiv registry rejects entities whose attributes are not sorted by
+  // key (AttributesNotSorted revert), so always submit them in byte order.
+  return attributes.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 export function parseGweiToWei(value: number): bigint {
