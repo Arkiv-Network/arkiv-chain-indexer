@@ -29,7 +29,7 @@ describe("backend baseload config", () => {
     });
 
     expect(config.workers.map((worker) => worker.walletAddress)).toEqual([
-      "0x638f7fAF81F9449CF7d5487329b4eB8fb5fA96b3",
+      "0x1e8254Ecb29AC73De90F02066A35b27f75FD5654",
       "0x8C59ca3A3BF65F5C530Eb5Ea67F2bd4b37049cf2",
     ]);
     expect(() => normalizeBaseloadConfig({ workers: [{ walletNumber: 2 }, { walletNumber: 2 }] })).toThrow(

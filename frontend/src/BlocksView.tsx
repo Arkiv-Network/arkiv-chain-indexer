@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtDate, fmtEth, fmtGwei } from "./format";
 import { BlockNumberLink } from "./blockLinks";
 import {
   buildPermalinkHref,
@@ -49,6 +49,7 @@ function blockColumns(
   timeZone: string,
   onLocationChange: () => void,
   tokenSymbol: string,
+  previousBaseFeeByBlock: Map<number, string>,
 ): Column<StoredBlock>[] {
   return [
     {
@@ -73,15 +74,13 @@ function blockColumns(
       key: "baseBlockFeeWei",
       label: "Base fee (gwei)",
       className: "num",
-      width: "9rem",
-      render: (row) => fmtGwei(row.baseBlockFeeWei),
-    },
-    {
-      key: "blockRewardWei",
-      label: `Block reward (${tokenSymbol})`,
-      className: "num",
       width: "11rem",
-      render: (row) => fmtEth(row.blockRewardWei ?? "0"),
+      render: (row) => (
+        <BaseFeeCell
+          baseFeeWei={row.baseBlockFeeWei}
+          previousBaseFeeWei={previousBaseFeeByBlock.get(row.blockNumber)}
+        />
+      ),
     },
     {
       key: "burntFeesWei",
@@ -102,16 +101,87 @@ function blockColumns(
       label: "Avg tx gas",
       className: "num",
       width: "10rem",
-      render: (row) => fmtInteger(row.averageTransactionGasUsed),
+      render: (row) => fmtGasK(row.averageTransactionGasUsed),
     },
     {
       key: "gasUsed",
       label: "Gas used / limit",
       className: "num",
       width: "15rem",
-      render: (row) => fmtRatio(row.totalGasUsed, row.maxGasInBlock),
+      render: (row) => fmtGasRatioK(row.totalGasUsed, row.maxGasInBlock),
     },
   ];
+}
+
+function BaseFeeCell({
+  baseFeeWei,
+  previousBaseFeeWei,
+}: {
+  baseFeeWei: string;
+  previousBaseFeeWei: string | undefined;
+}) {
+  const diff = baseFeeDifference(baseFeeWei, previousBaseFeeWei);
+  return (
+    <div className="base-fee-cell">
+      <span>{fmtGwei(baseFeeWei)}</span>
+      <span className={`base-fee-diff ${diff.className}`}>{diff.label}</span>
+    </div>
+  );
+}
+
+function baseFeeDifference(
+  baseFeeWei: string,
+  previousBaseFeeWei: string | undefined,
+): { label: string; className: "up" | "down" | "flat" | "missing" } {
+  if (!previousBaseFeeWei) return { label: "prev —", className: "missing" };
+  try {
+    const delta = BigInt(baseFeeWei) - BigInt(previousBaseFeeWei);
+    if (delta === 0n) return { label: "0", className: "flat" };
+    const prefix = delta > 0n ? "+" : "";
+    return {
+      label: `${prefix}${fmtGwei(delta.toString())}`,
+      className: delta > 0n ? "up" : "down",
+    };
+  } catch {
+    return { label: "prev —", className: "missing" };
+  }
+}
+
+function fmtGasK(value: string | number | null | undefined): string {
+  if (value === undefined || value === null) return "—";
+  try {
+    if (BigInt(value) === 0n) return "0";
+    const scaled = Number(BigInt(value) * 10n / 1_000n) / 10;
+    return `${formatGasKNumber(scaled)}k`;
+  } catch {
+    const parsed = Number(value);
+    if (parsed === 0) return "0";
+    return Number.isFinite(parsed) ? `${formatGasKNumber(parsed / 1_000)}k` : String(value);
+  }
+}
+
+function formatGasKNumber(value: number): string {
+  return value.toFixed(1).replace(/\.0$/, "");
+}
+
+function fmtGasRatioK(usedStr: string | null | undefined, limitStr: string | null | undefined): string {
+  if (!usedStr || !limitStr) return "—";
+  try {
+    const used = BigInt(usedStr);
+    const limit = BigInt(limitStr);
+    if (limit === 0n) return `${fmtGasK(used.toString())} / 0k`;
+    const pct = Number((used * 10_000n) / limit) / 100;
+    return `${fmtGasK(used.toString())} / ${fmtGasK(limit.toString())} (${pct.toFixed(2)}%)`;
+  } catch {
+    return `${fmtGasK(usedStr)} / ${fmtGasK(limitStr)}`;
+  }
+}
+
+function dateSuggestion(daysFromToday: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromToday);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.toISOString().replace(".000Z", "Z");
 }
 
 function buildParams(filters: Filters): URLSearchParams {
@@ -135,6 +205,7 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(true);
 
   const load = useCallback((f: Filters) => {
     setLoading(true);
@@ -169,6 +240,15 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
     }
   };
 
+  const clearFilters = () => {
+    setFilters(EMPTY);
+    if (writePermalink("blocks", EMPTY)) {
+      onLocationChange();
+    } else {
+      setApplied(EMPTY);
+    }
+  };
+
   const copyPermalink = async () => {
     const href = buildPermalinkHref("blocks", applied);
     try {
@@ -186,47 +266,118 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
   const onLimitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setFilters((prev) => ({ ...prev, limit: e.target.value }));
   };
-  const columns = useMemo(
-    () => blockColumns(timeZone, onLocationChange, tokenSymbol),
-    [timeZone, onLocationChange, tokenSymbol],
+  const sorted = useMemo(
+    () => (data ? data.blocks.slice().sort((a, b) => b.blockNumber - a.blockNumber) : []),
+    [data],
   );
-
-  const sorted = data
-    ? data.blocks.slice().sort((a, b) => b.blockNumber - a.blockNumber)
-    : [];
+  const previousBaseFeeByBlock = useMemo(() => {
+    const fees = new Map<number, string>();
+    for (const block of sorted) {
+      fees.set(block.blockNumber, block.baseBlockFeeWei);
+    }
+    const previousFees = new Map<number, string>();
+    for (const block of sorted) {
+      const previousBaseFee = fees.get(block.blockNumber - 1);
+      if (previousBaseFee !== undefined) {
+        previousFees.set(block.blockNumber, previousBaseFee);
+      }
+    }
+    return previousFees;
+  }, [sorted]);
+  const columns = useMemo(
+    () => blockColumns(timeZone, onLocationChange, tokenSymbol, previousBaseFeeByBlock),
+    [timeZone, onLocationChange, tokenSymbol, previousBaseFeeByBlock],
+  );
+  const activeFilterCount = [filters.blockGt, filters.blockLt, filters.dateGt, filters.dateLt].filter(
+    (value) => value.trim() !== "",
+  ).length;
+  const dateGtPlaceholder = useMemo(() => dateSuggestion(-1), []);
+  const dateLtPlaceholder = useMemo(() => dateSuggestion(1), []);
 
   return (
-    <section className="view">
+    <section className="view blocks-view">
       <h2>Latest blocks</h2>
-      <form onSubmit={onSubmit}>
-        <label>
-          blockGt
-          <input type="text" inputMode="numeric" value={filters.blockGt} onChange={onChange("blockGt")} />
-        </label>
-        <label>
-          blockLt
-          <input type="text" inputMode="numeric" value={filters.blockLt} onChange={onChange("blockLt")} />
-        </label>
-        <label>
-          dateGt (ISO)
-          <input type="text" placeholder="2024-01-01T00:00:00Z" value={filters.dateGt} onChange={onChange("dateGt")} />
-        </label>
-        <label>
-          dateLt (ISO)
-          <input type="text" placeholder="2024-12-31T00:00:00Z" value={filters.dateLt} onChange={onChange("dateLt")} />
-        </label>
-        <label>
-          limit
-          <select value={filters.limit} onChange={onLimitChange}>
-            {LIMIT_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit">Search</button>
-      </form>
+      <div className={`filters-panel blocks-filters-panel${filtersOpen ? " open" : ""}`}>
+        <div className="filters-panel-head">
+          <button
+            type="button"
+            className="filters-toggle"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <span className="filters-toggle-chevron" aria-hidden="true" />
+            <span>Filters</span>
+            {activeFilterCount > 0 ? <span className="filters-count">{activeFilterCount}</span> : null}
+          </button>
+          <span className="blocks-filter-meta">{filters.limit} rows</span>
+          {activeFilterCount > 0 || filters.limit !== EMPTY.limit ? (
+            <button type="button" className="link-button filters-clear" onClick={clearFilters}>
+              Clear all
+            </button>
+          ) : null}
+        </div>
+        {filtersOpen ? (
+          <form onSubmit={onSubmit} className="blocks-filter-form">
+            <fieldset className="filter-group">
+              <legend>Block</legend>
+              <label>
+                &gt;
+                <input type="text" inputMode="numeric" value={filters.blockGt} onChange={onChange("blockGt")} />
+              </label>
+              <label>
+                &lt;
+                <input type="text" inputMode="numeric" value={filters.blockLt} onChange={onChange("blockLt")} />
+              </label>
+            </fieldset>
+            <fieldset className="filter-group blocks-date-filter">
+              <legend>Date UTC</legend>
+              <label>
+                &gt;
+                <input
+                  type="text"
+                  placeholder={dateGtPlaceholder}
+                  value={filters.dateGt}
+                  onChange={onChange("dateGt")}
+                />
+              </label>
+              <label>
+                &lt;
+                <input
+                  type="text"
+                  placeholder={dateLtPlaceholder}
+                  value={filters.dateLt}
+                  onChange={onChange("dateLt")}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="filter-group blocks-limit-filter">
+              <legend>Rows</legend>
+              <label>
+                limit
+                <select value={filters.limit} onChange={onLimitChange}>
+                  {LIMIT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
+            <div className="blocks-filter-actions">
+              <button type="button" className="secondary" onClick={copyPermalink}>
+                Copy link
+              </button>
+              {activeFilterCount > 0 || filters.limit !== EMPTY.limit ? (
+                <button type="button" className="secondary" onClick={clearFilters}>
+                  Clear
+                </button>
+              ) : null}
+              <button type="submit">Search</button>
+              {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
+            </div>
+          </form>
+        ) : null}
+      </div>
       <p className={`summary${error ? " error" : ""}`}>
         {loading
           ? "Loading…"
@@ -236,12 +387,6 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
               ? `${data.count} blocks${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
-      <div className="permalink-row">
-        <button type="button" className="secondary" onClick={copyPermalink}>
-          Copy link
-        </button>
-        {copyStatus ? <span>{copyStatus}</span> : null}
-      </div>
       <div className="table-wrap">
         <table className="data-table">
           <colgroup>
