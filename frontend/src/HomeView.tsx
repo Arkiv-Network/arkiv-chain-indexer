@@ -308,6 +308,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
   }, [settings]);
 
   const guzzlersHref = buildPermalinkHref("guzzlers", {});
+  const blocksHref = buildPermalinkHref("blocks", {});
   const latestBlockBehindLabel = useMemo(() => {
     if (!latestBlock) return null;
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
@@ -325,6 +326,14 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
     if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();
     if (writePermalink("guzzlers", {})) {
+      onLocationChange();
+    }
+  };
+
+  const openBlocksView = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!shouldHandleClientNavigation(event)) return;
+    event.preventDefault();
+    if (writePermalink("blocks", {})) {
       onLocationChange();
     }
   };
@@ -408,6 +417,9 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
                   <span className="home-panel-latest-time">{latestBlockBehindLabel}</span>
                 ) : null}
                 <span>{blocksData ? `${blockSlots.length} shown` : blocksLoading ? "Loading" : "No data"}</span>
+                <a className="home-panel-link" href={blocksHref} onClick={openBlocksView}>
+                  All blocks
+                </a>
               </div>
             </div>
             {blocksError && blocks.length === 0 ? (

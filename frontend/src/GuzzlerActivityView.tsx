@@ -16,6 +16,7 @@ import {
   type GuzzlerActivityMetricKey,
   type GuzzlerActivityWindowKey,
 } from "./guzzlerActivity";
+import { addressSearchHref } from "./transactionLinks";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -94,6 +95,7 @@ export function GuzzlerActivityView({
   );
 
   const display = addressDisplay(address);
+  const transactionsHref = addressSearchHref(address);
   const retentionLabel = data ? fmtDurationSeconds(data.retentionMs / 1000) : "24h";
   // Reads naturally for both the fixed windows and the auto-fit "All" tab.
   const spanPhrase =
@@ -175,6 +177,11 @@ export function GuzzlerActivityView({
           </button>
           {inputError ? <span className="field-error">{inputError}</span> : null}
         </form>
+        {transactionsHref ? (
+          <a className="secondary-link guzzler-activity-txns" href={transactionsHref}>
+            View transactions
+          </a>
+        ) : null}
       </div>
 
       <p className={`summary${error ? " error" : ""}`}>

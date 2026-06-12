@@ -2278,6 +2278,10 @@ td.num {
   flex: 1;
 }
 
+.guzzler-activity-txns {
+  white-space: nowrap;
+}
+
 .guzzler-address-form input {
   flex: 1;
   min-width: 0;
