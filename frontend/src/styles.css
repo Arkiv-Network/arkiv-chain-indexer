@@ -1746,6 +1746,75 @@ button.secondary {
   flex-wrap: wrap;
 }
 
+.blocks-filters-panel {
+  background: color-mix(in oklab, var(--stone) 18%, transparent);
+}
+
+.blocks-filter-meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.blocks-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.7rem 0.9rem;
+  margin: 0;
+  padding: 0.75rem;
+}
+
+.blocks-filter-form .filter-group {
+  background: color-mix(in oklab, var(--sand) 68%, transparent);
+}
+
+.blocks-filter-form .filter-group label {
+  gap: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.blocks-filter-form .filter-group select,
+.blocks-filter-form .filter-group input {
+  border-color: var(--line-strong);
+  background: var(--sand);
+}
+
+.blocks-date-filter input {
+  width: 14rem;
+}
+
+.blocks-limit-filter select {
+  width: 7.5rem;
+}
+
+.blocks-filter-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .blocks-filter-form {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .blocks-filter-actions {
+    margin-left: 0;
+  }
+
+  .blocks-date-filter input,
+  .blocks-limit-filter select {
+    width: 100%;
+  }
+}
+
 /* Read-only address header on the locked /address/<0x…> page */
 .address-id {
   display: flex;
@@ -1927,6 +1996,14 @@ td.num {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-width: 32rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.cell-detail {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted, #6b7280);
+  overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 

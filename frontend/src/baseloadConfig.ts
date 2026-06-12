@@ -1,13 +1,34 @@
-import { type BaseloadConfig, type BaseloadWorkerConfig } from "./api";
+import {
+  BASELOAD_WORKER_BEHAVIORS,
+  type BaseloadConfig,
+  type BaseloadWorkerBehavior,
+  type BaseloadWorkerConfig,
+} from "./api";
 
-export type { BaseloadConfig, BaseloadWorkerConfig } from "./api";
+export { BASELOAD_WORKER_BEHAVIORS } from "./api";
+export type { BaseloadConfig, BaseloadWorkerBehavior, BaseloadWorkerConfig } from "./api";
+
+export const BASELOAD_BEHAVIOR_LABELS: Record<BaseloadWorkerBehavior, string> = {
+  "create": "Creates only",
+  "create-update": "Creates + updates (TTL refresh)",
+  "create-ownership": "Creates + ownership change",
+  "time-bomb": "Time bomb (synchronized expiry)",
+  "create-update-delete": "Creates + updates + deletes",
+};
+
+export function behaviorUsesPool(behavior: BaseloadWorkerBehavior): boolean {
+  return behavior === "create-update" || behavior === "create-update-delete";
+}
 
 export interface BaseloadWorkerDraft {
+  behavior: string;
   maxGasPriceGwei: string;
-  createsPerMinute: string;
+  opsPerMinute: string;
   singleCreatePayloadSize: string;
   singleCreateStringArgumentCount: string;
   singleCreateNumberArgumentCount: string;
+  entityPoolSize: string;
+  timeBombOffsetSeconds: string;
   walletNumber: string;
   startBlock: string;
   endBlock: string;
@@ -15,16 +36,19 @@ export interface BaseloadWorkerDraft {
   ttlSeconds: string;
 }
 
-export const BASELOAD_CONFIG_VERSION = 1;
+export const BASELOAD_CONFIG_VERSION = 2;
 export const MIN_WALLET_NUMBER = 0;
 export const MAX_WALLET_NUMBER = 100;
 
 export const DEFAULT_BASELOAD_WORKER_VALUES = {
+  behavior: "create" as BaseloadWorkerBehavior,
   maxGasPriceGwei: 0.1,
-  createsPerMinute: 1,
+  opsPerMinute: 1,
   singleCreatePayloadSize: 5000,
   singleCreateStringArgumentCount: 2,
   singleCreateNumberArgumentCount: 2,
+  entityPoolSize: 10,
+  timeBombOffsetSeconds: 600,
   startBlock: 0,
   endBlock: null,
   durationSeconds: null,
@@ -38,8 +62,9 @@ export const EMPTY_BASELOAD_CONFIG: BaseloadConfig = {
 
 export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerDraft {
   return {
+    behavior: DEFAULT_BASELOAD_WORKER_VALUES.behavior,
     maxGasPriceGwei: String(DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei.toFixed(1)),
-    createsPerMinute: String(DEFAULT_BASELOAD_WORKER_VALUES.createsPerMinute),
+    opsPerMinute: String(DEFAULT_BASELOAD_WORKER_VALUES.opsPerMinute),
     singleCreatePayloadSize: String(DEFAULT_BASELOAD_WORKER_VALUES.singleCreatePayloadSize),
     singleCreateStringArgumentCount: String(
       DEFAULT_BASELOAD_WORKER_VALUES.singleCreateStringArgumentCount,
@@ -47,6 +72,8 @@ export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerD
     singleCreateNumberArgumentCount: String(
       DEFAULT_BASELOAD_WORKER_VALUES.singleCreateNumberArgumentCount,
     ),
+    entityPoolSize: String(DEFAULT_BASELOAD_WORKER_VALUES.entityPoolSize),
+    timeBombOffsetSeconds: String(DEFAULT_BASELOAD_WORKER_VALUES.timeBombOffsetSeconds),
     walletNumber: String(walletNumber),
     startBlock: String(DEFAULT_BASELOAD_WORKER_VALUES.startBlock),
     endBlock: "",
@@ -69,11 +96,12 @@ export function createBaseloadWorkerFromDraft(draft: BaseloadWorkerDraft): Basel
   return normalizeBaseloadWorker({
     ...DEFAULT_BASELOAD_WORKER_VALUES,
     id: createWorkerId(Number(draft.walletNumber)),
+    behavior: draft.behavior,
     maxGasPriceGwei: parseFiniteNumber("Max gas price accepted gwei", draft.maxGasPriceGwei, {
       allowFloat: true,
       min: 0,
     }),
-    createsPerMinute: parseFiniteNumber("Number of creates per minute", draft.createsPerMinute, {
+    opsPerMinute: parseFiniteNumber("Operations per minute", draft.opsPerMinute, {
       allowFloat: true,
       min: 0,
     }),
@@ -90,6 +118,15 @@ export function createBaseloadWorkerFromDraft(draft: BaseloadWorkerDraft): Basel
       "Single create number argument number",
       draft.singleCreateNumberArgumentCount,
       { allowFloat: false, min: 0 },
+    ),
+    entityPoolSize: parseFiniteNumber("Entity pool size", draft.entityPoolSize, {
+      allowFloat: false,
+      min: 1,
+    }),
+    timeBombOffsetSeconds: parseFiniteNumber(
+      "Time bomb offset seconds",
+      draft.timeBombOffsetSeconds,
+      { allowFloat: false, min: 1 },
     ),
     walletNumber: parseFiniteNumber("Wallet number", draft.walletNumber, {
       allowFloat: false,
@@ -195,10 +232,11 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
 
   return {
     id: typeof input.id === "string" && input.id.trim() ? input.id : createWorkerId(walletNumber),
+    behavior: coerceBehavior(input.behavior),
     maxGasPriceGwei: coerceNumber("Max gas price accepted gwei", input.maxGasPriceGwei, {
       min: 0,
     }),
-    createsPerMinute: coerceNumber("Number of creates per minute", input.createsPerMinute, {
+    opsPerMinute: coerceNumber("Operations per minute", input.opsPerMinute, {
       min: 0,
     }),
     singleCreatePayloadSize: coerceInteger(
@@ -216,6 +254,10 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
       input.singleCreateNumberArgumentCount,
       { min: 0 },
     ),
+    entityPoolSize: coerceInteger("Entity pool size", input.entityPoolSize, { min: 1 }),
+    timeBombOffsetSeconds: coerceInteger("Time bomb offset seconds", input.timeBombOffsetSeconds, {
+      min: 1,
+    }),
     walletNumber,
     walletAddress: typeof input.walletAddress === "string" ? input.walletAddress : "",
     startBlock,
@@ -223,6 +265,19 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
     durationSeconds: coerceNullableInteger("Duration seconds", input.durationSeconds, { min: 1 }),
     ttlSeconds: coerceInteger("TTL seconds", input.ttlSeconds, { min: 1 }),
   };
+}
+
+function coerceBehavior(value: unknown): BaseloadWorkerBehavior {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_BASELOAD_WORKER_VALUES.behavior;
+  }
+  if (
+    typeof value === "string" &&
+    (BASELOAD_WORKER_BEHAVIORS as readonly string[]).includes(value)
+  ) {
+    return value as BaseloadWorkerBehavior;
+  }
+  throw new Error(`Worker behavior must be one of: ${BASELOAD_WORKER_BEHAVIORS.join(", ")}`);
 }
 
 function createWorkerId(walletNumber: number): string {
@@ -296,14 +351,18 @@ function defaultNumberFor(label: string): number {
   switch (label) {
     case "Max gas price accepted gwei":
       return DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei;
-    case "Number of creates per minute":
-      return DEFAULT_BASELOAD_WORKER_VALUES.createsPerMinute;
+    case "Operations per minute":
+      return DEFAULT_BASELOAD_WORKER_VALUES.opsPerMinute;
     case "Single create payload size":
       return DEFAULT_BASELOAD_WORKER_VALUES.singleCreatePayloadSize;
     case "Single create string argument number":
       return DEFAULT_BASELOAD_WORKER_VALUES.singleCreateStringArgumentCount;
     case "Single create number argument number":
       return DEFAULT_BASELOAD_WORKER_VALUES.singleCreateNumberArgumentCount;
+    case "Entity pool size":
+      return DEFAULT_BASELOAD_WORKER_VALUES.entityPoolSize;
+    case "Time bomb offset seconds":
+      return DEFAULT_BASELOAD_WORKER_VALUES.timeBombOffsetSeconds;
     case "Start block":
       return DEFAULT_BASELOAD_WORKER_VALUES.startBlock;
     case "TTL seconds":

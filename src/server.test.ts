@@ -507,7 +507,7 @@ describe("Baseload API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       enabled: false,
-      config: { version: 1, workers: [] },
+      config: { version: 2, workers: [] },
       statuses: {},
     });
   });
@@ -542,7 +542,7 @@ describe("Baseload API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       enabled: false,
-      config: { version: 1, workers: [] },
+      config: { version: 2, workers: [] },
       statuses: {},
     });
     runtime.stop();

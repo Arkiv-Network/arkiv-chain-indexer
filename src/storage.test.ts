@@ -175,15 +175,18 @@ if (!hasPostgresForTests()) {
       const storage = await withStorage();
 
       const saved = await storage.saveBaseloadConfig("low gas", {
-        version: 1,
+        version: 2,
         workers: [
           {
             id: "wallet-0",
+            behavior: "create",
             maxGasPriceGwei: 0.1,
-            createsPerMinute: 1,
+            opsPerMinute: 1,
             singleCreatePayloadSize: 5000,
             singleCreateStringArgumentCount: 2,
             singleCreateNumberArgumentCount: 2,
+            entityPoolSize: 10,
+            timeBombOffsetSeconds: 600,
             walletNumber: 0,
             walletAddress: "0x0000000000000000000000000000000000000000",
             startBlock: 0,
@@ -199,7 +202,7 @@ if (!hasPostgresForTests()) {
       expect(saved.createdAt).toMatch(/Z$/);
       expect(saved.updatedAt).toMatch(/Z$/);
 
-      await storage.saveBaseloadConfig("empty", { version: 1, workers: [] });
+      await storage.saveBaseloadConfig("empty", { version: 2, workers: [] });
       expect((await storage.listBaseloadConfigs()).map((config) => config.name)).toEqual([
         "empty",
         "low gas",

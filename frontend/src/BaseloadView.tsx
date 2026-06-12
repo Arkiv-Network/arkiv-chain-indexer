@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  BASELOAD_BEHAVIOR_LABELS,
+  BASELOAD_WORKER_BEHAVIORS,
+  behaviorUsesPool,
   createBaseloadWorkerDraft,
   createBaseloadWorkerFromDraft,
   getAvailableWalletNumbers,
@@ -10,6 +13,7 @@ import {
   serializeBaseloadConfig,
   updateBaseloadWorker,
   type BaseloadConfig,
+  type BaseloadWorkerBehavior,
   type BaseloadWorkerConfig,
   type BaseloadWorkerDraft,
 } from "./baseloadConfig";
@@ -46,11 +50,14 @@ interface BaseloadViewProps {
 
 const DRAFT_STORAGE_KEY = "baseload.workerDraft";
 const DRAFT_KEYS = [
+  "behavior",
   "maxGasPriceGwei",
-  "createsPerMinute",
+  "opsPerMinute",
   "singleCreatePayloadSize",
   "singleCreateStringArgumentCount",
   "singleCreateNumberArgumentCount",
+  "entityPoolSize",
+  "timeBombOffsetSeconds",
   "walletNumber",
   "startBlock",
   "endBlock",
@@ -59,10 +66,12 @@ const DRAFT_KEYS = [
 ] as const;
 const EDITABLE_WORKER_KEYS = [
   "maxGasPriceGwei",
-  "createsPerMinute",
+  "opsPerMinute",
   "singleCreatePayloadSize",
   "singleCreateStringArgumentCount",
   "singleCreateNumberArgumentCount",
+  "entityPoolSize",
+  "timeBombOffsetSeconds",
   "startBlock",
   "endBlock",
   "durationSeconds",
@@ -100,6 +109,11 @@ export function BaseloadView({
   const [managerError, setManagerError] = useState<string | null>(null);
   const [managerStatus, setManagerStatus] = useState("");
   const displayedConfigManagerError = managerError || configManagerError;
+  const draftBehavior: BaseloadWorkerBehavior = (
+    BASELOAD_WORKER_BEHAVIORS as readonly string[]
+  ).includes(draft.behavior)
+    ? (draft.behavior as BaseloadWorkerBehavior)
+    : "create";
 
   useEffect(() => {
     if (availableWallets.length === 0) return;
@@ -268,6 +282,16 @@ export function BaseloadView({
 
       <form className="baseload-form" onSubmit={addWorker} noValidate>
         <label>
+          Behavior
+          <select value={draftBehavior} onChange={onDraftChange("behavior")}>
+            {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
+              <option key={behavior} value={behavior}>
+                {BASELOAD_BEHAVIOR_LABELS[behavior]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           Max gas price accepted gwei
           <input
             type="number"
@@ -278,13 +302,13 @@ export function BaseloadView({
           />
         </label>
         <label>
-          Creates per minute
+          Operations per minute
           <input
             type="number"
             min="0"
             step="1"
-            value={draft.createsPerMinute}
-            onChange={onDraftChange("createsPerMinute")}
+            value={draft.opsPerMinute}
+            onChange={onDraftChange("opsPerMinute")}
           />
         </label>
         <label>
@@ -317,6 +341,30 @@ export function BaseloadView({
             onChange={onDraftChange("singleCreateNumberArgumentCount")}
           />
         </label>
+        {behaviorUsesPool(draftBehavior) ? (
+          <label>
+            Entity pool size
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={draft.entityPoolSize}
+              onChange={onDraftChange("entityPoolSize")}
+            />
+          </label>
+        ) : null}
+        {draftBehavior === "time-bomb" ? (
+          <label>
+            Time bomb offset seconds
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={draft.timeBombOffsetSeconds}
+              onChange={onDraftChange("timeBombOffsetSeconds")}
+            />
+          </label>
+        ) : null}
         <label>
           Wallet number
           <select
@@ -349,16 +397,18 @@ export function BaseloadView({
             onChange={onDraftChange("durationSeconds")}
           />
         </label>
-        <label>
-          Entry TTL seconds
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={draft.ttlSeconds}
-            onChange={onDraftChange("ttlSeconds")}
-          />
-        </label>
+        {draftBehavior !== "time-bomb" ? (
+          <label>
+            Entry TTL seconds
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={draft.ttlSeconds}
+              onChange={onDraftChange("ttlSeconds")}
+            />
+          </label>
+        ) : null}
         <button type="submit" disabled={availableWallets.length === 0}>
           Add worker
         </button>
@@ -437,11 +487,14 @@ export function BaseloadView({
               <th scope="col">Wallet</th>
               <th scope="col">Address</th>
               <th scope="col">Balance</th>
+              <th scope="col">Behavior</th>
               <th scope="col">Max gas gwei</th>
-              <th scope="col">Creates/min</th>
+              <th scope="col">Ops/min</th>
               <th scope="col">Payload size</th>
               <th scope="col">String args</th>
               <th scope="col">Number args</th>
+              <th scope="col">Pool size</th>
+              <th scope="col">Bomb offset sec</th>
               <th scope="col">Start block</th>
               <th scope="col">End block</th>
               <th scope="col">Duration sec</th>
@@ -453,7 +506,7 @@ export function BaseloadView({
           <tbody>
             {config.workers.length === 0 ? (
               <tr>
-                <td colSpan={14}>No baseload workers configured.</td>
+                <td colSpan={17}>No baseload workers configured.</td>
               </tr>
             ) : (
               config.workers.map((worker) => (
@@ -462,6 +515,23 @@ export function BaseloadView({
                   <td className="wallet-address">{worker.walletAddress}</td>
                   <td className="num">
                     <BalanceCell balance={balances[worker.id]} tokenSymbol={tokenSymbol} />
+                  </td>
+                  <td>
+                    <select
+                      className="table-input"
+                      value={worker.behavior}
+                      onChange={(event) =>
+                        updateWorker(worker, {
+                          behavior: event.target.value as BaseloadWorkerBehavior,
+                        })
+                      }
+                    >
+                      {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
+                        <option key={behavior} value={behavior}>
+                          {BASELOAD_BEHAVIOR_LABELS[behavior]}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td>
                     <EditableNumber
@@ -476,12 +546,12 @@ export function BaseloadView({
                   </td>
                   <td>
                     <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "createsPerMinute")}
-                      value={worker.createsPerMinute}
+                      storageKey={editableStorageKey(worker.id, "opsPerMinute")}
+                      value={worker.opsPerMinute}
                       min={0}
                       step="1"
                       onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { createsPerMinute: value });
+                        if (value !== null) updateWorker(worker, { opsPerMinute: value });
                       }}
                     />
                   </td>
@@ -522,6 +592,38 @@ export function BaseloadView({
                     />
                   </td>
                   <td>
+                    {behaviorUsesPool(worker.behavior) ? (
+                      <EditableNumber
+                        storageKey={editableStorageKey(worker.id, "entityPoolSize")}
+                        value={worker.entityPoolSize}
+                        min={1}
+                        step="1"
+                        integer
+                        onChange={(value) => {
+                          if (value !== null) updateWorker(worker, { entityPoolSize: value });
+                        }}
+                      />
+                    ) : (
+                      <span title="Only used by behaviors with an entity pool">—</span>
+                    )}
+                  </td>
+                  <td>
+                    {worker.behavior === "time-bomb" ? (
+                      <EditableNumber
+                        storageKey={editableStorageKey(worker.id, "timeBombOffsetSeconds")}
+                        value={worker.timeBombOffsetSeconds}
+                        min={1}
+                        step="1"
+                        integer
+                        onChange={(value) => {
+                          if (value !== null) updateWorker(worker, { timeBombOffsetSeconds: value });
+                        }}
+                      />
+                    ) : (
+                      <span title="Only used by the time bomb behavior">—</span>
+                    )}
+                  </td>
+                  <td>
                     <EditableNumber
                       storageKey={editableStorageKey(worker.id, "startBlock")}
                       value={worker.startBlock}
@@ -555,16 +657,20 @@ export function BaseloadView({
                     />
                   </td>
                   <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "ttlSeconds")}
-                      value={worker.ttlSeconds}
-                      min={1}
-                      step="1"
-                      integer
-                      onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { ttlSeconds: value });
-                      }}
-                    />
+                    {worker.behavior === "time-bomb" ? (
+                      <span title="TTL targets the detonation moment automatically">auto</span>
+                    ) : (
+                      <EditableNumber
+                        storageKey={editableStorageKey(worker.id, "ttlSeconds")}
+                        value={worker.ttlSeconds}
+                        min={1}
+                        step="1"
+                        integer
+                        onChange={(value) => {
+                          if (value !== null) updateWorker(worker, { ttlSeconds: value });
+                        }}
+                      />
+                    )}
                   </td>
                   <td>
                     <TaskStatusCell status={taskStatuses[worker.id]} />
@@ -602,21 +708,33 @@ function BalanceCell({ balance, tokenSymbol }: { balance: BaseloadWorkerBalance 
 
 function TaskStatusCell({ status }: { status: BaseloadTaskStatus | undefined }) {
   if (!status) return <span>starting</span>;
+  const ops: string[] = [];
+  if (status.createdCount) ops.push(`${status.createdCount} created`);
+  if (status.updatedCount) ops.push(`${status.updatedCount} updated`);
+  if (status.deletedCount) ops.push(`${status.deletedCount} deleted`);
+  if (status.ownershipChangedCount) ops.push(`${status.ownershipChangedCount} owned`);
   const count =
     status.attemptedCount === undefined
       ? ""
-      : ` ${status.createdCount ?? 0}/${status.attemptedCount}`;
+      : ` ${ops.join(", ") || "0 done"} / ${status.attemptedCount} tries`;
+  const poolSize = status.poolSize ? ` pool ${status.poolSize}` : "";
   const block = status.currentBlock === undefined ? "" : ` block ${status.currentBlock}`;
   const tx = status.txHash ? ` tx ${shortHash(status.txHash)}` : "";
-  const label = `${status.status}${count}${block}${tx}`;
+  const label = `${status.status}${count}${poolSize}${block}${tx}`;
   const isError = status.status === "error";
+  const title = [
+    status.message ?? status.txHash ?? status.entityKey,
+    status.detonationAt ? `Detonation at ${status.detonationAt}` : null,
+  ]
+    .filter((part) => part)
+    .join(" — ");
 
   return (
-    <span
-      className={isError ? "task-status-error" : undefined}
-      title={status.message ?? status.txHash ?? status.entityKey}
-    >
+    <span className={isError ? "task-status-error" : undefined} title={title || undefined}>
       <span>{label}</span>
+      {status.detonationAt ? (
+        <span className="cell-detail">boom @ {status.detonationAt}</span>
+      ) : null}
       {isError && status.message ? (
         <span className="cell-error-message">{status.message}</span>
       ) : null}

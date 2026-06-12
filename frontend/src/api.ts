@@ -476,13 +476,26 @@ export interface HealthResponse {
   };
 }
 
+export const BASELOAD_WORKER_BEHAVIORS = [
+  "create",
+  "create-update",
+  "create-ownership",
+  "time-bomb",
+  "create-update-delete",
+] as const;
+
+export type BaseloadWorkerBehavior = (typeof BASELOAD_WORKER_BEHAVIORS)[number];
+
 export interface BaseloadWorkerConfig {
   id: string;
+  behavior: BaseloadWorkerBehavior;
   maxGasPriceGwei: number;
-  createsPerMinute: number;
+  opsPerMinute: number;
   singleCreatePayloadSize: number;
   singleCreateStringArgumentCount: number;
   singleCreateNumberArgumentCount: number;
+  entityPoolSize: number;
+  timeBombOffsetSeconds: number;
   walletNumber: number;
   walletAddress: string;
   startBlock: number;
@@ -492,7 +505,7 @@ export interface BaseloadWorkerConfig {
 }
 
 export interface BaseloadConfig {
-  version: 1;
+  version: 2;
   workers: BaseloadWorkerConfig[];
 }
 
@@ -505,6 +518,11 @@ export interface BaseloadTaskStatus {
   message?: string;
   attemptedCount?: number;
   createdCount?: number;
+  updatedCount?: number;
+  deletedCount?: number;
+  ownershipChangedCount?: number;
+  poolSize?: number;
+  detonationAt?: string;
   entityKey?: string;
   txHash?: string;
 }

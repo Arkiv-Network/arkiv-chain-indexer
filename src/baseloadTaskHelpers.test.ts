@@ -1,12 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
   BASELOAD_PROJECT_ATTRIBUTE,
+  chooseBaseloadOperation,
   createBaseloadAttributes,
   createBaseloadEntityInput,
+  createBaseloadUpdateInput,
   getBaseloadLimitState,
   getMillisecondsUntilNextMinute,
   getMinuteAttemptLimit,
+  getTimeBombDetonationMs,
+  getTimeBombRemainingSeconds,
   parseGweiToWei,
+  pickSoonestExpiringPoolEntry,
+  pruneExpiredPoolEntries,
+  randomOwnerAddress,
+  type BaseloadPoolEntry,
 } from "./baseloadTaskHelpers";
 import { type BaseloadWorkerConfig } from "./baseloadConfig";
 
@@ -75,16 +83,89 @@ describe("baseload task helpers", () => {
     expect(parseGweiToWei(0.1)).toBe(100_000_000n);
     expect(parseGweiToWei(5.123456789)).toBe(5_123_456_789n);
   });
+
+  test("chooses operations for the simple behaviors", () => {
+    expect(chooseBaseloadOperation(createWorker({ behavior: "create" }), 0, 0)).toBe("create");
+    expect(chooseBaseloadOperation(createWorker({ behavior: "create-ownership" }), 0, 3)).toBe(
+      "create-and-own",
+    );
+    expect(chooseBaseloadOperation(createWorker({ behavior: "time-bomb" }), 0, 7)).toBe(
+      "time-bomb-create",
+    );
+  });
+
+  test("create-update fills the pool first and then only updates", () => {
+    const worker = createWorker({ behavior: "create-update", entityPoolSize: 3 });
+
+    expect(chooseBaseloadOperation(worker, 0, 0)).toBe("create");
+    expect(chooseBaseloadOperation(worker, 2, 5)).toBe("create");
+    expect(chooseBaseloadOperation(worker, 3, 6)).toBe("update");
+    expect(chooseBaseloadOperation(worker, 5, 7)).toBe("update");
+  });
+
+  test("create-update-delete mixes operations around the pool target", () => {
+    const worker = createWorker({ behavior: "create-update-delete", entityPoolSize: 2 });
+
+    expect(chooseBaseloadOperation(worker, 0, 0)).toBe("create");
+    expect(chooseBaseloadOperation(worker, 1, 2)).toBe("create");
+    expect(chooseBaseloadOperation(worker, 1, 3)).toBe("update");
+    expect(chooseBaseloadOperation(worker, 2, 4)).toBe("update");
+    expect(chooseBaseloadOperation(worker, 2, 5)).toBe("delete");
+  });
+
+  test("prunes pool entries that are about to expire and refreshes the soonest", () => {
+    const pool: BaseloadPoolEntry[] = [
+      { entityKey: "0x01", expiresAtMs: 10_000 },
+      { entityKey: "0x02", expiresAtMs: 50_000 },
+      { entityKey: "0x03", expiresAtMs: 30_000 },
+    ];
+
+    expect(pruneExpiredPoolEntries(pool, 9_000, 2_000).map((entry) => entry.entityKey)).toEqual([
+      "0x02",
+      "0x03",
+    ]);
+    expect(pruneExpiredPoolEntries(pool, 1_000, 2_000)).toHaveLength(3);
+    expect(pickSoonestExpiringPoolEntry(pool)?.entityKey).toBe("0x01");
+    expect(pickSoonestExpiringPoolEntry([])).toBeNull();
+  });
+
+  test("computes time bomb detonation and remaining TTL", () => {
+    const worker = createWorker({ behavior: "time-bomb", timeBombOffsetSeconds: 300 });
+    const detonationAtMs = getTimeBombDetonationMs(worker, 1_000_000);
+
+    expect(detonationAtMs).toBe(1_300_000);
+    expect(getTimeBombRemainingSeconds(detonationAtMs, 1_000_000)).toBe(300);
+    expect(getTimeBombRemainingSeconds(detonationAtMs, 1_299_500)).toBe(1);
+    expect(getTimeBombRemainingSeconds(detonationAtMs, 1_300_000)).toBe(0);
+  });
+
+  test("builds update inputs targeting an existing entity", () => {
+    const worker = createWorker({ singleCreatePayloadSize: 3, ttlSeconds: 60 });
+
+    const input = createBaseloadUpdateInput(worker, "0xabc", fixedRandomBytes);
+
+    expect(input.entityKey).toBe("0xabc");
+    expect(Array.from(input.payload)).toEqual([0, 1, 2]);
+    expect(input.expiresIn).toBe(60);
+    expect(input.attributes[0]).toEqual(BASELOAD_PROJECT_ATTRIBUTE);
+  });
+
+  test("derives random owner addresses from 20 bytes", () => {
+    expect(randomOwnerAddress(fixedRandomBytes)).toBe("0x000102030405060708090a0b0c0d0e0f10111213");
+  });
 });
 
 function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfig {
   return {
     id: "wallet-1",
+    behavior: "create",
     maxGasPriceGwei: 1000,
-    createsPerMinute: 1,
+    opsPerMinute: 1,
     singleCreatePayloadSize: 10,
     singleCreateStringArgumentCount: 2,
     singleCreateNumberArgumentCount: 2,
+    entityPoolSize: 10,
+    timeBombOffsetSeconds: 600,
     walletNumber: 1,
     walletAddress: "0x0000000000000000000000000000000000000001",
     startBlock: 0,

@@ -18,11 +18,92 @@ export interface BaseloadCreateInput {
   expiresIn: number;
 }
 
+export interface BaseloadUpdateInput extends BaseloadCreateInput {
+  entityKey: `0x${string}`;
+}
+
+export interface BaseloadPoolEntry {
+  entityKey: `0x${string}`;
+  expiresAtMs: number;
+}
+
+export type BaseloadOperationKind =
+  | "create"
+  | "update"
+  | "delete"
+  | "create-and-own"
+  | "time-bomb-create";
+
 export type RandomBytes = (size: number) => Uint8Array;
 
-export function getMinuteAttemptLimit(createsPerMinute: number): number {
-  if (!Number.isFinite(createsPerMinute) || createsPerMinute <= 0) return 0;
-  return Math.floor(createsPerMinute);
+// Entities whose estimated on-chain expiry is closer than this margin are
+// treated as lost: a refresh transaction would likely land after expiry.
+export const POOL_EXPIRY_SAFETY_MARGIN_MS = 2_000;
+
+// Below this remaining TTL a time bomb create can no longer land before the
+// detonation moment, so the worker completes instead.
+export const MIN_TIME_BOMB_TTL_SECONDS = 2;
+
+export function getMinuteAttemptLimit(opsPerMinute: number): number {
+  if (!Number.isFinite(opsPerMinute) || opsPerMinute <= 0) return 0;
+  return Math.floor(opsPerMinute);
+}
+
+export function chooseBaseloadOperation(
+  worker: Pick<BaseloadWorkerConfig, "behavior" | "entityPoolSize">,
+  currentPoolSize: number,
+  operationIndex: number,
+): BaseloadOperationKind {
+  switch (worker.behavior) {
+    case "create":
+      return "create";
+    case "create-ownership":
+      return "create-and-own";
+    case "time-bomb":
+      return "time-bomb-create";
+    case "create-update":
+      return currentPoolSize < worker.entityPoolSize ? "create" : "update";
+    case "create-update-delete": {
+      if (currentPoolSize === 0) return "create";
+      if (currentPoolSize < worker.entityPoolSize) {
+        return operationIndex % 2 === 0 ? "create" : "update";
+      }
+      return operationIndex % 2 === 0 ? "update" : "delete";
+    }
+  }
+}
+
+export function pruneExpiredPoolEntries(
+  pool: readonly BaseloadPoolEntry[],
+  nowMs: number,
+  marginMs = POOL_EXPIRY_SAFETY_MARGIN_MS,
+): BaseloadPoolEntry[] {
+  return pool.filter((entry) => entry.expiresAtMs - marginMs > nowMs);
+}
+
+export function pickSoonestExpiringPoolEntry(
+  pool: readonly BaseloadPoolEntry[],
+): BaseloadPoolEntry | null {
+  let soonest: BaseloadPoolEntry | null = null;
+  for (const entry of pool) {
+    if (soonest === null || entry.expiresAtMs < soonest.expiresAtMs) soonest = entry;
+  }
+  return soonest;
+}
+
+export function getTimeBombDetonationMs(
+  worker: Pick<BaseloadWorkerConfig, "timeBombOffsetSeconds">,
+  runStartedAtMs: number,
+): number {
+  return runStartedAtMs + worker.timeBombOffsetSeconds * 1000;
+}
+
+export function getTimeBombRemainingSeconds(detonationAtMs: number, nowMs: number): number {
+  return Math.ceil((detonationAtMs - nowMs) / 1000);
+}
+
+export function randomOwnerAddress(randomBytes: RandomBytes = secureRandomBytes): `0x${string}` {
+  return `0x${bytesToHex(randomBytes(20))}` as `0x${string}`;
 }
 
 export function getMillisecondsUntilNextMinute(windowStartedAtMs: number, nowMs: number): number {
@@ -56,6 +137,17 @@ export function createBaseloadEntityInput(
     contentType: "application/octet-stream",
     attributes: createBaseloadAttributes(worker, randomBytes),
     expiresIn: worker.ttlSeconds,
+  };
+}
+
+export function createBaseloadUpdateInput(
+  worker: BaseloadWorkerConfig,
+  entityKey: `0x${string}`,
+  randomBytes: RandomBytes = secureRandomBytes,
+): BaseloadUpdateInput {
+  return {
+    entityKey,
+    ...createBaseloadEntityInput(worker, randomBytes),
   };
 }
 

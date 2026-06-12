@@ -230,15 +230,18 @@ Expected file shape:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "workers": [
     {
       "walletNumber": 0,
+      "behavior": "create",
       "maxGasPriceGwei": 1000,
-      "createsPerMinute": 1,
+      "opsPerMinute": 1,
       "singleCreatePayloadSize": 5000,
       "singleCreateStringArgumentCount": 2,
       "singleCreateNumberArgumentCount": 2,
+      "entityPoolSize": 10,
+      "timeBombOffsetSeconds": 600,
       "startBlock": 0,
       "endBlock": null,
       "durationSeconds": null,
@@ -253,14 +256,25 @@ Missing worker fields use the backend defaults where supported, and wallet addre
 JSON files under `baseload-config/` are ignored by Git and by Docker builds so integration-provided configs are not
 committed or copied into the image.
 
-Worker behavior:
+Worker behaviors (`behavior` field):
+
+| Behavior | Description |
+| --- | --- |
+| `create` | Creates one entity per operation. |
+| `create-update` | Creates entities until the pool holds `entityPoolSize` entities, then keeps updating pool entities with fresh random data. Every update resets the entity TTL to `ttlSeconds`, so pool entities are never lost as long as the worker keeps up. |
+| `create-ownership` | Creates an entity, then transfers its ownership to a freshly generated random address. |
+| `time-bomb` | Creates entities whose TTL is computed so that every one of them expires at the same precise moment: run start plus `timeBombOffsetSeconds`. The worker completes once the detonation moment is closer than a TTL can land. |
+| `create-update-delete` | Maintains a pool of about `entityPoolSize` entities while cycling create, update, and delete operations. |
+
+Worker mechanics:
 
 - Each configured worker runs on the backend within its configured start block, optional end block, and optional duration.
-- Each worker targets up to its configured create transactions per minute. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
-- Each worker sends only one create transaction at a time and waits for the transaction receipt before submitting the next create.
+- Each worker targets up to its configured operations per minute. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
+- Each worker performs one operation at a time and waits for the transaction receipt before submitting the next one (`create-ownership` sends two sequential transactions per operation).
 - Gas is set aggressively from the worker's max gas price: both `maxFeePerGas` and `maxPriorityFeePerGas` use the configured gwei value.
-- Each create uses a random binary payload of the configured size, a project attribute, and the configured count of random string and numeric attributes. Defaults are two string attributes and two numeric attributes.
-- Entity TTL is set from the worker's TTL seconds value.
+- Each create or update uses a random binary payload of the configured size, a project attribute, and the configured count of random string and numeric attributes. Defaults are two string attributes and two numeric attributes.
+- Entity TTL is set from the worker's TTL seconds value, except for `time-bomb` workers where it is derived from the detonation moment.
+- Pool entities whose estimated TTL has lapsed are treated as lost and replaced by new creates.
 
 Backend API:
 

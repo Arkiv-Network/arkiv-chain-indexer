@@ -21,6 +21,9 @@ describe("backend baseload config", () => {
 
     expect(worker.walletNumber).toBe(1);
     expect(worker.walletAddress).toBe("0x8C59ca3A3BF65F5C530Eb5Ea67F2bd4b37049cf2");
+    expect(worker.behavior).toBe("create");
+    expect(worker.entityPoolSize).toBe(10);
+    expect(worker.timeBombOffsetSeconds).toBe(600);
   });
 
   test("normalizes imported configs and rejects duplicate wallets", () => {
@@ -29,12 +32,36 @@ describe("backend baseload config", () => {
     });
 
     expect(config.workers.map((worker) => worker.walletAddress)).toEqual([
-      "0x638f7fAF81F9449CF7d5487329b4eB8fb5fA96b3",
+      "0x1e8254Ecb29AC73De90F02066A35b27f75FD5654",
       "0x8C59ca3A3BF65F5C530Eb5Ea67F2bd4b37049cf2",
     ]);
     expect(() => normalizeBaseloadConfig({ workers: [{ walletNumber: 2 }, { walletNumber: 2 }] })).toThrow(
       "Wallet 2 is already attached",
     );
+  });
+
+  test("normalizes worker behaviors and rejects unknown values", () => {
+    const config = normalizeBaseloadConfig({
+      workers: [
+        { walletNumber: 0, behavior: "time-bomb", timeBombOffsetSeconds: 120 },
+        { walletNumber: 1, behavior: "create-update-delete", entityPoolSize: 4 },
+        { walletNumber: 2 },
+      ],
+    });
+
+    expect(config.workers.map((worker) => worker.behavior)).toEqual([
+      "time-bomb",
+      "create-update-delete",
+      "create",
+    ]);
+    expect(config.workers[0]?.timeBombOffsetSeconds).toBe(120);
+    expect(config.workers[1]?.entityPoolSize).toBe(4);
+    expect(() =>
+      normalizeBaseloadConfig({ workers: [{ walletNumber: 0, behavior: "explode" }] }),
+    ).toThrow("Worker behavior must be one of");
+    expect(() =>
+      normalizeBaseloadConfig({ workers: [{ walletNumber: 0, entityPoolSize: 0 }] }),
+    ).toThrow("Entity pool size must be at least 1");
   });
 
   test("reads backend baseload runtime settings from env", () => {
@@ -56,7 +83,8 @@ describe("backend baseload config", () => {
 
       expect(config.workers).toHaveLength(1);
       expect(config.workers[0]?.id).toBe("wallet-3");
-      expect(config.workers[0]?.createsPerMinute).toBe(1);
+      expect(config.workers[0]?.opsPerMinute).toBe(1);
+      expect(config.workers[0]?.behavior).toBe("create");
       expect(config.workers[0]?.walletAddress).toBe(deriveBaseloadWalletAddress(3));
     } finally {
       await rm(dir, { recursive: true, force: true });

@@ -17,11 +17,14 @@ describe("baseload config helpers", () => {
 
     expect(worker).toEqual({
       id: "wallet-7",
+      behavior: "create",
       maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
-      createsPerMinute: 1,
+      opsPerMinute: 1,
       singleCreatePayloadSize: 5000,
       singleCreateStringArgumentCount: 2,
       singleCreateNumberArgumentCount: 2,
+      entityPoolSize: 10,
+      timeBombOffsetSeconds: 600,
       walletNumber: 7,
       walletAddress: "",
       startBlock: 0,
@@ -36,11 +39,14 @@ describe("baseload config helpers", () => {
       workers: [
         {
           walletNumber: "1",
+          behavior: "create-update",
           maxGasPriceGwei: "5.5",
-          createsPerMinute: "2.25",
+          opsPerMinute: "2.25",
           singleCreatePayloadSize: "100",
           singleCreateStringArgumentCount: "3",
           singleCreateNumberArgumentCount: "4",
+          entityPoolSize: "7",
+          timeBombOffsetSeconds: "90",
           startBlock: "10",
           endBlock: "20",
           durationSeconds: "60",
@@ -50,15 +56,18 @@ describe("baseload config helpers", () => {
     });
 
     expect(config).toEqual({
-      version: 1,
+      version: 2,
       workers: [
         {
           id: "wallet-1",
+          behavior: "create-update",
           maxGasPriceGwei: 5.5,
-          createsPerMinute: 2.25,
+          opsPerMinute: 2.25,
           singleCreatePayloadSize: 100,
           singleCreateStringArgumentCount: 3,
           singleCreateNumberArgumentCount: 4,
+          entityPoolSize: 7,
+          timeBombOffsetSeconds: 90,
           walletNumber: 1,
           walletAddress: "",
           startBlock: 10,
@@ -68,6 +77,15 @@ describe("baseload config helpers", () => {
         },
       ],
     });
+  });
+
+  test("defaults the behavior and rejects unknown behaviors", () => {
+    const config = normalizeBaseloadConfig({ workers: [{ walletNumber: 0 }] });
+
+    expect(config.workers[0].behavior).toBe("create");
+    expect(() =>
+      normalizeBaseloadConfig({ workers: [{ walletNumber: 0, behavior: "explode" }] }),
+    ).toThrow("Worker behavior must be one of");
   });
 
   test("fills the default TTL for older configs", () => {
@@ -116,11 +134,14 @@ describe("baseload config helpers", () => {
   test("moves a draft to the next available wallet without resetting values", () => {
     const draft = {
       ...createBaseloadWorkerDraft(0),
+      behavior: "create-update-delete",
       maxGasPriceGwei: "7.5",
-      createsPerMinute: "11",
+      opsPerMinute: "11",
       singleCreatePayloadSize: "2048",
       singleCreateStringArgumentCount: "5",
       singleCreateNumberArgumentCount: "6",
+      entityPoolSize: "12",
+      timeBombOffsetSeconds: "45",
       startBlock: "123",
       endBlock: "456",
       durationSeconds: "789",
@@ -144,15 +165,18 @@ describe("baseload config helpers", () => {
     );
 
     expect(JSON.parse(serializeBaseloadConfig(config))).toEqual({
-      version: 1,
+      version: 2,
       workers: [
         {
           id: "wallet-4",
+          behavior: "create",
           maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
-          createsPerMinute: 1,
+          opsPerMinute: 1,
           singleCreatePayloadSize: 5000,
           singleCreateStringArgumentCount: 2,
           singleCreateNumberArgumentCount: 2,
+          entityPoolSize: 10,
+          timeBombOffsetSeconds: 600,
           walletNumber: 4,
           walletAddress: "",
           startBlock: 0,

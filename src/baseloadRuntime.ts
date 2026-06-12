@@ -10,11 +10,20 @@ import {
   type BaseloadWorkerConfig,
 } from "./baseloadConfig";
 import {
+  MIN_TIME_BOMB_TTL_SECONDS,
+  chooseBaseloadOperation,
   createBaseloadEntityInput,
+  createBaseloadUpdateInput,
   getBaseloadLimitState,
   getMillisecondsUntilNextMinute,
   getMinuteAttemptLimit,
+  getTimeBombDetonationMs,
+  getTimeBombRemainingSeconds,
   parseGweiToWei,
+  pickSoonestExpiringPoolEntry,
+  pruneExpiredPoolEntries,
+  randomOwnerAddress,
+  type BaseloadPoolEntry,
 } from "./baseloadTaskHelpers";
 
 type HexString = `0x${string}`;
@@ -38,6 +47,11 @@ export interface BaseloadWorkerStatus {
   message?: string;
   attemptedCount?: number;
   createdCount?: number;
+  updatedCount?: number;
+  deletedCount?: number;
+  ownershipChangedCount?: number;
+  poolSize?: number;
+  detonationAt?: string;
   entityKey?: string;
   txHash?: string;
 }
@@ -238,8 +252,15 @@ class BaseloadWorkerTask {
     let runStartedAtMs = Date.now();
     let minuteStartedAtMs = runStartedAtMs;
     let attemptsThisMinute = 0;
-    let attemptedCount = 0;
-    let createdCount = 0;
+    let operationIndex = 0;
+    let pool: BaseloadPoolEntry[] = [];
+    const counters = {
+      attemptedCount: 0,
+      createdCount: 0,
+      updatedCount: 0,
+      deletedCount: 0,
+      ownershipChangedCount: 0,
+    };
     let activeWorkerKey = configKey(this.worker);
     let cachedClients: { key: string; arkiv: WalletArkivClient; rpc: BaseloadRpcClient } | null = null;
 
@@ -252,16 +273,29 @@ class BaseloadWorkerTask {
           runStartedAtMs = Date.now();
           minuteStartedAtMs = runStartedAtMs;
           attemptsThisMinute = 0;
-          attemptedCount = 0;
-          createdCount = 0;
+          operationIndex = 0;
+          pool = [];
+          counters.attemptedCount = 0;
+          counters.createdCount = 0;
+          counters.updatedCount = 0;
+          counters.deletedCount = 0;
+          counters.ownershipChangedCount = 0;
         }
+
+        const detonationAtMs = getTimeBombDetonationMs(worker, runStartedAtMs);
+        const statusCounts = (): Partial<BaseloadWorkerStatus> => ({
+          ...counters,
+          poolSize: pool.length,
+          ...(worker.behavior === "time-bomb"
+            ? { detonationAt: new Date(detonationAtMs).toISOString() }
+            : {}),
+        });
 
         try {
           if (!this.runtimeConfig.rpcUrl) {
             this.postStatus("error", {
               message: "BASELOAD_RPC_NODE is required to run backend Baseload workers",
-              attemptedCount,
-              createdCount,
+              ...statusCounts(),
             });
             await sleep(5_000, this.abortController.signal);
             continue;
@@ -290,8 +324,7 @@ class BaseloadWorkerTask {
             this.postStatus("waiting", {
               currentBlock: limitState.currentBlock,
               message: `Waiting for start block ${worker.startBlock}`,
-              attemptedCount,
-              createdCount,
+              ...statusCounts(),
             });
             await sleep(2_000, this.abortController.signal);
             continue;
@@ -301,8 +334,7 @@ class BaseloadWorkerTask {
             this.postStatus("completed", {
               currentBlock: limitState.currentBlock,
               message: `Reached end block ${worker.endBlock}`,
-              attemptedCount,
-              createdCount,
+              ...statusCounts(),
             });
             break;
           }
@@ -311,19 +343,29 @@ class BaseloadWorkerTask {
             this.postStatus("completed", {
               currentBlock,
               message: `Reached duration limit ${worker.durationSeconds}s`,
-              attemptedCount,
-              createdCount,
+              ...statusCounts(),
             });
             break;
           }
 
-          const minuteAttemptLimit = getMinuteAttemptLimit(worker.createsPerMinute);
+          if (
+            worker.behavior === "time-bomb" &&
+            getTimeBombRemainingSeconds(detonationAtMs, nowMs) < MIN_TIME_BOMB_TTL_SECONDS
+          ) {
+            this.postStatus("completed", {
+              currentBlock,
+              message: `Time bomb armed: ${counters.createdCount} entities expire at ${new Date(detonationAtMs).toISOString()}`,
+              ...statusCounts(),
+            });
+            break;
+          }
+
+          const minuteAttemptLimit = getMinuteAttemptLimit(worker.opsPerMinute);
           if (minuteAttemptLimit <= 0) {
             this.postStatus("waiting", {
               currentBlock,
-              message: "Creates per minute is 0",
-              attemptedCount,
-              createdCount,
+              message: "Operations per minute is 0",
+              ...statusCounts(),
             });
             await sleep(5_000, this.abortController.signal);
             continue;
@@ -333,8 +375,7 @@ class BaseloadWorkerTask {
             this.postStatus("waiting", {
               currentBlock,
               message: "Waiting for next minute",
-              attemptedCount,
-              createdCount,
+              ...statusCounts(),
             });
             await sleep(
               Math.min(getMillisecondsUntilNextMinute(minuteStartedAtMs, Date.now()), 5_000),
@@ -343,14 +384,12 @@ class BaseloadWorkerTask {
             continue;
           }
 
+          pool = pruneExpiredPoolEntries(pool, nowMs);
+          const operation = chooseBaseloadOperation(worker, pool.length, operationIndex);
+
           attemptsThisMinute += 1;
-          attemptedCount += 1;
-          this.postStatus("running", {
-            currentBlock,
-            message: "Creating entity",
-            attemptedCount,
-            createdCount,
-          });
+          counters.attemptedCount += 1;
+          operationIndex += 1;
 
           const maxFeePerGas = parseGweiToWei(worker.maxGasPriceGwei);
 
@@ -362,23 +401,133 @@ class BaseloadWorkerTask {
           const SUFFICIENT_PRIORITY_FEE_PER_GAS = 2n;
           // Use the latest confirmed nonce so a re-send replaces any pending
           // tx that's been sitting in the mempool (under-priced, RPC reset, etc.).
-          const nonce = await clients.rpc.getLatestNonce(worker.walletAddress);
-          const result = await clients.arkiv.createEntity(createBaseloadEntityInput(worker), {
+          const sendTxParams = async () => ({
             maxFeePerGas,
             maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
-            nonce,
+            nonce: await clients.rpc.getLatestNonce(worker.walletAddress),
           });
-          await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
 
-          createdCount += 1;
-          this.postStatus("running", {
-            currentBlock,
-            message: "Entity created",
-            attemptedCount,
-            createdCount,
-            entityKey: result.entityKey,
-            txHash: result.txHash,
-          });
+          switch (operation) {
+            case "create":
+            case "time-bomb-create": {
+              const input = createBaseloadEntityInput(worker);
+              if (operation === "time-bomb-create") {
+                input.expiresIn = getTimeBombRemainingSeconds(detonationAtMs, Date.now());
+              }
+              this.postStatus("running", {
+                currentBlock,
+                message:
+                  operation === "time-bomb-create"
+                    ? `Creating time bomb entity (expires in ${input.expiresIn}s)`
+                    : "Creating entity",
+                ...statusCounts(),
+              });
+              const result = await clients.arkiv.createEntity(input, await sendTxParams());
+              await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
+              counters.createdCount += 1;
+              if (worker.behavior === "create-update" || worker.behavior === "create-update-delete") {
+                pool.push({
+                  entityKey: result.entityKey,
+                  expiresAtMs: Date.now() + worker.ttlSeconds * 1000,
+                });
+              }
+              this.postStatus("running", {
+                currentBlock,
+                message: "Entity created",
+                ...statusCounts(),
+                entityKey: result.entityKey,
+                txHash: result.txHash,
+              });
+              break;
+            }
+            case "create-and-own": {
+              this.postStatus("running", {
+                currentBlock,
+                message: "Creating entity",
+                ...statusCounts(),
+              });
+              const created = await clients.arkiv.createEntity(
+                createBaseloadEntityInput(worker),
+                await sendTxParams(),
+              );
+              await clients.rpc.waitForTransactionReceipt(created.txHash, this.abortController.signal);
+              counters.createdCount += 1;
+              const newOwner = randomOwnerAddress();
+              this.postStatus("running", {
+                currentBlock,
+                message: `Changing ownership to ${newOwner}`,
+                ...statusCounts(),
+                entityKey: created.entityKey,
+                txHash: created.txHash,
+              });
+              const owned = await clients.arkiv.changeOwnership(
+                { entityKey: created.entityKey, newOwner },
+                await sendTxParams(),
+              );
+              // The SDK types changeOwnership's txHash as plain string, unlike the other actions.
+              await clients.rpc.waitForTransactionReceipt(
+                owned.txHash as HexString,
+                this.abortController.signal,
+              );
+              counters.ownershipChangedCount += 1;
+              this.postStatus("running", {
+                currentBlock,
+                message: `Ownership changed to ${newOwner}`,
+                ...statusCounts(),
+                entityKey: created.entityKey,
+                txHash: owned.txHash,
+              });
+              break;
+            }
+            case "update": {
+              const entry = pickSoonestExpiringPoolEntry(pool);
+              if (!entry) throw new Error("No pool entity available to update");
+              this.postStatus("running", {
+                currentBlock,
+                message: `Updating entity ${entry.entityKey}`,
+                ...statusCounts(),
+              });
+              const result = await clients.arkiv.updateEntity(
+                createBaseloadUpdateInput(worker, entry.entityKey),
+                await sendTxParams(),
+              );
+              await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
+              counters.updatedCount += 1;
+              entry.expiresAtMs = Date.now() + worker.ttlSeconds * 1000;
+              this.postStatus("running", {
+                currentBlock,
+                message: "Entity updated, TTL refreshed",
+                ...statusCounts(),
+                entityKey: result.entityKey,
+                txHash: result.txHash,
+              });
+              break;
+            }
+            case "delete": {
+              const entry = pickSoonestExpiringPoolEntry(pool);
+              if (!entry) throw new Error("No pool entity available to delete");
+              this.postStatus("running", {
+                currentBlock,
+                message: `Deleting entity ${entry.entityKey}`,
+                ...statusCounts(),
+              });
+              const result = await clients.arkiv.deleteEntity(
+                { entityKey: entry.entityKey },
+                await sendTxParams(),
+              );
+              await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
+              counters.deletedCount += 1;
+              pool = pool.filter((candidate) => candidate !== entry);
+              this.postStatus("running", {
+                currentBlock,
+                message: "Entity deleted",
+                ...statusCounts(),
+                entityKey: result.entityKey,
+                txHash: result.txHash,
+              });
+              break;
+            }
+          }
         } catch (error) {
           if (this.abortController.signal.aborted) break;
           const verbose = describeError(error);
@@ -387,8 +536,7 @@ class BaseloadWorkerTask {
           );
           this.postStatus("error", {
             message: verbose,
-            attemptedCount,
-            createdCount,
+            ...statusCounts(),
           });
           await sleep(5_000, this.abortController.signal).catch(() => undefined);
         }
