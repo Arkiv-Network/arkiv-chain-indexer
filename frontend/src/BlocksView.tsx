@@ -26,7 +26,7 @@ interface Filters extends Record<string, string> {
   limit: string;
 }
 
-const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
+const LIMIT_OPTIONS = ["10", "100", "250", "500", "1000", "2500", "5000", "10000"];
 const FILTER_KEYS = ["blockGt", "blockLt", "dateGt", "dateLt", "limit"] as const;
 const STORAGE_KEY = "blocks.filters";
 const EMPTY: Filters = {
@@ -34,7 +34,7 @@ const EMPTY: Filters = {
   blockLt: "",
   dateGt: "",
   dateLt: "",
-  limit: "1000",
+  limit: "10",
 };
 
 interface Column<T> {
@@ -49,21 +49,18 @@ function blockColumns(
   timeZone: string,
   onLocationChange: () => void,
   tokenSymbol: string,
-  noBatcher: boolean,
 ): Column<StoredBlock>[] {
-  const columns: Column<StoredBlock>[] = [
+  return [
     {
       key: "block",
       label: "Block",
-      className: "num",
-      width: "7.5rem",
-      render: (row) => <BlockNumberLink blockNumber={row.blockNumber} onLocationChange={onLocationChange} />,
-    },
-    {
-      key: "date",
-      label: "Date",
-      width: "12.5rem",
-      render: (row) => fmtDate(row.blockDate, timeZone),
+      width: "13rem",
+      render: (row) => (
+        <div className="block-meta">
+          <BlockNumberLink blockNumber={row.blockNumber} onLocationChange={onLocationChange} />
+          <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
+        </div>
+      ),
     },
     {
       key: "transactionCount",
@@ -101,20 +98,6 @@ function blockColumns(
       render: (row) => fmtGwei(row.averageFeePriceWei),
     },
     {
-      key: "averagePriorityFeeWeightedWei",
-      label: "Gas-weighted priority (gwei)",
-      className: "num",
-      width: "14rem",
-      render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
-    },
-    {
-      key: "averagePriorityFeeWei",
-      label: "Avg priority fee (gwei)",
-      className: "num",
-      width: "11rem",
-      render: (row) => fmtGwei(row.averagePriorityFeeWei),
-    },
-    {
       key: "averageTransactionGasUsed",
       label: "Avg tx gas",
       className: "num",
@@ -127,53 +110,6 @@ function blockColumns(
       className: "num",
       width: "15rem",
       render: (row) => fmtRatio(row.totalGasUsed, row.maxGasInBlock),
-    },
-  ];
-  if (noBatcher) return columns;
-
-  return [
-    ...columns,
-    {
-      key: "batcherQueueSize",
-      label: "Batcher queue",
-      className: "num",
-      width: "10rem",
-      render: (row) => fmtInteger(row.batcherQueueSize),
-    },
-    {
-      key: "batcherIntensity",
-      label: "Batcher intensity",
-      className: "num",
-      width: "11rem",
-      render: (row) => fmtInteger(row.batcherIntensity),
-    },
-    {
-      key: "batcherLowerThreshold",
-      label: "Batcher lower",
-      className: "num",
-      width: "10rem",
-      render: (row) => fmtInteger(row.batcherLowerThreshold),
-    },
-    {
-      key: "batcherUpperThreshold",
-      label: "Batcher upper",
-      className: "num",
-      width: "10rem",
-      render: (row) => fmtInteger(row.batcherUpperThreshold),
-    },
-    {
-      key: "batcherMaxBlockSize",
-      label: "Batcher max block",
-      className: "num",
-      width: "12rem",
-      render: (row) => fmtInteger(row.batcherMaxBlockSize),
-    },
-    {
-      key: "batcherMaxTxSize",
-      label: "Batcher max tx",
-      className: "num",
-      width: "11rem",
-      render: (row) => fmtInteger(row.batcherMaxTxSize),
     },
   ];
 }
@@ -192,7 +128,7 @@ function loadFilters(locationSearch: string): Filters {
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
 }
 
-export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSymbol, noBatcher }: BlocksViewProps) {
+export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: BlocksViewProps) {
   const [filters, setFilters] = useState<Filters>(() => loadFilters(locationSearch));
   const [applied, setApplied] = useState<Filters>(filters);
   const [data, setData] = useState<BlocksResponse | null>(null);
@@ -251,8 +187,8 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
     setFilters((prev) => ({ ...prev, limit: e.target.value }));
   };
   const columns = useMemo(
-    () => blockColumns(timeZone, onLocationChange, tokenSymbol, noBatcher),
-    [timeZone, onLocationChange, tokenSymbol, noBatcher],
+    () => blockColumns(timeZone, onLocationChange, tokenSymbol),
+    [timeZone, onLocationChange, tokenSymbol],
   );
 
   const sorted = data
