@@ -1768,6 +1768,7 @@ button.secondary {
 }
 
 .blocks-filter-form .filter-group {
+  flex: 0 0 auto;
   background: color-mix(in oklab, var(--sand) 68%, transparent);
 }
 
@@ -1799,10 +1800,19 @@ button.secondary {
   margin-left: auto;
 }
 
+.blocks-filter-actions .copy-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 @media (max-width: 720px) {
   .blocks-filter-form {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .blocks-filter-form .filter-group {
+    width: 100%;
   }
 
   .blocks-filter-actions {
@@ -2837,6 +2847,31 @@ th:not(.num) .sort-header {
 
 .block-meta-date {
   font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.base-fee-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  line-height: 1.25;
+}
+
+.base-fee-diff {
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+}
+
+.base-fee-diff.up {
+  color: var(--op-red);
+}
+
+.base-fee-diff.down {
+  color: var(--ok);
+}
+
+.base-fee-diff.flat,
+.base-fee-diff.missing {
   color: var(--muted);
 }
 
