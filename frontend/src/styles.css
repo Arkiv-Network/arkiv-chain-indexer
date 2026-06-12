@@ -1978,17 +1978,328 @@ td.num {
   font: inherit;
 }
 
-.baseload-table th,
-.baseload-table td {
-  vertical-align: middle;
+/* Baseload worker dashboard — per-behavior accent colors. The hue tokens
+   (--ok, --ark-blue, --op-*) are theme-aware, so cards recolor in dark mode. */
+[data-behavior="create"] {
+  --w-accent: var(--ok);
+}
+[data-behavior="create-update"] {
+  --w-accent: var(--ark-blue);
+}
+[data-behavior="create-ownership"] {
+  --w-accent: var(--op-purple);
+}
+[data-behavior="time-bomb"] {
+  --w-accent: var(--op-red);
+}
+[data-behavior="create-update-delete"] {
+  --w-accent: var(--op-amber);
 }
 
-.wallet-address {
-  max-width: 15rem;
+.fleet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0 0 1rem;
+}
+
+.fleet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--row-alt);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.fleet-chip strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.fleet-chip-error,
+.fleet-chip-error strong {
+  border-color: var(--op-red);
+  color: var(--op-red);
+}
+
+.behavior-chip,
+.behavior-chip strong {
+  border-color: color-mix(in oklab, var(--w-accent) 55%, transparent);
+  color: var(--w-accent);
+}
+
+.behavior-chip {
+  background: color-mix(in oklab, var(--w-accent) 8%, transparent);
+}
+
+.worker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 1rem;
+}
+
+.worker-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.95rem 1rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--row-alt);
+  overflow: hidden;
+}
+
+.worker-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--w-accent, var(--accent));
+}
+
+.worker-card-empty {
+  border-style: dashed;
+  color: var(--muted);
+  justify-content: center;
+  align-items: center;
+  min-height: 8rem;
+  text-align: center;
+  background: transparent;
+}
+
+.worker-card-empty::before {
+  display: none;
+}
+
+.worker-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.worker-card-wallet {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.worker-card-wallet strong {
+  font-size: 1.05rem;
+  color: var(--fg);
+  font-family: var(--font-mono);
+}
+
+.behavior-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--w-accent, var(--accent)) 55%, transparent);
+  color: var(--w-accent, var(--fg));
+  background: color-mix(in oklab, var(--w-accent, var(--accent)) 10%, transparent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.worker-card-delete {
+  margin-left: auto;
+  width: 1.7rem;
+  height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.worker-card-delete:hover,
+.worker-card-delete:focus-visible {
+  border-color: var(--op-red);
+  color: var(--op-red);
+}
+
+.worker-card-address {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted);
   overflow-wrap: anywhere;
-  white-space: normal;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.worker-card-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
   font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-chip[data-status="running"],
+.status-chip[data-status="ready"],
+.status-chip[data-status="updated"] {
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
+}
+
+.status-chip[data-status="waiting"] {
+  color: var(--op-amber);
+  border-color: color-mix(in oklab, var(--op-amber) 45%, transparent);
+}
+
+.status-chip[data-status="error"] {
+  color: var(--op-red);
+  border-color: color-mix(in oklab, var(--op-red) 45%, transparent);
+}
+
+.status-chip[data-status="completed"] {
+  color: var(--ark-blue);
+  border-color: color-mix(in oklab, var(--ark-blue) 45%, transparent);
+}
+
+.status-chip[data-status="running"] .status-dot,
+.status-chip[data-status="waiting"] .status-dot {
+  animation: status-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.worker-card-balance {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--fg);
+}
+
+.worker-card-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--r-sm);
+  background: color-mix(in oklab, var(--w-accent, var(--accent)) 6%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+.worker-card-metrics .metric {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.worker-card-metrics dt {
+  margin: 0;
+  color: var(--muted);
+}
+
+.worker-card-metrics dd {
+  margin: 0;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.worker-card-detonation {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--op-red);
+  border: 1px dashed color-mix(in oklab, var(--op-red) 55%, transparent);
+  border-radius: var(--r-sm);
+  padding: 0.35rem 0.6rem;
+}
+
+.worker-card-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem 0.6rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+  margin-top: auto;
+}
+
+.wfield {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wfield input,
+.wfield select {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.82rem;
+  text-transform: none;
+  letter-spacing: normal;
+  width: 100%;
+  min-width: 0;
+}
+
+.wfield input:focus-visible,
+.wfield select:focus-visible {
+  outline: none;
+  border-color: var(--w-accent, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--w-accent, var(--accent)) 25%, transparent);
+}
+
+.wfield-wide {
+  grid-column: 1 / -1;
+}
+
+.wfield-static {
+  padding: 0.3rem 0.4rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .balance-error,

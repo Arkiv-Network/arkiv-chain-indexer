@@ -480,213 +480,355 @@ export function BaseloadView({
         balances={balances}
       />
 
-      <div className="table-wrap">
-        <table className="data-table baseload-table">
-          <thead>
-            <tr>
-              <th scope="col">Wallet</th>
-              <th scope="col">Address</th>
-              <th scope="col">Balance</th>
-              <th scope="col">Behavior</th>
-              <th scope="col">Max gas gwei</th>
-              <th scope="col">Ops/min</th>
-              <th scope="col">Payload size</th>
-              <th scope="col">String args</th>
-              <th scope="col">Number args</th>
-              <th scope="col">Pool size</th>
-              <th scope="col">Bomb offset sec</th>
-              <th scope="col">Start block</th>
-              <th scope="col">End block</th>
-              <th scope="col">Duration sec</th>
-              <th scope="col">TTL sec</th>
-              <th scope="col">Task</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {config.workers.length === 0 ? (
-              <tr>
-                <td colSpan={17}>No baseload workers configured.</td>
-              </tr>
-            ) : (
-              config.workers.map((worker) => (
-                <tr key={worker.id}>
-                  <td className="num">{worker.walletNumber}</td>
-                  <td className="wallet-address">{worker.walletAddress}</td>
-                  <td className="num">
-                    <BalanceCell balance={balances[worker.id]} tokenSymbol={tokenSymbol} />
-                  </td>
-                  <td>
-                    <select
-                      className="table-input"
-                      value={worker.behavior}
-                      onChange={(event) =>
-                        updateWorker(worker, {
-                          behavior: event.target.value as BaseloadWorkerBehavior,
-                        })
-                      }
-                    >
-                      {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
-                        <option key={behavior} value={behavior}>
-                          {BASELOAD_BEHAVIOR_LABELS[behavior]}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "maxGasPriceGwei")}
-                      value={worker.maxGasPriceGwei}
-                      min={0}
-                      step="0.1"
-                      onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { maxGasPriceGwei: value });
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "opsPerMinute")}
-                      value={worker.opsPerMinute}
-                      min={0}
-                      step="1"
-                      onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { opsPerMinute: value });
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "singleCreatePayloadSize")}
-                      value={worker.singleCreatePayloadSize}
-                      min={0}
-                      step="1"
-                      integer
-                      onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { singleCreatePayloadSize: value });
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "singleCreateStringArgumentCount")}
-                      value={worker.singleCreateStringArgumentCount}
-                      min={0}
-                      step="1"
-                      integer
-                      onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { singleCreateStringArgumentCount: value });
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "singleCreateNumberArgumentCount")}
-                      value={worker.singleCreateNumberArgumentCount}
-                      min={0}
-                      step="1"
-                      integer
-                      onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { singleCreateNumberArgumentCount: value });
-                      }}
-                    />
-                  </td>
-                  <td>
-                    {behaviorUsesPool(worker.behavior) ? (
-                      <EditableNumber
-                        storageKey={editableStorageKey(worker.id, "entityPoolSize")}
-                        value={worker.entityPoolSize}
-                        min={1}
-                        step="1"
-                        integer
-                        onChange={(value) => {
-                          if (value !== null) updateWorker(worker, { entityPoolSize: value });
-                        }}
-                      />
-                    ) : (
-                      <span title="Only used by behaviors with an entity pool">—</span>
-                    )}
-                  </td>
-                  <td>
-                    {worker.behavior === "time-bomb" ? (
-                      <EditableNumber
-                        storageKey={editableStorageKey(worker.id, "timeBombOffsetSeconds")}
-                        value={worker.timeBombOffsetSeconds}
-                        min={1}
-                        step="1"
-                        integer
-                        onChange={(value) => {
-                          if (value !== null) updateWorker(worker, { timeBombOffsetSeconds: value });
-                        }}
-                      />
-                    ) : (
-                      <span title="Only used by the time bomb behavior">—</span>
-                    )}
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "startBlock")}
-                      value={worker.startBlock}
-                      min={0}
-                      step="1"
-                      integer
-                      onChange={(value) => {
-                        if (value !== null) updateWorker(worker, { startBlock: value });
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "endBlock")}
-                      value={worker.endBlock}
-                      min={0}
-                      step="1"
-                      integer
-                      placeholder="Infinity"
-                      onChange={(value) => updateWorker(worker, { endBlock: value })}
-                    />
-                  </td>
-                  <td>
-                    <EditableNumber
-                      storageKey={editableStorageKey(worker.id, "durationSeconds")}
-                      value={worker.durationSeconds}
-                      min={1}
-                      step="1"
-                      integer
-                      onChange={(value) => updateWorker(worker, { durationSeconds: value })}
-                    />
-                  </td>
-                  <td>
-                    {worker.behavior === "time-bomb" ? (
-                      <span title="TTL targets the detonation moment automatically">auto</span>
-                    ) : (
-                      <EditableNumber
-                        storageKey={editableStorageKey(worker.id, "ttlSeconds")}
-                        value={worker.ttlSeconds}
-                        min={1}
-                        step="1"
-                        integer
-                        onChange={(value) => {
-                          if (value !== null) updateWorker(worker, { ttlSeconds: value });
-                        }}
-                      />
-                    )}
-                  </td>
-                  <td>
-                    <TaskStatusCell status={taskStatuses[worker.id]} />
-                  </td>
-                  <td>
-                    <button type="button" className="secondary" onClick={() => deleteWorker(worker.id)}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <FleetSummary workers={config.workers} taskStatuses={taskStatuses} />
+
+      <div className="worker-grid">
+        {config.workers.length === 0 ? (
+          <div className="worker-card worker-card-empty">
+            No baseload workers configured. Add one with the form above.
+          </div>
+        ) : (
+          config.workers.map((worker) => (
+            <WorkerCard
+              key={worker.id}
+              worker={worker}
+              status={taskStatuses[worker.id]}
+              balance={balances[worker.id]}
+              tokenSymbol={tokenSymbol}
+              onUpdate={(patch) => updateWorker(worker, patch)}
+              onDelete={() => deleteWorker(worker.id)}
+            />
+          ))
+        )}
       </div>
     </section>
+  );
+}
+
+const BEHAVIOR_BADGES: Record<BaseloadWorkerBehavior, string> = {
+  "create": "✚ create",
+  "create-update": "↻ create + update",
+  "create-ownership": "⇄ ownership",
+  "time-bomb": "✸ time bomb",
+  "create-update-delete": "♻ full churn",
+};
+
+function FleetSummary({
+  workers,
+  taskStatuses,
+}: {
+  workers: readonly BaseloadWorkerConfig[];
+  taskStatuses: Record<string, BaseloadTaskStatus>;
+}) {
+  if (workers.length === 0) return null;
+  const totalOps = workers.reduce((sum, worker) => sum + worker.opsPerMinute, 0);
+  const behaviorCounts = BASELOAD_WORKER_BEHAVIORS.map((behavior) => ({
+    behavior,
+    count: workers.filter((worker) => worker.behavior === behavior).length,
+  })).filter((entry) => entry.count > 0);
+  const activeCount = workers.filter((worker) =>
+    ["running", "waiting", "ready", "updated"].includes(taskStatuses[worker.id]?.status ?? ""),
+  ).length;
+  const errorCount = workers.filter(
+    (worker) => taskStatuses[worker.id]?.status === "error",
+  ).length;
+
+  return (
+    <div className="fleet-summary">
+      <span className="fleet-chip">
+        <strong>{workers.length}</strong> workers
+      </span>
+      <span className="fleet-chip">
+        <strong>{totalOps}</strong> ops/min
+      </span>
+      <span className="fleet-chip">
+        <strong>{activeCount}</strong> active
+      </span>
+      {errorCount > 0 ? (
+        <span className="fleet-chip fleet-chip-error">
+          <strong>{errorCount}</strong> errors
+        </span>
+      ) : null}
+      {behaviorCounts.map(({ behavior, count }) => (
+        <span
+          key={behavior}
+          className="fleet-chip behavior-chip"
+          data-behavior={behavior}
+          title={BASELOAD_BEHAVIOR_LABELS[behavior]}
+        >
+          <strong>{count}</strong> {BEHAVIOR_BADGES[behavior]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function WorkerCard({
+  worker,
+  status,
+  balance,
+  tokenSymbol,
+  onUpdate,
+  onDelete,
+}: {
+  worker: BaseloadWorkerConfig;
+  status: BaseloadTaskStatus | undefined;
+  balance: BaseloadWorkerBalance | undefined;
+  tokenSymbol: string;
+  onUpdate: (patch: Partial<BaseloadWorkerConfig>) => void;
+  onDelete: () => void;
+}) {
+  return (
+    <article className="worker-card" data-behavior={worker.behavior}>
+      <header className="worker-card-head">
+        <span className="worker-card-wallet">
+          wallet <strong>#{worker.walletNumber}</strong>
+        </span>
+        <span className="behavior-badge" title={BASELOAD_BEHAVIOR_LABELS[worker.behavior]}>
+          {BEHAVIOR_BADGES[worker.behavior]}
+        </span>
+        <button type="button" className="worker-card-delete" title="Delete worker" onClick={onDelete}>
+          ×
+        </button>
+      </header>
+
+      <div className="worker-card-address" title={worker.walletAddress}>
+        {worker.walletAddress || "address pending"}
+      </div>
+
+      <div className="worker-card-status-row">
+        <StatusChip status={status} />
+        <span className="worker-card-balance">
+          <BalanceCell balance={balance} tokenSymbol={tokenSymbol} />
+        </span>
+      </div>
+
+      <WorkerMetrics status={status} />
+
+      {status?.detonationAt ? (
+        <div className="worker-card-detonation">✸ detonation @ {status.detonationAt}</div>
+      ) : null}
+
+      {status?.status === "error" && status.message ? (
+        <ErrorDetail
+          className="cell-error-message"
+          message={status.message}
+          maxLength={CELL_ERROR_SUMMARY_MAX_LENGTH}
+        />
+      ) : null}
+
+      <div className="worker-card-fields">
+        <label className="wfield wfield-wide">
+          <span>Behavior</span>
+          <select
+            value={worker.behavior}
+            onChange={(event) =>
+              onUpdate({ behavior: event.target.value as BaseloadWorkerBehavior })
+            }
+          >
+            {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
+              <option key={behavior} value={behavior}>
+                {BASELOAD_BEHAVIOR_LABELS[behavior]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Field label="Max gas gwei">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "maxGasPriceGwei")}
+            value={worker.maxGasPriceGwei}
+            min={0}
+            step="0.1"
+            onChange={(value) => {
+              if (value !== null) onUpdate({ maxGasPriceGwei: value });
+            }}
+          />
+        </Field>
+        <Field label="Ops / min">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "opsPerMinute")}
+            value={worker.opsPerMinute}
+            min={0}
+            step="1"
+            onChange={(value) => {
+              if (value !== null) onUpdate({ opsPerMinute: value });
+            }}
+          />
+        </Field>
+        <Field label="Payload bytes">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "singleCreatePayloadSize")}
+            value={worker.singleCreatePayloadSize}
+            min={0}
+            step="1"
+            integer
+            onChange={(value) => {
+              if (value !== null) onUpdate({ singleCreatePayloadSize: value });
+            }}
+          />
+        </Field>
+        <Field label="String args">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "singleCreateStringArgumentCount")}
+            value={worker.singleCreateStringArgumentCount}
+            min={0}
+            step="1"
+            integer
+            onChange={(value) => {
+              if (value !== null) onUpdate({ singleCreateStringArgumentCount: value });
+            }}
+          />
+        </Field>
+        <Field label="Number args">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "singleCreateNumberArgumentCount")}
+            value={worker.singleCreateNumberArgumentCount}
+            min={0}
+            step="1"
+            integer
+            onChange={(value) => {
+              if (value !== null) onUpdate({ singleCreateNumberArgumentCount: value });
+            }}
+          />
+        </Field>
+        {behaviorUsesPool(worker.behavior) ? (
+          <Field label="Pool size">
+            <EditableNumber
+              storageKey={editableStorageKey(worker.id, "entityPoolSize")}
+              value={worker.entityPoolSize}
+              min={1}
+              step="1"
+              integer
+              onChange={(value) => {
+                if (value !== null) onUpdate({ entityPoolSize: value });
+              }}
+            />
+          </Field>
+        ) : null}
+        {worker.behavior === "time-bomb" ? (
+          <Field label="Bomb offset s">
+            <EditableNumber
+              storageKey={editableStorageKey(worker.id, "timeBombOffsetSeconds")}
+              value={worker.timeBombOffsetSeconds}
+              min={1}
+              step="1"
+              integer
+              onChange={(value) => {
+                if (value !== null) onUpdate({ timeBombOffsetSeconds: value });
+              }}
+            />
+          </Field>
+        ) : null}
+        <Field label="Start block">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "startBlock")}
+            value={worker.startBlock}
+            min={0}
+            step="1"
+            integer
+            onChange={(value) => {
+              if (value !== null) onUpdate({ startBlock: value });
+            }}
+          />
+        </Field>
+        <Field label="End block">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "endBlock")}
+            value={worker.endBlock}
+            min={0}
+            step="1"
+            integer
+            placeholder="Infinity"
+            onChange={(value) => onUpdate({ endBlock: value })}
+          />
+        </Field>
+        <Field label="Duration s">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "durationSeconds")}
+            value={worker.durationSeconds}
+            min={1}
+            step="1"
+            integer
+            onChange={(value) => onUpdate({ durationSeconds: value })}
+          />
+        </Field>
+        {worker.behavior === "time-bomb" ? (
+          <Field label="TTL s">
+            <span className="wfield-static" title="TTL targets the detonation moment automatically">
+              auto
+            </span>
+          </Field>
+        ) : (
+          <Field label="TTL s">
+            <EditableNumber
+              storageKey={editableStorageKey(worker.id, "ttlSeconds")}
+              value={worker.ttlSeconds}
+              min={1}
+              step="1"
+              integer
+              onChange={(value) => {
+                if (value !== null) onUpdate({ ttlSeconds: value });
+              }}
+            />
+          </Field>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="wfield">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function StatusChip({ status }: { status: BaseloadTaskStatus | undefined }) {
+  const name = status?.status ?? "starting";
+  const title =
+    status && status.status !== "error"
+      ? [status.message, status.entityKey ? `entity ${status.entityKey}` : null]
+          .filter((part) => part)
+          .join(" — ") || undefined
+      : undefined;
+  return (
+    <span className="status-chip" data-status={name} title={title}>
+      <span className="status-dot" aria-hidden="true" />
+      {name}
+    </span>
+  );
+}
+
+function WorkerMetrics({ status }: { status: BaseloadTaskStatus | undefined }) {
+  if (!status) return null;
+  const items: { label: string; value: string }[] = [];
+  if (status.createdCount) items.push({ label: "created", value: String(status.createdCount) });
+  if (status.updatedCount) items.push({ label: "updated", value: String(status.updatedCount) });
+  if (status.deletedCount) items.push({ label: "deleted", value: String(status.deletedCount) });
+  if (status.ownershipChangedCount) {
+    items.push({ label: "owned", value: String(status.ownershipChangedCount) });
+  }
+  if (status.attemptedCount !== undefined) {
+    items.push({ label: "tries", value: String(status.attemptedCount) });
+  }
+  if (status.poolSize) items.push({ label: "pool", value: String(status.poolSize) });
+  if (status.currentBlock !== undefined) {
+    items.push({ label: "block", value: String(status.currentBlock) });
+  }
+  if (status.txHash) items.push({ label: "tx", value: shortHash(status.txHash) });
+  if (items.length === 0) return null;
+  return (
+    <dl className="worker-card-metrics">
+      {items.map((item) => (
+        <div key={item.label} className="metric" title={item.label === "tx" ? status.txHash : undefined}>
+          <dt>{item.label}</dt>
+          <dd>{item.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -736,46 +878,6 @@ function BalanceCell({ balance, tokenSymbol }: { balance: BaseloadWorkerBalance 
   }
   return (
     <span title={`${balance.balanceWei} wei (updated ${balance.updatedAt})`}>{label}</span>
-  );
-}
-
-function TaskStatusCell({ status }: { status: BaseloadTaskStatus | undefined }) {
-  if (!status) return <span>starting</span>;
-  const ops: string[] = [];
-  if (status.createdCount) ops.push(`${status.createdCount} created`);
-  if (status.updatedCount) ops.push(`${status.updatedCount} updated`);
-  if (status.deletedCount) ops.push(`${status.deletedCount} deleted`);
-  if (status.ownershipChangedCount) ops.push(`${status.ownershipChangedCount} owned`);
-  const count =
-    status.attemptedCount === undefined
-      ? ""
-      : ` ${ops.join(", ") || "0 done"} / ${status.attemptedCount} tries`;
-  const poolSize = status.poolSize ? ` pool ${status.poolSize}` : "";
-  const block = status.currentBlock === undefined ? "" : ` block ${status.currentBlock}`;
-  const tx = status.txHash ? ` tx ${shortHash(status.txHash)}` : "";
-  const label = `${status.status}${count}${poolSize}${block}${tx}`;
-  const isError = status.status === "error";
-  const title = [
-    status.message ?? status.txHash ?? status.entityKey,
-    status.detonationAt ? `Detonation at ${status.detonationAt}` : null,
-  ]
-    .filter((part) => part)
-    .join(" — ");
-
-  return (
-    <span className={isError ? "task-status-error" : undefined} title={title || undefined}>
-      <span>{label}</span>
-      {status.detonationAt ? (
-        <span className="cell-detail">boom @ {status.detonationAt}</span>
-      ) : null}
-      {isError && status.message ? (
-        <ErrorDetail
-          className="cell-error-message"
-          message={status.message}
-          maxLength={CELL_ERROR_SUMMARY_MAX_LENGTH}
-        />
-      ) : null}
-    </span>
   );
 }
 
