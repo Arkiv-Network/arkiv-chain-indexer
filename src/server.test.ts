@@ -1171,11 +1171,7 @@ describe("GET /health", () => {
 });
 
 if (!hasPostgresForTests()) {
-  describe.skip("createBlockServer (skipped: set TEST_DATABASE_URL to run)", () => {
-    test("placeholder", () => {
-      expect(true).toBe(true);
-    });
-  });
+  describe.skip("createBlockServer (skipped: set TEST_DATABASE_URL to run)", () => {});
 } else {
   describe("createBlockServer", () => {
     test("returns newest stored blocks when no filters are supplied", async () => {

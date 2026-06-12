@@ -6,11 +6,7 @@ import { TEST_DATABASE_URL, hasPostgresForTests } from "./testPostgres";
 // upgrade changes any of these, this suite fails before storage corrupts data.
 
 if (!hasPostgresForTests()) {
-  describe.skip("db adapter (skipped: set TEST_DATABASE_URL to run)", () => {
-    test("placeholder", () => {
-      expect(true).toBe(true);
-    });
-  });
+  describe.skip("db adapter (skipped: set TEST_DATABASE_URL to run)", () => {});
 } else {
   const db: Db = openDb(TEST_DATABASE_URL!, { max: 2 });
 
