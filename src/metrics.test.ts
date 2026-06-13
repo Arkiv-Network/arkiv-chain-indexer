@@ -132,4 +132,50 @@ describe("computeBlockMetrics", () => {
       averagePriorityFeeWei: "55",
     });
   });
+
+  test("stores input data totals and averages as decoded byte counts", () => {
+    const block: RpcBlock = {
+      number: "0x7c",
+      timestamp: "0x65a0bb80",
+      baseFeePerGas: "0x1",
+      gasUsed: "0x3",
+      gasLimit: "0x1c9c380",
+      transactions: [
+        {
+          hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          input: `0x${"00".repeat(32)}`,
+        },
+        {
+          hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          input: "0x12345678",
+        },
+        {
+          hash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          input: "0x",
+        },
+      ],
+    };
+    const receipts: RpcReceipt[] = [
+      {
+        transactionHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        gasUsed: "0x1",
+        effectiveGasPrice: "0x1",
+      },
+      {
+        transactionHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        gasUsed: "0x1",
+        effectiveGasPrice: "0x1",
+      },
+      {
+        transactionHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        gasUsed: "0x1",
+        effectiveGasPrice: "0x1",
+      },
+    ];
+
+    expect(computeBlockMetrics(block, receipts)).toMatchObject({
+      totalInputDataSizeBytes: "36",
+      averageTransactionInputDataSizeBytes: "12",
+    });
+  });
 });

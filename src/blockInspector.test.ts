@@ -77,6 +77,13 @@ describe("inspectBlockFromRpc", () => {
     expect(compressedHexDataByteLength(input)).toBe(Bun.zstdCompressSync(bytes).byteLength);
     expect(() => hexDataByteLength("0x123" as Hex)).toThrow(/whole number of bytes/);
   });
+
+  test("counts calldata bytes, not hex characters", () => {
+    const input = `0x${"ab".repeat(32)}` as Hex;
+
+    expect(input.length - 2).toBe(64);
+    expect(hexDataByteLength(input)).toBe(32);
+  });
 });
 
 function blockFixture(): RpcBlock {

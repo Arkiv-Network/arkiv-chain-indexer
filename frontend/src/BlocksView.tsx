@@ -107,13 +107,13 @@ function blockColumns(
     },
     {
       key: "inputDataSizeBytes",
-      label: "Input data",
+      label: "Input data (raw / zstd)",
       className: "num",
       width: "12rem",
       render: (row) => (
         <div className="block-size-cell">
           <span>
-            {fmtBytes(row.totalInputDataCompressedSizeBytes)} / {fmtBytes(row.totalInputDataSizeBytes)}
+            {fmtBytes(row.totalInputDataSizeBytes)} / {fmtBytes(row.totalInputDataCompressedSizeBytes)}
           </span>
           <span>{fmtCompressionRatio(row.totalInputDataCompressedSizeBytes, row.totalInputDataSizeBytes)}</span>
         </div>
