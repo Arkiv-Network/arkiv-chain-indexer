@@ -72,10 +72,17 @@ export interface BaseloadState {
 interface BaseloadRpcClient {
   getBlockNumber: () => Promise<number>;
   getLatestNonce: (address: string) => Promise<number>;
-  waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<void>;
+  waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<unknown>;
 }
 
 const BALANCE_POLL_INTERVAL_MS = 10_000;
+const ARKIV_CONTRACT_ADDRESS = "0x00000000000000000000000000000061726b6976";
+const ARKIV_ENTITY_CREATED_TOPICS = new Set([
+  // ArkivEntityCreated(uint256 indexed entityKey, address indexed ownerAddress, uint256 expirationBlock, uint256 cost)
+  "0x73dc52f9255c70375a8835a75fca19be3d9f6940536cccf5a7bc414368b389fa",
+  // ArkivEntityCreated(bytes32 indexed entityKey, address indexed ownerAddress, uint256 expirationBlock, uint256 cost)
+  "0x5abeb37cae25ff8919c8348d9eebadaccd3166c8ac55d8dfa7afc70f3cce7d19",
+]);
 
 export class BaseloadRuntime {
   private config: BaseloadConfig = EMPTY_BASELOAD_CONFIG;
@@ -423,11 +430,16 @@ class BaseloadWorkerTask {
                 ...statusCounts(),
               });
               const result = await clients.arkiv.createEntity(input, await sendTxParams());
-              await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
+              const receipt = await clients.rpc.waitForTransactionReceipt(
+                result.txHash,
+                this.abortController.signal,
+              );
+              const entityKey = readBaseloadCreatedEntityKeyFromReceipt(receipt, result.txHash);
+              assertSdkEntityKeyMatchesReceipt(result.entityKey, entityKey, result.txHash);
               counters.createdCount += 1;
               if (worker.behavior === "create-update" || worker.behavior === "create-update-delete") {
                 pool.push({
-                  entityKey: result.entityKey,
+                  entityKey,
                   expiresAtMs: Date.now() + worker.ttlSeconds * 1000,
                 });
               }
@@ -435,7 +447,7 @@ class BaseloadWorkerTask {
                 currentBlock,
                 message: "Entity created",
                 ...statusCounts(),
-                entityKey: result.entityKey,
+                entityKey,
                 txHash: result.txHash,
               });
               break;
@@ -450,18 +462,26 @@ class BaseloadWorkerTask {
                 createBaseloadEntityInput(worker),
                 await sendTxParams(),
               );
-              await clients.rpc.waitForTransactionReceipt(created.txHash, this.abortController.signal);
+              const createReceipt = await clients.rpc.waitForTransactionReceipt(
+                created.txHash,
+                this.abortController.signal,
+              );
+              const createdEntityKey = readBaseloadCreatedEntityKeyFromReceipt(
+                createReceipt,
+                created.txHash,
+              );
+              assertSdkEntityKeyMatchesReceipt(created.entityKey, createdEntityKey, created.txHash);
               counters.createdCount += 1;
               const newOwner = randomOwnerAddress();
               this.postStatus("running", {
                 currentBlock,
                 message: `Changing ownership to ${newOwner}`,
                 ...statusCounts(),
-                entityKey: created.entityKey,
+                entityKey: createdEntityKey,
                 txHash: created.txHash,
               });
               const owned = await clients.arkiv.changeOwnership(
-                { entityKey: created.entityKey, newOwner },
+                { entityKey: createdEntityKey, newOwner },
                 await sendTxParams(),
               );
               // The SDK types changeOwnership's txHash as plain string, unlike the other actions.
@@ -474,7 +494,7 @@ class BaseloadWorkerTask {
                 currentBlock,
                 message: `Ownership changed to ${newOwner}`,
                 ...statusCounts(),
-                entityKey: created.entityKey,
+                entityKey: createdEntityKey,
                 txHash: owned.txHash,
               });
               break;
@@ -605,11 +625,78 @@ function createRpcClient(rpcUrl: string): BaseloadRpcClient {
     waitForTransactionReceipt: async (txHash, signal) => {
       while (!signal.aborted) {
         const result = await callRpc(rpcUrl, "eth_getTransactionReceipt", [txHash]);
-        if (result !== null) return;
+        if (result !== null) return result;
         await sleep(1_000, signal);
       }
+      throw new Error(`Stopped while waiting for transaction receipt ${txHash}`);
     },
   };
+}
+
+export function readBaseloadCreatedEntityKeyFromReceipt(
+  receipt: unknown,
+  txHash: string,
+): HexString {
+  if (!isRecord(receipt)) {
+    throw new Error(`Unable to read created entity key from transaction ${txHash}: receipt is not an object`);
+  }
+
+  const logs = receipt.logs;
+  if (!Array.isArray(logs)) {
+    throw new Error(`Unable to read created entity key from transaction ${txHash}: receipt logs are missing`);
+  }
+
+  const createLogs = logs.filter(isArkivEntityCreatedLog);
+  if (createLogs.length === 0) {
+    throw new Error(
+      `Unable to read created entity key from transaction ${txHash}: no ArkivEntityCreated event found in receipt`,
+    );
+  }
+  if (createLogs.length > 1) {
+    throw new Error(
+      `Unable to read created entity key from transaction ${txHash}: receipt has ${createLogs.length} ArkivEntityCreated events`,
+    );
+  }
+
+  const topics = createLogs[0]?.topics;
+  const entityKey = topics?.[1];
+  if (!isBytes32Hex(entityKey)) {
+    throw new Error(
+      `Unable to read created entity key from transaction ${txHash}: ArkivEntityCreated topic[1] is missing or invalid`,
+    );
+  }
+
+  return entityKey;
+}
+
+function assertSdkEntityKeyMatchesReceipt(
+  sdkEntityKey: unknown,
+  receiptEntityKey: HexString,
+  txHash: string,
+) {
+  if (typeof sdkEntityKey !== "string" || sdkEntityKey.toLowerCase() !== receiptEntityKey.toLowerCase()) {
+    throw new Error(
+      `Unable to trust created entity key from transaction ${txHash}: SDK returned ${String(
+        sdkEntityKey,
+      )}, but receipt event contains ${receiptEntityKey}`,
+    );
+  }
+}
+
+function isArkivEntityCreatedLog(value: unknown): value is { topics: string[] } {
+  if (!isRecord(value)) return false;
+  if (typeof value.address !== "string") return false;
+  if (value.address.toLowerCase() !== ARKIV_CONTRACT_ADDRESS) return false;
+  if (!Array.isArray(value.topics)) return false;
+  return typeof value.topics[0] === "string" && ARKIV_ENTITY_CREATED_TOPICS.has(value.topics[0].toLowerCase());
+}
+
+function isBytes32Hex(value: unknown): value is HexString {
+  return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
 
 async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
