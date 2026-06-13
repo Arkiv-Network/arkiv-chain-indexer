@@ -1,5 +1,6 @@
 import { average, hexToBigInt } from "./math";
 import { shouldIgnoreTransaction } from "./transactionFilter";
+import { compressedHexDataByteLength, hexDataByteLength } from "./blockInspector";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 
 export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): BlockMetrics {
@@ -28,6 +29,8 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
   let weightedPriorityFeeNumerator = 0n;
   let gasWeightedPriorityFeeNumerator = 0n;
   let totalReceiptGasUsed = 0n;
+  let totalInputDataSizeBytes = 0n;
+  let totalInputDataCompressedSizeBytes = 0n;
 
   for (const transaction of includedTransactions) {
     const receipt = receiptsByHash.get(transaction.hash.toLowerCase());
@@ -40,6 +43,8 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     const transactionFee = gasUsed * effectiveGasPrice;
     const priorityFee = effectiveGasPrice > baseFee ? effectiveGasPrice - baseFee : 0n;
 
+    totalInputDataSizeBytes += BigInt(hexDataByteLength(transaction.input));
+    totalInputDataCompressedSizeBytes += BigInt(compressedHexDataByteLength(transaction.input));
     feePrices.push(effectiveGasPrice);
     priorityFees.push(priorityFee);
     totalTransactionFee += transactionFee;
@@ -57,12 +62,18 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     transactionCount === 0 ? 0n : totalTransactionFee / BigInt(transactionCount);
   const averageTransactionGasUsed =
     transactionCount === 0 ? 0n : totalReceiptGasUsed / BigInt(transactionCount);
+  const averageTransactionInputDataSizeBytes =
+    transactionCount === 0 ? 0n : totalInputDataSizeBytes / BigInt(transactionCount);
+  const averageTransactionInputDataCompressedSizeBytes =
+    transactionCount === 0 ? 0n : totalInputDataCompressedSizeBytes / BigInt(transactionCount);
 
   return {
     blockDate: new Date(Number(blockTimestampSeconds) * 1000).toISOString(),
     blockNumber,
     baseBlockFeeWei: baseFee.toString(),
     totalGasUsed: totalGasUsed.toString(),
+    totalInputDataSizeBytes: totalInputDataSizeBytes.toString(),
+    totalInputDataCompressedSizeBytes: totalInputDataCompressedSizeBytes.toString(),
     maxGasInBlock: hexToBigInt(block.gasLimit).toString(),
     transactionCount,
     blockRewardWei: gasWeightedPriorityFeeNumerator.toString(),
@@ -75,6 +86,8 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
     averageFeePriceWei: average(feePrices).toString(),
     averageTransactionFeeWei: averageTransactionFee.toString(),
     averageTransactionGasUsed: averageTransactionGasUsed.toString(),
+    averageTransactionInputDataSizeBytes: averageTransactionInputDataSizeBytes.toString(),
+    averageTransactionInputDataCompressedSizeBytes: averageTransactionInputDataCompressedSizeBytes.toString(),
     averagePriorityFeeWeightedWei: weightedPriorityFee.toString(),
     averagePriorityFeeWei: average(priorityFees).toString(),
   };

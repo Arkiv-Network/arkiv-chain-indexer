@@ -3,7 +3,7 @@ import { fetchTransactions, type StoredTransaction, type TransactionsResponse } 
 import { addressDisplay } from "./addressAliases";
 import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
+import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import {
   buildAddressPermalinkHref,
   buildPermalinkHref,
@@ -64,6 +64,8 @@ type SortKey =
   | "valueWei"
   | "gasLimit"
   | "gasUsed"
+  | "inputDataSizeBytes"
+  | "inputDataCompressedSizeBytes"
   | "cumulativeGasUsed"
   | "gasPriceWei"
   | "maxFeePerGasWei"
@@ -184,6 +186,20 @@ function transactionColumns(
     width: "12rem",
     render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
   };
+  const inputData: Column = {
+    key: "inputDataSizeBytes",
+    label: "Input data",
+    className: "num",
+    width: "9rem",
+    render: (row) => fmtBytes(row.inputDataSizeBytes),
+  };
+  const inputDataCompressed: Column = {
+    key: "inputDataCompressedSizeBytes",
+    label: "Input zstd",
+    className: "num",
+    width: "9rem",
+    render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
+  };
   const effectiveFee: Column = {
     key: "effectiveGasPriceWei",
     label: "Effective fee (gwei)",
@@ -202,9 +218,9 @@ function transactionColumns(
   // When scoped to a single address every row shares the same sender, so the
   // From column is redundant — lead with the nonce instead.
   if (addressSelected) {
-    return [nonce, block, hash, arkivOps, gas, effectiveFee, txFee];
+    return [nonce, block, hash, arkivOps, gas, inputData, inputDataCompressed, effectiveFee, txFee];
   }
-  return [block, hash, arkivOps, from, nonce, gas, effectiveFee, txFee];
+  return [block, hash, arkivOps, from, nonce, gas, inputData, inputDataCompressed, effectiveFee, txFee];
 }
 
 function loadFilters(locationSearch: string, lockedAddress: string | null): TransactionFilters {
@@ -751,6 +767,8 @@ function sortValue(row: StoredTransaction, key: SortKey): string | bigint {
     key === "valueWei" ||
     key === "gasLimit" ||
     key === "gasUsed" ||
+    key === "inputDataSizeBytes" ||
+    key === "inputDataCompressedSizeBytes" ||
     key === "cumulativeGasUsed" ||
     key === "baseBlockFeeWei" ||
     key === "gasPriceWei" ||

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchRanges, type RangesResponse, type StoredBlockRange } from "./api";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -159,6 +159,20 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
     render: (row) => fmtInteger(row.averageTransactionGasUsed),
   },
   {
+    key: "averageTransactionInputDataSizeBytes",
+    label: "Avg tx input",
+    className: "num",
+    width: "10rem",
+    render: (row) => fmtBytes(row.averageTransactionInputDataSizeBytes),
+  },
+  {
+    key: "averageTransactionInputDataCompressedSizeBytes",
+    label: "Avg tx input zstd",
+    className: "num",
+    width: "12rem",
+    render: (row) => fmtBytes(row.averageTransactionInputDataCompressedSizeBytes),
+  },
+  {
     key: "transactionCount",
     label: "Tx count",
     className: "num",
@@ -185,6 +199,20 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
     className: "num",
     width: "16rem",
     render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
+  },
+  {
+    key: "totalInputDataSizeBytes",
+    label: "Input data",
+    className: "num",
+    width: "10rem",
+    render: (row) => fmtBytes(row.totalInputDataSizeBytes),
+  },
+  {
+    key: "totalInputDataCompressedSizeBytes",
+    label: "Input data zstd",
+    className: "num",
+    width: "12rem",
+    render: (row) => fmtBytes(row.totalInputDataCompressedSizeBytes),
   },
   ];
 }

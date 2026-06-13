@@ -26,6 +26,8 @@ export interface BlockRangeMetrics {
   maxBaseFeeWei: string;
   averageBaseFeeWei: string;
   totalGasUsed: string;
+  totalInputDataSizeBytes: string;
+  totalInputDataCompressedSizeBytes: string;
   totalMaxGas: string;
   minMaxGasInBlock: string;
   maxMaxGasInBlock: string;
@@ -36,6 +38,8 @@ export interface BlockRangeMetrics {
   averageBurntFeesWei: string;
   averageFeePriceWei: string;
   averageTransactionGasUsed: string;
+  averageTransactionInputDataSizeBytes: string;
+  averageTransactionInputDataCompressedSizeBytes: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
   minBatcherQueueSize?: string | null;
@@ -125,6 +129,8 @@ export function computeBlockRange(
   let maxBaseFee = minBaseFee;
   let baseFeeSum = 0n;
   let totalGasUsed = 0n;
+  let totalInputDataSizeBytes = 0n;
+  let totalInputDataCompressedSizeBytes = 0n;
   let totalMaxGas = 0n;
   let minMaxGasInBlock = BigInt(blocks[0]!.maxGasInBlock);
   let maxMaxGasInBlock = minMaxGasInBlock;
@@ -134,6 +140,8 @@ export function computeBlockRange(
   let gasWeightedPriorityFeeNumerator = 0n;
   let feePriceNumerator = 0n;
   let transactionGasNumerator = 0n;
+  let transactionInputDataNumerator = 0n;
+  let transactionInputDataCompressedNumerator = 0n;
   let txWeightedPriorityFeeNumerator = 0n;
   const batcherQueueSizes: bigint[] = [];
   const batcherIntensities: number[] = [];
@@ -154,6 +162,8 @@ export function computeBlockRange(
     const gasUsed = BigInt(block.totalGasUsed);
     const maxGas = BigInt(block.maxGasInBlock);
     totalGasUsed += gasUsed;
+    totalInputDataSizeBytes += BigInt(block.totalInputDataSizeBytes ?? "0");
+    totalInputDataCompressedSizeBytes += BigInt(block.totalInputDataCompressedSizeBytes ?? "0");
     totalMaxGas += maxGas;
     if (maxGas < minMaxGasInBlock) minMaxGasInBlock = maxGas;
     if (maxGas > maxMaxGasInBlock) maxMaxGasInBlock = maxGas;
@@ -169,6 +179,16 @@ export function computeBlockRange(
       block.transactionCount,
     );
     transactionGasNumerator += gasUsed;
+    transactionInputDataNumerator += exactOrAverageSum(
+      block.totalInputDataSizeBytes,
+      block.averageTransactionInputDataSizeBytes ?? "0",
+      block.transactionCount,
+    );
+    transactionInputDataCompressedNumerator += exactOrAverageSum(
+      block.totalInputDataCompressedSizeBytes,
+      block.averageTransactionInputDataCompressedSizeBytes ?? "0",
+      block.transactionCount,
+    );
     txWeightedPriorityFeeNumerator += exactOrAverageSum(
       block.priorityFeeSumWei,
       block.averagePriorityFeeWei,
@@ -191,6 +211,10 @@ export function computeBlockRange(
     transactionCount === 0 ? 0n : feePriceNumerator / BigInt(transactionCount);
   const averageTransactionGasUsed =
     transactionCount === 0 ? 0n : transactionGasNumerator / BigInt(transactionCount);
+  const averageTransactionInputDataSizeBytes =
+    transactionCount === 0 ? 0n : transactionInputDataNumerator / BigInt(transactionCount);
+  const averageTransactionInputDataCompressedSizeBytes =
+    transactionCount === 0 ? 0n : transactionInputDataCompressedNumerator / BigInt(transactionCount);
   const averagePriorityFee =
     transactionCount === 0
       ? 0n
@@ -206,6 +230,8 @@ export function computeBlockRange(
     maxBaseFeeWei: maxBaseFee.toString(),
     averageBaseFeeWei: averageBaseFee.toString(),
     totalGasUsed: totalGasUsed.toString(),
+    totalInputDataSizeBytes: totalInputDataSizeBytes.toString(),
+    totalInputDataCompressedSizeBytes: totalInputDataCompressedSizeBytes.toString(),
     totalMaxGas: totalMaxGas.toString(),
     minMaxGasInBlock: minMaxGasInBlock.toString(),
     maxMaxGasInBlock: maxMaxGasInBlock.toString(),
@@ -216,6 +242,8 @@ export function computeBlockRange(
     averageBurntFeesWei: (totalBurntFees / rangeSize).toString(),
     averageFeePriceWei: averageFeePrice.toString(),
     averageTransactionGasUsed: averageTransactionGasUsed.toString(),
+    averageTransactionInputDataSizeBytes: averageTransactionInputDataSizeBytes.toString(),
+    averageTransactionInputDataCompressedSizeBytes: averageTransactionInputDataCompressedSizeBytes.toString(),
     averagePriorityFeeWeightedWei: averagePriorityFeeWeighted.toString(),
     averagePriorityFeeWei: averagePriorityFee.toString(),
     ...rangeStats("BatcherQueueSize", batcherQueueSizes, true),

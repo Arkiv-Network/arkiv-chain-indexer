@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { inspectBlockFromRpc } from "./blockInspector";
+import { compressedHexDataByteLength, hexDataByteLength, inspectBlockFromRpc } from "./blockInspector";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import type { Hex, RpcBlock, RpcReceipt } from "./types";
 
@@ -22,6 +22,8 @@ describe("inspectBlockFromRpc", () => {
       position: 0,
       hash: "0xaaa",
       gasUsed: "10",
+      inputDataSizeBytes: "3",
+      inputDataCompressedSizeBytes: "12",
       effectiveGasPriceWei: "150",
       priorityFeeWei: "50",
       transactionFeeWei: "1500",
@@ -32,6 +34,8 @@ describe("inspectBlockFromRpc", () => {
       position: 1,
       hash: "0xbbb",
       gasUsed: "2",
+      inputDataSizeBytes: "0",
+      inputDataCompressedSizeBytes: "9",
       effectiveGasPriceWei: "80",
       priorityFeeWei: "0",
       transactionFeeWei: "160",
@@ -64,6 +68,15 @@ describe("inspectBlockFromRpc", () => {
     expect(inspected.transactions.map((transaction) => transaction.hash)).toEqual(["0xaaa", "0xbbb"]);
     expect(inspected.transactions.map((transaction) => transaction.position)).toEqual([0, 2]);
   });
+
+  test("measures input data after parsing calldata into bytes", () => {
+    const input = "0x000102ff" as Hex;
+    const bytes = Uint8Array.from([0, 1, 2, 255]);
+
+    expect(hexDataByteLength(input)).toBe(bytes.byteLength);
+    expect(compressedHexDataByteLength(input)).toBe(Bun.zstdCompressSync(bytes).byteLength);
+    expect(() => hexDataByteLength("0x123" as Hex)).toThrow(/whole number of bytes/);
+  });
 });
 
 function blockFixture(): RpcBlock {
@@ -85,6 +98,7 @@ function blockFixture(): RpcBlock {
         gasPrice: "0x96",
         maxFeePerGas: "0xc8",
         maxPriorityFeePerGas: "0x3c",
+        input: "0x123456",
       },
       {
         hash: "0xbbb",

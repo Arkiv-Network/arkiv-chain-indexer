@@ -15,7 +15,11 @@ export interface StoredBlock {
   priorityFeeGasWeightedNumeratorWei?: string;
   averageTransactionFeeWei: string;
   averageTransactionGasUsed: string;
+  averageTransactionInputDataSizeBytes: string;
+  averageTransactionInputDataCompressedSizeBytes: string;
   totalGasUsed: string;
+  totalInputDataSizeBytes: string;
+  totalInputDataCompressedSizeBytes: string;
   maxGasInBlock: string;
   batcherQueueSize?: string | null;
   batcherIntensity?: string | null;
@@ -30,6 +34,8 @@ export const BLOCK_RESPONSE_NAMES = [
   "blockDate",
   "baseBlockFeeWei",
   "totalGasUsed",
+  "totalInputDataSizeBytes",
+  "totalInputDataCompressedSizeBytes",
   "maxGasInBlock",
   "transactionCount",
   "blockRewardWei",
@@ -42,6 +48,8 @@ export const BLOCK_RESPONSE_NAMES = [
   "averageFeePriceWei",
   "averageTransactionFeeWei",
   "averageTransactionGasUsed",
+  "averageTransactionInputDataSizeBytes",
+  "averageTransactionInputDataCompressedSizeBytes",
   "averagePriorityFeeWeightedWei",
   "averagePriorityFeeWei",
   "batcherQueueSize",
@@ -66,6 +74,8 @@ export const RANGE_RESPONSE_NAMES = [
   "maxBaseFeeWei",
   "averageBaseFeeWei",
   "totalGasUsed",
+  "totalInputDataSizeBytes",
+  "totalInputDataCompressedSizeBytes",
   "totalMaxGas",
   "minMaxGasInBlock",
   "maxMaxGasInBlock",
@@ -76,6 +86,8 @@ export const RANGE_RESPONSE_NAMES = [
   "averageBurntFeesWei",
   "averageFeePriceWei",
   "averageTransactionGasUsed",
+  "averageTransactionInputDataSizeBytes",
+  "averageTransactionInputDataCompressedSizeBytes",
   "averagePriorityFeeWeightedWei",
   "averagePriorityFeeWei",
   "minBatcherQueueSize",
@@ -105,12 +117,16 @@ export interface StoredBlockRange {
   averagePriorityFeeWei: string;
   averagePriorityFeeWeightedWei: string;
   averageTransactionGasUsed: string;
+  averageTransactionInputDataSizeBytes: string;
+  averageTransactionInputDataCompressedSizeBytes: string;
   totalBlockRewardWei: string;
   totalBurntFeesWei: string;
   averageBlockRewardWei: string;
   averageBurntFeesWei: string;
   transactionCount: number;
   totalGasUsed: string;
+  totalInputDataSizeBytes: string;
+  totalInputDataCompressedSizeBytes: string;
   totalMaxGas: string;
   minMaxGasInBlock: string;
   maxMaxGasInBlock: string;
@@ -217,6 +233,8 @@ export interface InspectedTransaction {
   valueWei: string;
   gasLimit: string;
   gasUsed: string;
+  inputDataSizeBytes: string;
+  inputDataCompressedSizeBytes: string;
   cumulativeGasUsed: string | null;
   gasPriceWei: string | null;
   maxFeePerGasWei: string | null;
@@ -238,6 +256,8 @@ export interface InspectedBlock {
   blockDate: string;
   baseBlockFeeWei: string;
   totalGasUsed: string;
+  totalInputDataSizeBytes?: string;
+  totalInputDataCompressedSizeBytes?: string;
   maxGasInBlock: string;
   transactionCount: number;
   blockRewardWei?: string;
@@ -246,6 +266,8 @@ export interface InspectedBlock {
   averageFeePriceWei?: string;
   averageTransactionFeeWei?: string;
   averageTransactionGasUsed?: string;
+  averageTransactionInputDataSizeBytes?: string;
+  averageTransactionInputDataCompressedSizeBytes?: string;
   averagePriorityFeeWeightedWei?: string;
   averagePriorityFeeWei?: string;
   batcherQueueSize?: string | null;
@@ -763,11 +785,21 @@ function decodeBlockResponseRow(row: BlockResponseRow, names: readonly string[] 
     blockDate: stringValue(values.get("blockDate") ?? null),
     baseBlockFeeWei: stringValue(values.get("baseBlockFeeWei") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    totalInputDataSizeBytes: stringValue(values.get("totalInputDataSizeBytes") ?? null),
+    totalInputDataCompressedSizeBytes: stringValue(
+      values.get("totalInputDataCompressedSizeBytes") ?? null,
+    ),
     maxGasInBlock: stringValue(values.get("maxGasInBlock") ?? null),
     transactionCount: numberValue(values.get("transactionCount") ?? null),
     averageFeePriceWei: stringValue(values.get("averageFeePriceWei") ?? null),
     averageTransactionFeeWei: stringValue(values.get("averageTransactionFeeWei") ?? null),
     averageTransactionGasUsed: stringValue(values.get("averageTransactionGasUsed") ?? null),
+    averageTransactionInputDataSizeBytes: stringValue(
+      values.get("averageTransactionInputDataSizeBytes") ?? null,
+    ),
+    averageTransactionInputDataCompressedSizeBytes: stringValue(
+      values.get("averageTransactionInputDataCompressedSizeBytes") ?? null,
+    ),
     averagePriorityFeeWeightedWei: stringValue(values.get("averagePriorityFeeWeightedWei") ?? null),
     averagePriorityFeeWei: stringValue(values.get("averagePriorityFeeWei") ?? null),
     batcherQueueSize: nullableString(values.get("batcherQueueSize") ?? null),
@@ -818,12 +850,22 @@ function decodeRangeResponseRow(
       values.get("averagePriorityFeeWeightedWei") ?? null,
     ),
     averageTransactionGasUsed: stringValue(values.get("averageTransactionGasUsed") ?? null),
+    averageTransactionInputDataSizeBytes: stringValue(
+      values.get("averageTransactionInputDataSizeBytes") ?? null,
+    ),
+    averageTransactionInputDataCompressedSizeBytes: stringValue(
+      values.get("averageTransactionInputDataCompressedSizeBytes") ?? null,
+    ),
     totalBlockRewardWei: stringValue(values.get("totalBlockRewardWei") ?? null),
     totalBurntFeesWei: stringValue(values.get("totalBurntFeesWei") ?? null),
     averageBlockRewardWei: stringValue(values.get("averageBlockRewardWei") ?? null),
     averageBurntFeesWei: stringValue(values.get("averageBurntFeesWei") ?? null),
     transactionCount: numberValue(values.get("transactionCount") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    totalInputDataSizeBytes: stringValue(values.get("totalInputDataSizeBytes") ?? null),
+    totalInputDataCompressedSizeBytes: stringValue(
+      values.get("totalInputDataCompressedSizeBytes") ?? null,
+    ),
     totalMaxGas: stringValue(values.get("totalMaxGas") ?? null),
     minMaxGasInBlock: stringValue(values.get("minMaxGasInBlock") ?? null),
     maxMaxGasInBlock: stringValue(values.get("maxMaxGasInBlock") ?? null),

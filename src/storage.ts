@@ -91,6 +91,8 @@ export interface StoredBlock {
   blockDate: string;
   baseBlockFeeWei: string;
   totalGasUsed: string;
+  totalInputDataSizeBytes?: string;
+  totalInputDataCompressedSizeBytes?: string;
   maxGasInBlock: string;
   transactionCount: number;
   blockRewardWei?: string;
@@ -103,6 +105,8 @@ export interface StoredBlock {
   averageFeePriceWei: string;
   averageTransactionFeeWei: string;
   averageTransactionGasUsed: string;
+  averageTransactionInputDataSizeBytes?: string;
+  averageTransactionInputDataCompressedSizeBytes?: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
   batcherQueueSize?: string | null;
@@ -162,6 +166,8 @@ export interface StoredBlockRange {
   maxBaseFeeWei: string;
   averageBaseFeeWei: string;
   totalGasUsed: string;
+  totalInputDataSizeBytes: string;
+  totalInputDataCompressedSizeBytes: string;
   totalMaxGas: string;
   minMaxGasInBlock: string;
   maxMaxGasInBlock: string;
@@ -172,6 +178,8 @@ export interface StoredBlockRange {
   averageBurntFeesWei: string;
   averageFeePriceWei: string;
   averageTransactionGasUsed: string;
+  averageTransactionInputDataSizeBytes: string;
+  averageTransactionInputDataCompressedSizeBytes: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
   minBatcherQueueSize?: string | null;
@@ -311,6 +319,8 @@ export class ScannerStorage {
         block_date TEXT NOT NULL,
         base_block_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
+        total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
         max_gas_in_block TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
         block_reward_wei TEXT NOT NULL DEFAULT '0',
@@ -323,6 +333,8 @@ export class ScannerStorage {
         average_fee_price_wei TEXT NOT NULL DEFAULT '0',
         average_transaction_fee_wei TEXT NOT NULL,
         average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
+        average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
         batcher_queue_size TEXT,
@@ -334,6 +346,14 @@ export class ScannerStorage {
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await this.db.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS total_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
     await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS block_reward_wei TEXT NOT NULL DEFAULT '0'`,
@@ -370,6 +390,14 @@ export class ScannerStorage {
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
     );
+    await this.db.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
     await this.addNullableTextColumn(this.qBlocks, "batcher_queue_size");
     await this.addNullableTextColumn(this.qBlocks, "batcher_intensity");
     await this.addNullableTextColumn(this.qBlocks, "batcher_lower_threshold");
@@ -405,6 +433,8 @@ export class ScannerStorage {
         value_wei TEXT NOT NULL,
         gas_limit TEXT NOT NULL,
         gas_used TEXT NOT NULL,
+        input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
         cumulative_gas_used TEXT,
         gas_price_wei TEXT,
         max_fee_per_gas_wei TEXT,
@@ -433,6 +463,14 @@ export class ScannerStorage {
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_from_address_block_idx")}
        ON ${this.qTransactions} (LOWER(from_address), block_number, position)`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactions}
+       ADD COLUMN IF NOT EXISTS input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactions}
+       ADD COLUMN IF NOT EXISTS input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
     );
     // Decoded Arkiv operation metadata per transaction. Payloads/calldata are
     // never stored — only payload_size_bytes. expires_at_blocks is BIGINT
@@ -480,6 +518,8 @@ export class ScannerStorage {
         value_wei TEXT NOT NULL,
         gas_limit TEXT NOT NULL,
         gas_used TEXT NOT NULL,
+        input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
         cumulative_gas_used TEXT,
         gas_price_wei TEXT,
         max_fee_per_gas_wei TEXT,
@@ -500,6 +540,14 @@ export class ScannerStorage {
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_hash_idx")}
        ON ${this.qTransactionRecords} (hash)`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactionRecords}
+       ADD COLUMN IF NOT EXISTS input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactionRecords}
+       ADD COLUMN IF NOT EXISTS input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
     );
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qSenderStats} (
@@ -533,6 +581,8 @@ export class ScannerStorage {
         max_base_fee_wei TEXT NOT NULL,
         average_base_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
+        total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
         total_max_gas TEXT NOT NULL,
         min_max_gas_in_block TEXT NOT NULL,
         max_max_gas_in_block TEXT NOT NULL,
@@ -543,6 +593,8 @@ export class ScannerStorage {
         average_burnt_fees_wei TEXT NOT NULL DEFAULT '0',
         average_fee_price_wei TEXT NOT NULL DEFAULT '0',
         average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
+        average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
         min_batcher_queue_size TEXT,
@@ -558,6 +610,14 @@ export class ScannerStorage {
         PRIMARY KEY (range_size, range_start)
       )
     `);
+    await this.db.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS total_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
     await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS total_block_reward_wei TEXT NOT NULL DEFAULT '0'`,
@@ -581,6 +641,14 @@ export class ScannerStorage {
     await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qBlockRanges}
+       ADD COLUMN IF NOT EXISTS average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
     );
     await this.addNullableTextColumn(this.qBlockRanges, "min_batcher_queue_size");
     await this.addNullableTextColumn(this.qBlockRanges, "max_batcher_queue_size");
@@ -789,6 +857,8 @@ export class ScannerStorage {
           block_date,
           base_block_fee_wei,
           total_gas_used,
+          total_input_data_size_bytes,
+          total_input_data_compressed_size_bytes,
           max_gas_in_block,
           transaction_count,
           block_reward_wei,
@@ -801,6 +871,8 @@ export class ScannerStorage {
           average_fee_price_wei,
           average_transaction_fee_wei,
           average_transaction_gas_used,
+          average_transaction_input_data_size_bytes,
+          average_transaction_input_data_compressed_size_bytes,
           average_priority_fee_weighted_wei,
           average_priority_fee_wei,
           batcher_queue_size,
@@ -810,11 +882,13 @@ export class ScannerStorage {
           batcher_max_block_size,
           batcher_max_tx_size,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
           base_block_fee_wei = EXCLUDED.base_block_fee_wei,
           total_gas_used = EXCLUDED.total_gas_used,
+          total_input_data_size_bytes = EXCLUDED.total_input_data_size_bytes,
+          total_input_data_compressed_size_bytes = EXCLUDED.total_input_data_compressed_size_bytes,
           max_gas_in_block = EXCLUDED.max_gas_in_block,
           transaction_count = EXCLUDED.transaction_count,
           block_reward_wei = EXCLUDED.block_reward_wei,
@@ -827,6 +901,8 @@ export class ScannerStorage {
           average_fee_price_wei = EXCLUDED.average_fee_price_wei,
           average_transaction_fee_wei = EXCLUDED.average_transaction_fee_wei,
           average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
+          average_transaction_input_data_size_bytes = EXCLUDED.average_transaction_input_data_size_bytes,
+          average_transaction_input_data_compressed_size_bytes = EXCLUDED.average_transaction_input_data_compressed_size_bytes,
           average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
           average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
           batcher_queue_size = COALESCE(EXCLUDED.batcher_queue_size, existing.batcher_queue_size),
@@ -841,6 +917,8 @@ export class ScannerStorage {
           metrics.blockDate,
           metrics.baseBlockFeeWei,
           metrics.totalGasUsed,
+          metrics.totalInputDataSizeBytes,
+          metrics.totalInputDataCompressedSizeBytes,
           metrics.maxGasInBlock,
           metrics.transactionCount,
           metrics.blockRewardWei,
@@ -853,6 +931,8 @@ export class ScannerStorage {
           metrics.averageFeePriceWei,
           metrics.averageTransactionFeeWei,
           metrics.averageTransactionGasUsed,
+          metrics.averageTransactionInputDataSizeBytes,
+          metrics.averageTransactionInputDataCompressedSizeBytes,
           metrics.averagePriorityFeeWeightedWei,
           metrics.averagePriorityFeeWei,
           metrics.batcherQueueSize ?? null,
@@ -940,7 +1020,7 @@ export class ScannerStorage {
       transaction: InspectedTransaction;
     }>,
   ): Promise<void> {
-    const columnsPerRow = 23;
+    const columnsPerRow = 25;
     const params: Array<string | number | null> = [];
     const values = rows.map((row, rowIndex) => {
       const offset = rowIndex * columnsPerRow;
@@ -960,6 +1040,8 @@ export class ScannerStorage {
         transaction.valueWei,
         transaction.gasLimit,
         transaction.gasUsed,
+        transaction.inputDataSizeBytes,
+        transaction.inputDataCompressedSizeBytes,
         transaction.cumulativeGasUsed,
         transaction.gasPriceWei,
         transaction.maxFeePerGasWei,
@@ -993,6 +1075,8 @@ export class ScannerStorage {
         value_wei,
         gas_limit,
         gas_used,
+        input_data_size_bytes,
+        input_data_compressed_size_bytes,
         cumulative_gas_used,
         gas_price_wei,
         max_fee_per_gas_wei,
@@ -1015,6 +1099,8 @@ export class ScannerStorage {
         value_wei = EXCLUDED.value_wei,
         gas_limit = EXCLUDED.gas_limit,
         gas_used = EXCLUDED.gas_used,
+        input_data_size_bytes = EXCLUDED.input_data_size_bytes,
+        input_data_compressed_size_bytes = EXCLUDED.input_data_compressed_size_bytes,
         cumulative_gas_used = EXCLUDED.cumulative_gas_used,
         gas_price_wei = EXCLUDED.gas_price_wei,
         max_fee_per_gas_wei = EXCLUDED.max_fee_per_gas_wei,
@@ -1060,7 +1146,7 @@ export class ScannerStorage {
       return;
     }
 
-    const columnsPerRow = 21;
+    const columnsPerRow = 23;
     const params: Array<string | number | null> = [];
     const values = transactions.map((transaction, rowIndex) => {
       const offset = rowIndex * columnsPerRow;
@@ -1077,6 +1163,8 @@ export class ScannerStorage {
         transaction.valueWei,
         transaction.gasLimit,
         transaction.gasUsed,
+        transaction.inputDataSizeBytes,
+        transaction.inputDataCompressedSizeBytes,
         transaction.cumulativeGasUsed,
         transaction.gasPriceWei,
         transaction.maxFeePerGasWei,
@@ -1108,6 +1196,8 @@ export class ScannerStorage {
         value_wei,
         gas_limit,
         gas_used,
+        input_data_size_bytes,
+        input_data_compressed_size_bytes,
         cumulative_gas_used,
         gas_price_wei,
         max_fee_per_gas_wei,
@@ -1303,6 +1393,8 @@ export class ScannerStorage {
         block_date,
         base_block_fee_wei,
         total_gas_used,
+        total_input_data_size_bytes,
+        total_input_data_compressed_size_bytes,
         max_gas_in_block,
         transaction_count,
         block_reward_wei,
@@ -1315,6 +1407,8 @@ export class ScannerStorage {
         average_fee_price_wei,
         average_transaction_fee_wei,
         average_transaction_gas_used,
+        average_transaction_input_data_size_bytes,
+        average_transaction_input_data_compressed_size_bytes,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         batcher_queue_size,
@@ -1334,6 +1428,8 @@ export class ScannerStorage {
       block_date: string;
       base_block_fee_wei: string;
       total_gas_used: string;
+      total_input_data_size_bytes: string;
+      total_input_data_compressed_size_bytes: string;
       max_gas_in_block: string;
       transaction_count: number;
       block_reward_wei: string;
@@ -1346,6 +1442,8 @@ export class ScannerStorage {
       average_fee_price_wei: string;
       average_transaction_fee_wei: string;
       average_transaction_gas_used: string;
+      average_transaction_input_data_size_bytes: string;
+      average_transaction_input_data_compressed_size_bytes: string;
       average_priority_fee_weighted_wei: string;
       average_priority_fee_wei: string;
       batcher_queue_size: string | null;
@@ -1361,6 +1459,8 @@ export class ScannerStorage {
       blockDate: row.block_date,
       baseBlockFeeWei: row.base_block_fee_wei,
       totalGasUsed: row.total_gas_used,
+      totalInputDataSizeBytes: row.total_input_data_size_bytes,
+      totalInputDataCompressedSizeBytes: row.total_input_data_compressed_size_bytes,
       maxGasInBlock: row.max_gas_in_block,
       transactionCount: row.transaction_count,
       blockRewardWei: row.block_reward_wei,
@@ -1373,6 +1473,8 @@ export class ScannerStorage {
       averageFeePriceWei: row.average_fee_price_wei,
       averageTransactionFeeWei: row.average_transaction_fee_wei,
       averageTransactionGasUsed: row.average_transaction_gas_used,
+      averageTransactionInputDataSizeBytes: row.average_transaction_input_data_size_bytes,
+      averageTransactionInputDataCompressedSizeBytes: row.average_transaction_input_data_compressed_size_bytes,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
       batcherQueueSize: row.batcher_queue_size,
@@ -1482,6 +1584,8 @@ export class ScannerStorage {
         value_wei,
         gas_limit,
         gas_used,
+        input_data_size_bytes,
+        input_data_compressed_size_bytes,
         cumulative_gas_used,
         gas_price_wei,
         max_fee_per_gas_wei,
@@ -1511,6 +1615,8 @@ export class ScannerStorage {
       value_wei: string;
       gas_limit: string;
       gas_used: string;
+      input_data_size_bytes: string;
+      input_data_compressed_size_bytes: string;
       cumulative_gas_used: string | null;
       gas_price_wei: string | null;
       max_fee_per_gas_wei: string | null;
@@ -1551,6 +1657,8 @@ export class ScannerStorage {
         value_wei,
         gas_limit,
         gas_used,
+        input_data_size_bytes,
+        input_data_compressed_size_bytes,
         cumulative_gas_used,
         gas_price_wei,
         max_fee_per_gas_wei,
@@ -1596,6 +1704,8 @@ export class ScannerStorage {
            value_wei,
            gas_limit,
            gas_used,
+           input_data_size_bytes,
+           input_data_compressed_size_bytes,
            cumulative_gas_used,
            gas_price_wei,
            max_fee_per_gas_wei,
@@ -1900,6 +2010,8 @@ export class ScannerStorage {
         max_base_fee_wei,
         average_base_fee_wei,
         total_gas_used,
+        total_input_data_size_bytes,
+        total_input_data_compressed_size_bytes,
         total_max_gas,
         min_max_gas_in_block,
         max_max_gas_in_block,
@@ -1910,6 +2022,8 @@ export class ScannerStorage {
         average_burnt_fees_wei,
         average_fee_price_wei,
         average_transaction_gas_used,
+        average_transaction_input_data_size_bytes,
+        average_transaction_input_data_compressed_size_bytes,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         min_batcher_queue_size,
@@ -1922,7 +2036,7 @@ export class ScannerStorage {
         average_batcher_max_tx_size,
         is_complete,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, TRUE, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, TRUE, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -1931,6 +2045,8 @@ export class ScannerStorage {
         max_base_fee_wei = EXCLUDED.max_base_fee_wei,
         average_base_fee_wei = EXCLUDED.average_base_fee_wei,
         total_gas_used = EXCLUDED.total_gas_used,
+        total_input_data_size_bytes = EXCLUDED.total_input_data_size_bytes,
+        total_input_data_compressed_size_bytes = EXCLUDED.total_input_data_compressed_size_bytes,
         total_max_gas = EXCLUDED.total_max_gas,
         min_max_gas_in_block = EXCLUDED.min_max_gas_in_block,
         max_max_gas_in_block = EXCLUDED.max_max_gas_in_block,
@@ -1941,6 +2057,8 @@ export class ScannerStorage {
         average_burnt_fees_wei = EXCLUDED.average_burnt_fees_wei,
         average_fee_price_wei = EXCLUDED.average_fee_price_wei,
         average_transaction_gas_used = EXCLUDED.average_transaction_gas_used,
+        average_transaction_input_data_size_bytes = EXCLUDED.average_transaction_input_data_size_bytes,
+        average_transaction_input_data_compressed_size_bytes = EXCLUDED.average_transaction_input_data_compressed_size_bytes,
         average_priority_fee_weighted_wei = EXCLUDED.average_priority_fee_weighted_wei,
         average_priority_fee_wei = EXCLUDED.average_priority_fee_wei,
         min_batcher_queue_size = EXCLUDED.min_batcher_queue_size,
@@ -1963,6 +2081,8 @@ export class ScannerStorage {
         metrics.maxBaseFeeWei,
         metrics.averageBaseFeeWei,
         metrics.totalGasUsed,
+        metrics.totalInputDataSizeBytes,
+        metrics.totalInputDataCompressedSizeBytes,
         metrics.totalMaxGas,
         metrics.minMaxGasInBlock,
         metrics.maxMaxGasInBlock,
@@ -1973,6 +2093,8 @@ export class ScannerStorage {
         metrics.averageBurntFeesWei,
         metrics.averageFeePriceWei,
         metrics.averageTransactionGasUsed,
+        metrics.averageTransactionInputDataSizeBytes,
+        metrics.averageTransactionInputDataCompressedSizeBytes,
         metrics.averagePriorityFeeWeightedWei,
         metrics.averagePriorityFeeWei,
         metrics.minBatcherQueueSize ?? null,
@@ -2030,6 +2152,8 @@ export class ScannerStorage {
         max_base_fee_wei,
         average_base_fee_wei,
         total_gas_used,
+        total_input_data_size_bytes,
+        total_input_data_compressed_size_bytes,
         total_max_gas,
         min_max_gas_in_block,
         max_max_gas_in_block,
@@ -2040,6 +2164,8 @@ export class ScannerStorage {
         average_burnt_fees_wei,
         average_fee_price_wei,
         average_transaction_gas_used,
+        average_transaction_input_data_size_bytes,
+        average_transaction_input_data_compressed_size_bytes,
         average_priority_fee_weighted_wei,
         average_priority_fee_wei,
         min_batcher_queue_size,
@@ -2066,6 +2192,8 @@ export class ScannerStorage {
       max_base_fee_wei: string;
       average_base_fee_wei: string;
       total_gas_used: string;
+      total_input_data_size_bytes: string;
+      total_input_data_compressed_size_bytes: string;
       total_max_gas: string;
       min_max_gas_in_block: string;
       max_max_gas_in_block: string;
@@ -2076,6 +2204,8 @@ export class ScannerStorage {
       average_burnt_fees_wei: string;
       average_fee_price_wei: string;
       average_transaction_gas_used: string;
+      average_transaction_input_data_size_bytes: string;
+      average_transaction_input_data_compressed_size_bytes: string;
       average_priority_fee_weighted_wei: string;
       average_priority_fee_wei: string;
       min_batcher_queue_size: string | null;
@@ -2098,6 +2228,8 @@ export class ScannerStorage {
       maxBaseFeeWei: row.max_base_fee_wei,
       averageBaseFeeWei: row.average_base_fee_wei,
       totalGasUsed: row.total_gas_used,
+      totalInputDataSizeBytes: row.total_input_data_size_bytes,
+      totalInputDataCompressedSizeBytes: row.total_input_data_compressed_size_bytes,
       totalMaxGas: row.total_max_gas,
       minMaxGasInBlock: row.min_max_gas_in_block,
       maxMaxGasInBlock: row.max_max_gas_in_block,
@@ -2108,6 +2240,8 @@ export class ScannerStorage {
       averageBurntFeesWei: row.average_burnt_fees_wei,
       averageFeePriceWei: row.average_fee_price_wei,
       averageTransactionGasUsed: row.average_transaction_gas_used,
+      averageTransactionInputDataSizeBytes: row.average_transaction_input_data_size_bytes,
+      averageTransactionInputDataCompressedSizeBytes: row.average_transaction_input_data_compressed_size_bytes,
       averagePriorityFeeWeightedWei: row.average_priority_fee_weighted_wei,
       averagePriorityFeeWei: row.average_priority_fee_wei,
       minBatcherQueueSize: row.min_batcher_queue_size,
@@ -2457,6 +2591,8 @@ interface TransactionRow {
   value_wei: string;
   gas_limit: string;
   gas_used: string;
+  input_data_size_bytes: string;
+  input_data_compressed_size_bytes: string;
   cumulative_gas_used: string | null;
   gas_price_wei: string | null;
   max_fee_per_gas_wei: string | null;
@@ -2590,6 +2726,8 @@ function mapTransactionRow(row: TransactionRow): StoredTransaction {
     valueWei: row.value_wei,
     gasLimit: row.gas_limit,
     gasUsed: row.gas_used,
+    inputDataSizeBytes: row.input_data_size_bytes,
+    inputDataCompressedSizeBytes: row.input_data_compressed_size_bytes,
     cumulativeGasUsed: row.cumulative_gas_used,
     gasPriceWei: row.gas_price_wei,
     maxFeePerGasWei: row.max_fee_per_gas_wei,
@@ -2613,6 +2751,8 @@ function stripStoredTransactionContext(row: StoredTransaction): InspectedTransac
     valueWei: row.valueWei,
     gasLimit: row.gasLimit,
     gasUsed: row.gasUsed,
+    inputDataSizeBytes: row.inputDataSizeBytes,
+    inputDataCompressedSizeBytes: row.inputDataCompressedSizeBytes,
     cumulativeGasUsed: row.cumulativeGasUsed,
     gasPriceWei: row.gasPriceWei,
     maxFeePerGasWei: row.maxFeePerGasWei,

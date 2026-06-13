@@ -12,8 +12,8 @@ describe("computeBlockMetrics", () => {
       gasUsed: "0xa",
       gasLimit: "0x1c9c380",
       transactions: [
-        { hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
-        { hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+        { hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", input: "0x123456" },
+        { hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", input: "0x" },
       ],
     };
     const receipts: RpcReceipt[] = [
@@ -34,6 +34,8 @@ describe("computeBlockMetrics", () => {
       blockNumber: 123n,
       baseBlockFeeWei: "100",
       totalGasUsed: "10",
+      totalInputDataSizeBytes: "3",
+      totalInputDataCompressedSizeBytes: "21",
       maxGasInBlock: "30000000",
       transactionCount: 2,
       blockRewardWei: "280",
@@ -46,6 +48,8 @@ describe("computeBlockMetrics", () => {
       averageFeePriceWei: "155",
       averageTransactionFeeWei: "640",
       averageTransactionGasUsed: "5",
+      averageTransactionInputDataSizeBytes: "1",
+      averageTransactionInputDataCompressedSizeBytes: "10",
       averagePriorityFeeWeightedWei: "28",
       averagePriorityFeeWei: "55",
     });

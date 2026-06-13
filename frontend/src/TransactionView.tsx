@@ -194,6 +194,8 @@ function TransactionDetail({
           <dl className="tx-detail-grid">
             <Row label="Gas limit">{fmtInteger(transaction.gasLimit)}</Row>
             <Row label="Gas used (of limit)">{fmtRatio(transaction.gasUsed, transaction.gasLimit)}</Row>
+            <Row label="Input data">{fmtBytes(transaction.inputDataSizeBytes)}</Row>
+            <Row label="Input data zstd">{fmtBytes(transaction.inputDataCompressedSizeBytes)}</Row>
             <Row label="Cumulative gas">{fmtInteger(transaction.cumulativeGasUsed)}</Row>
           </dl>
         </section>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlockInspect, type BlockInspectResponse, type InspectedTransaction } from "./api";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
 import { TransactionHashLink } from "./TransactionView";
@@ -129,12 +129,19 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
             <Metric label="Transactions" value={fmtInteger(block.transactionCount)} />
             <Metric label="Base fee" value={`${fmtGwei(block.baseBlockFeeWei)} gwei`} />
             <Metric label="Gas used / limit" value={fmtRatio(block.totalGasUsed, block.maxGasInBlock)} />
+            <Metric label="Input data" value={fmtBytes(block.totalInputDataSizeBytes)} />
+            <Metric label="Input data zstd" value={fmtBytes(block.totalInputDataCompressedSizeBytes)} />
             <Metric label="Block reward" value={`${fmtEth(block.blockRewardWei)} ${tokenSymbol}`} />
             <Metric label="Burnt fees" value={`${fmtEth(block.burntFeesWei)} ${tokenSymbol}`} />
             <Metric label="Total tx fees" value={`${fmtEth(block.totalTransactionFeeWei)} ${tokenSymbol}`} />
             <Metric label="Avg fee price" value={`${fmtGwei(block.averageFeePriceWei)} gwei`} />
             <Metric label="Avg tx fee" value={`${fmtEth(block.averageTransactionFeeWei)} ${tokenSymbol}`} />
             <Metric label="Avg tx gas" value={fmtInteger(block.averageTransactionGasUsed)} />
+            <Metric label="Avg tx input data" value={fmtBytes(block.averageTransactionInputDataSizeBytes)} />
+            <Metric
+              label="Avg tx input zstd"
+              value={fmtBytes(block.averageTransactionInputDataCompressedSizeBytes)}
+            />
             <Metric label="Avg priority fee" value={`${fmtGwei(block.averagePriorityFeeWei)} gwei`} />
             <Metric
               label="Gas-weighted priority"
@@ -253,6 +260,20 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
       className: "num",
       width: "9rem",
       render: (row) => fmtInteger(row.gasUsed),
+    },
+    {
+      key: "inputDataSizeBytes",
+      label: "Input data",
+      className: "num",
+      width: "9rem",
+      render: (row) => fmtBytes(row.inputDataSizeBytes),
+    },
+    {
+      key: "inputDataCompressedSizeBytes",
+      label: "Input zstd",
+      className: "num",
+      width: "9rem",
+      render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
     },
     {
       key: "effectiveGasPriceWei",

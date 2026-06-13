@@ -39,6 +39,8 @@ export interface BlockMetrics extends BatcherMetrics {
   blockNumber: bigint;
   baseBlockFeeWei: string;
   totalGasUsed: string;
+  totalInputDataSizeBytes: string;
+  totalInputDataCompressedSizeBytes: string;
   maxGasInBlock: string;
   transactionCount: number;
   blockRewardWei: string;
@@ -51,6 +53,8 @@ export interface BlockMetrics extends BatcherMetrics {
   averageFeePriceWei: string;
   averageTransactionFeeWei: string;
   averageTransactionGasUsed: string;
+  averageTransactionInputDataSizeBytes: string;
+  averageTransactionInputDataCompressedSizeBytes: string;
   averagePriorityFeeWeightedWei: string;
   averagePriorityFeeWei: string;
 }

@@ -13,6 +13,8 @@ export interface InspectedTransaction {
   valueWei: string;
   gasLimit: string;
   gasUsed: string;
+  inputDataSizeBytes: string;
+  inputDataCompressedSizeBytes: string;
   cumulativeGasUsed: string | null;
   gasPriceWei: string | null;
   maxFeePerGasWei: string | null;
@@ -30,6 +32,8 @@ export interface InspectedBlock extends BatcherMetrics {
   blockDate: string;
   baseBlockFeeWei: string;
   totalGasUsed: string;
+  totalInputDataSizeBytes?: string;
+  totalInputDataCompressedSizeBytes?: string;
   maxGasInBlock: string;
   transactionCount: number;
   blockRewardWei?: string;
@@ -38,6 +42,8 @@ export interface InspectedBlock extends BatcherMetrics {
   averageFeePriceWei?: string;
   averageTransactionFeeWei?: string;
   averageTransactionGasUsed?: string;
+  averageTransactionInputDataSizeBytes?: string;
+  averageTransactionInputDataCompressedSizeBytes?: string;
   averagePriorityFeeWeightedWei?: string;
   averagePriorityFeeWei?: string;
   transactions: InspectedTransaction[];
@@ -107,6 +113,8 @@ function inspectTransaction(
     valueWei: hexToBigInt(transaction.value).toString(),
     gasLimit: hexToBigInt(transaction.gas).toString(),
     gasUsed: gasUsed.toString(),
+    inputDataSizeBytes: hexDataByteLength(transaction.input).toString(),
+    inputDataCompressedSizeBytes: compressedHexDataByteLength(transaction.input).toString(),
     cumulativeGasUsed: hexToDecimalString(receipt.cumulativeGasUsed),
     gasPriceWei: hexToDecimalString(transaction.gasPrice),
     maxFeePerGasWei: hexToDecimalString(transaction.maxFeePerGas),
@@ -122,4 +130,25 @@ function inspectTransaction(
 function hexToDecimalString(value: Hex | undefined | null): string | null {
   if (value === undefined || value === null) return null;
   return hexToBigInt(value).toString();
+}
+
+export function hexDataByteLength(value: Hex | undefined | null): number {
+  return hexDataToBytes(value).byteLength;
+}
+
+export function compressedHexDataByteLength(value: Hex | undefined | null): number {
+  return Bun.zstdCompressSync(hexDataToBytes(value)).byteLength;
+}
+
+function hexDataToBytes(value: Hex | undefined | null): Uint8Array {
+  if (value === undefined || value === null || value === "0x") return new Uint8Array();
+  const hex = value.slice(2);
+  if (hex.length % 2 !== 0) {
+    throw new Error("Hex input data must contain a whole number of bytes");
+  }
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
 }
