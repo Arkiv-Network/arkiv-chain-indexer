@@ -102,34 +102,61 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
         />
         <h2>Block info</h2>
       </div>
-      <form onSubmit={onSubmit} className="block-inspector-form">
-        <label>
-          block
-          <input
-            type="text"
-            inputMode="numeric"
-            value={blockNumber}
-            onChange={(event) => setBlockNumber(event.target.value)}
-          />
-        </label>
-        <button type="submit">Load</button>
-      </form>
+      <div className="block-lookup">
+        <form onSubmit={onSubmit} className="block-lookup-form">
+          <div className="block-lookup-field">
+            <label htmlFor="block-number-input">Block number</label>
+            <div className="block-lookup-input">
+              <span className="block-lookup-hash" aria-hidden="true">
+                #
+              </span>
+              <input
+                id="block-number-input"
+                type="text"
+                inputMode="numeric"
+                placeholder="e.g. 29668"
+                value={blockNumber}
+                onChange={(event) => setBlockNumber(event.target.value)}
+              />
+            </div>
+          </div>
+          <button type="submit" className="block-lookup-load" disabled={loading}>
+            {loading ? "Loading…" : "Load"}
+          </button>
+        </form>
 
-      <p className={`summary${error ? " error" : ""}`}>
-        {loading
-          ? "Loading..."
-          : error
-            ? `Failed to load block: ${error}`
-            : block
-              ? `Block ${block.blockNumberDecimal} with ${block.transactionCount} transactions`
-              : "Enter a block number to inspect stored block details."}
-      </p>
+        <div className="block-lookup-meta">
+          <p className={`block-lookup-status${error ? " error" : ""}`}>
+            {loading ? (
+              "Loading block…"
+            ) : error ? (
+              `Failed to load block: ${error}`
+            ) : block ? (
+              <>
+                Block <strong>{block.blockNumberDecimal}</strong>
+                <span className="block-lookup-txcount">{block.transactionCount} txns</span>
+              </>
+            ) : (
+              "Enter a block number to inspect stored block details."
+            )}
+          </p>
 
-      <div className="permalink-row">
-        <button type="button" className="secondary" onClick={copyPermalink} disabled={!appliedBlockNumber.trim()}>
-          Copy link
-        </button>
-        {copyStatus ? <span>{copyStatus}</span> : null}
+          <div className="block-lookup-actions">
+            <button
+              type="button"
+              className="block-lookup-copy"
+              onClick={copyPermalink}
+              disabled={!appliedBlockNumber.trim()}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Copy link
+            </button>
+            {copyStatus ? <span className="block-lookup-copied">{copyStatus}</span> : null}
+          </div>
+        </div>
       </div>
 
       {block ? (

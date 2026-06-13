@@ -558,6 +558,17 @@ main.chart-fullscreen-main {
   letter-spacing: -0.08em;
 }
 
+.page-breadcrumb-icon {
+  display: inline-flex;
+  align-items: center;
+  /* nudge the glyph to sit on the cap-height baseline of the mono label */
+  margin-top: -0.1em;
+}
+
+.page-breadcrumb-icon .svg-icon {
+  display: block;
+}
+
 .page-breadcrumb-item a {
   color: var(--ink-muted);
   text-decoration: none;
@@ -1747,6 +1758,11 @@ button.secondary {
 
 .filters-clear {
   font-size: 0.8rem;
+  /* Override .link-button's flex-start so it centers with the toggle/row count */
+  align-self: center;
+  /* Nudge down to visually baseline-match the mono "N rows" label beside it */
+  position: relative;
+  top: 3px;
 }
 
 /* Grouped filter form (flex so field groups size to their contents) */
@@ -3188,9 +3204,185 @@ button.secondary.guzzler-refresh {
   text-align: center;
 }
 
-.block-inspector-form {
-  grid-template-columns: minmax(180px, 320px) auto;
-  justify-content: start;
+/* Block lookup panel — search field + status + copy link, unified */
+.block-lookup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem 1.5rem;
+  margin: 0 0 1.1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: color-mix(in oklab, var(--stone) 42%, transparent);
+}
+
+.block-lookup-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.block-lookup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.block-lookup-field label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.block-lookup-input {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--sand);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.block-lookup-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.block-lookup-hash {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.block-lookup-input input {
+  width: 11rem;
+  max-width: 100%;
+  padding: 0.55rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.block-lookup-input input::placeholder {
+  color: color-mix(in oklab, var(--ink-muted) 70%, transparent);
+}
+
+.block-lookup-load {
+  padding: 0.62rem 1.4rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.block-lookup-load:hover:not(:disabled) {
+  background: var(--ark-blue-2);
+  border-color: var(--ark-blue-2);
+}
+
+.block-lookup-load:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.block-lookup-meta {
+  display: flex;
+  flex: 1 1 16rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  padding-bottom: 0.15rem;
+}
+
+.block-lookup-status {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  color: var(--ink-muted);
+  font-size: 0.95rem;
+}
+
+.block-lookup-status strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.block-lookup-status.error {
+  color: var(--op-red);
+  font-weight: 600;
+}
+
+.block-lookup-txcount {
+  align-self: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.block-lookup-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.block-lookup-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.block-lookup-copy:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.block-lookup-copy:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.block-lookup-copy svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.block-lookup-copied {
+  color: var(--ok);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
 }
 
 .block-summary {

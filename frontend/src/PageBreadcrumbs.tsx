@@ -1,9 +1,10 @@
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { buildRouteHref, shouldHandleClientNavigation, type View, writePermalink } from "./permalinks";
 
 export interface PageBreadcrumbItem {
   view: View;
   label: string;
+  icon?: ReactNode;
 }
 
 export function PageBreadcrumbs({
@@ -29,6 +30,11 @@ export function PageBreadcrumbs({
         const last = index === items.length - 1;
         return (
           <span className="page-breadcrumb-item" key={`${item.view}:${item.label}`}>
+            {item.icon ? (
+              <span className="page-breadcrumb-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+            ) : null}
             {last ? (
               <span aria-current="page">{item.label}</span>
             ) : (

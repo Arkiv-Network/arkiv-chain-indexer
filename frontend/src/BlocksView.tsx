@@ -10,6 +10,7 @@ import {
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
+import { BlockList } from "./icons";
 
 interface BlocksViewProps {
   locationSearch: string;
@@ -328,11 +329,10 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
         <PageBreadcrumbs
           items={[
             { view: "home", label: "Home" },
-            { view: "blocks", label: "Block list" },
+            { view: "blocks", label: "Block list", icon: <BlockList size={16} /> },
           ]}
           onLocationChange={onLocationChange}
         />
-        <h2>Latest blocks</h2>
       </div>
       <div className={`filters-panel blocks-filters-panel${filtersOpen ? " open" : ""}`}>
         <div className="filters-panel-head">
