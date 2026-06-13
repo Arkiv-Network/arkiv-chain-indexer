@@ -107,7 +107,7 @@ function blockColumns(
     },
     {
       key: "inputDataSizeBytes",
-      label: "Input data (raw / zstd)",
+      label: "Input (raw / zstd)",
       className: "num",
       width: "12rem",
       render: (row) => (
