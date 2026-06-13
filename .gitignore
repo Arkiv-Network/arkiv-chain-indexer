@@ -1,5 +1,6 @@
 node_modules/
 arkiv-sdk-js/
+experiments/
 .env
 .env.local
 .env.*.local

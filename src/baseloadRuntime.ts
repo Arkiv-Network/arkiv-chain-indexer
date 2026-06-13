@@ -1,5 +1,5 @@
 import { createWalletClient, http, type WalletArkivClient } from "@arkiv-network/sdk";
-import { braga } from "@arkiv-network/sdk/chains";
+import { defineChain } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 import {
   BASELOAD_DERIVATION_PATH_PREFIX,
@@ -70,19 +70,13 @@ export interface BaseloadState {
 }
 
 interface BaseloadRpcClient {
+  getChainId: () => Promise<number>;
   getBlockNumber: () => Promise<number>;
   getLatestNonce: (address: string) => Promise<number>;
   waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<unknown>;
 }
 
 const BALANCE_POLL_INTERVAL_MS = 10_000;
-const ARKIV_CONTRACT_ADDRESS = "0x00000000000000000000000000000061726b6976";
-const ARKIV_ENTITY_CREATED_TOPICS = new Set([
-  // ArkivEntityCreated(uint256 indexed entityKey, address indexed ownerAddress, uint256 expirationBlock, uint256 cost)
-  "0x73dc52f9255c70375a8835a75fca19be3d9f6940536cccf5a7bc414368b389fa",
-  // ArkivEntityCreated(bytes32 indexed entityKey, address indexed ownerAddress, uint256 expirationBlock, uint256 cost)
-  "0x5abeb37cae25ff8919c8348d9eebadaccd3166c8ac55d8dfa7afc70f3cce7d19",
-]);
 
 export class BaseloadRuntime {
   private config: BaseloadConfig = EMPTY_BASELOAD_CONFIG;
@@ -316,10 +310,12 @@ class BaseloadWorkerTask {
 
           const clientKey = `${this.runtimeConfig.rpcUrl}:${this.runtimeConfig.mnemonic}:${worker.walletNumber}`;
           if (cachedClients === null || cachedClients.key !== clientKey) {
+            const rpc = createRpcClient(this.runtimeConfig.rpcUrl);
+            const chainId = await rpc.getChainId();
             cachedClients = {
               key: clientKey,
-              arkiv: createArkivClient(worker, this.runtimeConfig),
-              rpc: createRpcClient(this.runtimeConfig.rpcUrl),
+              arkiv: createArkivClient(worker, this.runtimeConfig, chainId),
+              rpc,
             };
           }
           const clients = cachedClients;
@@ -430,12 +426,11 @@ class BaseloadWorkerTask {
                 ...statusCounts(),
               });
               const result = await clients.arkiv.createEntity(input, await sendTxParams());
-              const receipt = await clients.rpc.waitForTransactionReceipt(
+              await clients.rpc.waitForTransactionReceipt(
                 result.txHash,
                 this.abortController.signal,
               );
-              const entityKey = readBaseloadCreatedEntityKeyFromReceipt(receipt, result.txHash);
-              assertSdkEntityKeyMatchesReceipt(result.entityKey, entityKey, result.txHash);
+              const entityKey = readBaseloadCreatedEntityKeyFromSdkResult(result.entityKey, result.txHash);
               counters.createdCount += 1;
               if (worker.behavior === "create-update" || worker.behavior === "create-update-delete") {
                 pool.push({
@@ -462,15 +457,14 @@ class BaseloadWorkerTask {
                 createBaseloadEntityInput(worker),
                 await sendTxParams(),
               );
-              const createReceipt = await clients.rpc.waitForTransactionReceipt(
+              await clients.rpc.waitForTransactionReceipt(
                 created.txHash,
                 this.abortController.signal,
               );
-              const createdEntityKey = readBaseloadCreatedEntityKeyFromReceipt(
-                createReceipt,
+              const createdEntityKey = readBaseloadCreatedEntityKeyFromSdkResult(
+                created.entityKey,
                 created.txHash,
               );
-              assertSdkEntityKeyMatchesReceipt(created.entityKey, createdEntityKey, created.txHash);
               counters.createdCount += 1;
               const newOwner = randomOwnerAddress();
               this.postStatus("running", {
@@ -586,6 +580,7 @@ class BaseloadWorkerTask {
 function createArkivClient(
   worker: BaseloadWorkerConfig,
   runtimeConfig: BaseloadRuntimeConfig,
+  chainId: number,
 ): WalletArkivClient {
   if (!runtimeConfig.rpcUrl) {
     throw new Error("BASELOAD_RPC_NODE is required");
@@ -595,8 +590,22 @@ function createArkivClient(
     path: `${BASELOAD_DERIVATION_PATH_PREFIX}/${worker.walletNumber}`,
   });
 
+  const chain = defineChain({
+    id: chainId,
+    name: `Arkiv RPC ${chainId}`,
+    network: `arkiv-rpc-${chainId}`,
+    nativeCurrency: {
+      decimals: 18,
+      name: "Ether",
+      symbol: "ETH",
+    },
+    rpcUrls: {
+      default: { http: [runtimeConfig.rpcUrl] },
+    },
+  });
+
   return createWalletClient({
-    chain: braga,
+    chain,
     transport: http(runtimeConfig.rpcUrl),
     account,
   });
@@ -604,6 +613,17 @@ function createArkivClient(
 
 function createRpcClient(rpcUrl: string): BaseloadRpcClient {
   return {
+    getChainId: async () => {
+      const result = await callRpc(rpcUrl, "eth_chainId", []);
+      if (typeof result !== "string") {
+        throw new Error("RPC eth_chainId returned a non-string result");
+      }
+      const chainId = BigInt(result);
+      if (chainId < 0n || chainId > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`RPC eth_chainId returned out-of-range chain id ${chainId.toString()}`);
+      }
+      return Number(chainId);
+    },
     getBlockNumber: async () => {
       const result = await callRpc(rpcUrl, "eth_blockNumber", []);
       if (typeof result !== "string") {
@@ -633,70 +653,23 @@ function createRpcClient(rpcUrl: string): BaseloadRpcClient {
   };
 }
 
-export function readBaseloadCreatedEntityKeyFromReceipt(
-  receipt: unknown,
+export function readBaseloadCreatedEntityKeyFromSdkResult(
+  sdkEntityKey: unknown,
   txHash: string,
 ): HexString {
-  if (!isRecord(receipt)) {
-    throw new Error(`Unable to read created entity key from transaction ${txHash}: receipt is not an object`);
-  }
-
-  const logs = receipt.logs;
-  if (!Array.isArray(logs)) {
-    throw new Error(`Unable to read created entity key from transaction ${txHash}: receipt logs are missing`);
-  }
-
-  const createLogs = logs.filter(isArkivEntityCreatedLog);
-  if (createLogs.length === 0) {
+  if (!isBytes32Hex(sdkEntityKey)) {
     throw new Error(
-      `Unable to read created entity key from transaction ${txHash}: no ArkivEntityCreated event found in receipt`,
-    );
-  }
-  if (createLogs.length > 1) {
-    throw new Error(
-      `Unable to read created entity key from transaction ${txHash}: receipt has ${createLogs.length} ArkivEntityCreated events`,
-    );
-  }
-
-  const topics = createLogs[0]?.topics;
-  const entityKey = topics?.[1];
-  if (!isBytes32Hex(entityKey)) {
-    throw new Error(
-      `Unable to read created entity key from transaction ${txHash}: ArkivEntityCreated topic[1] is missing or invalid`,
-    );
-  }
-
-  return entityKey;
-}
-
-function assertSdkEntityKeyMatchesReceipt(
-  sdkEntityKey: unknown,
-  receiptEntityKey: HexString,
-  txHash: string,
-) {
-  if (typeof sdkEntityKey !== "string" || sdkEntityKey.toLowerCase() !== receiptEntityKey.toLowerCase()) {
-    throw new Error(
-      `Unable to trust created entity key from transaction ${txHash}: SDK returned ${String(
+      `Unable to trust created entity key from transaction ${txHash}: SDK returned invalid entity key ${String(
         sdkEntityKey,
-      )}, but receipt event contains ${receiptEntityKey}`,
+      )}`,
     );
   }
-}
 
-function isArkivEntityCreatedLog(value: unknown): value is { topics: string[] } {
-  if (!isRecord(value)) return false;
-  if (typeof value.address !== "string") return false;
-  if (value.address.toLowerCase() !== ARKIV_CONTRACT_ADDRESS) return false;
-  if (!Array.isArray(value.topics)) return false;
-  return typeof value.topics[0] === "string" && ARKIV_ENTITY_CREATED_TOPICS.has(value.topics[0].toLowerCase());
+  return sdkEntityKey;
 }
 
 function isBytes32Hex(value: unknown): value is HexString {
   return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }
 
 async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
