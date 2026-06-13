@@ -522,6 +522,59 @@ main.chart-fullscreen-main {
   max-width: none;
 }
 
+.page-heading {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+}
+
+.page-heading h2 {
+  margin: 0;
+}
+
+.page-breadcrumbs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.page-breadcrumb-item {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.page-breadcrumb-item + .page-breadcrumb-item::before {
+  content: ">>";
+  color: var(--line-strong);
+  letter-spacing: -0.08em;
+}
+
+.page-breadcrumb-item a {
+  color: var(--ink-muted);
+  text-decoration: none;
+  text-underline-offset: 0.2em;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.page-breadcrumb-item a:hover,
+.page-breadcrumb-item a:focus-visible {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.page-breadcrumb-item [aria-current="page"] {
+  color: var(--ink);
+}
+
 form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

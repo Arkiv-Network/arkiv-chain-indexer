@@ -9,6 +9,7 @@ import {
   writePermalink,
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
+import { PageBreadcrumbs } from "./PageBreadcrumbs";
 
 interface BlocksViewProps {
   locationSearch: string;
@@ -323,7 +324,16 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
 
   return (
     <section className="view blocks-view">
-      <h2>Latest blocks</h2>
+      <div className="page-heading">
+        <PageBreadcrumbs
+          items={[
+            { view: "home", label: "Home" },
+            { view: "blocks", label: "Block list" },
+          ]}
+          onLocationChange={onLocationChange}
+        />
+        <h2>Latest blocks</h2>
+      </div>
       <div className={`filters-panel blocks-filters-panel${filtersOpen ? " open" : ""}`}>
         <div className="filters-panel-head">
           <button

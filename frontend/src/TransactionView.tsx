@@ -3,6 +3,7 @@ import { fetchTransactionByHash, type ArkivOperation, type StoredTransaction } f
 import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { transactionDetailHref, writeTransactionPermalink } from "./permalinks";
 import { transactionExplorerHref } from "./transactionLinks";
 
@@ -83,7 +84,17 @@ export function TransactionView({
 
   return (
     <section className="view transaction-view">
-      <h2>Transaction</h2>
+      <div className="page-heading">
+        <PageBreadcrumbs
+          items={[
+            { view: "home", label: "Home" },
+            { view: "blocks", label: "Block list" },
+            { view: "transaction", label: "Transaction details" },
+          ]}
+          onLocationChange={onLocationChange}
+        />
+        <h2>Transaction</h2>
+      </div>
 
       <form onSubmit={onSubmit} className="tx-lookup-form">
         <input

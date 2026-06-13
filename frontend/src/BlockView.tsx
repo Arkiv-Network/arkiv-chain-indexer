@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlockInspect, type BlockInspectResponse, type InspectedTransaction } from "./api";
 import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
 import { TransactionHashLink } from "./TransactionView";
@@ -90,7 +91,17 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
 
   return (
     <section className="view block-view">
-      <h2>Block info</h2>
+      <div className="page-heading">
+        <PageBreadcrumbs
+          items={[
+            { view: "home", label: "Home" },
+            { view: "blocks", label: "Block list" },
+            { view: "block", label: "Block details" },
+          ]}
+          onLocationChange={onLocationChange}
+        />
+        <h2>Block info</h2>
+      </div>
       <form onSubmit={onSubmit} className="block-inspector-form">
         <label>
           block
