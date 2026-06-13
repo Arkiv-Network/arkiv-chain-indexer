@@ -3281,6 +3281,18 @@ th:not(.num) .sort-header {
   line-height: 1.25;
 }
 
+.block-size-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  line-height: 1.25;
+}
+
+.block-size-cell span:last-child {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
 .base-fee-diff {
   font-size: 0.74rem;
   font-family: var(--font-mono);

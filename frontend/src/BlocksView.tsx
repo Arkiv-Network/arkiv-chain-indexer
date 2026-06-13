@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
-import { fmtDate, fmtEth, fmtGwei } from "./format";
+import { fmtBytes, fmtDate, fmtEth, fmtGwei } from "./format";
 import { BlockNumberLink } from "./blockLinks";
 import {
   buildPermalinkHref,
@@ -104,6 +104,20 @@ function blockColumns(
       render: (row) => fmtGasK(row.averageTransactionGasUsed),
     },
     {
+      key: "inputDataSizeBytes",
+      label: "Input data",
+      className: "num",
+      width: "12rem",
+      render: (row) => (
+        <div className="block-size-cell">
+          <span>
+            {fmtBytes(row.totalInputDataCompressedSizeBytes)} / {fmtBytes(row.totalInputDataSizeBytes)}
+          </span>
+          <span>{fmtCompressionRatio(row.totalInputDataCompressedSizeBytes, row.totalInputDataSizeBytes)}</span>
+        </div>
+      ),
+    },
+    {
       key: "gasUsed",
       label: "Gas used / limit",
       className: "num",
@@ -174,6 +188,19 @@ function fmtGasRatioK(usedStr: string | null | undefined, limitStr: string | nul
     return `${fmtGasK(used.toString())} / ${fmtGasK(limit.toString())} (${pct.toFixed(2)}%)`;
   } catch {
     return `${fmtGasK(usedStr)} / ${fmtGasK(limitStr)}`;
+  }
+}
+
+function fmtCompressionRatio(compressedStr: string | null | undefined, rawStr: string | null | undefined): string {
+  if (!compressedStr || !rawStr) return "ratio —";
+  try {
+    const compressed = BigInt(compressedStr);
+    const raw = BigInt(rawStr);
+    if (raw === 0n) return compressed === 0n ? "ratio 100%" : "ratio —";
+    const pct = Number((compressed * 10_000n) / raw) / 100;
+    return `ratio ${pct.toFixed(2)}%`;
+  } catch {
+    return "ratio —";
   }
 }
 
