@@ -2147,7 +2147,24 @@ button.secondary {
 }
 
 .record-table {
-  min-width: 1100px;
+  /* size to the colgroup widths instead of stretching to fill the container,
+     so the per-column widths actually hold (the table left-aligns and scrolls
+     on narrow screens via .table-wrap). */
+  width: auto;
+  min-width: 0;
+}
+
+/* Denser rows, and clip every cell to its column so the tx hash / addresses
+   ellipsis instead of bleeding across columns. */
+.record-table th,
+.record-table td {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.record-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table-wrap {

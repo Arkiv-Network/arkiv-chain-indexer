@@ -111,6 +111,17 @@ function RecordCategoryTable({
       </div>
       <div className="table-wrap">
         <table className="data-table record-table">
+          <colgroup>
+            <col style={{ width: "3rem" }} />
+            <col style={{ width: "8rem" }} />
+            <col style={{ width: "4rem" }} />
+            <col style={{ width: "11rem" }} />
+            <col style={{ width: "10.5rem" }} />
+            <col style={{ width: "9rem" }} />
+            <col style={{ width: "5rem" }} />
+            <col style={{ width: "5.5rem" }} />
+            <col style={{ width: "7rem" }} />
+          </colgroup>
           <thead>
             <tr>
               <th scope="col" className="num">Rank</th>
@@ -119,7 +130,6 @@ function RecordCategoryTable({
               <th scope="col">Date</th>
               <th scope="col">Hash</th>
               <th scope="col">From</th>
-              <th scope="col">To / contract</th>
               <th scope="col" className="num">Gas used</th>
               <th scope="col" className="num">Effective fee</th>
               <th scope="col" className="num">Tx fee</th>
@@ -128,7 +138,7 @@ function RecordCategoryTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10}>No records stored yet.</td>
+                <td colSpan={9}>No records stored yet.</td>
               </tr>
             ) : (
               rows.map((row) => (
@@ -147,9 +157,6 @@ function RecordCategoryTable({
                   </td>
                   <td data-label="From">
                     <AddressText address={row.from} />
-                  </td>
-                  <td data-label="To / contract">
-                    <AddressText address={row.to ?? row.contractAddress} />
                   </td>
                   <td className="num" data-label="Gas used">{fmtInteger(row.gasUsed)}</td>
                   <td className="num" data-label="Effective fee">{fmtGwei(row.effectiveGasPriceWei)}</td>
