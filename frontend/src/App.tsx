@@ -549,6 +549,7 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             settings={pageSettings}
+            adminModeActive={adminModeIsActive}
           />
         ) : activeView === "blocks" ? (
           <BlocksView

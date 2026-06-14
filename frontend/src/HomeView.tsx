@@ -37,6 +37,7 @@ interface HomeViewProps {
   onLocationChange: () => void;
   settings: PageSettings;
   timeZone: string;
+  adminModeActive: boolean;
 }
 
 const MINUTE_MS = 60_000;
@@ -75,7 +76,7 @@ const EMPTY_HOME_DEBUG_STATS: HomeDebugStats = {
   },
 };
 
-export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps) {
+export function HomeView({ onLocationChange, settings, timeZone, adminModeActive }: HomeViewProps) {
   const [blocksData, setBlocksData] = useState<BlocksResponse | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const [blocksLoading, setBlocksLoading] = useState(true);
@@ -478,7 +479,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
         />
       </div>
 
-      <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} />
+      {adminModeActive ? <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} /> : null}
     </section>
   );
 }
