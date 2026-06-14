@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { fetchTransactionByHash, type ArkivOperation, type StoredTransaction } from "./api";
 import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
+import { CedricOnTimer } from "./Cedric";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { transactionDetailHref, writeTransactionPermalink } from "./permalinks";
@@ -152,7 +153,9 @@ function TransactionDetail({
   const operations = transaction.operations ?? [];
 
   return (
-    <div className="tx-detail-card">
+    <div className="tx-cedric-card-wrap">
+      <CedricOnTimer />
+      <div className="tx-detail-card">
       <div className="tx-detail-topline">
         <span className={`tx-status-badge ${status.tone}`}>{status.label}</span>
         <span className="tx-detail-hash mono">{transaction.hash}</span>
@@ -233,6 +236,7 @@ function TransactionDetail({
           ))}
         </section>
       ) : null}
+      </div>
     </div>
   );
 }

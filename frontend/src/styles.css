@@ -3907,6 +3907,19 @@ th:not(.num) .sort-header {
   flex: 0 0 auto;
 }
 
+/* Cedric peeks over the top edge of the detail card. The card is opaque and
+   clips its own overflow, so he lives in this relative parent and the card
+   (raised z-index) paints over his body — no shelf needed. */
+.tx-cedric-card-wrap {
+  position: relative;
+  margin-top: 4.25rem;
+}
+
+.tx-cedric-card-wrap > .tx-detail-card {
+  position: relative;
+  z-index: 1;
+}
+
 .tx-detail-card {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
