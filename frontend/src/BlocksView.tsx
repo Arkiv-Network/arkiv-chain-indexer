@@ -69,7 +69,7 @@ function blockColumns(
       key: "transactionCount",
       label: "Tx count",
       className: "num",
-      width: "6rem",
+      width: "clamp(4.25rem, 14vw, 6rem)",
       render: (row) => row.transactionCount,
     },
     {

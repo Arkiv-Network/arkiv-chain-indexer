@@ -202,7 +202,7 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
       label: "Tx count",
       header: ["Tx", "count"],
       className: "num",
-      width: "5.5rem",
+      width: "clamp(4.25rem, 14vw, 5.5rem)",
       render: (row) => row.transactionCount,
     },
     {
