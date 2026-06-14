@@ -14,6 +14,7 @@ import {
   type StoredBaseloadConfigSummary,
 } from "./api";
 import { AdminView } from "./AdminView";
+import { adminModeActive, adminModeStatus, privilegedAdminToken } from "./adminMode";
 import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
@@ -47,6 +48,7 @@ import { TransactionView } from "./TransactionView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
+const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 const FULL_WIDTH_STORAGE_KEY = "ui.fullWidth";
 const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
@@ -71,6 +73,9 @@ export function App() {
     readStoredPageSettings(BUILD_PAGE_SETTINGS),
   );
   const [adminVerified, setAdminVerified] = useState(false);
+  const [adminModeEnabled, setAdminModeEnabled] = useState(
+    () => readStoredString(ADMIN_MODE_ENABLED_STORAGE_KEY, "true") === "true",
+  );
   const [simulateOffline, setSimulateOffline] = useState(
     () => readStoredString(SIMULATE_OFFLINE_STORAGE_KEY, "false") === "true",
   );
@@ -105,7 +110,9 @@ export function App() {
       ? "blocks"
       : view;
   const chartFullscreen = activeView === "chart-fullscreen";
-  const navItems = visibleNavItems(adminVerified, transactionDataEnabled);
+  const adminMode = adminModeStatus(adminVerified, adminModeEnabled);
+  const adminModeIsActive = adminModeActive(adminVerified, adminModeEnabled);
+  const navItems = visibleNavItems(adminModeIsActive, transactionDataEnabled);
   const activeNavLabel =
     navItems.find((item) => item.view === activeView)?.label ?? navLabelForView(activeView) ?? "Menu";
 
@@ -190,7 +197,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeView, baseloadAdminToken]);
+  }, [activeView, baseloadAdminToken, adminModeIsActive]);
 
   useEffect(() => {
     if (
@@ -226,6 +233,10 @@ export function App() {
   useEffect(() => {
     writeStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, baseloadAdminToken);
   }, [baseloadAdminToken]);
+
+  useEffect(() => {
+    writeStoredString(ADMIN_MODE_ENABLED_STORAGE_KEY, String(adminModeEnabled));
+  }, [adminModeEnabled]);
 
   useEffect(() => {
     writeStoredString(SIMULATE_OFFLINE_STORAGE_KEY, String(simulateOffline));
@@ -327,12 +338,14 @@ export function App() {
     if (!trimmed) {
       setBaseloadAdminToken("");
       setAdminVerified(false);
+      setAdminModeEnabled(false);
       return;
     }
     try {
       await verifyAdminToken(trimmed);
       setBaseloadAdminToken(trimmed);
       setAdminVerified(true);
+      setAdminModeEnabled(true);
     } catch (error) {
       setAdminVerified(false);
       window.alert(
@@ -349,7 +362,8 @@ export function App() {
     }
   };
 
-  const adminBearerToken = () => baseloadAdminToken.trim() || undefined;
+  const adminBearerToken = () =>
+    privilegedAdminToken(baseloadAdminToken, adminVerified, adminModeEnabled);
 
   const applyBaseloadState = (state: BaseloadStateResponse) => {
     setBaseloadConfig(state.config);
@@ -433,7 +447,19 @@ export function App() {
             <span className="brand-name">{pageSettings.chainName}</span>
             <span className="brand-sub">Scanner</span>
           </h1>
-          {adminVerified ? <span className="admin-mode-indicator">ADMIN MODE</span> : null}
+          {adminMode !== "hidden" ? (
+            <button
+              type="button"
+              className={`admin-mode-indicator${adminMode === "enabled" ? " active" : ""}`}
+              aria-pressed={adminMode === "enabled"}
+              onClick={() => setAdminModeEnabled((value) => !value)}
+              title={
+                adminMode === "enabled" ? "Disable admin mode" : "Enable admin mode"
+              }
+            >
+              Admin mode {adminMode}
+            </button>
+          ) : null}
           <div className="header-menu" ref={menuRef}>
             <button
               type="button"
