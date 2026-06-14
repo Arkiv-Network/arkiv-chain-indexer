@@ -190,6 +190,7 @@ if (!hasPostgresForTests()) {
             behavior: "create",
             maxGasPriceGwei: 0.1,
             opsPerMinute: 1,
+            entitiesPerRequest: 1,
             singleCreatePayloadSize: 5000,
             singleCreateStringArgumentCount: 2,
             singleCreateNumberArgumentCount: 2,

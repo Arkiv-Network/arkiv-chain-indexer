@@ -6,12 +6,14 @@ import {
   createBaseloadEntityInput,
   createBaseloadUpdateInput,
   getBaseloadLimitState,
+  getEntitiesPerRequestLimit,
   getMillisecondsUntilNextMinute,
   getMinuteAttemptLimit,
   getTimeBombDetonationMs,
   getTimeBombRemainingSeconds,
   parseGweiToWei,
   pickSoonestExpiringPoolEntry,
+  pickSoonestExpiringPoolEntries,
   pruneExpiredPoolEntries,
   randomOwnerAddress,
   type BaseloadPoolEntry,
@@ -23,6 +25,9 @@ describe("baseload task helpers", () => {
     expect(getMinuteAttemptLimit(3)).toBe(3);
     expect(getMinuteAttemptLimit(2.75)).toBe(2);
     expect(getMinuteAttemptLimit(0.5)).toBe(0);
+    expect(getEntitiesPerRequestLimit(3)).toBe(3);
+    expect(getEntitiesPerRequestLimit(2.75)).toBe(2);
+    expect(getEntitiesPerRequestLimit(0)).toBe(1);
     expect(getMillisecondsUntilNextMinute(1_000, 31_000)).toBe(30_000);
     expect(getMillisecondsUntilNextMinute(1_000, 61_000)).toBe(0);
   });
@@ -140,6 +145,11 @@ describe("baseload task helpers", () => {
     ]);
     expect(pruneExpiredPoolEntries(pool, 1_000, 2_000)).toHaveLength(3);
     expect(pickSoonestExpiringPoolEntry(pool)?.entityKey).toBe("0x01");
+    expect(pickSoonestExpiringPoolEntries(pool, 2).map((entry) => entry.entityKey)).toEqual([
+      "0x01",
+      "0x03",
+    ]);
+    expect(pickSoonestExpiringPoolEntries(pool, 0)).toEqual([]);
     expect(pickSoonestExpiringPoolEntry([])).toBeNull();
   });
 
@@ -175,6 +185,7 @@ function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfi
     behavior: "create",
     maxGasPriceGwei: 1000,
     opsPerMinute: 1,
+    entitiesPerRequest: 1,
     singleCreatePayloadSize: 10,
     singleCreateStringArgumentCount: 2,
     singleCreateNumberArgumentCount: 2,

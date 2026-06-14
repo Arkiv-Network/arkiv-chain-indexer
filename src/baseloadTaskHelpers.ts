@@ -49,6 +49,11 @@ export function getMinuteAttemptLimit(opsPerMinute: number): number {
   return Math.floor(opsPerMinute);
 }
 
+export function getEntitiesPerRequestLimit(entitiesPerRequest: number): number {
+  if (!Number.isFinite(entitiesPerRequest) || entitiesPerRequest < 1) return 1;
+  return Math.floor(entitiesPerRequest);
+}
+
 export function chooseBaseloadOperation(
   worker: Pick<BaseloadWorkerConfig, "behavior" | "entityPoolSize">,
   currentPoolSize: number,
@@ -84,11 +89,15 @@ export function pruneExpiredPoolEntries(
 export function pickSoonestExpiringPoolEntry(
   pool: readonly BaseloadPoolEntry[],
 ): BaseloadPoolEntry | null {
-  let soonest: BaseloadPoolEntry | null = null;
-  for (const entry of pool) {
-    if (soonest === null || entry.expiresAtMs < soonest.expiresAtMs) soonest = entry;
-  }
-  return soonest;
+  return pickSoonestExpiringPoolEntries(pool, 1)[0] ?? null;
+}
+
+export function pickSoonestExpiringPoolEntries(
+  pool: readonly BaseloadPoolEntry[],
+  count: number,
+): BaseloadPoolEntry[] {
+  if (count <= 0) return [];
+  return [...pool].sort((a, b) => a.expiresAtMs - b.expiresAtMs).slice(0, count);
 }
 
 export function getTimeBombDetonationMs(

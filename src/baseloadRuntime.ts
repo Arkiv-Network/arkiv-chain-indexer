@@ -14,13 +14,14 @@ import {
   chooseBaseloadOperation,
   createBaseloadEntityInput,
   createBaseloadUpdateInput,
+  getEntitiesPerRequestLimit,
   getBaseloadLimitState,
   getMillisecondsUntilNextMinute,
   getMinuteAttemptLimit,
   getTimeBombDetonationMs,
   getTimeBombRemainingSeconds,
   parseGweiToWei,
-  pickSoonestExpiringPoolEntry,
+  pickSoonestExpiringPoolEntries,
   pruneExpiredPoolEntries,
   randomOwnerAddress,
   type BaseloadPoolEntry,
@@ -79,6 +80,36 @@ interface BaseloadRpcClient {
 type BaseloadTransactionReceipt = {
   status?: unknown;
   [key: string]: unknown;
+};
+
+type BaseloadTxParams = {
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  nonce: number;
+};
+
+type BaseloadMutationParameters = {
+  creates?: ReturnType<typeof createBaseloadEntityInput>[];
+  updates?: ReturnType<typeof createBaseloadUpdateInput>[];
+  deletes?: Array<{ entityKey: HexString }>;
+  extensions?: Array<{ entityKey: HexString; expiresIn: number }>;
+  ownershipChanges?: Array<{ entityKey: HexString; newOwner: HexString }>;
+};
+
+type BaseloadMutationResult = {
+  txHash: HexString;
+  createdEntities: HexString[];
+  updatedEntities: HexString[];
+  deletedEntities: HexString[];
+  extendedEntities: HexString[];
+  ownershipChanges: HexString[];
+};
+
+type BaseloadMutationClient = WalletArkivClient & {
+  mutateEntities?: (
+    data: BaseloadMutationParameters,
+    txParams?: BaseloadTxParams,
+  ) => Promise<unknown>;
 };
 
 const BALANCE_POLL_INTERVAL_MS = 10_000;
@@ -414,143 +445,196 @@ class BaseloadWorkerTask {
             maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
             nonce: await clients.rpc.getLatestNonce(worker.walletAddress),
           });
+          const entitiesPerRequest = getEntitiesPerRequestLimit(worker.entitiesPerRequest);
 
           switch (operation) {
             case "create":
             case "time-bomb-create": {
-              const input = createBaseloadEntityInput(worker);
+              const createCount =
+                worker.behavior === "create-update" || worker.behavior === "create-update-delete"
+                  ? Math.min(entitiesPerRequest, Math.max(0, worker.entityPoolSize - pool.length))
+                  : entitiesPerRequest;
+              if (createCount <= 0) throw new Error("No pool room available to create entities");
+              const inputs = Array.from({ length: createCount }, () => createBaseloadEntityInput(worker));
               if (operation === "time-bomb-create") {
-                input.expiresIn = getTimeBombRemainingSeconds(detonationAtMs, Date.now());
+                const expiresIn = getTimeBombRemainingSeconds(detonationAtMs, Date.now());
+                for (const input of inputs) input.expiresIn = expiresIn;
               }
               this.postStatus("running", {
                 currentBlock,
                 message:
                   operation === "time-bomb-create"
-                    ? `Creating time bomb entity (expires in ${input.expiresIn}s)`
-                    : "Creating entity",
+                    ? `Creating ${describeEntityCount(inputs.length)} time bomb batch (expires in ${inputs[0]?.expiresIn ?? 0}s)`
+                    : `Creating ${describeEntityCount(inputs.length)}`,
                 ...statusCounts(),
               });
-              const result = await clients.arkiv.createEntity(input, await sendTxParams());
+              const result = await mutateBaseloadEntities(
+                clients.arkiv,
+                { creates: inputs },
+                await sendTxParams(),
+              );
               await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
-              const entityKey = readBaseloadCreatedEntityKeyFromSdkResult(result.entityKey, result.txHash);
-              counters.createdCount += 1;
+              const entityKeys = readBaseloadEntityKeysFromSdkResult(
+                result.createdEntities,
+                result.txHash,
+                inputs.length,
+                "createdEntities",
+              );
+              counters.createdCount += entityKeys.length;
               if (worker.behavior === "create-update" || worker.behavior === "create-update-delete") {
-                pool.push({
-                  entityKey,
-                  expiresAtMs: Date.now() + worker.ttlSeconds * 1000,
-                });
+                const expiresAtMs = Date.now() + worker.ttlSeconds * 1000;
+                pool.push(...entityKeys.map((entityKey) => ({ entityKey, expiresAtMs })));
               }
               this.postStatus("running", {
                 currentBlock,
-                message: "Entity created",
+                message: `Created ${describeEntityCount(entityKeys.length)}`,
                 ...statusCounts(),
-                entityKey,
+                entityKey: lastEntityKey(entityKeys),
                 txHash: result.txHash,
               });
               break;
             }
             case "create-and-own": {
+              const inputs = Array.from({ length: entitiesPerRequest }, () => createBaseloadEntityInput(worker));
               this.postStatus("running", {
                 currentBlock,
-                message: "Creating entity",
+                message: `Creating ${describeEntityCount(inputs.length)} before ownership change`,
                 ...statusCounts(),
               });
-              const created = await clients.arkiv.createEntity(
-                createBaseloadEntityInput(worker),
+              const created = await mutateBaseloadEntities(
+                clients.arkiv,
+                { creates: inputs },
                 await sendTxParams(),
               );
               await waitForSuccessfulTransactionReceipt(clients.rpc, created.txHash, this.abortController.signal);
-              const createdEntityKey = readBaseloadCreatedEntityKeyFromSdkResult(
-                created.entityKey,
+              const createdEntityKeys = readBaseloadEntityKeysFromSdkResult(
+                created.createdEntities,
                 created.txHash,
+                inputs.length,
+                "createdEntities",
               );
-              counters.createdCount += 1;
-              const newOwner = randomOwnerAddress();
+              counters.createdCount += createdEntityKeys.length;
+              const ownershipChanges = createdEntityKeys.map((entityKey) => ({
+                entityKey,
+                newOwner: randomOwnerAddress(),
+              }));
               this.postStatus("running", {
                 currentBlock,
-                message: `Changing ownership to ${newOwner}`,
+                message: `Changing ownership for ${describeEntityCount(ownershipChanges.length)}`,
                 ...statusCounts(),
-                entityKey: createdEntityKey,
+                entityKey: lastEntityKey(createdEntityKeys),
                 txHash: created.txHash,
               });
-              const owned = await clients.arkiv.changeOwnership(
-                { entityKey: createdEntityKey, newOwner },
+              const owned = await mutateBaseloadEntities(
+                clients.arkiv,
+                // SDK validation currently ignores ownership-only batches unless another
+                // mutation key is present; an empty extensions array keeps the tx ownership-only.
+                { ownershipChanges, extensions: [] },
                 await sendTxParams(),
               );
-              // The SDK types changeOwnership's txHash as plain string, unlike the other actions.
               await waitForSuccessfulTransactionReceipt(
                 clients.rpc,
-                owned.txHash as HexString,
+                owned.txHash,
                 this.abortController.signal,
               );
-              counters.ownershipChangedCount += 1;
+              const changedEntityKeys = readBaseloadEntityKeysFromSdkResult(
+                owned.ownershipChanges,
+                owned.txHash,
+                ownershipChanges.length,
+                "ownershipChanges",
+              );
+              counters.ownershipChangedCount += changedEntityKeys.length;
               this.postStatus("running", {
                 currentBlock,
-                message: `Ownership changed to ${newOwner}`,
+                message: `Ownership changed for ${describeEntityCount(changedEntityKeys.length)}`,
                 ...statusCounts(),
-                entityKey: createdEntityKey,
+                entityKey: lastEntityKey(changedEntityKeys),
                 txHash: owned.txHash,
               });
               break;
             }
             case "update": {
-              const entry = pickSoonestExpiringPoolEntry(pool);
-              if (!entry) throw new Error("No pool entity available to update");
+              const entries = pickSoonestExpiringPoolEntries(
+                pool,
+                Math.min(entitiesPerRequest, pool.length),
+              );
+              if (entries.length === 0) throw new Error("No pool entity available to update");
               this.postStatus("running", {
                 currentBlock,
-                message: `Updating entity ${entry.entityKey}`,
+                message: `Updating ${describeEntityCount(entries.length)}`,
                 ...statusCounts(),
               });
-              const result = await clients.arkiv.updateEntity(
-                createBaseloadUpdateInput(worker, entry.entityKey),
+              const result = await mutateBaseloadEntities(
+                clients.arkiv,
+                { updates: entries.map((entry) => createBaseloadUpdateInput(worker, entry.entityKey)) },
                 await sendTxParams(),
               );
               try {
                 await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
               } catch (error) {
                 if (error instanceof BaseloadTransactionRevertedError) {
-                  pool = pool.filter((candidate) => candidate !== entry);
+                  const revertedEntries = new Set(entries);
+                  pool = pool.filter((candidate) => !revertedEntries.has(candidate));
                 }
                 throw error;
               }
-              counters.updatedCount += 1;
-              entry.expiresAtMs = Date.now() + worker.ttlSeconds * 1000;
+              const updatedEntityKeys = readBaseloadEntityKeysFromSdkResult(
+                result.updatedEntities,
+                result.txHash,
+                entries.length,
+                "updatedEntities",
+              );
+              counters.updatedCount += updatedEntityKeys.length;
+              const expiresAtMs = Date.now() + worker.ttlSeconds * 1000;
+              for (const entry of entries) entry.expiresAtMs = expiresAtMs;
               this.postStatus("running", {
                 currentBlock,
-                message: "Entity updated, TTL refreshed",
+                message: `Updated ${describeEntityCount(updatedEntityKeys.length)}, TTL refreshed`,
                 ...statusCounts(),
-                entityKey: result.entityKey,
+                entityKey: lastEntityKey(updatedEntityKeys),
                 txHash: result.txHash,
               });
               break;
             }
             case "delete": {
-              const entry = pickSoonestExpiringPoolEntry(pool);
-              if (!entry) throw new Error("No pool entity available to delete");
+              const entries = pickSoonestExpiringPoolEntries(
+                pool,
+                Math.min(entitiesPerRequest, pool.length),
+              );
+              if (entries.length === 0) throw new Error("No pool entity available to delete");
               this.postStatus("running", {
                 currentBlock,
-                message: `Deleting entity ${entry.entityKey}`,
+                message: `Deleting ${describeEntityCount(entries.length)}`,
                 ...statusCounts(),
               });
-              const result = await clients.arkiv.deleteEntity(
-                { entityKey: entry.entityKey },
+              const result = await mutateBaseloadEntities(
+                clients.arkiv,
+                { deletes: entries.map((entry) => ({ entityKey: entry.entityKey })) },
                 await sendTxParams(),
               );
               try {
                 await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
               } catch (error) {
                 if (error instanceof BaseloadTransactionRevertedError) {
-                  pool = pool.filter((candidate) => candidate !== entry);
+                  const revertedEntries = new Set(entries);
+                  pool = pool.filter((candidate) => !revertedEntries.has(candidate));
                 }
                 throw error;
               }
-              counters.deletedCount += 1;
-              pool = pool.filter((candidate) => candidate !== entry);
+              const deletedEntityKeys = readBaseloadEntityKeysFromSdkResult(
+                result.deletedEntities,
+                result.txHash,
+                entries.length,
+                "deletedEntities",
+              );
+              counters.deletedCount += deletedEntityKeys.length;
+              const deletedEntries = new Set(entries);
+              pool = pool.filter((candidate) => !deletedEntries.has(candidate));
               this.postStatus("running", {
                 currentBlock,
-                message: "Entity deleted",
+                message: `Deleted ${describeEntityCount(deletedEntityKeys.length)}`,
                 ...statusCounts(),
-                entityKey: result.entityKey,
+                entityKey: lastEntityKey(deletedEntityKeys),
                 txHash: result.txHash,
               });
               break;
@@ -687,6 +771,34 @@ export function readBaseloadCreatedEntityKeyFromSdkResult(
   return sdkEntityKey;
 }
 
+export function readBaseloadEntityKeysFromSdkResult(
+  sdkEntityKeys: unknown,
+  txHash: string,
+  expectedCount: number,
+  fieldName: string,
+): HexString[] {
+  if (!Array.isArray(sdkEntityKeys)) {
+    throw new Error(
+      `Unable to trust ${fieldName} from transaction ${txHash}: SDK returned a non-array value`,
+    );
+  }
+  if (sdkEntityKeys.length !== expectedCount) {
+    throw new Error(
+      `Unable to trust ${fieldName} from transaction ${txHash}: expected ${expectedCount} keys but SDK returned ${sdkEntityKeys.length}`,
+    );
+  }
+  return sdkEntityKeys.map((entityKey, index) => {
+    if (!isBytes32Hex(entityKey)) {
+      throw new Error(
+        `Unable to trust ${fieldName}[${index}] from transaction ${txHash}: SDK returned invalid entity key ${String(
+          entityKey,
+        )}`,
+      );
+    }
+    return entityKey;
+  });
+}
+
 export function isBaseloadTransactionReceiptSuccessful(receipt: BaseloadTransactionReceipt): boolean {
   const status = receipt.status;
   if (status === undefined || status === null) return true;
@@ -716,6 +828,51 @@ async function waitForSuccessfulTransactionReceipt(
   return receipt;
 }
 
+async function mutateBaseloadEntities(
+  client: WalletArkivClient,
+  parameters: BaseloadMutationParameters,
+  txParams: BaseloadTxParams,
+): Promise<BaseloadMutationResult> {
+  const mutateEntities = (client as BaseloadMutationClient).mutateEntities;
+  if (typeof mutateEntities !== "function") {
+    throw new Error("@arkiv-network/sdk WalletArkivClient does not expose mutateEntities");
+  }
+  return normalizeBaseloadMutationResult(await mutateEntities.call(client, parameters, txParams));
+}
+
+function normalizeBaseloadMutationResult(result: unknown): BaseloadMutationResult {
+  if (!isRecord(result) || !isBytes32Hex(result.txHash)) {
+    throw new Error(`SDK mutateEntities returned an invalid transaction result: ${safeStringify(result)}`);
+  }
+  return {
+    txHash: result.txHash,
+    createdEntities: readOptionalEntityKeyArray(result.createdEntities, "createdEntities", result.txHash),
+    updatedEntities: readOptionalEntityKeyArray(result.updatedEntities, "updatedEntities", result.txHash),
+    deletedEntities: readOptionalEntityKeyArray(result.deletedEntities, "deletedEntities", result.txHash),
+    extendedEntities: readOptionalEntityKeyArray(result.extendedEntities, "extendedEntities", result.txHash),
+    ownershipChanges: readOptionalEntityKeyArray(result.ownershipChanges, "ownershipChanges", result.txHash),
+  };
+}
+
+function readOptionalEntityKeyArray(value: unknown, fieldName: string, txHash: HexString): HexString[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `SDK mutateEntities returned invalid ${fieldName} for transaction ${txHash}: expected array`,
+    );
+  }
+  return value.map((entityKey, index) => {
+    if (!isBytes32Hex(entityKey)) {
+      throw new Error(
+        `SDK mutateEntities returned invalid ${fieldName}[${index}] for transaction ${txHash}: ${String(
+          entityKey,
+        )}`,
+      );
+    }
+    return entityKey;
+  });
+}
+
 class BaseloadTransactionRevertedError extends Error {
   constructor(txHash: HexString, receipt: BaseloadTransactionReceipt) {
     super(`Transaction ${txHash} was mined but reverted: ${safeStringify(receipt)}`);
@@ -725,6 +882,16 @@ class BaseloadTransactionRevertedError extends Error {
 
 function isBytes32Hex(value: unknown): value is HexString {
   return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function describeEntityCount(count: number): string {
+  return `${count} ${count === 1 ? "entity" : "entities"}`;
+}
+
+function lastEntityKey(entityKeys: readonly HexString[]): HexString {
+  const entityKey = entityKeys[entityKeys.length - 1];
+  if (!entityKey) throw new Error("Expected at least one entity key");
+  return entityKey;
 }
 
 async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {

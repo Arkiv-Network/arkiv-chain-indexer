@@ -403,7 +403,7 @@ create, create-update, create-ownership, time-bomb, create-update-delete
 Worker config fields:
 
 ```txt
-id, behavior, maxGasPriceGwei, opsPerMinute, singleCreatePayloadSize,
+id, behavior, maxGasPriceGwei, opsPerMinute, entitiesPerRequest, singleCreatePayloadSize,
 singleCreateStringArgumentCount, singleCreateNumberArgumentCount, entityPoolSize,
 timeBombOffsetSeconds, walletNumber, walletAddress, startBlock, endBlock,
 durationSeconds, ttlSeconds

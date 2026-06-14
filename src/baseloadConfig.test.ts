@@ -22,6 +22,7 @@ describe("backend baseload config", () => {
     expect(worker.walletNumber).toBe(1);
     expect(worker.walletAddress).toBe("0x8C59ca3A3BF65F5C530Eb5Ea67F2bd4b37049cf2");
     expect(worker.behavior).toBe("create");
+    expect(worker.entitiesPerRequest).toBe(1);
     expect(worker.entityPoolSize).toBe(10);
     expect(worker.timeBombOffsetSeconds).toBe(600);
   });
@@ -44,7 +45,12 @@ describe("backend baseload config", () => {
     const config = normalizeBaseloadConfig({
       workers: [
         { walletNumber: 0, behavior: "time-bomb", timeBombOffsetSeconds: 120 },
-        { walletNumber: 1, behavior: "create-update-delete", entityPoolSize: 4 },
+        {
+          walletNumber: 1,
+          behavior: "create-update-delete",
+          entitiesPerRequest: 3,
+          entityPoolSize: 4,
+        },
         { walletNumber: 2 },
       ],
     });
@@ -55,6 +61,7 @@ describe("backend baseload config", () => {
       "create",
     ]);
     expect(config.workers[0]?.timeBombOffsetSeconds).toBe(120);
+    expect(config.workers[1]?.entitiesPerRequest).toBe(3);
     expect(config.workers[1]?.entityPoolSize).toBe(4);
     expect(() =>
       normalizeBaseloadConfig({ workers: [{ walletNumber: 0, behavior: "explode" }] }),
@@ -62,6 +69,9 @@ describe("backend baseload config", () => {
     expect(() =>
       normalizeBaseloadConfig({ workers: [{ walletNumber: 0, entityPoolSize: 0 }] }),
     ).toThrow("Entity pool size must be at least 1");
+    expect(() =>
+      normalizeBaseloadConfig({ workers: [{ walletNumber: 0, entitiesPerRequest: 0 }] }),
+    ).toThrow("Entities per request must be at least 1");
   });
 
   test("reads backend baseload runtime settings from env", () => {
@@ -84,6 +94,7 @@ describe("backend baseload config", () => {
       expect(config.workers).toHaveLength(1);
       expect(config.workers[0]?.id).toBe("wallet-3");
       expect(config.workers[0]?.opsPerMinute).toBe(1);
+      expect(config.workers[0]?.entitiesPerRequest).toBe(1);
       expect(config.workers[0]?.behavior).toBe("create");
       expect(config.workers[0]?.walletAddress).toBe(deriveBaseloadWalletAddress(3));
     } finally {

@@ -20,6 +20,7 @@ describe("baseload config helpers", () => {
       behavior: "create",
       maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
       opsPerMinute: 1,
+      entitiesPerRequest: 1,
       singleCreatePayloadSize: 5000,
       singleCreateStringArgumentCount: 2,
       singleCreateNumberArgumentCount: 2,
@@ -42,6 +43,7 @@ describe("baseload config helpers", () => {
           behavior: "create-update",
           maxGasPriceGwei: "5.5",
           opsPerMinute: "2.25",
+          entitiesPerRequest: "4",
           singleCreatePayloadSize: "100",
           singleCreateStringArgumentCount: "3",
           singleCreateNumberArgumentCount: "4",
@@ -63,6 +65,7 @@ describe("baseload config helpers", () => {
           behavior: "create-update",
           maxGasPriceGwei: 5.5,
           opsPerMinute: 2.25,
+          entitiesPerRequest: 4,
           singleCreatePayloadSize: 100,
           singleCreateStringArgumentCount: 3,
           singleCreateNumberArgumentCount: 4,
@@ -94,6 +97,13 @@ describe("baseload config helpers", () => {
     });
 
     expect(config.workers[0].ttlSeconds).toBe(3600);
+    expect(config.workers[0].entitiesPerRequest).toBe(1);
+  });
+
+  test("rejects non-positive entity batch sizes", () => {
+    expect(() =>
+      normalizeBaseloadConfig({ workers: [{ walletNumber: 0, entitiesPerRequest: 0 }] }),
+    ).toThrow("Entities per request must be at least 1");
   });
 
   test("rejects duplicate wallets", () => {
@@ -137,6 +147,7 @@ describe("baseload config helpers", () => {
       behavior: "create-update-delete",
       maxGasPriceGwei: "7.5",
       opsPerMinute: "11",
+      entitiesPerRequest: "9",
       singleCreatePayloadSize: "2048",
       singleCreateStringArgumentCount: "5",
       singleCreateNumberArgumentCount: "6",
@@ -172,6 +183,7 @@ describe("baseload config helpers", () => {
           behavior: "create",
           maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
           opsPerMinute: 1,
+          entitiesPerRequest: 1,
           singleCreatePayloadSize: 5000,
           singleCreateStringArgumentCount: 2,
           singleCreateNumberArgumentCount: 2,
