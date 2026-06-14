@@ -2173,20 +2173,21 @@ button.secondary {
   border-radius: 6px;
 }
 
-/* Cedric peeks over the top edge of the transactions table. The table-wrap
-   clips its own overflow, so Cedric lives in this relative parent instead and
-   the wrap (raised z-index) paints on top of his body. */
-.tx-cedric-wrap {
+/* Cedric peeks over the top edge of a data table. The table-wrap clips its own
+   overflow, so Cedric lives in this relative parent instead and the wrap
+   (raised z-index) paints on top of his body. Shared by the transactions and
+   block-list tables; the margin gives his head room above the table. */
+.cedric-table-wrap {
   position: relative;
   margin-top: 4.25rem;
 }
 
-.tx-cedric-wrap > .table-wrap {
+.cedric-table-wrap > .table-wrap {
   position: relative;
   z-index: 1;
 }
 
-.tx-cedric-shelf {
+.cedric-table-shelf {
   right: 2.25rem;
   width: 92px;
   top: 1px;

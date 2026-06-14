@@ -513,11 +513,11 @@ export function TransactionsView({
         {copyStatus ? <span>{copyStatus}</span> : null}
       </div>
 
-      <div className="tx-cedric-wrap">
+      <div className="cedric-table-wrap">
         <CedricOnTimer />
         {/* Opaque shelf hiding Cedric's body so only his head peeks over the
             table's top edge (the table-wrap clips its own overflow). */}
-        <div className="cedric-shelf tx-cedric-shelf" aria-hidden="true" />
+        <div className="cedric-shelf cedric-table-shelf" aria-hidden="true" />
         <div className="table-wrap">
           <table className="data-table tx-table">
           <colgroup>

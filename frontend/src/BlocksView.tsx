@@ -11,6 +11,7 @@ import {
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { BlockList } from "./icons";
+import { CedricOnTimer } from "./Cedric";
 
 interface BlocksViewProps {
   locationSearch: string;
@@ -424,7 +425,12 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
               ? `${data.count} blocks${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
-      <div className="table-wrap">
+      <div className="cedric-table-wrap">
+        <CedricOnTimer />
+        {/* Opaque shelf hiding Cedric's body so only his head peeks over the
+            table's top edge (the table-wrap clips its own overflow). */}
+        <div className="cedric-shelf cedric-table-shelf" aria-hidden="true" />
+        <div className="table-wrap">
         <table className="data-table">
           <colgroup>
             {columns.map((column) => (
@@ -452,6 +458,7 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </section>
   );
