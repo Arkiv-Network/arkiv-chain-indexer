@@ -1949,6 +1949,11 @@ button.secondary {
   background: color-mix(in oklab, var(--stone) 18%, transparent);
 }
 
+/* Nudge the block-count summary down a touch below the filters panel. */
+.blocks-view > .summary {
+  margin-top: 20px;
+}
+
 .blocks-filter-meta {
   margin-left: auto;
   color: var(--muted);

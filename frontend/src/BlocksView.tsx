@@ -37,7 +37,7 @@ const EMPTY: Filters = {
   blockLt: "",
   dateGt: "",
   dateLt: "",
-  limit: "10",
+  limit: "1000",
 };
 
 interface Column<T> {
