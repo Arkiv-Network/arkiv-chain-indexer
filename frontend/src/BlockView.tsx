@@ -84,10 +84,21 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   const block = data?.block;
+  const adjacentBlocks = useMemo(() => adjacentBlockNumbers(appliedBlockNumber), [appliedBlockNumber]);
   const columns = useMemo(
     () => transactionColumns(tokenSymbol, onLocationChange),
     [tokenSymbol, onLocationChange],
   );
+
+  const navigateToBlock = (nextBlock: string) => {
+    setCopyStatus("");
+    setBlockNumber(nextBlock);
+    if (writePermalink("block", { block: nextBlock })) {
+      onLocationChange();
+    } else {
+      setAppliedBlockNumber(nextBlock);
+    }
+  };
 
   return (
     <section className="view block-view">
@@ -142,6 +153,34 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
           </p>
 
           <div className="block-lookup-actions">
+            <div className="block-adjacent-nav" aria-label="Adjacent blocks">
+              <button
+                type="button"
+                className="block-adjacent-button"
+                onClick={() => adjacentBlocks.previous && navigateToBlock(adjacentBlocks.previous)}
+                disabled={loading || !adjacentBlocks.previous}
+                aria-label="Previous block"
+                title="Previous block"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>{adjacentBlocks.previous ?? "Prev"}</span>
+              </button>
+              <button
+                type="button"
+                className="block-adjacent-button"
+                onClick={() => adjacentBlocks.next && navigateToBlock(adjacentBlocks.next)}
+                disabled={loading || !adjacentBlocks.next}
+                aria-label="Next block"
+                title="Next block"
+              >
+                <span>{adjacentBlocks.next ?? "Next"}</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
             <button
               type="button"
               className="block-lookup-copy"
@@ -331,4 +370,15 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
 function readBlockFromSearch(search: string): string {
   const value = new URLSearchParams(search).get("block");
   return value?.trim() ?? EMPTY_BLOCK;
+}
+
+export function adjacentBlockNumbers(value: string): { previous: string | null; next: string | null } {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return { previous: null, next: null };
+
+  const current = BigInt(trimmed);
+  return {
+    previous: current > 0n ? String(current - 1n) : null,
+    next: String(current + 1n),
+  };
 }
