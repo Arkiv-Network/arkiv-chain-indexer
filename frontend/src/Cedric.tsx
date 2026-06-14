@@ -1,16 +1,29 @@
 import { useEffect, useRef, useState, type AnimationEvent } from "react";
 
-// Decorative owl that peeks over the top edge of a panel/list, watches for 4
-// blinks, then ducks away behind the panel until `progress` has advanced by 3
-// — then it pops back up. Purely cosmetic. `progress` is whatever monotonically
-// increasing signal the host wants to gate the owl on (e.g. the latest block
-// number on the home feed, or a refresh tick on the leaderboard).
-const OWL_BLINKS_BEFORE_HIDING = 4;
-const OWL_PROGRESS_AWAY = 3;
+// Cedric — full name "Cedric The Owl". A decorative owl that peeks over the top
+// edge of a panel/list, watches for 4 blinks, then ducks away behind the panel
+// until `progress` has advanced by 3 — then he pops back up. Purely cosmetic.
+// `progress` is whatever monotonically increasing signal the host wants to gate
+// Cedric on (e.g. the latest block number on the home feed, or a refresh tick on
+// the leaderboard).
+const CEDRIC_BLINKS_BEFORE_HIDING = 4;
+const CEDRIC_PROGRESS_AWAY = 3;
 
-const OWL_INITIAL_HIDDEN_MS = 3000;
+const CEDRIC_INITIAL_HIDDEN_MS = 3000;
 
-export function PeekingOwl({ progress }: { progress: number | null }) {
+// Drives Cedric on a self-contained timer for views that have no natural
+// monotonic signal (e.g. the transactions table, which only loads on demand).
+// Keeping the tick state here means the host view doesn't re-render every tick.
+export function CedricOnTimer({ intervalMs = 6000 }: { intervalMs?: number }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((value) => value + 1), intervalMs);
+    return () => window.clearInterval(id);
+  }, [intervalMs]);
+  return <Cedric progress={tick} />;
+}
+
+export function Cedric({ progress }: { progress: number | null }) {
   // "initial" — hidden for a few seconds after load; "peeking" — up and
   // blinking; "away" — ducked behind the panel until progress advances by 3.
   const [phase, setPhase] = useState<"initial" | "peeking" | "away">("initial");
@@ -19,15 +32,15 @@ export function PeekingOwl({ progress }: { progress: number | null }) {
 
   // Stay hidden briefly on page load, then make the first appearance.
   useEffect(() => {
-    const timer = window.setTimeout(() => setPhase("peeking"), OWL_INITIAL_HIDDEN_MS);
+    const timer = window.setTimeout(() => setPhase("peeking"), CEDRIC_INITIAL_HIDDEN_MS);
     return () => window.clearTimeout(timer);
   }, []);
 
   // Count blinks while peeking; after the 4th, duck away.
   const onIteration = (event: AnimationEvent) => {
-    if (event.animationName !== "home-owl-blink" || phase !== "peeking") return;
+    if (event.animationName !== "cedric-blink" || phase !== "peeking") return;
     blinkCount.current += 1;
-    if (blinkCount.current >= OWL_BLINKS_BEFORE_HIDING) {
+    if (blinkCount.current >= CEDRIC_BLINKS_BEFORE_HIDING) {
       hiddenSinceProgress.current = progress;
       setPhase("away");
     }
@@ -40,7 +53,7 @@ export function PeekingOwl({ progress }: { progress: number | null }) {
       hiddenSinceProgress.current = progress;
       return;
     }
-    if (progress - hiddenSinceProgress.current >= OWL_PROGRESS_AWAY) {
+    if (progress - hiddenSinceProgress.current >= CEDRIC_PROGRESS_AWAY) {
       blinkCount.current = 0;
       setPhase("peeking");
     }
@@ -48,10 +61,10 @@ export function PeekingOwl({ progress }: { progress: number | null }) {
 
   return (
     <span
-      className={`home-owl${phase === "peeking" ? " is-peeking" : ""}`}
+      className={`cedric${phase === "peeking" ? " is-peeking" : ""}`}
       aria-hidden="true"
-      // Stay fully hidden until the first peek begins — otherwise the owl
-      // flashes in its un-positioned spot on load before it ducks. Inline so it
+      // Stay fully hidden until the first peek begins — otherwise Cedric
+      // flashes in his un-positioned spot on load before he ducks. Inline so it
       // applies on the very first paint, before the stylesheet is in effect.
       style={{ visibility: phase === "initial" ? "hidden" : "visible" }}
       onAnimationIteration={onIteration}
@@ -71,11 +84,11 @@ export function PeekingOwl({ progress }: { progress: number | null }) {
         <path d="M28 41 Q44 31 57 43" stroke="#5A3C26" strokeWidth="4" fill="none" strokeLinecap="round" />
         <path d="M92 41 Q76 31 63 43" stroke="#5A3C26" strokeWidth="4" fill="none" strokeLinecap="round" />
         {/* eyes — grouped so they can blink; pupils sit low to look down at the blocks */}
-        <g className="home-owl-eyes">
+        <g className="cedric-eyes">
           <circle cx="43" cy="57" r="16.5" fill="#FBF7EF" />
           <circle cx="77" cy="57" r="16.5" fill="#FBF7EF" />
           {/* pupils wander to random-ish angles, always biased down-and-left */}
-          <g className="home-owl-pupils">
+          <g className="cedric-pupils">
             <circle cx="43" cy="57" r="7.6" fill="#2A2320" />
             <circle cx="77" cy="57" r="7.6" fill="#2A2320" />
             <circle cx="40" cy="54" r="2.3" fill="#FFFFFF" />

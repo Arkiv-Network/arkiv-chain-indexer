@@ -1053,9 +1053,9 @@ button.secondary {
   flex-direction: column;
 }
 
-/* Wrapper that lets the peeking owl sit *behind* the Latest blocks panel:
+/* Wrapper that lets Cedric the Owl sit *behind* the Latest blocks panel:
    the panel paints on top (z-index + opaque background), so only the part
-   of the owl above the panel's top edge is visible. */
+   of Cedric above the panel's top edge is visible. */
 .home-feed-panel-wrap {
   position: relative;
   display: flex;
@@ -1069,7 +1069,8 @@ button.secondary {
   min-width: 0;
 }
 
-.home-owl {
+/* Cedric the Owl — shared decorative owl (see Cedric.tsx). */
+.cedric {
   position: absolute;
   z-index: 0;
   top: -76px;
@@ -1077,7 +1078,7 @@ button.secondary {
   width: 84px;
   height: 130px;
   pointer-events: none;
-  /* ducked behind the panel by default; .is-peeking raises it into view.
+  /* ducked behind the panel by default; .is-peeking raises him into view.
      The base (ducked) state owns the slower hide transition; raising up
      uses the snappier bounce defined on .is-peeking. */
   transform: translateY(64px);
@@ -1085,12 +1086,12 @@ button.secondary {
   will-change: transform;
 }
 
-.home-owl.is-peeking {
+.cedric.is-peeking {
   transform: translateY(0);
   transition: transform 0.6s cubic-bezier(0.34, 1.4, 0.6, 1);
 }
 
-.home-owl svg {
+.cedric svg {
   display: block;
   width: 100%;
   height: 100%;
@@ -1098,27 +1099,27 @@ button.secondary {
   filter: drop-shadow(0 3px 2px rgba(17, 17, 17, 0.18));
 }
 
-.home-owl-eyes {
+.cedric-eyes {
   transform-box: view-box;
   transform-origin: 60px 57px;
 }
 
-.home-owl.is-peeking .home-owl-eyes {
-  animation: home-owl-blink 4.2s ease-in-out infinite;
+.cedric.is-peeking .cedric-eyes {
+  animation: cedric-blink 4.2s ease-in-out infinite;
 }
 
 /* Gaze wanders between several angles, but every target stays in the
    left-bottom quadrant (negative x = left, positive y = down). */
-.home-owl-pupils {
+.cedric-pupils {
   transform-box: view-box;
   transform: translate(-6px, 5px);
 }
 
-.home-owl.is-peeking .home-owl-pupils {
-  animation: home-owl-glance 7s ease-in-out infinite;
+.cedric.is-peeking .cedric-pupils {
+  animation: cedric-glance 7s ease-in-out infinite;
 }
 
-@keyframes home-owl-glance {
+@keyframes cedric-glance {
   0%, 16% {
     transform: translate(-6px, 5px);
   }
@@ -1136,7 +1137,7 @@ button.secondary {
   }
 }
 
-@keyframes home-owl-blink {
+@keyframes cedric-blink {
   0%, 90%, 100% {
     transform: scaleY(1);
   }
@@ -1146,19 +1147,19 @@ button.secondary {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .home-owl {
+  .cedric {
     /* stay peeking, no motion */
     transition: none;
     transform: translateY(0);
   }
 
-  .home-owl-eyes,
-  .home-owl.is-peeking .home-owl-eyes {
+  .cedric-eyes,
+  .cedric.is-peeking .cedric-eyes {
     animation: none;
   }
 
-  .home-owl-pupils,
-  .home-owl.is-peeking .home-owl-pupils {
+  .cedric-pupils,
+  .cedric.is-peeking .cedric-pupils {
     animation: none;
     transform: translate(-6px, 5px);
   }
@@ -2140,6 +2141,26 @@ button.secondary {
   border-radius: 6px;
 }
 
+/* Cedric peeks over the top edge of the transactions table. The table-wrap
+   clips its own overflow, so Cedric lives in this relative parent instead and
+   the wrap (raised z-index) paints on top of his body. */
+.tx-cedric-wrap {
+  position: relative;
+  margin-top: 4.25rem;
+}
+
+.tx-cedric-wrap > .table-wrap {
+  position: relative;
+  z-index: 1;
+}
+
+.tx-cedric-shelf {
+  right: 2.25rem;
+  width: 92px;
+  top: 1px;
+  height: 91px;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
@@ -2874,10 +2895,10 @@ td.num {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
-/* Wrapper that lets the peeking owl sit *behind* the leaderboard list: the
-   list (opaque cards, raised z-index) paints on top, so only the owl's head
-   peeking above the first card is visible. The top margin gives that head room
-   so it doesn't overlap the intro text above. */
+/* Wrapper that lets Cedric sit *behind* the leaderboard list: the list
+   (opaque cards, raised z-index) paints on top, so only his head peeking
+   above the first card is visible. The top margin gives that head room so it
+   doesn't overlap the intro text above. */
 .guzzler-list-wrap {
   position: relative;
   margin-top: 4.25rem;
@@ -2889,20 +2910,23 @@ td.num {
   margin-top: 0;
 }
 
-/* The "shelf" the owl peeks over: an opaque band, in the page colour, painted
-   above the owl (z-index 1) but level with the list top. Its top edge is the
-   line the owl's head pokes above; everything below (the owl's body) is hidden. */
-.guzzler-owl-shelf {
+/* The "shelf" Cedric peeks over: an opaque band, in the page colour, painted
+   above him (z-index 1). Its top edge is the line his head pokes above;
+   everything below (his body) is hidden. Per-view classes set the geometry. */
+.cedric-shelf {
   position: absolute;
   z-index: 1;
+  background: var(--sand);
+  pointer-events: none;
+}
+
+.guzzler-cedric-shelf {
   right: 2.25rem;
   width: 92px;
-  /* sits level with the list top and runs down past the owl's feet, so the
+  /* sits level with the list top and runs down past Cedric's feet, so the
      whole body (including any sliver in the gap between cards) is hidden */
   top: 1px;
   height: 91px;
-  background: var(--sand);
-  pointer-events: none;
 }
 
 .guzzler-list {

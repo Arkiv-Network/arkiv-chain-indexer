@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { AddressFace } from "./AddressFace";
-import { PeekingOwl } from "./PeekingOwl";
+import { Cedric } from "./Cedric";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { fmtDurationSeconds, fmtEth, fmtInteger } from "./format";
@@ -116,8 +116,8 @@ function GuzzlerLeaderboard({
   const [now, setNow] = useState(() => Date.now());
   const [visibleCount, setVisibleCount] = useState(BATCH);
   const [windowKey, setWindowKey] = useState<WindowKey>("1h");
-  // Monotonic counter bumped on every successful refresh — drives the peeking
-  // owl's reappearance the way new blocks do on the home feed.
+  // Monotonic counter bumped on every successful refresh — drives Cedric's
+  // reappearance the way new blocks do on the home feed.
   const [refreshTick, setRefreshTick] = useState(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -217,10 +217,10 @@ function GuzzlerLeaderboard({
       </p>
 
       <div className="guzzler-list-wrap">
-        <PeekingOwl progress={refreshTick} />
-        {/* Opaque shelf painted over the owl's body so only its head peeks —
-            stands in for the solid panel the owl hides behind on the home feed. */}
-        <div className="guzzler-owl-shelf" aria-hidden="true" />
+        <Cedric progress={refreshTick} />
+        {/* Opaque shelf painted over Cedric's body so only his head peeks —
+            stands in for the solid panel he hides behind on the home feed. */}
+        <div className="cedric-shelf guzzler-cedric-shelf" aria-hidden="true" />
         <ol className="guzzler-list">
           {guzzlers.slice(0, shown).map((g, index) => (
             <GuzzlerCard

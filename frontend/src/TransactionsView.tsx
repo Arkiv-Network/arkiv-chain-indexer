@@ -3,6 +3,7 @@ import { fetchTransactions, type StoredTransaction, type TransactionsResponse } 
 import { addressDisplay } from "./addressAliases";
 import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
+import { CedricOnTimer } from "./Cedric";
 import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import {
   buildAddressPermalinkHref,
@@ -512,8 +513,13 @@ export function TransactionsView({
         {copyStatus ? <span>{copyStatus}</span> : null}
       </div>
 
-      <div className="table-wrap">
-        <table className="data-table tx-table">
+      <div className="tx-cedric-wrap">
+        <CedricOnTimer />
+        {/* Opaque shelf hiding Cedric's body so only his head peeks over the
+            table's top edge (the table-wrap clips its own overflow). */}
+        <div className="cedric-shelf tx-cedric-shelf" aria-hidden="true" />
+        <div className="table-wrap">
+          <table className="data-table tx-table">
           <colgroup>
             {columns.map((column) => (
               <col key={column.key} style={{ width: column.width }} />
@@ -542,7 +548,8 @@ export function TransactionsView({
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
     </section>
   );

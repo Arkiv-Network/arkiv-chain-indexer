@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
 import { AddressFace } from "./AddressFace";
-import { PeekingOwl } from "./PeekingOwl";
+import { Cedric } from "./Cedric";
 import {
   fetchBlockByNumber,
   fetchBlocks,
@@ -406,7 +406,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
         </div>
         <div className="home-feed-grid">
           <div className="home-feed-panel-wrap">
-            <PeekingOwl progress={latestBlock?.blockNumber ?? null} />
+            <Cedric progress={latestBlock?.blockNumber ?? null} />
             <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
             <div className="home-panel-heading">
               <h3 id="home-latest-blocks" className="home-panel-heading-title">
