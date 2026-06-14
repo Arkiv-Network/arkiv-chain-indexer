@@ -3045,7 +3045,10 @@ td.num {
     grid-area: rank;
   }
 
-  .guzzler-icon {
+  /* Scope to the leaderboard card: the home "Most active wallets" preview
+     reuses the .guzzler-icon class but lays out on a different grid with no
+     "icon" area, so an unscoped grid-area broke that row on phones. */
+  .guzzler-card .guzzler-icon {
     grid-area: icon;
   }
 
