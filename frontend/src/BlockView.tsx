@@ -202,7 +202,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
           ) : null}
 
           <div className="table-wrap">
-            <table className="data-table block-transactions-table">
+            <table className="data-table tx-table block-transactions-table">
               <colgroup>
                 {columns.map((column) => (
                   <col key={column.key} style={{ width: column.width }} />
@@ -251,53 +251,46 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
       key: "position",
       label: "Pos",
       className: "num",
-      width: "5rem",
+      width: "4.5rem",
       render: (row) => row.position,
     },
     {
       key: "hash",
       label: "Hash",
-      width: "16rem",
+      width: "15rem",
       render: (row) => <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />,
     },
     {
       key: "from",
       label: "From",
-      width: "12rem",
+      width: "12.5rem",
       render: (row) => <AddressCell address={row.from} />,
     },
     {
       key: "to",
       label: "To / contract",
-      width: "12rem",
+      width: "12.5rem",
       render: (row) => <AddressCell address={row.to ?? row.contractAddress} />,
     },
     {
       key: "nonce",
       label: "Nonce",
       className: "num",
-      width: "7rem",
+      width: "6rem",
       render: (row) => row.nonce ?? "-",
     },
     {
       key: "status",
       label: "Status",
-      width: "6rem",
+      width: "6.5rem",
       render: (row) => statusLabel(row.status),
     },
     {
-      key: "valueWei",
-      label: `Value (${tokenSymbol})`,
-      className: "num",
-      width: "9rem",
-      render: (row) => fmtEth(row.valueWei),
-    },
-    {
       key: "gasUsed",
-      label: "Gas used",
+      label: "Gas used / limit",
       className: "num",
-      width: "9rem",
-      render: (row) => fmtInteger(row.gasUsed),
+      width: "12rem",
+      render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
     },
     {
       key: "inputDataSizeBytes",
@@ -319,13 +312,6 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
       className: "num",
       width: "12rem",
       render: (row) => fmtGwei(row.effectiveGasPriceWei),
-    },
-    {
-      key: "priorityFeeWei",
-      label: "Priority fee (gwei)",
-      className: "num",
-      width: "12rem",
-      render: (row) => fmtGwei(row.priorityFeeWei),
     },
     {
       key: "transactionFeeWei",
