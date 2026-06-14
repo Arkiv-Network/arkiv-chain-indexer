@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type ArkivOperationSummaryEntry } from "./arkivOperations";
 import { type BlockInspectionResult } from "./blockInspector";
@@ -293,6 +294,7 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Max-Age": "86400",
 };
+const LLMS_TXT_FILE = new URL("../llms.txt", import.meta.url);
 
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
@@ -346,6 +348,10 @@ export async function handleRequest(
 
   if (request.method !== "GET") {
     return jsonError(405, `Method ${request.method} is not allowed`);
+  }
+
+  if (url.pathname === "/llms.txt") {
+    return handleGetLlmsTxt();
   }
 
   if (url.pathname === "/health") {
@@ -616,6 +622,20 @@ async function handleGetHealth(
   };
 
   return jsonResponse(body);
+}
+
+async function handleGetLlmsTxt(): Promise<Response> {
+  try {
+    const body = await readFile(LLMS_TXT_FILE, "utf8");
+    return new Response(body, {
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "text/plain; charset=utf-8",
+      },
+    });
+  } catch (error) {
+    return jsonError(500, error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function handleGetBlockByNumber(

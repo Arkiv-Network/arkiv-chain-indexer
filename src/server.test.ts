@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   BLOCK_RESPONSE_NAMES,
@@ -440,6 +441,21 @@ describe("GET /blocks", () => {
         null,
       ],
     ]);
+  });
+});
+
+describe("GET /llms.txt", () => {
+  test("serves the repository llms.txt as plain text", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/llms.txt"),
+      {} as ScannerStorage,
+    );
+    const expected = await readFile(new URL("../llms.txt", import.meta.url), "utf8");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await response.text()).toBe(expected);
   });
 });
 
