@@ -4379,6 +4379,18 @@ th:not(.num) .sort-header {
     text-align: left;
   }
 
+  /* Wallet rows are short enough to keep rank/fees on the right rather than
+     wrapping to a second line — there's room even on phones. */
+  .home-wallet-item {
+    grid-template-columns: 2.85rem minmax(0, 1fr) auto;
+  }
+
+  .home-wallet-item .home-feed-side {
+    grid-column: 3;
+    align-items: flex-end;
+    text-align: right;
+  }
+
   .home-panel-heading {
     flex-direction: column;
   }
