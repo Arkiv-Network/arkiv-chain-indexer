@@ -20,6 +20,7 @@ type RecordCategory = {
   key: TransactionRecordCategory;
   title: string;
   valueLabel: string;
+  duplicateColumnKey: string;
   renderValue: (row: StoredTransactionRecord) => string;
 };
 
@@ -37,18 +38,21 @@ function categories(tokenSymbol: string): RecordCategory[] {
       key: "gas_used",
       title: "Maximum gas used",
       valueLabel: "Gas used",
+      duplicateColumnKey: "gasUsed",
       renderValue: (row) => fmtInteger(row.recordValue),
     },
     {
       key: "transaction_fee",
       title: "Maximum fee paid",
       valueLabel: `Fee paid (${tokenSymbol})`,
+      duplicateColumnKey: "transactionFeeWei",
       renderValue: (row) => fmtEth(row.recordValue),
     },
     {
       key: "effective_fee",
       title: "Highest effective fee",
       valueLabel: "Effective fee (gwei)",
+      duplicateColumnKey: "effectiveGasPriceWei",
       renderValue: (row) => fmtGwei(row.recordValue),
     },
   ];
@@ -60,7 +64,7 @@ function recordColumns(
   timeZone: string,
   tokenSymbol: string,
 ): Column[] {
-  return [
+  const sharedColumns: Column[] = [
     {
       key: "rank",
       label: "Rank",
@@ -98,6 +102,8 @@ function recordColumns(
       width: "12rem",
       render: (row) => <AddressCell address={row.from} />,
     },
+  ];
+  const metricColumns: Column[] = [
     {
       key: "gasUsed",
       label: "Gas used",
@@ -120,6 +126,18 @@ function recordColumns(
       render: (row) => fmtEth(row.transactionFeeWei),
     },
   ];
+
+  return sharedColumns.concat(metricColumns.filter((column) => column.key !== category.duplicateColumnKey));
+}
+
+export function recordColumnLabelsForCategory(
+  categoryKey: TransactionRecordCategory,
+  tokenSymbol: string,
+): string[] {
+  const category = categories(tokenSymbol).find((candidate) => candidate.key === categoryKey);
+  if (!category) return [];
+
+  return recordColumns(category, () => {}, "UTC", tokenSymbol).map((column) => column.label);
 }
 
 export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol }: RecordTransactionsViewProps) {
