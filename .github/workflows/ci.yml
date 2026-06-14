@@ -54,8 +54,10 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # Scope to backend tests: the frontend tests live under frontend/ and
+      # import .tsx modules that need React (installed only in the frontend job).
       - name: Run tests
-        run: bun test
+        run: bun test src
         env:
           TEST_DATABASE_URL: postgres://gas:gas@localhost:5432/gas
 
@@ -74,9 +76,18 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
       - name: Install dependencies
         run: npm ci
 
       # `build` runs `tsc -b` first, so this covers the type/language check.
       - name: Typecheck and build
         run: npm run build
+
+      # Frontend tests run here (not in the backend job) because they import
+      # .tsx modules that resolve React from frontend/node_modules.
+      - name: Run tests
+        run: bun test
