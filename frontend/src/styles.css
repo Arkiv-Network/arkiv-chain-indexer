@@ -2792,6 +2792,37 @@ td.num {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
+/* Wrapper that lets the peeking owl sit *behind* the leaderboard list: the
+   list (opaque cards, raised z-index) paints on top, so only the owl's head
+   peeking above the first card is visible. The top margin gives that head room
+   so it doesn't overlap the intro text above. */
+.guzzler-list-wrap {
+  position: relative;
+  margin-top: 4.25rem;
+}
+
+.guzzler-list-wrap > .guzzler-list {
+  position: relative;
+  z-index: 1;
+  margin-top: 0;
+}
+
+/* The "shelf" the owl peeks over: an opaque band, in the page colour, painted
+   above the owl (z-index 1) but level with the list top. Its top edge is the
+   line the owl's head pokes above; everything below (the owl's body) is hidden. */
+.guzzler-owl-shelf {
+  position: absolute;
+  z-index: 1;
+  right: 2.25rem;
+  width: 92px;
+  /* sits level with the list top and runs down past the owl's feet, so the
+     whole body (including any sliver in the gap between cards) is hidden */
+  top: 1px;
+  height: 91px;
+  background: var(--sand);
+  pointer-events: none;
+}
+
 .guzzler-list {
   list-style: none;
   margin: 1rem 0 0;

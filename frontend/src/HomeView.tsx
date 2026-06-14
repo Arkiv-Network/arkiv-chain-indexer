@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
 import { AddressFace } from "./AddressFace";
+import { PeekingOwl } from "./PeekingOwl";
 import {
   fetchBlockByNumber,
   fetchBlocks,
@@ -405,7 +406,7 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
         </div>
         <div className="home-feed-grid">
           <div className="home-feed-panel-wrap">
-            <PeekingOwl latestBlockNumber={latestBlock?.blockNumber ?? null} />
+            <PeekingOwl progress={latestBlock?.blockNumber ?? null} />
             <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
             <div className="home-panel-heading">
               <h3 id="home-latest-blocks" className="home-panel-heading-title">
@@ -476,89 +477,6 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
 
       <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} />
     </section>
-  );
-}
-
-// Decorative owl that peeks over the top edge of the Latest blocks panel,
-// watches the blocks for 4 blinks, then ducks away behind the panel until
-// 3 new blocks have arrived — then it pops back up. Purely cosmetic.
-const OWL_BLINKS_BEFORE_HIDING = 4;
-const OWL_BLOCKS_AWAY = 3;
-
-const OWL_INITIAL_HIDDEN_MS = 3000;
-
-function PeekingOwl({ latestBlockNumber }: { latestBlockNumber: number | null }) {
-  // "initial" — hidden for a few seconds after load; "peeking" — up and
-  // blinking; "away" — ducked behind the panel until 3 new blocks arrive.
-  const [phase, setPhase] = useState<"initial" | "peeking" | "away">("initial");
-  const blinkCount = useRef(0);
-  const hiddenSinceBlock = useRef<number | null>(null);
-
-  // Stay hidden briefly on page load, then make the first appearance.
-  useEffect(() => {
-    const timer = window.setTimeout(() => setPhase("peeking"), OWL_INITIAL_HIDDEN_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  // Count blinks while peeking; after the 4th, duck away.
-  const onIteration = (event: React.AnimationEvent) => {
-    if (event.animationName !== "home-owl-blink" || phase !== "peeking") return;
-    blinkCount.current += 1;
-    if (blinkCount.current >= OWL_BLINKS_BEFORE_HIDING) {
-      hiddenSinceBlock.current = latestBlockNumber;
-      setPhase("away");
-    }
-  };
-
-  // While away, reappear once 3 new blocks have shown up.
-  useEffect(() => {
-    if (phase !== "away" || latestBlockNumber === null) return;
-    if (hiddenSinceBlock.current === null) {
-      hiddenSinceBlock.current = latestBlockNumber;
-      return;
-    }
-    if (latestBlockNumber - hiddenSinceBlock.current >= OWL_BLOCKS_AWAY) {
-      blinkCount.current = 0;
-      setPhase("peeking");
-    }
-  }, [latestBlockNumber, phase]);
-
-  return (
-    <span
-      className={`home-owl${phase === "peeking" ? " is-peeking" : ""}`}
-      aria-hidden="true"
-      onAnimationIteration={onIteration}
-    >
-      <svg viewBox="0 0 120 130" xmlns="http://www.w3.org/2000/svg">
-        {/* ear tufts */}
-        <path d="M30 28 L41 7 L54 31 Z" fill="#6E4B30" />
-        <path d="M90 28 L79 7 L66 31 Z" fill="#6E4B30" />
-        {/* body (mostly hidden behind the panel) */}
-        <path d="M16 72 Q16 130 60 130 Q104 130 104 72 Z" fill="#6E4B30" />
-        {/* head */}
-        <ellipse cx="60" cy="58" rx="45" ry="43" fill="#6E4B30" />
-        {/* belly + face disc */}
-        <ellipse cx="60" cy="94" rx="31" ry="34" fill="#C49A6C" />
-        <ellipse cx="60" cy="57" rx="37" ry="34" fill="#C49A6C" />
-        {/* brows */}
-        <path d="M28 41 Q44 31 57 43" stroke="#5A3C26" strokeWidth="4" fill="none" strokeLinecap="round" />
-        <path d="M92 41 Q76 31 63 43" stroke="#5A3C26" strokeWidth="4" fill="none" strokeLinecap="round" />
-        {/* eyes — grouped so they can blink; pupils sit low to look down at the blocks */}
-        <g className="home-owl-eyes">
-          <circle cx="43" cy="57" r="16.5" fill="#FBF7EF" />
-          <circle cx="77" cy="57" r="16.5" fill="#FBF7EF" />
-          {/* pupils wander to random-ish angles, always biased down-and-left */}
-          <g className="home-owl-pupils">
-            <circle cx="43" cy="57" r="7.6" fill="#2A2320" />
-            <circle cx="77" cy="57" r="7.6" fill="#2A2320" />
-            <circle cx="40" cy="54" r="2.3" fill="#FFFFFF" />
-            <circle cx="74" cy="54" r="2.3" fill="#FFFFFF" />
-          </g>
-        </g>
-        {/* beak */}
-        <path d="M60 65 L68 73 Q60 82 52 73 Z" fill="#FE7446" />
-      </svg>
-    </span>
   );
 }
 

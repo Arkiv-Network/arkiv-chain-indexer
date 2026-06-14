@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { AddressFace } from "./AddressFace";
+import { PeekingOwl } from "./PeekingOwl";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { fmtDurationSeconds, fmtEth, fmtInteger } from "./format";
@@ -115,6 +116,9 @@ function GuzzlerLeaderboard({
   const [now, setNow] = useState(() => Date.now());
   const [visibleCount, setVisibleCount] = useState(BATCH);
   const [windowKey, setWindowKey] = useState<WindowKey>("1h");
+  // Monotonic counter bumped on every successful refresh — drives the peeking
+  // owl's reappearance the way new blocks do on the home feed.
+  const [refreshTick, setRefreshTick] = useState(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(() => {
@@ -124,6 +128,7 @@ function GuzzlerLeaderboard({
       .then((body) => {
         setData(body);
         setNow(Date.now());
+        setRefreshTick((tick) => tick + 1);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -211,21 +216,27 @@ function GuzzlerLeaderboard({
               : "No guzzlers loaded."}
       </p>
 
-      <ol className="guzzler-list">
-        {guzzlers.slice(0, shown).map((g, index) => (
-          <GuzzlerCard
-            key={g.address}
-            rank={index + 1}
-            guzzler={g}
-            maxGas={maxGas}
-            nowMs={now}
-            tokenSymbol={tokenSymbol}
-            // Carry the leaderboard's window selection into the activity view.
-            activityWindowKey={activityWindowForMs(selectedWindow.ms)}
-            onSelect={onSelectAddress}
-          />
-        ))}
-      </ol>
+      <div className="guzzler-list-wrap">
+        <PeekingOwl progress={refreshTick} />
+        {/* Opaque shelf painted over the owl's body so only its head peeks —
+            stands in for the solid panel the owl hides behind on the home feed. */}
+        <div className="guzzler-owl-shelf" aria-hidden="true" />
+        <ol className="guzzler-list">
+          {guzzlers.slice(0, shown).map((g, index) => (
+            <GuzzlerCard
+              key={g.address}
+              rank={index + 1}
+              guzzler={g}
+              maxGas={maxGas}
+              nowMs={now}
+              tokenSymbol={tokenSymbol}
+              // Carry the leaderboard's window selection into the activity view.
+              activityWindowKey={activityWindowForMs(selectedWindow.ms)}
+              onSelect={onSelectAddress}
+            />
+          ))}
+        </ol>
+      </div>
 
       {shown < total ? (
         <div ref={sentinelRef} className="guzzler-sentinel">
