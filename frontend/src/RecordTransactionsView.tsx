@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   fetchTransactionRecords,
   type StoredTransactionRecord,
   type TransactionRecordCategory,
   type TransactionRecordsResponse,
 } from "./api";
-import { addressDisplay } from "./addressAliases";
+import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { TransactionHashLink } from "./TransactionView";
@@ -23,26 +23,102 @@ type RecordCategory = {
   renderValue: (row: StoredTransactionRecord) => string;
 };
 
+interface Column {
+  key: string;
+  label: string;
+  className?: string;
+  width: string;
+  render: (row: StoredTransactionRecord) => ReactNode;
+}
+
 function categories(tokenSymbol: string): RecordCategory[] {
   return [
-  {
-    key: "gas_used",
-    title: "Maximum gas used",
-    valueLabel: "Gas used",
-    renderValue: (row) => fmtInteger(row.recordValue),
-  },
-  {
-    key: "transaction_fee",
-    title: "Maximum fee paid",
-    valueLabel: `Fee paid (${tokenSymbol})`,
-    renderValue: (row) => fmtEth(row.recordValue),
-  },
-  {
-    key: "effective_fee",
-    title: "Highest effective fee",
-    valueLabel: "Effective fee (gwei)",
-    renderValue: (row) => fmtGwei(row.recordValue),
-  },
+    {
+      key: "gas_used",
+      title: "Maximum gas used",
+      valueLabel: "Gas used",
+      renderValue: (row) => fmtInteger(row.recordValue),
+    },
+    {
+      key: "transaction_fee",
+      title: "Maximum fee paid",
+      valueLabel: `Fee paid (${tokenSymbol})`,
+      renderValue: (row) => fmtEth(row.recordValue),
+    },
+    {
+      key: "effective_fee",
+      title: "Highest effective fee",
+      valueLabel: "Effective fee (gwei)",
+      renderValue: (row) => fmtGwei(row.recordValue),
+    },
+  ];
+}
+
+function recordColumns(
+  category: RecordCategory,
+  onLocationChange: () => void,
+  timeZone: string,
+  tokenSymbol: string,
+): Column[] {
+  return [
+    {
+      key: "rank",
+      label: "Rank",
+      className: "num",
+      width: "5rem",
+      render: (row) => row.rank,
+    },
+    {
+      key: "recordValue",
+      label: category.valueLabel,
+      className: "num",
+      width: "12rem",
+      render: category.renderValue,
+    },
+    {
+      key: "block",
+      label: "Block",
+      width: "13rem",
+      render: (row) => (
+        <div className="block-meta">
+          <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
+          <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
+        </div>
+      ),
+    },
+    {
+      key: "hash",
+      label: "Hash",
+      width: "13rem",
+      render: (row) => <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />,
+    },
+    {
+      key: "from",
+      label: "From",
+      width: "12rem",
+      render: (row) => <AddressCell address={row.from} />,
+    },
+    {
+      key: "gasUsed",
+      label: "Gas used",
+      className: "num",
+      width: "9rem",
+      render: (row) => fmtInteger(row.gasUsed),
+    },
+    {
+      key: "effectiveGasPriceWei",
+      label: "Effective fee (gwei)",
+      className: "num",
+      width: "12rem",
+      render: (row) => fmtGwei(row.effectiveGasPriceWei),
+    },
+    {
+      key: "transactionFeeWei",
+      label: `Tx fee (${tokenSymbol})`,
+      className: "num",
+      width: "10rem",
+      render: (row) => fmtEth(row.transactionFeeWei),
+    },
   ];
 }
 
@@ -85,6 +161,7 @@ export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol
             rows={data?.records[category.key] ?? []}
             onLocationChange={onLocationChange}
             timeZone={timeZone}
+            tokenSymbol={tokenSymbol}
           />
         ))}
       </div>
@@ -97,12 +174,16 @@ function RecordCategoryTable({
   rows,
   onLocationChange,
   timeZone,
+  tokenSymbol,
 }: {
   category: RecordCategory;
   rows: StoredTransactionRecord[];
   onLocationChange: () => void;
   timeZone: string;
+  tokenSymbol: string;
 }) {
+  const columns = recordColumns(category, onLocationChange, timeZone, tokenSymbol);
+
   return (
     <section className="record-category">
       <div className="record-category-heading">
@@ -110,57 +191,34 @@ function RecordCategoryTable({
         <span>{rows.length} rows</span>
       </div>
       <div className="table-wrap">
-        <table className="data-table record-table">
+        <table className="data-table tx-table record-table">
           <colgroup>
-            <col style={{ width: "3rem" }} />
-            <col style={{ width: "8rem" }} />
-            <col style={{ width: "4rem" }} />
-            <col style={{ width: "11rem" }} />
-            <col style={{ width: "10.5rem" }} />
-            <col style={{ width: "9rem" }} />
-            <col style={{ width: "5rem" }} />
-            <col style={{ width: "5.5rem" }} />
-            <col style={{ width: "7rem" }} />
+            {columns.map((column) => (
+              <col key={column.key} style={{ width: column.width }} />
+            ))}
           </colgroup>
           <thead>
             <tr>
-              <th scope="col" className="num">Rank</th>
-              <th scope="col" className="num">{category.valueLabel}</th>
-              <th scope="col" className="num">Block</th>
-              <th scope="col">Date</th>
-              <th scope="col">Hash</th>
-              <th scope="col">From</th>
-              <th scope="col" className="num">Gas used</th>
-              <th scope="col" className="num">Effective fee</th>
-              <th scope="col" className="num">Tx fee</th>
+              {columns.map((column) => (
+                <th key={column.key} scope="col" className={column.className}>
+                  {column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9}>No records stored yet.</td>
+                <td colSpan={columns.length}>No records stored yet.</td>
               </tr>
             ) : (
               rows.map((row) => (
                 <tr key={`${row.category}:${row.blockNumberDecimal}:${row.position}`}>
-                  <td className="num" data-label="Rank">{row.rank}</td>
-                  <td className="num" data-label={category.valueLabel}>{category.renderValue(row)}</td>
-                  <td className="num" data-label="Block">
-                    <BlockNumberLink
-                      blockNumber={row.blockNumberDecimal}
-                      onLocationChange={onLocationChange}
-                    />
-                  </td>
-                  <td data-label="Date">{fmtDate(row.blockDate, timeZone)}</td>
-                  <td data-label="Hash">
-                    <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />
-                  </td>
-                  <td data-label="From">
-                    <AddressText address={row.from} />
-                  </td>
-                  <td className="num" data-label="Gas used">{fmtInteger(row.gasUsed)}</td>
-                  <td className="num" data-label="Effective fee">{fmtGwei(row.effectiveGasPriceWei)}</td>
-                  <td className="num" data-label="Tx fee">{fmtEth(row.transactionFeeWei)}</td>
+                  {columns.map((column) => (
+                    <td key={column.key} className={column.className} data-label={column.label}>
+                      {column.render(row)}
+                    </td>
+                  ))}
                 </tr>
               ))
             )}
@@ -168,14 +226,5 @@ function RecordCategoryTable({
         </table>
       </div>
     </section>
-  );
-}
-
-function AddressText({ address }: { address: string | null | undefined }) {
-  const display = addressDisplay(address);
-  return (
-    <span className="mono truncate" title={display.title}>
-      {display.label}
-    </span>
   );
 }
