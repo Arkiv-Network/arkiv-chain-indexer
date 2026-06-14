@@ -257,13 +257,13 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     {
       key: "hash",
       label: "Hash",
-      width: "13rem",
+      width: "198px",
       render: (row) => <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />,
     },
     {
       key: "arkivOps",
       label: "Arkiv ops",
-      width: "10rem",
+      width: "210px",
       render: (row) =>
         row.operationsSummary?.length ? (
           <span className="op-badge-list">
@@ -287,42 +287,42 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
       key: "nonce",
       label: "Nonce",
       className: "num",
-      width: "7rem",
+      width: "62px",
       render: (row) => row.nonce ?? "-",
     },
     {
       key: "gasUsed",
       label: "Gas (used / limit)",
       className: "num",
-      width: "12rem",
+      width: "162px",
       render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
     },
     {
       key: "inputDataSizeBytes",
       label: "Input data",
       className: "num",
-      width: "9rem",
+      width: "94px",
       render: (row) => fmtBytes(row.inputDataSizeBytes),
     },
     {
       key: "inputDataCompressedSizeBytes",
       label: "Input zstd",
       className: "num",
-      width: "9rem",
+      width: "94px",
       render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
     },
     {
       key: "effectiveGasPriceWei",
       label: "Effective fee (gwei)",
       className: "num",
-      width: "12rem",
+      width: "112px",
       render: (row) => fmtGwei(row.effectiveGasPriceWei),
     },
     {
       key: "transactionFeeWei",
       label: `Tx fee (${tokenSymbol})`,
       className: "num",
-      width: "10rem",
+      width: "140px",
       render: (row) => fmtEth(row.transactionFeeWei),
     },
   ];
