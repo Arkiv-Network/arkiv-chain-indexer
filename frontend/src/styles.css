@@ -2182,7 +2182,9 @@ button.secondary {
    block-list tables; the margin gives his head room above the table. */
 .cedric-table-wrap {
   position: relative;
-  margin-top: 4.25rem;
+  /* enough room for Cedric's head to peek; his body sits to the right of the
+     summary line above, so the gap stays tight */
+  margin-top: 2.25rem;
 }
 
 .cedric-table-wrap > .table-wrap {
