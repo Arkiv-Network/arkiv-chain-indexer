@@ -10,7 +10,6 @@ import {
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
-import { BlockList } from "./icons";
 import { CedricOnTimer } from "./Cedric";
 
 interface BlocksViewProps {
@@ -330,7 +329,7 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
         <PageBreadcrumbs
           items={[
             { view: "home", label: "Home" },
-            { view: "blocks", label: "Block list", icon: <BlockList size={16} /> },
+            { view: "blocks", label: "Block list" },
           ]}
           onLocationChange={onLocationChange}
         />
