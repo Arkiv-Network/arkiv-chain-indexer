@@ -73,8 +73,13 @@ interface BaseloadRpcClient {
   getChainId: () => Promise<number>;
   getBlockNumber: () => Promise<number>;
   getLatestNonce: (address: string) => Promise<number>;
-  waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<unknown>;
+  waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<BaseloadTransactionReceipt>;
 }
+
+type BaseloadTransactionReceipt = {
+  status?: unknown;
+  [key: string]: unknown;
+};
 
 const BALANCE_POLL_INTERVAL_MS = 10_000;
 
@@ -426,10 +431,7 @@ class BaseloadWorkerTask {
                 ...statusCounts(),
               });
               const result = await clients.arkiv.createEntity(input, await sendTxParams());
-              await clients.rpc.waitForTransactionReceipt(
-                result.txHash,
-                this.abortController.signal,
-              );
+              await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
               const entityKey = readBaseloadCreatedEntityKeyFromSdkResult(result.entityKey, result.txHash);
               counters.createdCount += 1;
               if (worker.behavior === "create-update" || worker.behavior === "create-update-delete") {
@@ -457,10 +459,7 @@ class BaseloadWorkerTask {
                 createBaseloadEntityInput(worker),
                 await sendTxParams(),
               );
-              await clients.rpc.waitForTransactionReceipt(
-                created.txHash,
-                this.abortController.signal,
-              );
+              await waitForSuccessfulTransactionReceipt(clients.rpc, created.txHash, this.abortController.signal);
               const createdEntityKey = readBaseloadCreatedEntityKeyFromSdkResult(
                 created.entityKey,
                 created.txHash,
@@ -479,7 +478,8 @@ class BaseloadWorkerTask {
                 await sendTxParams(),
               );
               // The SDK types changeOwnership's txHash as plain string, unlike the other actions.
-              await clients.rpc.waitForTransactionReceipt(
+              await waitForSuccessfulTransactionReceipt(
+                clients.rpc,
                 owned.txHash as HexString,
                 this.abortController.signal,
               );
@@ -505,7 +505,14 @@ class BaseloadWorkerTask {
                 createBaseloadUpdateInput(worker, entry.entityKey),
                 await sendTxParams(),
               );
-              await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
+              try {
+                await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
+              } catch (error) {
+                if (error instanceof BaseloadTransactionRevertedError) {
+                  pool = pool.filter((candidate) => candidate !== entry);
+                }
+                throw error;
+              }
               counters.updatedCount += 1;
               entry.expiresAtMs = Date.now() + worker.ttlSeconds * 1000;
               this.postStatus("running", {
@@ -529,7 +536,14 @@ class BaseloadWorkerTask {
                 { entityKey: entry.entityKey },
                 await sendTxParams(),
               );
-              await clients.rpc.waitForTransactionReceipt(result.txHash, this.abortController.signal);
+              try {
+                await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
+              } catch (error) {
+                if (error instanceof BaseloadTransactionRevertedError) {
+                  pool = pool.filter((candidate) => candidate !== entry);
+                }
+                throw error;
+              }
               counters.deletedCount += 1;
               pool = pool.filter((candidate) => candidate !== entry);
               this.postStatus("running", {
@@ -645,7 +659,12 @@ function createRpcClient(rpcUrl: string): BaseloadRpcClient {
     waitForTransactionReceipt: async (txHash, signal) => {
       while (!signal.aborted) {
         const result = await callRpc(rpcUrl, "eth_getTransactionReceipt", [txHash]);
-        if (result !== null) return result;
+        if (result !== null) {
+          if (!isRecord(result)) {
+            throw new Error(`RPC eth_getTransactionReceipt returned a non-object receipt for ${txHash}`);
+          }
+          return result;
+        }
         await sleep(1_000, signal);
       }
       throw new Error(`Stopped while waiting for transaction receipt ${txHash}`);
@@ -666,6 +685,42 @@ export function readBaseloadCreatedEntityKeyFromSdkResult(
   }
 
   return sdkEntityKey;
+}
+
+export function isBaseloadTransactionReceiptSuccessful(receipt: BaseloadTransactionReceipt): boolean {
+  const status = receipt.status;
+  if (status === undefined || status === null) return true;
+
+  if (typeof status === "string") {
+    const normalized = status.trim().toLowerCase();
+    if (normalized === "0x1" || normalized === "1") return true;
+    if (normalized === "0x0" || normalized === "0") return false;
+  }
+
+  if (typeof status === "number") return status === 1;
+  if (typeof status === "bigint") return status === 1n;
+  if (typeof status === "boolean") return status;
+
+  throw new Error(`Transaction receipt has unsupported status value ${safeStringify(status)}`);
+}
+
+async function waitForSuccessfulTransactionReceipt(
+  rpc: BaseloadRpcClient,
+  txHash: HexString,
+  signal: AbortSignal,
+): Promise<BaseloadTransactionReceipt> {
+  const receipt = await rpc.waitForTransactionReceipt(txHash, signal);
+  if (!isBaseloadTransactionReceiptSuccessful(receipt)) {
+    throw new BaseloadTransactionRevertedError(txHash, receipt);
+  }
+  return receipt;
+}
+
+class BaseloadTransactionRevertedError extends Error {
+  constructor(txHash: HexString, receipt: BaseloadTransactionReceipt) {
+    super(`Transaction ${txHash} was mined but reverted: ${safeStringify(receipt)}`);
+    this.name = "BaseloadTransactionRevertedError";
+  }
 }
 
 function isBytes32Hex(value: unknown): value is HexString {
@@ -707,6 +762,10 @@ async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promi
     );
   }
   return body.result;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const EXTRA_ERROR_FIELDS = [

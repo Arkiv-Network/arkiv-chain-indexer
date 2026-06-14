@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readBaseloadCreatedEntityKeyFromSdkResult } from "./baseloadRuntime";
+import {
+  isBaseloadTransactionReceiptSuccessful,
+  readBaseloadCreatedEntityKeyFromSdkResult,
+} from "./baseloadRuntime";
 
 const TX_HASH = `0x${"aa".repeat(32)}` as `0x${string}`;
 const ENTITY_KEY = `0x${"11".repeat(32)}` as `0x${string}`;
@@ -19,5 +22,27 @@ describe("baseload runtime SDK entity key handling", () => {
     expect(() => readBaseloadCreatedEntityKeyFromSdkResult("0x1234", TX_HASH)).toThrow(
       /SDK returned invalid entity key/,
     );
+  });
+});
+
+describe("baseload runtime receipt handling", () => {
+  test("accepts successful transaction receipt status forms", () => {
+    expect(isBaseloadTransactionReceiptSuccessful({ status: "0x1" })).toBe(true);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: "1" })).toBe(true);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: 1 })).toBe(true);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: 1n })).toBe(true);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: true })).toBe(true);
+  });
+
+  test("rejects reverted transaction receipt status forms", () => {
+    expect(isBaseloadTransactionReceiptSuccessful({ status: "0x0" })).toBe(false);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: "0" })).toBe(false);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: 0 })).toBe(false);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: 0n })).toBe(false);
+    expect(isBaseloadTransactionReceiptSuccessful({ status: false })).toBe(false);
+  });
+
+  test("keeps compatibility with receipt fixtures that omit status", () => {
+    expect(isBaseloadTransactionReceiptSuccessful({ transactionHash: TX_HASH })).toBe(true);
   });
 });
