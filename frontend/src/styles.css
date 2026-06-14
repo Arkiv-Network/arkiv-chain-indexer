@@ -442,8 +442,10 @@ footer {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  gap: 0.85rem;
 }
 
+.footer-link,
 .admin-login-link {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -454,6 +456,7 @@ footer {
   transition: opacity 0.15s ease;
 }
 
+.footer-link:hover,
 .admin-login-link:hover {
   opacity: 1;
   text-decoration: underline;
@@ -4495,6 +4498,22 @@ th:not(.num) .sort-header {
   margin: 0 0 0.75rem;
   color: var(--ink-muted, #6b6b6b);
   font-size: 0.9rem;
+}
+
+.home-llms-note {
+  margin: 0.65rem 0 0;
+  color: var(--ink-muted, #6b6b6b);
+  font-size: 0.88rem;
+}
+
+.home-llms-note a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.home-llms-note a:hover,
+.home-llms-note a:focus-visible {
+  text-decoration: underline;
 }
 
 .home-panel-heading .home-activity-note {

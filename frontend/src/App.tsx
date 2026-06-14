@@ -656,6 +656,9 @@ export function App() {
       </main>
       <footer>
         <div className="footer-inner">
+          <a href="/llms.txt" className="footer-link">
+            llms.txt
+          </a>
           <a href="#" className="admin-login-link" onClick={onAdminLoginClick}>
             admin login
           </a>

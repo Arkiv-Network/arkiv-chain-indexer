@@ -395,6 +395,9 @@ export function HomeView({ onLocationChange, settings, timeZone }: HomeViewProps
             value={lastMinuteAvgGas !== null ? fmtGasBillions(lastMinuteAvgGas) : "—"}
           />
         </div>
+        <p className="home-llms-note">
+          Machine-readable API and data notes are available at <a href="/llms.txt">llms.txt</a>.
+        </p>
       </div>
 
       <div>
