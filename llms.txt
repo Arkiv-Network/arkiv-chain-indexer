@@ -1,0 +1,498 @@
+# Arkiv Chain Indexer
+
+This repository contains a Bun and TypeScript Ethereum block scanner, PostgreSQL storage layer,
+range/sender aggregators, HTTP backend, Baseload worker control plane, Redis-backed recent-sender
+leaderboards, and a static frontend.
+
+The backend API is implemented in `src/server.ts` and started by `bun run serve` through
+`src/serve.ts`. It serves stored scanner data from PostgreSQL only. It does not fetch blocks from
+JSON-RPC during normal API requests. The production frontend serves the React app and proxies
+requests with the `/api/` prefix to the backend after stripping `/api`; the backend paths below are
+the direct unprefixed paths.
+
+## Core Runtime Commands
+
+```sh
+bun install
+bun test
+DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run serve
+DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate -- --range 50
+DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate-all -- --once
+DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate-senders -- --once
+docker compose up --build
+```
+
+## Backend Configuration
+
+`bun run serve` accepts CLI flags and environment variables:
+
+| CLI flag | Environment variables | Default | Meaning |
+| --- | --- | --- | --- |
+| `--database-url <url>` | `DATABASE_URL`, `SCANNER_DATABASE_URL` | required | PostgreSQL connection string. |
+| `--port <port>` | `SERVER_PORT` | `3000` | Backend TCP port. Use `0` for any free port. |
+| `--host <host>` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
+| `--transaction-data-enabled <bool>` | `SERVER_TRANSACTION_DATA_ENABLED`, `SAVE_TRANSACTION_DATA` | `true` | Enables transaction inspection endpoints and advertises transaction features in `/health`. |
+| `--baseload-admin-bearer-token <token>` | `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token for mutating Baseload requests and saved config routes. |
+| `--baseload-initial-config <path>` | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional Baseload worker config JSON file loaded once at backend startup. |
+| `--redis-url <url>` | `REDIS_URL`, `SERVER_REDIS_URL` | unset | Enables Redis-backed `/guzzlers` and `/guzzler/:address` APIs. |
+
+Related scanner and worker settings:
+
+- `SAVE_TRANSACTION_DATA=true` or `SCANNER_SAVE_TRANSACTION_DATA=true` makes the scanner persist
+  transaction rows. Without stored transaction rows, transaction endpoints may be enabled but have no
+  useful data.
+- `DECODER_URL` or `SCANNER_DECODER_URL` points to the Arkiv transaction decoder. It is used only
+  when transaction data is stored.
+- `BASELOAD_RPC_NODE` enables backend Baseload workers to submit Arkiv operations.
+- `BASELOAD_MNEMONIC` or `MNEMONIC` controls backend Baseload wallet derivation. If unset, a
+  deterministic development mnemonic is used.
+
+## Global API Conventions
+
+- All responses include permissive CORS headers.
+- `OPTIONS` to any path returns `204`.
+- Unsupported methods return JSON errors: `{ "error": "..." }`.
+- Unknown paths return `404` with `{ "error": "Not found: /path" }`.
+- Most route validation errors return `400`.
+- Mutating Baseload routes may return `401` for missing bearer tokens or `403` for invalid bearer
+  tokens.
+- The backend never returns raw transaction calldata and never stores decoded Arkiv payload bytes.
+  It stores and returns payload size only.
+- Wei, gas, nonce, block number, and other values that may exceed JavaScript precision are returned
+  as decimal strings unless a response type is explicitly a small number.
+- Dates are ISO-8601 UTC strings.
+- `order` parameters accept `asc` or `desc`; invalid values return `400`.
+- Integer query parameters must be non-negative or positive as required by the route.
+- `/blocks`, `/ranges`, and `/guzzlers` return `Content-Encoding: zstd` when the request
+  `Accept-Encoding` header allows `zstd`; otherwise they return normal JSON.
+
+## Feature Gates
+
+| Feature | Enabled by | Affected endpoints |
+| --- | --- | --- |
+| Transaction inspection | `SERVER_TRANSACTION_DATA_ENABLED` or `SAVE_TRANSACTION_DATA` not false | `/block/:blockNumber`, `/transactions`, `/transaction/:hash`, `/senders` return `404` when disabled. |
+| Transaction records | Stored transaction record rows | `/transaction-records` remains routed even if transaction data is disabled, but it is useful only with record data. |
+| Arkiv operation metadata | Scanner transaction storage plus decoder URL | `/transactions` may include `operationsSummary`; `/transaction/:hash` includes `operations`. |
+| Baseload workers | Backend started with Baseload runtime; `BASELOAD_RPC_NODE` required to actually submit transactions | `/baseload` status is public; runtime-dependent writes fail if runtime is unavailable. |
+| Baseload admin protection | `BASELOAD_ADMIN_BEARER_TOKEN` | Mutating `/baseload`, all `/baseload/configs...`, and `/admin/verify`. |
+| Guzzlers | `REDIS_URL` or `SERVER_REDIS_URL` | `/guzzlers` and `/guzzler/:address`; disabled routes return `503`. |
+
+## Endpoint Index
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `OPTIONS` | any | CORS preflight. |
+| `GET` | `/health` | Backend, scanner, database, feature, and guzzler cache health. |
+| `GET` | `/blocks` | Compact rows for stored per-block metrics. |
+| `GET` | `/blocks/:blockNumber` | One compact stored block row. |
+| `GET` | `/block/:blockNumber` | Stored block plus stored transaction rows for inspection. |
+| `GET` | `/ranges` | Compact rows for precomputed fixed-size block ranges. |
+| `GET` | `/transactions` | Stored transaction rows with pagination and filters. |
+| `GET` | `/transaction/:hash` | One stored transaction plus decoded Arkiv operations. |
+| `GET` | `/transaction-records` | Top stored transaction records by gas, fee, and effective fee. |
+| `GET` | `/senders` | Precomputed sender-address activity stats. |
+| `GET` | `/guzzlers` | Redis-cached active sender leaderboards over recent windows. |
+| `GET` | `/guzzler/:address` | One sender's recent per-minute guzzler history. |
+| `GET` | `/baseload` | Current backend Baseload state and worker statuses. |
+| `PUT` | `/baseload` | Replace Baseload worker config and reconcile workers. |
+| `GET` | `/admin/verify` | Validate the configured Baseload admin bearer token. |
+| `GET` | `/baseload/configs` | List saved Baseload configs. |
+| `GET` | `/baseload/configs/:name` | Fetch one saved Baseload config. |
+| `PUT` | `/baseload/configs/:name` | Save or replace one named Baseload config. |
+| `DELETE` | `/baseload/configs/:name` | Delete one named Baseload config. |
+| `PUT` | `/baseload/configs/:name/load` | Load one saved config into the active Baseload runtime. |
+
+## `GET /health`
+
+Returns:
+
+- `ok`: boolean.
+- `serverTimeUtc`: current server timestamp.
+- `build`: build metadata from `src/buildInfo.ts`.
+- `scanner`: progress fields:
+  `lastSuccessfulBlock`, `lastSuccessfulBlockDate`, `lastSuccessfulScannedAtUtc`,
+  `lastBlockAgeSeconds`, `backfillNextBlock`, `latestObservedBlock`, `safeHeadBlock`,
+  `latestObservedAtUtc`, `latestObservationAgeSeconds`, `headLagBlocks`, `safeHeadLagBlocks`.
+- `database`: `totalSizeBytes` plus per-table `tableName`, `rowCount`, `tableSizeBytes`,
+  `indexesSizeBytes`, `totalSizeBytes`.
+- `features`: booleans for `transactionData` and `guzzlers`.
+- `guzzlers`: Redis cache health: `enabled`, `entryCount`, `bucketCount`, `oldestBucket`,
+  `newestBucket`, `totalSizeBytes`.
+
+## `GET /blocks`
+
+Returns stored block metric rows. Results default to newest first and are capped at 10,000 rows.
+Filters combine additively.
+
+Query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `blockGt` | Only blocks with `block_number > blockGt`. |
+| `blockLt` | Only blocks with `block_number < blockLt`. |
+| `dateGt` | Only blocks with `block_date > dateGt`; value is parsed as ISO-8601. |
+| `dateLt` | Only blocks with `block_date < dateLt`; value is parsed as ISO-8601. |
+| `limit` | Positive integer, maximum 10,000. |
+| `order` | `desc` default, or `asc`. |
+
+Response shape:
+
+```json
+{
+  "count": 0,
+  "limit": 10000,
+  "truncated": false,
+  "filters": {
+    "blockGt": null,
+    "blockLt": null,
+    "dateGt": null,
+    "dateLt": null
+  },
+  "names": ["blockNumber"],
+  "blocks": []
+}
+```
+
+`names` field order:
+
+```txt
+blockNumber, blockDate, baseBlockFeeWei, totalGasUsed, totalInputDataSizeBytes,
+totalInputDataCompressedSizeBytes, maxGasInBlock, transactionCount, blockRewardWei,
+burntFeesWei, totalTransactionFeeWei, feePriceSumWei, priorityFeeSumWei,
+priorityFeeWeightedNumeratorWei, priorityFeeGasWeightedNumeratorWei, averageFeePriceWei,
+averageTransactionFeeWei, averageTransactionGasUsed, averageTransactionInputDataSizeBytes,
+averageTransactionInputDataCompressedSizeBytes, averagePriorityFeeWeightedWei,
+averagePriorityFeeWei, batcherQueueSize, batcherIntensity, batcherLowerThreshold,
+batcherUpperThreshold, batcherMaxBlockSize, batcherMaxTxSize
+```
+
+## `GET /blocks/:blockNumber`
+
+Returns one compact stored block row as a JSON array using the same field order as `/blocks.names`.
+Returns `404` if the block is not stored.
+
+## `GET /block/:blockNumber`
+
+Requires transaction data to be enabled. Returns `{ "cached": false, "block": ... }` for one stored
+block plus up to 1,000 stored transactions in ascending position order. Returns `404` when
+transaction data is disabled or the block is unknown.
+
+The block includes the metrics from `/blocks` plus `blockNumberDecimal` and `transactions`.
+Each transaction includes:
+
+```txt
+position, hash, from, to, type, nonce, valueWei, gasLimit, gasUsed,
+inputDataSizeBytes, inputDataCompressedSizeBytes, cumulativeGasUsed, gasPriceWei,
+maxFeePerGasWei, maxPriorityFeePerGasWei, effectiveGasPriceWei, priorityFeeWei,
+transactionFeeWei, status, contractAddress
+```
+
+## `GET /ranges`
+
+Returns precomputed fixed-size block range aggregate rows. Results default to `range_start`
+descending and are capped at 10,000 rows. A range row exists only when the aggregator has written it.
+Supported range sizes are `2`, `5`, `10`, `20`, `50`, `100`, `200`, `500`, and `1000`. Range
+boundaries are `[k * M, k * M + M - 1]`.
+
+Query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `rangeSize` | One supported size. Defaults to `100`. |
+| `rangeStartGt` | Only ranges with `range_start > rangeStartGt`. |
+| `rangeStartLt` | Only ranges with `range_start < rangeStartLt`. |
+| `dateGt` | Only ranges whose `max_block_date > dateGt`; value is parsed as ISO-8601. |
+| `dateLt` | Only ranges whose `min_block_date < dateLt`; value is parsed as ISO-8601. |
+| `limit` | Positive integer, maximum 10,000. |
+| `order` | `desc` default, or `asc`. |
+
+Response shape includes `count`, `limit`, `truncated`, `filters`, `names`, and `ranges`.
+
+`names` field order:
+
+```txt
+rangeSize, rangeStart, rangeEnd, minBlockDate, maxBlockDate, minBaseFeeWei,
+maxBaseFeeWei, averageBaseFeeWei, totalGasUsed, totalInputDataSizeBytes,
+totalInputDataCompressedSizeBytes, totalMaxGas, minMaxGasInBlock, maxMaxGasInBlock,
+transactionCount, totalBlockRewardWei, totalBurntFeesWei, averageBlockRewardWei,
+averageBurntFeesWei, averageFeePriceWei, averageTransactionGasUsed,
+averageTransactionInputDataSizeBytes, averageTransactionInputDataCompressedSizeBytes,
+averagePriorityFeeWeightedWei, averagePriorityFeeWei, minBatcherQueueSize,
+maxBatcherQueueSize, averageBatcherQueueSize, averageBatcherIntensity,
+averageBatcherLowerThreshold, averageBatcherUpperThreshold, averageBatcherMaxBlockSize,
+averageBatcherMaxTxSize
+```
+
+## `GET /transactions`
+
+Requires transaction data to be enabled. Returns stored transaction rows ordered by block number and
+transaction position. Results default to newest first and are capped at 1,000 rows per page.
+
+Query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `block` | Only transactions from exactly this block number. |
+| `blockGt` | Only transactions with `block_number > blockGt`. |
+| `blockLt` | Only transactions with `block_number < blockLt`. |
+| `address` | Only transactions from this 20-byte hex sender address; normalized to lowercase. |
+| `nonceGt` | Only transactions with nonce greater than this value. |
+| `nonceLt` | Only transactions with nonce lower than this value. |
+| `dateGt` | Only transactions in blocks newer than this ISO-8601 timestamp. |
+| `dateLt` | Only transactions in blocks older than this ISO-8601 timestamp. |
+| `limit` | Positive integer, maximum 1,000. |
+| `page` | Positive integer page number. Defaults to `1`. |
+| `order` | `desc` default, or `asc`. |
+
+Response shape:
+
+```json
+{
+  "count": 0,
+  "limit": 1000,
+  "truncated": false,
+  "page": 1,
+  "pageSize": 1000,
+  "totalCount": 0,
+  "totalPages": 0,
+  "hasPreviousPage": false,
+  "hasNextPage": false,
+  "filters": {
+    "block": null,
+    "blockGt": null,
+    "blockLt": null,
+    "address": null,
+    "nonceGt": null,
+    "nonceLt": null,
+    "dateGt": null,
+    "dateLt": null
+  },
+  "transactions": []
+}
+```
+
+Transaction rows include the transaction fields listed under `/block/:blockNumber` plus block context:
+`blockNumber`, `blockNumberDecimal`, `blockDate`, and `baseBlockFeeWei`.
+
+If decoded Arkiv operations were stored for a transaction, that row may also include
+`operationsSummary`, an array of `{ operation, operationType, count }` entries.
+
+## `GET /transaction/:hash`
+
+Requires transaction data to be enabled. The hash must match `0x` plus 64 hex characters.
+
+Returns `{ "transaction": ... }`. The transaction has the same stored transaction fields as
+`/transactions` and always includes `operations`, an array of decoded Arkiv operation metadata. The
+array is empty if no operations are stored.
+
+Each operation includes:
+
+```txt
+opIndex, operationType, operation, entityKey, contentType, payloadSizeBytes,
+attributes, expiresAtBlocks, newOwner
+```
+
+Each operation attribute includes `key`, `valueType`, `valueTypeName`, and `value`.
+
+## `GET /transaction-records`
+
+Returns top stored transaction records by category. This endpoint is routed independently of the
+transaction-data feature flag but depends on stored transaction record rows.
+
+Query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | Positive integer, maximum 20 through the HTTP API. Defaults to 20. |
+
+Response shape:
+
+```json
+{
+  "limit": 20,
+  "records": {
+    "gas_used": [],
+    "transaction_fee": [],
+    "effective_fee": []
+  }
+}
+```
+
+Each record is a transaction row plus `category`, `recordValue`, `rank`, and `recordedAt`.
+
+## `GET /senders`
+
+Requires transaction data to be enabled. Returns precomputed sender-address stats from
+`sender_stats`, ordered by found transaction count.
+
+Query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | Positive integer, maximum 10,000. |
+| `order` | `desc` default for most active first, or `asc`. |
+
+Each sender row includes:
+
+```txt
+address, latestNonce, transactionCount, totalGasUsed, totalTransactionFeeWei,
+totalValueWei, averageGasUsed, averageTransactionFeeWei, firstBlockNumber,
+firstBlockNumberDecimal, lastBlockNumber, lastBlockNumberDecimal, firstBlockDate,
+lastBlockDate, aggregatedAt
+```
+
+## `GET /guzzlers`
+
+Requires Redis-backed guzzler tracking. Returns cached active-sender leaderboards computed by the
+near-head scanner. The backend slices the cached board; it does not rebuild leaderboards on request.
+Before the first refresh, it returns empty boards. Disabled guzzlers return `503`.
+
+Query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | Positive integer, maximum 250. Defaults to 100. |
+| `window` | Optional single window label. One of `5m`, `20m`, `1h`, `6h`, `24h`. |
+
+Response fields:
+
+- `generatedAt`: board generation time.
+- `retentionMs`: bucket retention period, equal to 24 hours.
+- `limit`: effective top-N per window.
+- `names`: compact stat field order.
+- `windows`: array of requested or all windows.
+
+`names` field order for each guzzler stat:
+
+```txt
+address, transactionCount, totalGasUsed, totalFeeWei, firstSeen, lastSeen
+```
+
+Each window row includes `label`, `windowMs`, `count`, and compact `guzzlers` rows.
+
+## `GET /guzzler/:address`
+
+Requires Redis-backed guzzler tracking. The address must be a 20-byte hex address and is normalized
+to lowercase. Returns one sender's retained one-minute history over the 24-hour retention window. An
+unknown sender returns an empty history.
+
+Response fields include:
+
+```txt
+address, generatedAt, retentionMs, bucketMs, count, names, points
+```
+
+`names` field order for each point:
+
+```txt
+minute, startTime, transactionCount, totalGasUsed, totalFeeWei, firstSeen, lastSeen
+```
+
+## Baseload APIs
+
+Baseload is a backend control plane for Arkiv load-generation workers. The browser never sends
+private-key material or Arkiv RPC calls directly. The backend derives worker wallets from the
+configured mnemonic at `m/44'/60'/0'/0/<walletNumber>`.
+
+Worker config version is `2`. Worker behavior values:
+
+```txt
+create, create-update, create-ownership, time-bomb, create-update-delete
+```
+
+Worker config fields:
+
+```txt
+id, behavior, maxGasPriceGwei, opsPerMinute, singleCreatePayloadSize,
+singleCreateStringArgumentCount, singleCreateNumberArgumentCount, entityPoolSize,
+timeBombOffsetSeconds, walletNumber, walletAddress, startBlock, endBlock,
+durationSeconds, ttlSeconds
+```
+
+### `GET /baseload`
+
+Returns backend Baseload state, enabled/runtime availability, active config, and worker statuses.
+This route is public even when `BASELOAD_ADMIN_BEARER_TOKEN` is configured.
+
+### `PUT /baseload`
+
+Replaces the active backend Baseload config and starts, updates, or stops workers to match it.
+Requires `Authorization: Bearer <token>` when `BASELOAD_ADMIN_BEARER_TOKEN` is set. The request body
+must be a JSON object normalizable to:
+
+```json
+{
+  "version": 2,
+  "workers": []
+}
+```
+
+Invalid JSON or invalid config returns `400`. If no admin token is configured, mutation is
+unrestricted.
+
+### `GET /admin/verify`
+
+Validates the configured Baseload admin bearer token. Returns `503` when no admin bearer token is
+configured. Requires `Authorization: Bearer <token>` and returns `{ "authorized": true }` on success.
+
+### Saved Baseload Configs
+
+All saved config routes require the admin bearer token when `BASELOAD_ADMIN_BEARER_TOKEN` is set.
+Names are URL-decoded, trimmed, must start with a letter or number, may contain letters, numbers,
+spaces, dots, underscores, or hyphens, and are limited to 80 characters.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/baseload/configs` | Returns `{ "configs": [...] }` with `name`, `workerCount`, `createdAt`, and `updatedAt`. |
+| `GET` | `/baseload/configs/:name` | Returns one saved config summary plus `config`. |
+| `PUT` | `/baseload/configs/:name` | Saves a normalized config body under the name. |
+| `DELETE` | `/baseload/configs/:name` | Deletes the named config and returns `{ "deleted": true|false }`. |
+| `PUT` | `/baseload/configs/:name/load` | Loads the saved config into the active Baseload runtime. Returns `503` if runtime is unavailable. |
+
+## Stored Metric Conventions
+
+- `baseBlockFeeWei` comes from block `baseFeePerGas`; networks without it store `0`.
+- `maxGasInBlock` is block `gasLimit`.
+- Transaction fee is `receipt.gasUsed * receipt.effectiveGasPrice`.
+- Priority fee is `max(effectiveGasPrice - baseFeePerGas, 0)`.
+- `averageFeePriceWei` is the simple per-transaction average of `effectiveGasPrice`.
+- `averageTransactionGasUsed` is the simple per-transaction average of receipt gas used.
+- `averagePriorityFeeWeightedWei` is weighted by receipt gas used.
+- Empty blocks store `0` for average values.
+- Batcher collector fields are nullable enrichment metrics:
+  `batcherQueueSize`, `batcherIntensity`, `batcherLowerThreshold`, `batcherUpperThreshold`,
+  `batcherMaxBlockSize`, `batcherMaxTxSize`.
+
+## Arkiv Operation Metadata
+
+The scanner can send Arkiv registry transaction calldata to the external decoder service. A decoder
+HTTP 400 means the calldata is not an Arkiv `execute()` call and is skipped. Other decoder failures
+make the whole block retry.
+
+Stored operation metadata is keyed by transaction block number, position, and operation index.
+Stored fields include operation type/name, entity key, content type, attributes, expiry, new owner,
+and `payloadSizeBytes`.
+
+Never expect `payload.hex`, `payload.text`, or raw transaction `input` in database rows or API
+responses. They are intentionally dropped and must not be persisted.
+
+## Scanner and Aggregator Behavior Relevant to API Data
+
+- The scanner stores one completed block at a time and resumes from the last successfully stored
+  block.
+- A failed block read is retried and is not skipped.
+- The block row, transaction rows, operation rows, and scanner progress update are written in one
+  PostgreSQL transaction.
+- The main range aggregator writes `block_ranges` for complete fixed-size windows only.
+- `aggregate-all` walks every supported range size repeatedly.
+- `aggregate-senders` rebuilds `sender_stats` from stored transaction rows.
+- The guzzler cache is database-free recent activity in Redis. It keeps one-minute buckets for 24
+  hours and cached top-N boards for the configured windows.
+
+## Frontend Notes for API Consumers
+
+- Development frontend uses Vite and proxies `/api` to the backend.
+- Production frontend uses `frontend/server.js` to serve static files and reverse-proxy `/api/*`.
+- Direct backend URLs use paths such as `/blocks`; frontend-origin URLs use `/api/blocks`.
+- Readonly views and status APIs are public. Baseload mutating controls send the optional admin
+  bearer token from browser local storage only when configured by the user.
