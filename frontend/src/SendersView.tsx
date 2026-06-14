@@ -119,7 +119,7 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
         <table className="data-table sender-table">
           <colgroup>
             <col style={{ width: "14.5rem" }} />{/* Address */}
-            <col style={{ width: "7.5rem" }} />{/* Tx count */}
+            <col style={{ width: "clamp(4.25rem, 14vw, 7.5rem)" }} />{/* Tx count */}
             <col style={{ width: "7.5rem" }} />{/* Gas used */}
             <col style={{ width: "8.5rem" }} />{/* Fees spent */}
             <col style={{ width: "7rem" }} />{/* Avg gas */}
