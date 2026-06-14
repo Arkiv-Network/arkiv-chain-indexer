@@ -23,6 +23,7 @@ COPY package.json ./
 RUN bun install
 
 COPY tsconfig.json ./
+COPY llms.txt ./
 COPY src ./src
 
 ENV NODE_ENV=production
