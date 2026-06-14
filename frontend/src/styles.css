@@ -1053,6 +1053,117 @@ button.secondary {
   flex-direction: column;
 }
 
+/* Wrapper that lets the peeking owl sit *behind* the Latest blocks panel:
+   the panel paints on top (z-index + opaque background), so only the part
+   of the owl above the panel's top edge is visible. */
+.home-feed-panel-wrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.home-feed-panel-wrap > .home-feed-panel {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+.home-owl {
+  position: absolute;
+  z-index: 0;
+  top: -76px;
+  right: 2.5rem;
+  width: 84px;
+  height: 130px;
+  pointer-events: none;
+  /* ducked behind the panel by default; .is-peeking raises it into view.
+     The base (ducked) state owns the slower hide transition; raising up
+     uses the snappier bounce defined on .is-peeking. */
+  transform: translateY(64px);
+  transition: transform 1.5s ease-in;
+  will-change: transform;
+}
+
+.home-owl.is-peeking {
+  transform: translateY(0);
+  transition: transform 0.6s cubic-bezier(0.34, 1.4, 0.6, 1);
+}
+
+.home-owl svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* soft contact shadow so the head reads as resting on the panel edge */
+  filter: drop-shadow(0 3px 2px rgba(17, 17, 17, 0.18));
+}
+
+.home-owl-eyes {
+  transform-box: view-box;
+  transform-origin: 60px 57px;
+}
+
+.home-owl.is-peeking .home-owl-eyes {
+  animation: home-owl-blink 4.2s ease-in-out infinite;
+}
+
+/* Gaze wanders between several angles, but every target stays in the
+   left-bottom quadrant (negative x = left, positive y = down). */
+.home-owl-pupils {
+  transform-box: view-box;
+  transform: translate(-6px, 5px);
+}
+
+.home-owl.is-peeking .home-owl-pupils {
+  animation: home-owl-glance 7s ease-in-out infinite;
+}
+
+@keyframes home-owl-glance {
+  0%, 16% {
+    transform: translate(-6px, 5px);
+  }
+  26%, 40% {
+    transform: translate(-7px, 2px);
+  }
+  50%, 63% {
+    transform: translate(-3px, 7px);
+  }
+  73%, 88% {
+    transform: translate(-6px, 6px);
+  }
+  98%, 100% {
+    transform: translate(-6px, 5px);
+  }
+}
+
+@keyframes home-owl-blink {
+  0%, 90%, 100% {
+    transform: scaleY(1);
+  }
+  94%, 96% {
+    transform: scaleY(0.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-owl {
+    /* stay peeking, no motion */
+    transition: none;
+    transform: translateY(0);
+  }
+
+  .home-owl-eyes,
+  .home-owl.is-peeking .home-owl-eyes {
+    animation: none;
+  }
+
+  .home-owl-pupils,
+  .home-owl.is-peeking .home-owl-pupils {
+    animation: none;
+    transform: translate(-6px, 5px);
+  }
+}
+
 .home-feed-panel .home-feed-list {
   flex: 1;
 }
