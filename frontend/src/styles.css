@@ -1985,6 +1985,83 @@ button.secondary {
   font-size: 0.8rem;
 }
 
+.ranges-size-filter select {
+  width: 6.25rem;
+}
+
+.ranges-columns-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin: 0 0 0.75rem;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--stone) 12%, transparent);
+}
+
+.ranges-columns-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+}
+
+.ranges-columns-panel.open .filters-toggle-chevron {
+  transform: rotate(0deg);
+}
+
+.ranges-column-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.35rem 0.65rem;
+  padding: 0.35rem 0.6rem 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.ranges-column-toggle {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.42rem;
+  min-width: 0;
+  color: var(--fg);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.ranges-column-toggle input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0.05rem 0 0;
+  accent-color: var(--accent);
+}
+
+.ranges-column-toggle span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ranges-table th {
+  padding: 0.45rem 0.55rem;
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+.ranges-table td {
+  padding: 0.5rem 0.55rem;
+}
+
+.range-header-label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  line-height: 1.08;
+  white-space: normal;
+}
+
+.ranges-table th.num .range-header-label {
+  align-items: flex-end;
+}
+
 @media (max-width: 720px) {
   .blocks-filter-form {
     display: grid;
@@ -2000,8 +2077,13 @@ button.secondary {
   }
 
   .blocks-date-filter input,
-  .blocks-limit-filter select {
+  .blocks-limit-filter select,
+  .ranges-size-filter select {
     width: 100%;
+  }
+
+  .ranges-column-grid {
+    grid-template-columns: 1fr;
   }
 }
 

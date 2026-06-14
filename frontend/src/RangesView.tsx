@@ -7,7 +7,12 @@ import {
   readFiltersFromSearch,
   writePermalink,
 } from "./permalinks";
-import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
+import {
+  readStoredString,
+  readStoredStringRecord,
+  writeStoredString,
+  writeStoredStringRecord,
+} from "./localStorage";
 
 interface RangesViewProps {
   locationSearch: string;
@@ -28,7 +33,8 @@ interface Filters extends Record<string, string> {
 const RANGE_SIZES = ["2", "5", "10", "20", "50", "100", "150", "200", "300", "500", "1000"];
 const LIMIT_OPTIONS = ["100", "250", "500", "1000", "2500", "5000", "10000"];
 const FILTER_KEYS = ["rangeSize", "rangeStartGt", "rangeStartLt", "dateGt", "dateLt", "limit"] as const;
-const STORAGE_KEY = "ranges.filters";
+const FILTER_STORAGE_KEY = "ranges.filters";
+const COLUMN_STORAGE_KEY = "ranges.visibleColumns";
 const EMPTY: Filters = {
   rangeSize: "100",
   rangeStartGt: "",
@@ -41,6 +47,7 @@ const EMPTY: Filters = {
 interface Column<T> {
   key: string;
   label: string;
+  header: string[];
   className?: string;
   width: string;
   render: (row: T) => ReactNode;
@@ -48,172 +55,196 @@ interface Column<T> {
 
 function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlockRange>[] {
   return [
-  {
-    key: "rangeSize",
-    label: "Range size",
-    className: "num",
-    width: "7rem",
-    render: (row) => row.rangeSize,
-  },
-  {
-    key: "rangeStart",
-    label: "Start",
-    className: "num",
-    width: "7.5rem",
-    render: (row) => row.rangeStart,
-  },
-  {
-    key: "rangeEnd",
-    label: "End",
-    className: "num",
-    width: "7.5rem",
-    render: (row) => row.rangeEnd,
-  },
-  {
-    key: "minBlockDate",
-    label: "Min date",
-    width: "12.5rem",
-    render: (row) => fmtDate(row.minBlockDate, timeZone),
-  },
-  {
-    key: "maxBlockDate",
-    label: "Max date",
-    width: "12.5rem",
-    render: (row) => fmtDate(row.maxBlockDate, timeZone),
-  },
-  {
-    key: "minBaseFeeWei",
-    label: "Min base fee (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.minBaseFeeWei),
-  },
-  {
-    key: "maxBaseFeeWei",
-    label: "Max base fee (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.maxBaseFeeWei),
-  },
-  {
-    key: "averageBaseFeeWei",
-    label: "Avg base fee (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.averageBaseFeeWei),
-  },
-  {
-    key: "totalBlockRewardWei",
-    label: `Total rewards (${tokenSymbol})`,
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtEth(row.totalBlockRewardWei),
-  },
-  {
-    key: "totalBurntFeesWei",
-    label: `Total burnt (${tokenSymbol})`,
-    className: "num",
-    width: "10rem",
-    render: (row) => fmtEth(row.totalBurntFeesWei),
-  },
-  {
-    key: "averageBlockRewardWei",
-    label: `Avg reward/block (${tokenSymbol})`,
-    className: "num",
-    width: "13rem",
-    render: (row) => fmtEth(row.averageBlockRewardWei),
-  },
-  {
-    key: "averageBurntFeesWei",
-    label: `Avg burnt/block (${tokenSymbol})`,
-    className: "num",
-    width: "13rem",
-    render: (row) => fmtEth(row.averageBurntFeesWei),
-  },
-  {
-    key: "averageFeePriceWei",
-    label: "Avg fee price (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.averageFeePriceWei),
-  },
-  {
-    key: "averagePriorityFeeWeightedWei",
-    label: "Gas-weighted priority (gwei)",
-    className: "num",
-    width: "14rem",
-    render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
-  },
-  {
-    key: "averagePriorityFeeWei",
-    label: "Avg priority fee (gwei)",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtGwei(row.averagePriorityFeeWei),
-  },
-  {
-    key: "averageTransactionGasUsed",
-    label: "Avg tx gas",
-    className: "num",
-    width: "10rem",
-    render: (row) => fmtInteger(row.averageTransactionGasUsed),
-  },
-  {
-    key: "averageTransactionInputDataSizeBytes",
-    label: "Avg tx input",
-    className: "num",
-    width: "10rem",
-    render: (row) => fmtBytes(row.averageTransactionInputDataSizeBytes),
-  },
-  {
-    key: "averageTransactionInputDataCompressedSizeBytes",
-    label: "Avg tx input zstd",
-    className: "num",
-    width: "12rem",
-    render: (row) => fmtBytes(row.averageTransactionInputDataCompressedSizeBytes),
-  },
-  {
-    key: "transactionCount",
-    label: "Tx count",
-    className: "num",
-    width: "7rem",
-    render: (row) => row.transactionCount,
-  },
-  {
-    key: "minMaxGasInBlock",
-    label: "Min block gas limit",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtInteger(row.minMaxGasInBlock),
-  },
-  {
-    key: "maxMaxGasInBlock",
-    label: "Max block gas limit",
-    className: "num",
-    width: "11rem",
-    render: (row) => fmtInteger(row.maxMaxGasInBlock),
-  },
-  {
-    key: "gasUsed",
-    label: "Gas used / total max",
-    className: "num",
-    width: "16rem",
-    render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
-  },
-  {
-    key: "totalInputDataSizeBytes",
-    label: "Input data",
-    className: "num",
-    width: "10rem",
-    render: (row) => fmtBytes(row.totalInputDataSizeBytes),
-  },
-  {
-    key: "totalInputDataCompressedSizeBytes",
-    label: "Input data zstd",
-    className: "num",
-    width: "12rem",
-    render: (row) => fmtBytes(row.totalInputDataCompressedSizeBytes),
-  },
+    {
+      key: "rangeSize",
+      label: "Range size",
+      header: ["Range", "size"],
+      className: "num",
+      width: "5.25rem",
+      render: (row) => row.rangeSize,
+    },
+    {
+      key: "rangeStart",
+      label: "Start",
+      header: ["Start"],
+      className: "num",
+      width: "6.25rem",
+      render: (row) => row.rangeStart,
+    },
+    {
+      key: "rangeEnd",
+      label: "End",
+      header: ["End"],
+      className: "num",
+      width: "6.25rem",
+      render: (row) => row.rangeEnd,
+    },
+    {
+      key: "minBlockDate",
+      label: "Min date",
+      header: ["Min", "date"],
+      width: "10.5rem",
+      render: (row) => fmtDate(row.minBlockDate, timeZone),
+    },
+    {
+      key: "maxBlockDate",
+      label: "Max date",
+      header: ["Max", "date"],
+      width: "10.5rem",
+      render: (row) => fmtDate(row.maxBlockDate, timeZone),
+    },
+    {
+      key: "minBaseFeeWei",
+      label: "Min base fee (gwei)",
+      header: ["Min base", "fee", "gwei"],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtGwei(row.minBaseFeeWei),
+    },
+    {
+      key: "maxBaseFeeWei",
+      label: "Max base fee (gwei)",
+      header: ["Max base", "fee", "gwei"],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtGwei(row.maxBaseFeeWei),
+    },
+    {
+      key: "averageBaseFeeWei",
+      label: "Avg base fee (gwei)",
+      header: ["Avg base", "fee", "gwei"],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtGwei(row.averageBaseFeeWei),
+    },
+    {
+      key: "totalBlockRewardWei",
+      label: `Total rewards (${tokenSymbol})`,
+      header: ["Total", "rewards", tokenSymbol],
+      className: "num",
+      width: "7.75rem",
+      render: (row) => fmtEth(row.totalBlockRewardWei),
+    },
+    {
+      key: "totalBurntFeesWei",
+      label: `Total burnt (${tokenSymbol})`,
+      header: ["Total", "burnt", tokenSymbol],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtEth(row.totalBurntFeesWei),
+    },
+    {
+      key: "averageBlockRewardWei",
+      label: `Avg reward/block (${tokenSymbol})`,
+      header: ["Avg reward", "per block", tokenSymbol],
+      className: "num",
+      width: "8.5rem",
+      render: (row) => fmtEth(row.averageBlockRewardWei),
+    },
+    {
+      key: "averageBurntFeesWei",
+      label: `Avg burnt/block (${tokenSymbol})`,
+      header: ["Avg burnt", "per block", tokenSymbol],
+      className: "num",
+      width: "8.5rem",
+      render: (row) => fmtEth(row.averageBurntFeesWei),
+    },
+    {
+      key: "averageFeePriceWei",
+      label: "Avg fee price (gwei)",
+      header: ["Avg fee", "price", "gwei"],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtGwei(row.averageFeePriceWei),
+    },
+    {
+      key: "averagePriorityFeeWeightedWei",
+      label: "Gas-weighted priority (gwei)",
+      header: ["Gas-weighted", "priority", "gwei"],
+      className: "num",
+      width: "8.25rem",
+      render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
+    },
+    {
+      key: "averagePriorityFeeWei",
+      label: "Avg priority fee (gwei)",
+      header: ["Avg priority", "fee", "gwei"],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtGwei(row.averagePriorityFeeWei),
+    },
+    {
+      key: "averageTransactionGasUsed",
+      label: "Avg tx gas",
+      header: ["Avg tx", "gas"],
+      className: "num",
+      width: "6.5rem",
+      render: (row) => fmtInteger(row.averageTransactionGasUsed),
+    },
+    {
+      key: "averageTransactionInputDataSizeBytes",
+      label: "Avg tx input",
+      header: ["Avg tx", "input"],
+      className: "num",
+      width: "6.75rem",
+      render: (row) => fmtBytes(row.averageTransactionInputDataSizeBytes),
+    },
+    {
+      key: "averageTransactionInputDataCompressedSizeBytes",
+      label: "Avg tx input zstd",
+      header: ["Avg tx", "input", "zstd"],
+      className: "num",
+      width: "7rem",
+      render: (row) => fmtBytes(row.averageTransactionInputDataCompressedSizeBytes),
+    },
+    {
+      key: "transactionCount",
+      label: "Tx count",
+      header: ["Tx", "count"],
+      className: "num",
+      width: "5.5rem",
+      render: (row) => row.transactionCount,
+    },
+    {
+      key: "minMaxGasInBlock",
+      label: "Min block gas limit",
+      header: ["Min block", "gas limit"],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtInteger(row.minMaxGasInBlock),
+    },
+    {
+      key: "maxMaxGasInBlock",
+      label: "Max block gas limit",
+      header: ["Max block", "gas limit"],
+      className: "num",
+      width: "7.25rem",
+      render: (row) => fmtInteger(row.maxMaxGasInBlock),
+    },
+    {
+      key: "gasUsed",
+      label: "Gas used / total max",
+      header: ["Gas used", "of total", "max"],
+      className: "num",
+      width: "10rem",
+      render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
+    },
+    {
+      key: "totalInputDataSizeBytes",
+      label: "Input data",
+      header: ["Input", "data"],
+      className: "num",
+      width: "6.5rem",
+      render: (row) => fmtBytes(row.totalInputDataSizeBytes),
+    },
+    {
+      key: "totalInputDataCompressedSizeBytes",
+      label: "Input data zstd",
+      header: ["Input", "data", "zstd"],
+      className: "num",
+      width: "7rem",
+      render: (row) => fmtBytes(row.totalInputDataCompressedSizeBytes),
+    },
   ];
 }
 
@@ -227,8 +258,25 @@ function buildParams(filters: Filters): URLSearchParams {
 }
 
 function loadFilters(locationSearch: string): Filters {
-  const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
+  const stored = readStoredStringRecord(FILTER_STORAGE_KEY, EMPTY, FILTER_KEYS);
   return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
+}
+
+function loadVisibleColumnKeys(columns: readonly Column<StoredBlockRange>[]): string[] {
+  const allKeys = columns.map((column) => column.key);
+  const stored = readStoredString(COLUMN_STORAGE_KEY, "");
+  if (!stored) return allKeys;
+
+  const known = new Set(allKeys);
+  const visible = stored
+    .split(",")
+    .map((key) => key.trim())
+    .filter((key) => known.has(key));
+  return visible.length > 0 ? visible : allKeys;
+}
+
+function saveVisibleColumnKeys(keys: readonly string[]) {
+  writeStoredString(COLUMN_STORAGE_KEY, keys.join(","));
 }
 
 export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSymbol }: RangesViewProps) {
@@ -238,6 +286,11 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() =>
+    loadVisibleColumnKeys(rangeColumns(timeZone, tokenSymbol)),
+  );
 
   const load = useCallback((f: Filters) => {
     setLoading(true);
@@ -253,7 +306,7 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
   }, [applied, load]);
 
   useEffect(() => {
-    writeStoredStringRecord(STORAGE_KEY, filters, FILTER_KEYS);
+    writeStoredStringRecord(FILTER_STORAGE_KEY, filters, FILTER_KEYS);
   }, [filters]);
 
   useEffect(() => {
@@ -269,6 +322,15 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
       onLocationChange();
     } else {
       setApplied(filters);
+    }
+  };
+
+  const clearFilters = () => {
+    setFilters(EMPTY);
+    if (writePermalink("ranges", EMPTY)) {
+      onLocationChange();
+    } else {
+      setApplied(EMPTY);
     }
   };
 
@@ -290,100 +352,216 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
     setFilters((prev) => ({ ...prev, [key]: e.target.value }));
   };
 
-  const sorted = data
-    ? data.ranges.slice().sort((a, b) => b.rangeStart - a.rangeStart)
-    : [];
+  const sorted = data ? data.ranges.slice().sort((a, b) => b.rangeStart - a.rangeStart) : [];
   const columns = useMemo(() => rangeColumns(timeZone, tokenSymbol), [timeZone, tokenSymbol]);
+  const visibleColumns = useMemo(() => {
+    const visible = new Set(visibleColumnKeys);
+    const selected = columns.filter((column) => visible.has(column.key));
+    return selected.length > 0 ? selected : columns.slice(0, 1);
+  }, [columns, visibleColumnKeys]);
+  const activeFilterCount = [
+    filters.rangeStartGt,
+    filters.rangeStartLt,
+    filters.dateGt,
+    filters.dateLt,
+  ].filter((value) => value.trim() !== "").length;
+
+  useEffect(() => {
+    const known = new Set(columns.map((column) => column.key));
+    setVisibleColumnKeys((current) => {
+      const next = current.filter((key) => known.has(key));
+      return next.length > 0 ? next : columns.map((column) => column.key);
+    });
+  }, [columns]);
+
+  useEffect(() => {
+    saveVisibleColumnKeys(visibleColumnKeys);
+  }, [visibleColumnKeys]);
+
+  const showAllColumns = () => {
+    setVisibleColumnKeys(columns.map((column) => column.key));
+  };
+
+  const toggleColumn = (key: string) => {
+    setVisibleColumnKeys((current) => {
+      if (current.includes(key)) {
+        return current.length > 1 ? current.filter((columnKey) => columnKey !== key) : current;
+      }
+      return columns.some((column) => column.key === key) ? [...current, key] : current;
+    });
+  };
+
+  const filtersChanged =
+    activeFilterCount > 0 || filters.limit !== EMPTY.limit || filters.rangeSize !== EMPTY.rangeSize;
 
   return (
-    <section className="view">
+    <section className="view ranges-view">
       <h2>Aggregated ranges</h2>
-      <form onSubmit={onSubmit}>
-        <label>
-          rangeSize
-          <select value={filters.rangeSize} onChange={onSelectChange("rangeSize")}>
-            {RANGE_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          rangeStartGt
-          <input
-            type="text"
-            inputMode="numeric"
-            value={filters.rangeStartGt}
-            onChange={onTextChange("rangeStartGt")}
-          />
-        </label>
-        <label>
-          rangeStartLt
-          <input
-            type="text"
-            inputMode="numeric"
-            value={filters.rangeStartLt}
-            onChange={onTextChange("rangeStartLt")}
-          />
-        </label>
-        <label>
-          dateGt (ISO)
-          <input
-            type="text"
-            placeholder="2024-01-01T00:00:00Z"
-            value={filters.dateGt}
-            onChange={onTextChange("dateGt")}
-          />
-        </label>
-        <label>
-          dateLt (ISO)
-          <input
-            type="text"
-            placeholder="2024-12-31T00:00:00Z"
-            value={filters.dateLt}
-            onChange={onTextChange("dateLt")}
-          />
-        </label>
-        <label>
-          limit
-          <select value={filters.limit} onChange={onSelectChange("limit")}>
-            {LIMIT_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit">Search</button>
-      </form>
+      <div className={`filters-panel blocks-filters-panel${filtersOpen ? " open" : ""}`}>
+        <div className="filters-panel-head">
+          <button
+            type="button"
+            className="filters-toggle"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <span className="filters-toggle-chevron" aria-hidden="true" />
+            <span>Filters</span>
+            {activeFilterCount > 0 ? <span className="filters-count">{activeFilterCount}</span> : null}
+          </button>
+          <span className="blocks-filter-meta">
+            {filters.limit} rows / {filters.rangeSize} blocks
+          </span>
+          {filtersChanged ? (
+            <button type="button" className="link-button filters-clear" onClick={clearFilters}>
+              Clear all
+            </button>
+          ) : null}
+        </div>
+        {filtersOpen ? (
+          <form onSubmit={onSubmit} className="blocks-filter-form ranges-filter-form">
+            <fieldset className="filter-group ranges-size-filter">
+              <legend>Range</legend>
+              <label>
+                size
+                <select value={filters.rangeSize} onChange={onSelectChange("rangeSize")}>
+                  {RANGE_SIZES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                &gt;
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={filters.rangeStartGt}
+                  onChange={onTextChange("rangeStartGt")}
+                />
+              </label>
+              <label>
+                &lt;
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={filters.rangeStartLt}
+                  onChange={onTextChange("rangeStartLt")}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="filter-group blocks-date-filter">
+              <legend>Date UTC</legend>
+              <label>
+                &gt;
+                <input
+                  type="text"
+                  placeholder="2024-01-01T00:00:00Z"
+                  value={filters.dateGt}
+                  onChange={onTextChange("dateGt")}
+                />
+              </label>
+              <label>
+                &lt;
+                <input
+                  type="text"
+                  placeholder="2024-12-31T00:00:00Z"
+                  value={filters.dateLt}
+                  onChange={onTextChange("dateLt")}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="filter-group blocks-limit-filter">
+              <legend>Rows</legend>
+              <label>
+                limit
+                <select value={filters.limit} onChange={onSelectChange("limit")}>
+                  {LIMIT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
+            <div className="blocks-filter-actions">
+              <button type="button" className="secondary" onClick={copyPermalink}>
+                Copy link
+              </button>
+              {filtersChanged ? (
+                <button type="button" className="secondary" onClick={clearFilters}>
+                  Clear
+                </button>
+              ) : null}
+              <button type="submit">Search</button>
+              {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
+            </div>
+          </form>
+        ) : null}
+      </div>
       <p className={`summary${error ? " error" : ""}`}>
         {loading
-          ? "Loading…"
+          ? "Loading..."
           : error
             ? `Failed to load ranges: ${error}`
             : data
               ? `${data.count} ranges${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
-      <div className="permalink-row">
-        <button type="button" className="secondary" onClick={copyPermalink}>
-          Copy link
-        </button>
-        {copyStatus ? <span>{copyStatus}</span> : null}
+      <div className={`ranges-columns-panel${columnsOpen ? " open" : ""}`}>
+        <div className="ranges-columns-head">
+          <button
+            type="button"
+            className="filters-toggle"
+            aria-expanded={columnsOpen}
+            onClick={() => setColumnsOpen((open) => !open)}
+          >
+            <span className="filters-toggle-chevron" aria-hidden="true" />
+            <span>Columns</span>
+            <span className="filters-count">{visibleColumns.length}</span>
+          </button>
+          {visibleColumns.length < columns.length ? (
+            <button type="button" className="link-button filters-clear" onClick={showAllColumns}>
+              Show all
+            </button>
+          ) : null}
+        </div>
+        {columnsOpen ? (
+          <div className="ranges-column-grid">
+            {columns.map((column) => {
+              const checked = visibleColumnKeys.includes(column.key);
+              return (
+                <label key={column.key} className="ranges-column-toggle">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={checked && visibleColumns.length === 1}
+                    onChange={() => toggleColumn(column.key)}
+                  />
+                  <span>{column.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
       <div className="table-wrap">
-        <table className="data-table">
+        <table className="data-table ranges-table">
           <colgroup>
-            {columns.map((column) => (
+            {visibleColumns.map((column) => (
               <col key={column.key} style={{ width: column.width }} />
             ))}
           </colgroup>
           <thead>
             <tr>
-              {columns.map((column) => (
+              {visibleColumns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
-                  {column.label}
+                  <span className="range-header-label">
+                    {column.header.map((line) => (
+                      <span key={line}>{line}</span>
+                    ))}
+                  </span>
                 </th>
               ))}
             </tr>
@@ -391,7 +569,7 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
           <tbody>
             {sorted.map((row) => (
               <tr key={`${row.rangeSize}-${row.rangeStart}`}>
-                {columns.map((column) => (
+                {visibleColumns.map((column) => (
                   <td key={column.key} className={column.className} data-label={column.label}>
                     {column.render(row)}
                   </td>
