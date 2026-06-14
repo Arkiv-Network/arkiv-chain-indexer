@@ -257,37 +257,42 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     {
       key: "hash",
       label: "Hash",
-      width: "15rem",
+      width: "13rem",
       render: (row) => <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />,
+    },
+    {
+      key: "arkivOps",
+      label: "Arkiv ops",
+      width: "10rem",
+      render: (row) =>
+        row.operationsSummary?.length ? (
+          <span className="op-badge-list">
+            {row.operationsSummary.map((entry) => (
+              <span key={entry.operationType} className={`op-badge op-${entry.operation}`}>
+                {entry.count > 1 ? `${entry.operation} ×${entry.count}` : entry.operation}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="tx-muted">—</span>
+        ),
     },
     {
       key: "from",
       label: "From",
-      width: "12.5rem",
+      width: "12rem",
       render: (row) => <AddressCell address={row.from} />,
-    },
-    {
-      key: "to",
-      label: "To / contract",
-      width: "12.5rem",
-      render: (row) => <AddressCell address={row.to ?? row.contractAddress} />,
     },
     {
       key: "nonce",
       label: "Nonce",
       className: "num",
-      width: "6rem",
+      width: "7rem",
       render: (row) => row.nonce ?? "-",
     },
     {
-      key: "status",
-      label: "Status",
-      width: "6.5rem",
-      render: (row) => statusLabel(row.status),
-    },
-    {
       key: "gasUsed",
-      label: "Gas used / limit",
+      label: "Gas (used / limit)",
       className: "num",
       width: "12rem",
       render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
@@ -326,10 +331,4 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
 function readBlockFromSearch(search: string): string {
   const value = new URLSearchParams(search).get("block");
   return value?.trim() ?? EMPTY_BLOCK;
-}
-
-function statusLabel(value: string | null): string {
-  if (value === "1") return "Success";
-  if (value === "0") return "Failed";
-  return value ?? "-";
 }
