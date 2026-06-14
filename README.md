@@ -237,6 +237,7 @@ Expected file shape:
       "behavior": "create",
       "maxGasPriceGwei": 1000,
       "opsPerMinute": 1,
+      "entitiesPerRequest": 1,
       "singleCreatePayloadSize": 5000,
       "singleCreateStringArgumentCount": 2,
       "singleCreateNumberArgumentCount": 2,
@@ -260,17 +261,17 @@ Worker behaviors (`behavior` field):
 
 | Behavior | Description |
 | --- | --- |
-| `create` | Creates one entity per operation. |
-| `create-update` | Creates entities until the pool holds `entityPoolSize` entities, then keeps updating pool entities with fresh random data. Every update resets the entity TTL to `ttlSeconds`, so pool entities are never lost as long as the worker keeps up. |
-| `create-ownership` | Creates an entity, then transfers its ownership to a freshly generated random address. |
-| `time-bomb` | Creates entities whose TTL is computed so that every one of them expires at the same precise moment: run start plus `timeBombOffsetSeconds`. The worker completes once the detonation moment is closer than a TTL can land. |
-| `create-update-delete` | Maintains a pool of about `entityPoolSize` entities while cycling create, update, and delete operations. |
+| `create` | Creates up to `entitiesPerRequest` entities per request. |
+| `create-update` | Creates entities until the pool holds `entityPoolSize` entities, then keeps updating pool entities with fresh random data. Create and update requests handle up to `entitiesPerRequest` entities. Every update resets the entity TTL to `ttlSeconds`, so pool entities are never lost as long as the worker keeps up. |
+| `create-ownership` | Creates up to `entitiesPerRequest` entities, then transfers their ownership to freshly generated random addresses. |
+| `time-bomb` | Creates up to `entitiesPerRequest` entities per request whose TTL is computed so that every one of them expires at the same precise moment: run start plus `timeBombOffsetSeconds`. The worker completes once the detonation moment is closer than a TTL can land. |
+| `create-update-delete` | Maintains a pool of about `entityPoolSize` entities while cycling create, update, and delete requests that handle up to `entitiesPerRequest` entities. |
 
 Worker mechanics:
 
 - Each configured worker runs on the backend within its configured start block, optional end block, and optional duration.
-- Each worker targets up to its configured operations per minute. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
-- Each worker performs one operation at a time and waits for the transaction receipt before submitting the next one (`create-ownership` sends two sequential transactions per operation).
+- Each worker targets up to its configured operations per minute. Each operation submits one batched Arkiv mutation request for up to `entitiesPerRequest` entities. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
+- Each worker performs one request at a time and waits for the transaction receipt before submitting the next one (`create-ownership` sends one create batch and then one ownership-change batch because ownership changes need the newly created entity keys).
 - Gas is set aggressively from the worker's max gas price: both `maxFeePerGas` and `maxPriorityFeePerGas` use the configured gwei value.
 - Each create or update uses a random binary payload of the configured size, a project attribute, and the configured count of random string and numeric attributes. Defaults are two string attributes and two numeric attributes.
 - Entity TTL is set from the worker's TTL seconds value, except for `time-bomb` workers where it is derived from the detonation moment.

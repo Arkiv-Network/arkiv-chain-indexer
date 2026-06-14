@@ -53,6 +53,7 @@ const DRAFT_KEYS = [
   "behavior",
   "maxGasPriceGwei",
   "opsPerMinute",
+  "entitiesPerRequest",
   "singleCreatePayloadSize",
   "singleCreateStringArgumentCount",
   "singleCreateNumberArgumentCount",
@@ -67,6 +68,7 @@ const DRAFT_KEYS = [
 const EDITABLE_WORKER_KEYS = [
   "maxGasPriceGwei",
   "opsPerMinute",
+  "entitiesPerRequest",
   "singleCreatePayloadSize",
   "singleCreateStringArgumentCount",
   "singleCreateNumberArgumentCount",
@@ -338,6 +340,15 @@ export function BaseloadView({
               onChange={onDraftChange("opsPerMinute")}
             />
           </Field>
+          <Field label="Entities / req">
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={draft.entitiesPerRequest}
+              onChange={onDraftChange("entitiesPerRequest")}
+            />
+          </Field>
           <Field label="Payload bytes">
             <input
               type="number"
@@ -544,6 +555,10 @@ function FleetSummary({
 }) {
   if (workers.length === 0) return null;
   const totalOps = workers.reduce((sum, worker) => sum + worker.opsPerMinute, 0);
+  const totalEntities = workers.reduce(
+    (sum, worker) => sum + worker.opsPerMinute * worker.entitiesPerRequest,
+    0,
+  );
   const behaviorCounts = BASELOAD_WORKER_BEHAVIORS.map((behavior) => ({
     behavior,
     count: workers.filter((worker) => worker.behavior === behavior).length,
@@ -562,6 +577,9 @@ function FleetSummary({
       </span>
       <span className="fleet-chip">
         <strong>{totalOps}</strong> ops/min
+      </span>
+      <span className="fleet-chip">
+        <strong>{totalEntities}</strong> entities/min
       </span>
       <span className="fleet-chip">
         <strong>{activeCount}</strong> active
@@ -674,6 +692,18 @@ function WorkerCard({
             step="1"
             onChange={(value) => {
               if (value !== null) onUpdate({ opsPerMinute: value });
+            }}
+          />
+        </Field>
+        <Field label="Entities / req">
+          <EditableNumber
+            storageKey={editableStorageKey(worker.id, "entitiesPerRequest")}
+            value={worker.entitiesPerRequest}
+            min={1}
+            step="1"
+            integer
+            onChange={(value) => {
+              if (value !== null) onUpdate({ entitiesPerRequest: value });
             }}
           />
         </Field>

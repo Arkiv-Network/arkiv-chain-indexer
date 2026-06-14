@@ -513,6 +513,7 @@ export interface BaseloadWorkerConfig {
   behavior: BaseloadWorkerBehavior;
   maxGasPriceGwei: number;
   opsPerMinute: number;
+  entitiesPerRequest: number;
   singleCreatePayloadSize: number;
   singleCreateStringArgumentCount: number;
   singleCreateNumberArgumentCount: number;

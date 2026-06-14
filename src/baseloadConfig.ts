@@ -16,6 +16,7 @@ export interface BaseloadWorkerConfig {
   behavior: BaseloadWorkerBehavior;
   maxGasPriceGwei: number;
   opsPerMinute: number;
+  entitiesPerRequest: number;
   singleCreatePayloadSize: number;
   singleCreateStringArgumentCount: number;
   singleCreateNumberArgumentCount: number;
@@ -38,6 +39,7 @@ export interface BaseloadWorkerDraft {
   behavior: string;
   maxGasPriceGwei: string;
   opsPerMinute: string;
+  entitiesPerRequest: string;
   singleCreatePayloadSize: string;
   singleCreateStringArgumentCount: string;
   singleCreateNumberArgumentCount: string;
@@ -66,6 +68,7 @@ export const DEFAULT_BASELOAD_WORKER_VALUES = {
   behavior: "create" as BaseloadWorkerBehavior,
   maxGasPriceGwei: 1000,
   opsPerMinute: 1,
+  entitiesPerRequest: 1,
   singleCreatePayloadSize: 5000,
   singleCreateStringArgumentCount: 2,
   singleCreateNumberArgumentCount: 2,
@@ -93,6 +96,7 @@ export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerD
     behavior: DEFAULT_BASELOAD_WORKER_VALUES.behavior,
     maxGasPriceGwei: String(DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei.toFixed(1)),
     opsPerMinute: String(DEFAULT_BASELOAD_WORKER_VALUES.opsPerMinute),
+    entitiesPerRequest: String(DEFAULT_BASELOAD_WORKER_VALUES.entitiesPerRequest),
     singleCreatePayloadSize: String(DEFAULT_BASELOAD_WORKER_VALUES.singleCreatePayloadSize),
     singleCreateStringArgumentCount: String(
       DEFAULT_BASELOAD_WORKER_VALUES.singleCreateStringArgumentCount,
@@ -126,6 +130,10 @@ export function createBaseloadWorkerFromDraft(
       opsPerMinute: parseFiniteNumber("Operations per minute", draft.opsPerMinute, {
         allowFloat: true,
         min: 0,
+      }),
+      entitiesPerRequest: parseFiniteNumber("Entities per request", draft.entitiesPerRequest, {
+        allowFloat: false,
+        min: 1,
       }),
       singleCreatePayloadSize: parseFiniteNumber("Single create payload size", draft.singleCreatePayloadSize, {
         allowFloat: false,
@@ -300,6 +308,9 @@ function normalizeBaseloadWorker(
     opsPerMinute: coerceNumber("Operations per minute", input.opsPerMinute, {
       min: 0,
     }),
+    entitiesPerRequest: coerceInteger("Entities per request", input.entitiesPerRequest, {
+      min: 1,
+    }),
     singleCreatePayloadSize: coerceInteger(
       "Single create payload size",
       input.singleCreatePayloadSize,
@@ -414,6 +425,8 @@ function defaultNumberFor(label: string): number {
       return DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei;
     case "Operations per minute":
       return DEFAULT_BASELOAD_WORKER_VALUES.opsPerMinute;
+    case "Entities per request":
+      return DEFAULT_BASELOAD_WORKER_VALUES.entitiesPerRequest;
     case "Single create payload size":
       return DEFAULT_BASELOAD_WORKER_VALUES.singleCreatePayloadSize;
     case "Single create string argument number":
