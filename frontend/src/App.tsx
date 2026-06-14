@@ -14,7 +14,12 @@ import {
   type StoredBaseloadConfigSummary,
 } from "./api";
 import { AdminView } from "./AdminView";
-import { adminModeActive, adminModeStatus, privilegedAdminToken } from "./adminMode";
+import {
+  adminModeActive,
+  adminModeStatus,
+  isVerifiedAdminToken,
+  privilegedAdminToken,
+} from "./adminMode";
 import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
@@ -72,7 +77,7 @@ export function App() {
   const [pageSettings, setPageSettings] = useState<PageSettings>(() =>
     readStoredPageSettings(BUILD_PAGE_SETTINGS),
   );
-  const [adminVerified, setAdminVerified] = useState(false);
+  const [verifiedAdminToken, setVerifiedAdminToken] = useState("");
   const [adminModeEnabled, setAdminModeEnabled] = useState(
     () => readStoredString(ADMIN_MODE_ENABLED_STORAGE_KEY, "true") === "true",
   );
@@ -110,6 +115,8 @@ export function App() {
       ? "blocks"
       : view;
   const chartFullscreen = activeView === "chart-fullscreen";
+  const trimmedAdminToken = baseloadAdminToken.trim();
+  const adminVerified = isVerifiedAdminToken(trimmedAdminToken, verifiedAdminToken);
   const adminMode = adminModeStatus(adminVerified, adminModeEnabled);
   const adminModeIsActive = adminModeActive(adminVerified, adminModeEnabled);
   const navItems = visibleNavItems(adminModeIsActive, transactionDataEnabled);
@@ -309,23 +316,22 @@ export function App() {
   }, [simulateOffline]);
 
   useEffect(() => {
-    const trimmed = baseloadAdminToken.trim();
-    if (!trimmed) {
-      setAdminVerified(false);
+    if (!trimmedAdminToken) {
+      setVerifiedAdminToken("");
       return;
     }
     let cancelled = false;
-    verifyAdminToken(trimmed)
+    verifyAdminToken(trimmedAdminToken)
       .then(() => {
-        if (!cancelled) setAdminVerified(true);
+        if (!cancelled) setVerifiedAdminToken(trimmedAdminToken);
       })
       .catch(() => {
-        if (!cancelled) setAdminVerified(false);
+        if (!cancelled) setVerifiedAdminToken("");
       });
     return () => {
       cancelled = true;
     };
-  }, [baseloadAdminToken]);
+  }, [trimmedAdminToken]);
 
   const onAdminLoginClick = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -337,17 +343,17 @@ export function App() {
     const trimmed = input.trim();
     if (!trimmed) {
       setBaseloadAdminToken("");
-      setAdminVerified(false);
+      setVerifiedAdminToken("");
       setAdminModeEnabled(false);
       return;
     }
     try {
       await verifyAdminToken(trimmed);
       setBaseloadAdminToken(trimmed);
-      setAdminVerified(true);
+      setVerifiedAdminToken(trimmed);
       setAdminModeEnabled(true);
     } catch (error) {
-      setAdminVerified(false);
+      setVerifiedAdminToken("");
       window.alert(
         `Admin credentials rejected: ${error instanceof Error ? error.message : String(error)}`,
       );

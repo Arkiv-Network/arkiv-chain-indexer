@@ -9,6 +9,11 @@ export function adminModeActive(adminVerified: boolean, adminModeEnabled: boolea
   return adminModeStatus(adminVerified, adminModeEnabled) === "enabled";
 }
 
+export function isVerifiedAdminToken(token: string, verifiedToken: string): boolean {
+  const trimmed = token.trim();
+  return trimmed !== "" && trimmed === verifiedToken;
+}
+
 export function privilegedAdminToken(
   token: string,
   adminVerified: boolean,
