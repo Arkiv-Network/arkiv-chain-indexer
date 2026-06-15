@@ -1094,7 +1094,7 @@ button.secondary {
   top: -76px;
   right: 2.5rem;
   width: 84px;
-  height: 130px;
+  height: 150px;
   pointer-events: none;
   /* ducked behind the panel by default; .is-peeking raises him into view.
      The base (ducked) state owns the slower hide transition; raising up
@@ -2180,7 +2180,7 @@ button.secondary {
   right: 2.25rem;
   width: 92px;
   top: 1px;
-  height: 91px;
+  height: 111px;
 }
 
 table {
@@ -2948,7 +2948,7 @@ td.num {
   /* sits level with the list top and runs down past Cedric's feet, so the
      whole body (including any sliver in the gap between cards) is hidden */
   top: 1px;
-  height: 91px;
+  height: 111px;
 }
 
 .guzzler-list {

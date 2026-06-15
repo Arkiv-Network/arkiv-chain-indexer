@@ -125,7 +125,7 @@ function transactionColumns(
   const block: Column = {
     key: "blockNumber",
     label: "Block",
-    width: "13rem",
+    width: "11rem",
     render: (row) => (
       <div className="block-meta">
         <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
@@ -177,42 +177,42 @@ function transactionColumns(
     key: "nonce",
     label: "Nonce",
     className: "num",
-    width: "7rem",
+    width: "5rem",
     render: (row) => row.nonce ?? "-",
   };
   const gas: Column = {
     key: "gasUsed",
     label: "Gas (used / limit)",
     className: "num",
-    width: "4rem",
+    width: "10rem",
     render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
   };
   const inputData: Column = {
     key: "inputDataSizeBytes",
     label: "Input data",
     className: "num",
-    width: "9rem",
+    width: "5rem",
     render: (row) => fmtBytes(row.inputDataSizeBytes),
   };
   const inputDataCompressed: Column = {
     key: "inputDataCompressedSizeBytes",
     label: "Input zstd",
     className: "num",
-    width: "9rem",
+    width: "5rem",
     render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
   };
   const effectiveFee: Column = {
     key: "effectiveGasPriceWei",
     label: "Effective fee (gwei)",
     className: "num",
-    width: "12rem",
+    width: "8rem",
     render: (row) => fmtGwei(row.effectiveGasPriceWei),
   };
   const txFee: Column = {
     key: "transactionFeeWei",
     label: `Tx fee (${tokenSymbol})`,
     className: "num",
-    width: "10rem",
+    width: "8rem",
     render: (row) => fmtEth(row.transactionFeeWei),
   };
 
