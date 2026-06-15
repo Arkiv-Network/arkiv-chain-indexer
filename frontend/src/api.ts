@@ -1027,6 +1027,21 @@ export async function fetchBlockInspect(blockNumber: string): Promise<BlockInspe
     throw new Error(`Block ${blockNumber} was not found in storage`);
   }
 
+  return inspectStoredBlock(block, blockNumber);
+}
+
+export async function fetchLatestBlockInspect(): Promise<BlockInspectResponse> {
+  const params = new URLSearchParams({ limit: "1" });
+  const response = await fetchBlocks(params);
+  const [latestBlock] = response.blocks;
+  if (!latestBlock) {
+    throw new Error("No blocks were found in storage");
+  }
+
+  return inspectStoredBlock(latestBlock, String(latestBlock.blockNumber));
+}
+
+async function inspectStoredBlock(block: StoredBlock, blockNumber: string): Promise<BlockInspectResponse> {
   const transactionParams = new URLSearchParams({
     block: blockNumber,
     limit: "1000",

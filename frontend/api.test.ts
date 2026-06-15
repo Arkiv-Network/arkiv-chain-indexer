@@ -5,6 +5,7 @@ import {
   GUZZLER_STAT_RESPONSE_NAMES,
   RANGE_RESPONSE_NAMES,
   fetchBlockByNumber,
+  fetchLatestBlockInspect,
   deleteBaseloadConfig,
   fetchBlocks,
   fetchBlockInspect,
@@ -418,6 +419,71 @@ describe("frontend API helpers", () => {
     ]);
     expect(result.block.blockNumberDecimal).toBe("42");
     expect(result.block.transactions).toHaveLength(1);
+  });
+
+  test("fetches the latest block inspection when no block number is provided", async () => {
+    const observedInputs: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      observedInputs.push(String(input));
+      if (String(input) === "/api/blocks?limit=1") {
+        return Response.json({
+          count: 1,
+          limit: 1,
+          truncated: false,
+          filters: { blockGt: null, blockLt: null, dateGt: null, dateLt: null },
+          names: BLOCK_RESPONSE_NAMES,
+          blocks: [compactBlockRow(45)],
+        });
+      }
+      if (String(input) === "/api/transactions?block=45&limit=1000&order=asc") {
+        return Response.json({
+          count: 0,
+          limit: 1000,
+          truncated: false,
+          page: 1,
+          pageSize: 1000,
+          totalCount: 0,
+          totalPages: 0,
+          hasPreviousPage: false,
+          hasNextPage: false,
+          filters: {
+            block: "45",
+            blockGt: null,
+            blockLt: null,
+            address: null,
+            nonceGt: null,
+            nonceLt: null,
+            dateGt: null,
+            dateLt: null,
+          },
+          transactions: [],
+        });
+      }
+      return Response.json({ error: "unexpected request" }, { status: 500 });
+    }) as typeof fetch;
+
+    const result = await fetchLatestBlockInspect();
+
+    expect(observedInputs).toEqual([
+      "/api/blocks?limit=1",
+      "/api/transactions?block=45&limit=1000&order=asc",
+    ]);
+    expect(result.block.blockNumberDecimal).toBe("45");
+    expect(result.block.transactions).toEqual([]);
+  });
+
+  test("reports an empty latest block lookup clearly", async () => {
+    globalThis.fetch = (async () =>
+      Response.json({
+        count: 0,
+        limit: 1,
+        truncated: false,
+        filters: { blockGt: null, blockLt: null, dateGt: null, dateLt: null },
+        names: BLOCK_RESPONSE_NAMES,
+        blocks: [],
+      })) as typeof fetch;
+
+    await expect(fetchLatestBlockInspect()).rejects.toThrow("No blocks were found in storage");
   });
 
   test("keeps block inspection available when transaction rows cannot be loaded", async () => {
