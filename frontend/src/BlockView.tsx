@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { fetchBlockInspect, type BlockInspectResponse, type InspectedTransaction } from "./api";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  fetchBlockInspect,
+  fetchLatestBlockInspect,
+  type BlockInspectResponse,
+  type InspectedTransaction,
+} from "./api";
 import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
@@ -31,25 +36,33 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
+  const loadRequestId = useRef(0);
 
   const load = useCallback((value: string) => {
+    const requestId = loadRequestId.current + 1;
+    loadRequestId.current = requestId;
     const trimmed = value.trim();
-    if (!trimmed) {
-      setData(null);
-      setError(null);
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     setError(null);
-    fetchBlockInspect(trimmed)
-      .then((body) => setData(body))
+    const request = trimmed ? fetchBlockInspect(trimmed) : fetchLatestBlockInspect();
+    request
+      .then((body) => {
+        if (requestId !== loadRequestId.current) return;
+        setData(body);
+        if (!trimmed) {
+          setBlockNumber((current) => (current.trim() ? current : body.block.blockNumberDecimal));
+        }
+      })
       .catch((err: Error) => {
+        if (requestId !== loadRequestId.current) return;
         setData(null);
         setError(err.message);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (requestId === loadRequestId.current) {
+          setLoading(false);
+        }
+      });
   }, []);
 
   useEffect(() => {
@@ -74,7 +87,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   const copyPermalink = async () => {
-    const href = buildPermalinkHref("block", { block: appliedBlockNumber });
+    const href = buildPermalinkHref("block", { block: displayedBlockNumber });
     try {
       await navigator.clipboard.writeText(href);
       setCopyStatus("Copied");
@@ -84,7 +97,8 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   const block = data?.block;
-  const adjacentBlocks = useMemo(() => adjacentBlockNumbers(appliedBlockNumber), [appliedBlockNumber]);
+  const displayedBlockNumber = block?.blockNumberDecimal ?? appliedBlockNumber;
+  const adjacentBlocks = useMemo(() => adjacentBlockNumbers(displayedBlockNumber), [displayedBlockNumber]);
   const columns = useMemo(
     () => transactionColumns(tokenSymbol, onLocationChange),
     [tokenSymbol, onLocationChange],
@@ -185,7 +199,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
               type="button"
               className="block-lookup-copy"
               onClick={copyPermalink}
-              disabled={!appliedBlockNumber.trim()}
+              disabled={!displayedBlockNumber.trim()}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
