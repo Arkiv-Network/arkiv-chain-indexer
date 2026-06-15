@@ -184,7 +184,7 @@ function transactionColumns(
     key: "gasUsed",
     label: "Gas (used / limit)",
     className: "num",
-    width: "12rem",
+    width: "4rem",
     render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
   };
   const inputData: Column = {
