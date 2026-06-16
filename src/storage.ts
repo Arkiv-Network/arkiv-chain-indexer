@@ -736,7 +736,7 @@ export class ScannerStorage {
        WHERE table_schema = $1
          AND table_name = $2
          AND column_name = ANY($3::text[])`,
-      [this.schema, tableName, columns],
+      [this.schema, tableName, textArrayLiteral(columns)],
     );
     const present = new Set(result.rows.map((row) => row.column_name));
     return columns.some((column) => !present.has(column));
