@@ -9,6 +9,7 @@ import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { TransactionHashLink } from "./TransactionView";
+import { renderTableHeader } from "./tableHeader";
 
 interface RecordTransactionsViewProps {
   onLocationChange: () => void;
@@ -28,7 +29,6 @@ interface Column {
   key: string;
   label: string;
   className?: string;
-  width: string;
   render: (row: StoredTransactionRecord) => ReactNode;
 }
 
@@ -69,20 +69,17 @@ function recordColumns(
       key: "rank",
       label: "Rank",
       className: "num",
-      width: "5rem",
       render: (row) => row.rank,
     },
     {
       key: "recordValue",
       label: category.valueLabel,
       className: "num",
-      width: "12rem",
       render: category.renderValue,
     },
     {
       key: "block",
       label: "Block",
-      width: "13rem",
       render: (row) => (
         <div className="block-meta">
           <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
@@ -93,36 +90,31 @@ function recordColumns(
     {
       key: "hash",
       label: "Hash",
-      width: "13rem",
       render: (row) => <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />,
     },
     {
       key: "from",
       label: "From",
-      width: "12rem",
       render: (row) => <AddressCell address={row.from} />,
     },
   ];
   const metricColumns: Column[] = [
     {
       key: "gasUsed",
-      label: "Gas used",
+      label: "Gas Used",
       className: "num",
-      width: "9rem",
       render: (row) => fmtInteger(row.gasUsed),
     },
     {
       key: "effectiveGasPriceWei",
       label: "Effective fee (gwei)",
       className: "num",
-      width: "12rem",
       render: (row) => fmtGwei(row.effectiveGasPriceWei),
     },
     {
       key: "transactionFeeWei",
       label: `Tx fee (${tokenSymbol})`,
       className: "num",
-      width: "10rem",
       render: (row) => fmtEth(row.transactionFeeWei),
     },
   ];
@@ -209,17 +201,12 @@ function RecordCategoryTable({
         <span>{rows.length} rows</span>
       </div>
       <div className="table-wrap">
-        <table className="data-table tx-table record-table">
-          <colgroup>
-            {columns.map((column) => (
-              <col key={column.key} style={{ width: column.width }} />
-            ))}
-          </colgroup>
+          <table className="data-table tx-table record-table">
           <thead>
             <tr>
               {columns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
-                  {column.label}
+                  {renderTableHeader(column.label)}
                 </th>
               ))}
             </tr>

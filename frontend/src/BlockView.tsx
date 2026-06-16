@@ -10,6 +10,7 @@ import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
 import { TransactionHashLink } from "./TransactionView";
+import { renderTableHeader } from "./tableHeader";
 
 interface BlockViewProps {
   locationSearch: string;
@@ -23,7 +24,6 @@ interface Column {
   key: string;
   label: string;
   className?: string;
-  width: string;
   render: (row: InspectedTransaction) => ReactNode;
 }
 
@@ -256,18 +256,13 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
 
           <div className="table-wrap">
             <table className="data-table tx-table block-transactions-table">
-              <colgroup>
-                {columns.map((column) => (
-                  <col key={column.key} style={{ width: column.width }} />
-                ))}
-              </colgroup>
               <thead>
                 <tr>
-                  {columns.map((column) => (
-                    <th key={column.key} scope="col" className={column.className}>
-                      {column.label}
-                    </th>
-                  ))}
+                {columns.map((column) => (
+                  <th key={column.key} scope="col" className={column.className}>
+                      {renderTableHeader(column.label)}
+                  </th>
+                ))}
                 </tr>
               </thead>
               <tbody>
@@ -304,19 +299,16 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
       key: "position",
       label: "Pos",
       className: "num",
-      width: "4.5rem",
       render: (row) => row.position,
     },
     {
       key: "hash",
       label: "Hash",
-      width: "198px",
       render: (row) => <TransactionHashLink hash={row.hash} onLocationChange={onLocationChange} />,
     },
     {
       key: "arkivOps",
       label: "Arkiv ops",
-      width: "210px",
       render: (row) =>
         row.operationsSummary?.length ? (
           <span className="op-badge-list">
@@ -333,49 +325,42 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     {
       key: "from",
       label: "From",
-      width: "12rem",
       render: (row) => <AddressCell address={row.from} />,
     },
     {
       key: "nonce",
       label: "Nonce",
       className: "num",
-      width: "62px",
       render: (row) => row.nonce ?? "-",
     },
     {
       key: "gasUsed",
       label: "Gas (used / limit)",
       className: "num",
-      width: "162px",
       render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
     },
     {
       key: "inputDataSizeBytes",
       label: "Input data",
       className: "num",
-      width: "94px",
       render: (row) => fmtBytes(row.inputDataSizeBytes),
     },
     {
       key: "inputDataCompressedSizeBytes",
       label: "Input zstd",
       className: "num",
-      width: "94px",
       render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
     },
     {
       key: "effectiveGasPriceWei",
       label: "Effective fee (gwei)",
       className: "num",
-      width: "112px",
       render: (row) => fmtGwei(row.effectiveGasPriceWei),
     },
     {
       key: "transactionFeeWei",
       label: `Tx fee (${tokenSymbol})`,
       className: "num",
-      width: "140px",
       render: (row) => fmtEth(row.transactionFeeWei),
     },
   ];

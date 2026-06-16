@@ -5,6 +5,7 @@ import { fmtDate, fmtEth, fmtMillions, fmtThousands } from "./format";
 import { buildPermalinkHref, buildRouteHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { AddressCell } from "./TransactionsView";
+import { renderTableHeader } from "./tableHeader";
 
 interface SendersViewProps {
   locationSearch: string;
@@ -117,26 +118,16 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
 
       <div className="table-wrap">
         <table className="data-table sender-table">
-          <colgroup>
-            <col style={{ width: "14.5rem" }} />{/* Address */}
-            <col style={{ width: "clamp(4.25rem, 14vw, 7.5rem)" }} />{/* Tx count */}
-            <col style={{ width: "7.5rem" }} />{/* Gas used */}
-            <col style={{ width: "8.5rem" }} />{/* Fees spent */}
-            <col style={{ width: "7rem" }} />{/* Avg gas */}
-            <col style={{ width: "8rem" }} />{/* Avg fee */}
-            <col style={{ width: "13rem" }} />{/* First tx */}
-            <col style={{ width: "13rem" }} />{/* Last tx */}
-          </colgroup>
           <thead>
             <tr>
-              <th scope="col">Address</th>
-              <th scope="col" className="num">Tx count</th>
-              <th scope="col" className="num">Gas used</th>
-              <th scope="col" className="num">Fees spent ({tokenSymbol})</th>
-              <th scope="col" className="num">Avg gas per tx</th>
-              <th scope="col" className="num">Avg fee ({tokenSymbol})</th>
-              <th scope="col">First tx (block/date)</th>
-              <th scope="col">Last tx (block/date)</th>
+              <th scope="col">{renderTableHeader("Address")}</th>
+              <th scope="col" className="num">{renderTableHeader("Tx count")}</th>
+              <th scope="col" className="num">{renderTableHeader("Gas used")}</th>
+              <th scope="col" className="num">{renderTableHeader(`Fees spent (${tokenSymbol})`)}</th>
+              <th scope="col" className="num">{renderTableHeader("Avg gas per tx")}</th>
+              <th scope="col" className="num">{renderTableHeader(`Avg fee (${tokenSymbol})`)}</th>
+              <th scope="col">{renderTableHeader("First tx (block/date)")}</th>
+              <th scope="col">{renderTableHeader("Last tx (block/date)")}</th>
             </tr>
           </thead>
           <tbody>

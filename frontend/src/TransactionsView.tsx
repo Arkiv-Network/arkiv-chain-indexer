@@ -17,6 +17,7 @@ import {
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { addressSearchHref } from "./transactionLinks";
+import { renderTableHeader } from "./tableHeader";
 
 interface TransactionsViewProps {
   locationSearch: string;
@@ -80,7 +81,6 @@ interface Column {
   key: SortKey;
   label: string;
   className?: string;
-  width: string;
   render: (row: StoredTransaction) => ReactNode;
 }
 
@@ -125,7 +125,6 @@ function transactionColumns(
   const block: Column = {
     key: "blockNumber",
     label: "Block",
-    width: "11rem",
     render: (row) => (
       <div className="block-meta">
         <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
@@ -136,7 +135,6 @@ function transactionColumns(
   const hash: Column = {
     key: "hash",
     label: "Hash",
-    width: "13rem",
     render: (row) => (
       <CopyCell
         value={row.hash}
@@ -153,7 +151,6 @@ function transactionColumns(
   const arkivOps: Column = {
     key: "arkivOps",
     label: "Arkiv ops",
-    width: "10rem",
     render: (row) =>
       row.operationsSummary?.length ? (
         <span className="op-badge-list">
@@ -170,49 +167,42 @@ function transactionColumns(
   const from: Column = {
     key: "from",
     label: "From",
-    width: "12rem",
     render: (row) => <AddressCell address={row.from} />,
   };
   const nonce: Column = {
     key: "nonce",
     label: "Nonce",
     className: "num",
-    width: "5rem",
     render: (row) => row.nonce ?? "-",
   };
   const gas: Column = {
     key: "gasUsed",
     label: "Gas (used / limit)",
     className: "num",
-    width: "10rem",
     render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
   };
   const inputData: Column = {
     key: "inputDataSizeBytes",
     label: "Input data",
     className: "num",
-    width: "5rem",
     render: (row) => fmtBytes(row.inputDataSizeBytes),
   };
   const inputDataCompressed: Column = {
     key: "inputDataCompressedSizeBytes",
     label: "Input zstd",
     className: "num",
-    width: "5rem",
     render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
   };
   const effectiveFee: Column = {
     key: "effectiveGasPriceWei",
     label: "Effective fee (gwei)",
     className: "num",
-    width: "8rem",
     render: (row) => fmtGwei(row.effectiveGasPriceWei),
   };
   const txFee: Column = {
     key: "transactionFeeWei",
     label: `Tx fee (${tokenSymbol})`,
     className: "num",
-    width: "8rem",
     render: (row) => fmtEth(row.transactionFeeWei),
   };
 
@@ -520,17 +510,12 @@ export function TransactionsView({
         <div className="cedric-shelf cedric-table-shelf" aria-hidden="true" />
         <div className="table-wrap">
           <table className="data-table tx-table">
-          <colgroup>
-            {columns.map((column) => (
-              <col key={column.key} style={{ width: column.width }} />
-            ))}
-          </colgroup>
           <thead>
             <tr>
               {columns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
                   <button type="button" className="sort-header" onClick={() => setSortKey(column.key)}>
-                    <span>{column.label}</span>
+                    <span>{renderTableHeader(column.label)}</span>
                     <span aria-hidden="true">{sort?.key === column.key ? sortIcon(sort.direction) : ""}</span>
                   </button>
                 </th>

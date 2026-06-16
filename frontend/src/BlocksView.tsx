@@ -11,6 +11,7 @@ import {
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { CedricOnTimer } from "./Cedric";
+import { renderTableHeader } from "./tableHeader";
 
 interface BlocksViewProps {
   locationSearch: string;
@@ -43,7 +44,6 @@ interface Column<T> {
   key: string;
   label: string;
   className?: string;
-  width: string;
   render: (row: T) => ReactNode;
 }
 
@@ -57,7 +57,6 @@ function blockColumns(
     {
       key: "block",
       label: "Block",
-      width: "13rem",
       render: (row) => (
         <div className="block-meta">
           <BlockNumberLink blockNumber={row.blockNumber} onLocationChange={onLocationChange} />
@@ -69,14 +68,12 @@ function blockColumns(
       key: "transactionCount",
       label: "Tx count",
       className: "num",
-      width: "clamp(4.25rem, 14vw, 6rem)",
       render: (row) => row.transactionCount,
     },
     {
       key: "baseBlockFeeWei",
       label: "Base fee (gwei)",
       className: "num",
-      width: "11rem",
       render: (row) => (
         <BaseFeeCell
           baseFeeWei={row.baseBlockFeeWei}
@@ -88,28 +85,24 @@ function blockColumns(
       key: "burntFeesWei",
       label: `Burnt fees (${tokenSymbol})`,
       className: "num",
-      width: "10rem",
       render: (row) => fmtEth(row.burntFeesWei ?? "0"),
     },
     {
       key: "averageFeePriceWei",
       label: "Avg fee price (gwei)",
       className: "num",
-      width: "11rem",
       render: (row) => fmtGwei(row.averageFeePriceWei),
     },
     {
       key: "averageTransactionGasUsed",
       label: "Avg tx gas",
       className: "num",
-      width: "10rem",
       render: (row) => fmtGasK(row.averageTransactionGasUsed),
     },
     {
       key: "inputDataSizeBytes",
       label: "Input data",
       className: "num",
-      width: "12rem",
       render: (row) => (
         <div className="block-size-cell">
           <span>
@@ -123,7 +116,6 @@ function blockColumns(
       key: "gasUsed",
       label: "Gas used / limit",
       className: "num",
-      width: "15rem",
       render: (row) => fmtGasRatioK(row.totalGasUsed, row.maxGasInBlock),
     },
   ];
@@ -430,20 +422,15 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
             table's top edge (the table-wrap clips its own overflow). */}
         <div className="cedric-shelf cedric-table-shelf" aria-hidden="true" />
         <div className="table-wrap">
-        <table className="data-table">
-          <colgroup>
-            {columns.map((column) => (
-              <col key={column.key} style={{ width: column.width }} />
-            ))}
-          </colgroup>
+          <table className="data-table">
           <thead>
             <tr>
-              {columns.map((column) => (
-                <th key={column.key} scope="col" className={column.className}>
-                  {column.label}
-                </th>
-              ))}
-            </tr>
+                {columns.map((column) => (
+                  <th key={column.key} scope="col" className={column.className}>
+                    {renderTableHeader(column.label)}
+                  </th>
+                ))}
+              </tr>
           </thead>
           <tbody>
             {sorted.map((row) => (

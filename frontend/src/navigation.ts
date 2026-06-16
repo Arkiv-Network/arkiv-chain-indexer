@@ -14,7 +14,7 @@ export const ALL_NAV_ITEMS: readonly NavItem[] = [
   { view: "transactions", label: "Address", requiresTransactionData: true },
   { view: "senders", label: "Senders", requiresTransactionData: true },
   { view: "transaction-records", label: "Records" },
-  { view: "ranges", label: "Ranges", requiresAdmin: true },
+  { view: "ranges", label: "Ranges" },
   { view: "charts", label: "Charts" },
   { view: "guzzlers", label: "Activity" },
   { view: "health", label: "Health", requiresAdmin: true },

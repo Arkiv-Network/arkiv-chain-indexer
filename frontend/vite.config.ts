@@ -7,9 +7,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: process.env.VITE_API_TARGET ?? "https://scanner.arkiv-global.net",
+        target: process.env.VITE_API_TARGET ?? "http://apex.arkiv-global.net:23560",
         changeOrigin: true,
-        secure: true,
+        secure: false,
       },
     },
   },

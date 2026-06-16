@@ -13,6 +13,7 @@ import {
   writeStoredString,
   writeStoredStringRecord,
 } from "./localStorage";
+import { renderTableHeader } from "./tableHeader";
 
 interface RangesViewProps {
   locationSearch: string;
@@ -47,9 +48,7 @@ const EMPTY: Filters = {
 interface Column<T> {
   key: string;
   label: string;
-  header: string[];
   className?: string;
-  width: string;
   render: (row: T) => ReactNode;
 }
 
@@ -58,191 +57,143 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
     {
       key: "rangeSize",
       label: "Range size",
-      header: ["Range", "size"],
       className: "num",
-      width: "5.25rem",
       render: (row) => row.rangeSize,
     },
     {
       key: "rangeStart",
       label: "Start",
-      header: ["Start"],
       className: "num",
-      width: "6.25rem",
       render: (row) => row.rangeStart,
     },
     {
       key: "rangeEnd",
       label: "End",
-      header: ["End"],
       className: "num",
-      width: "6.25rem",
       render: (row) => row.rangeEnd,
     },
     {
       key: "minBlockDate",
       label: "Min date",
-      header: ["Min", "date"],
-      width: "10.5rem",
       render: (row) => fmtDate(row.minBlockDate, timeZone),
     },
     {
       key: "maxBlockDate",
       label: "Max date",
-      header: ["Max", "date"],
-      width: "10.5rem",
       render: (row) => fmtDate(row.maxBlockDate, timeZone),
     },
     {
       key: "minBaseFeeWei",
       label: "Min base fee (gwei)",
-      header: ["Min base", "fee", "gwei"],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtGwei(row.minBaseFeeWei),
     },
     {
       key: "maxBaseFeeWei",
       label: "Max base fee (gwei)",
-      header: ["Max base", "fee", "gwei"],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtGwei(row.maxBaseFeeWei),
     },
     {
       key: "averageBaseFeeWei",
       label: "Avg base fee (gwei)",
-      header: ["Avg base", "fee", "gwei"],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtGwei(row.averageBaseFeeWei),
     },
     {
       key: "totalBlockRewardWei",
       label: `Total rewards (${tokenSymbol})`,
-      header: ["Total", "rewards", tokenSymbol],
       className: "num",
-      width: "7.75rem",
       render: (row) => fmtEth(row.totalBlockRewardWei),
     },
     {
       key: "totalBurntFeesWei",
       label: `Total burnt (${tokenSymbol})`,
-      header: ["Total", "burnt", tokenSymbol],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtEth(row.totalBurntFeesWei),
     },
     {
       key: "averageBlockRewardWei",
       label: `Avg reward/block (${tokenSymbol})`,
-      header: ["Avg reward", "per block", tokenSymbol],
       className: "num",
-      width: "8.5rem",
       render: (row) => fmtEth(row.averageBlockRewardWei),
     },
     {
       key: "averageBurntFeesWei",
       label: `Avg burnt/block (${tokenSymbol})`,
-      header: ["Avg burnt", "per block", tokenSymbol],
       className: "num",
-      width: "8.5rem",
       render: (row) => fmtEth(row.averageBurntFeesWei),
     },
     {
       key: "averageFeePriceWei",
       label: "Avg fee price (gwei)",
-      header: ["Avg fee", "price", "gwei"],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtGwei(row.averageFeePriceWei),
     },
     {
       key: "averagePriorityFeeWeightedWei",
       label: "Gas-weighted priority (gwei)",
-      header: ["Gas-weighted", "priority", "gwei"],
       className: "num",
-      width: "8.25rem",
       render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
     },
     {
       key: "averagePriorityFeeWei",
       label: "Avg priority fee (gwei)",
-      header: ["Avg priority", "fee", "gwei"],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtGwei(row.averagePriorityFeeWei),
     },
     {
       key: "averageTransactionGasUsed",
       label: "Avg tx gas",
-      header: ["Avg tx", "gas"],
       className: "num",
-      width: "6.5rem",
       render: (row) => fmtInteger(row.averageTransactionGasUsed),
     },
     {
       key: "averageTransactionInputDataSizeBytes",
       label: "Avg tx input",
-      header: ["Avg tx", "input"],
       className: "num",
-      width: "6.75rem",
       render: (row) => fmtBytes(row.averageTransactionInputDataSizeBytes),
     },
     {
       key: "averageTransactionInputDataCompressedSizeBytes",
       label: "Avg tx input zstd",
-      header: ["Avg tx", "input", "zstd"],
       className: "num",
-      width: "7rem",
       render: (row) => fmtBytes(row.averageTransactionInputDataCompressedSizeBytes),
     },
     {
       key: "transactionCount",
       label: "Tx count",
-      header: ["Tx", "count"],
       className: "num",
-      width: "clamp(4.25rem, 14vw, 5.5rem)",
       render: (row) => row.transactionCount,
     },
     {
       key: "minMaxGasInBlock",
       label: "Min block gas limit",
-      header: ["Min block", "gas limit"],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtInteger(row.minMaxGasInBlock),
     },
     {
       key: "maxMaxGasInBlock",
       label: "Max block gas limit",
-      header: ["Max block", "gas limit"],
       className: "num",
-      width: "7.25rem",
       render: (row) => fmtInteger(row.maxMaxGasInBlock),
     },
     {
       key: "gasUsed",
       label: "Gas used / total max",
-      header: ["Gas used", "of total", "max"],
       className: "num",
-      width: "10rem",
       render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
     },
     {
       key: "totalInputDataSizeBytes",
       label: "Input data",
-      header: ["Input", "data"],
       className: "num",
-      width: "6.5rem",
       render: (row) => fmtBytes(row.totalInputDataSizeBytes),
     },
     {
       key: "totalInputDataCompressedSizeBytes",
       label: "Input data zstd",
-      header: ["Input", "data", "zstd"],
       className: "num",
-      width: "7rem",
       render: (row) => fmtBytes(row.totalInputDataCompressedSizeBytes),
     },
   ];
@@ -548,20 +499,11 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
       </div>
       <div className="table-wrap">
         <table className="data-table ranges-table">
-          <colgroup>
-            {visibleColumns.map((column) => (
-              <col key={column.key} style={{ width: column.width }} />
-            ))}
-          </colgroup>
           <thead>
             <tr>
               {visibleColumns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
-                  <span className="range-header-label">
-                    {column.header.map((line) => (
-                      <span key={line}>{line}</span>
-                    ))}
-                  </span>
+                  {renderTableHeader(column.label)}
                 </th>
               ))}
             </tr>

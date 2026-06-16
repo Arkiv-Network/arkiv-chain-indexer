@@ -2065,25 +2065,13 @@ button.secondary {
 }
 
 .ranges-table th {
-  padding: 0.45rem 0.55rem;
+  padding: 0.35rem 0.55rem;
   white-space: normal;
-  vertical-align: bottom;
+  vertical-align: top;
 }
 
 .ranges-table td {
-  padding: 0.5rem 0.55rem;
-}
-
-.range-header-label {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 0.05rem;
-  line-height: 1.08;
-  white-space: normal;
-}
-
-.ranges-table th.num .range-header-label {
-  align-items: flex-end;
+  padding: 0.4rem 0.55rem;
 }
 
 @media (max-width: 720px) {
@@ -2190,7 +2178,7 @@ table {
 }
 
 .data-table {
-  table-layout: fixed;
+  table-layout: auto;
   min-width: max-content;
 }
 
@@ -2220,7 +2208,13 @@ th {
   line-height: 1.25;
   position: sticky;
   white-space: normal;
+  overflow-wrap: anywhere;
   top: 0;
+}
+
+.table-header-wrap {
+  white-space: normal;
+  line-height: 1.3;
 }
 
 tbody tr:nth-child(even) {
@@ -3750,10 +3744,12 @@ button.secondary.guzzler-refresh {
 
 .sort-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.35rem;
+  gap: 0.2rem 0.35rem;
   width: 100%;
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -3766,6 +3762,12 @@ button.secondary.guzzler-refresh {
 
 th:not(.num) .sort-header {
   justify-content: space-between;
+}
+
+.sort-header > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .sort-header:hover {
