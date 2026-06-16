@@ -4270,6 +4270,31 @@ th:not(.num) .sort-header {
   gap: 0.2rem;
 }
 
+.parameter-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.parameter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.parameter-group + .parameter-group {
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.parameter-group-title {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .param-check {
   display: flex;
   align-items: center;

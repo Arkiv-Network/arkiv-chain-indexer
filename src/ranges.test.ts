@@ -136,6 +136,9 @@ describe("computeBlockRange", () => {
 
     expect(range.averageBaseFeeWei).toBe((baseFeeSum / rangeSize).toString());
     expect(range.totalGasUsed).toBe(totalGas.toString());
+    expect(range.averageTotalGasUsed).toBe((totalGas / rangeSize).toString());
+    expect(range.minTotalGasUsed).toBe("1000");
+    expect(range.maxTotalGasUsed).toBe("1099");
     expect(range.totalMaxGas).toBe(totalMaxGas.toString());
     expect(range.minMaxGasInBlock).toBe("30000000");
     expect(range.maxMaxGasInBlock).toBe("30099000");
@@ -183,6 +186,9 @@ describe("computeBlockRange", () => {
     expect(range.rangeEnd).toBe(2_099n);
     expect(range.transactionCount).toBe(50);
     expect(range.totalGasUsed).toBe((1000n * 50n).toString());
+    expect(range.averageTotalGasUsed).toBe("1000");
+    expect(range.minTotalGasUsed).toBe("1000");
+    expect(range.maxTotalGasUsed).toBe("1000");
     expect(range.minBaseFeeWei).toBe("200");
     expect(range.maxBaseFeeWei).toBe((200n + 49n).toString());
   });

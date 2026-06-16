@@ -18,6 +18,7 @@ export interface ParameterDef {
   unit: string;
   color: string;
   toNumber: (value: string | number | undefined | null) => number | null;
+  rangeOnly?: boolean;
   /**
    * When set, this parameter renders as a min/max band (filled area) with `key`
    * as the average line on top, mirroring the home view's MinAvgMaxPanel.
@@ -127,6 +128,17 @@ export const PARAMETERS: ParameterDef[] = [
     toNumber: plainNumber,
   },
   {
+    key: "averageTotalGasUsed",
+    label: "Avg block gas used",
+    axis: "total-gas",
+    axisLabel: "Total gas used",
+    unit: "gas",
+    color: "#8e44ad",
+    toNumber: plainNumber,
+    rangeOnly: true,
+    band: { minKey: "minTotalGasUsed", maxKey: "maxTotalGasUsed" },
+  },
+  {
     key: "totalInputDataSizeBytes",
     label: "Total input data",
     axis: "total-input-data",
@@ -136,6 +148,17 @@ export const PARAMETERS: ParameterDef[] = [
     toNumber: plainNumber,
   },
   {
+    key: "averageTotalInputDataSizeBytes",
+    label: "Avg block data size",
+    axis: "total-input-data",
+    axisLabel: "Total input data",
+    unit: "bytes",
+    color: "#0e7490",
+    toNumber: plainNumber,
+    rangeOnly: true,
+    band: { minKey: "minTotalInputDataSizeBytes", maxKey: "maxTotalInputDataSizeBytes" },
+  },
+  {
     key: "totalInputDataCompressedSizeBytes",
     label: "Total input data zstd",
     axis: "total-input-data-zstd",
@@ -143,6 +166,20 @@ export const PARAMETERS: ParameterDef[] = [
     unit: "bytes",
     color: "#005f73",
     toNumber: plainNumber,
+  },
+  {
+    key: "averageTotalInputDataCompressedSizeBytes",
+    label: "Avg block data zstd",
+    axis: "total-input-data-zstd",
+    axisLabel: "Total input data zstd",
+    unit: "bytes",
+    color: "#0f766e",
+    toNumber: plainNumber,
+    rangeOnly: true,
+    band: {
+      minKey: "minTotalInputDataCompressedSizeBytes",
+      maxKey: "maxTotalInputDataCompressedSizeBytes",
+    },
   },
   {
     key: "totalBlockRewardWei",
@@ -277,6 +314,13 @@ export const DEFAULT_PARAMETERS = ["averageBaseFeeWei", "averagePriorityFeeWei"]
 
 export function getAvailableParameters(noBatcher: boolean): ParameterDef[] {
   return noBatcher ? PARAMETERS.filter((parameter) => parameter.axis !== AXIS_BATCHER) : PARAMETERS;
+}
+
+export function filterParametersForRangeMode(
+  parameters: readonly ParameterDef[],
+  isRangeMode: boolean,
+): ParameterDef[] {
+  return parameters.filter((parameter) => (isRangeMode ? true : !parameter.rangeOnly));
 }
 
 export function parseSelectedParameters(value: string, availableParameters: readonly ParameterDef[]): string[] {

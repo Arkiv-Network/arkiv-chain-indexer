@@ -166,8 +166,17 @@ export interface StoredBlockRange {
   maxBaseFeeWei: string;
   averageBaseFeeWei: string;
   totalGasUsed: string;
+  averageTotalGasUsed: string;
+  minTotalGasUsed: string;
+  maxTotalGasUsed: string;
   totalInputDataSizeBytes: string;
+  averageTotalInputDataSizeBytes: string;
+  minTotalInputDataSizeBytes: string;
+  maxTotalInputDataSizeBytes: string;
   totalInputDataCompressedSizeBytes: string;
+  averageTotalInputDataCompressedSizeBytes: string;
+  minTotalInputDataCompressedSizeBytes: string;
+  maxTotalInputDataCompressedSizeBytes: string;
   totalMaxGas: string;
   minMaxGasInBlock: string;
   maxMaxGasInBlock: string;
@@ -581,8 +590,17 @@ export class ScannerStorage {
         max_base_fee_wei TEXT NOT NULL,
         average_base_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
+        average_total_gas_used TEXT NOT NULL DEFAULT '0',
+        min_total_gas_used TEXT NOT NULL DEFAULT '0',
+        max_total_gas_used TEXT NOT NULL DEFAULT '0',
         total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        average_total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        min_total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
+        max_total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
         total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        average_total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        min_total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        max_total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
         total_max_gas TEXT NOT NULL,
         min_max_gas_in_block TEXT NOT NULL,
         max_max_gas_in_block TEXT NOT NULL,
@@ -610,6 +628,29 @@ export class ScannerStorage {
         PRIMARY KEY (range_size, range_start)
       )
     `);
+    const blockRangeMetricColumnsWereMissing = await this.hasMissingColumns("block_ranges", [
+      "average_total_gas_used",
+      "min_total_gas_used",
+      "max_total_gas_used",
+      "average_total_input_data_size_bytes",
+      "min_total_input_data_size_bytes",
+      "max_total_input_data_size_bytes",
+      "average_total_input_data_compressed_size_bytes",
+      "min_total_input_data_compressed_size_bytes",
+      "max_total_input_data_compressed_size_bytes",
+    ]);
+    await this.addRequiredTextColumn(this.qBlockRanges, "average_total_gas_used");
+    await this.addRequiredTextColumn(this.qBlockRanges, "min_total_gas_used");
+    await this.addRequiredTextColumn(this.qBlockRanges, "max_total_gas_used");
+    await this.addRequiredTextColumn(this.qBlockRanges, "average_total_input_data_size_bytes");
+    await this.addRequiredTextColumn(this.qBlockRanges, "min_total_input_data_size_bytes");
+    await this.addRequiredTextColumn(this.qBlockRanges, "max_total_input_data_size_bytes");
+    await this.addRequiredTextColumn(this.qBlockRanges, "average_total_input_data_compressed_size_bytes");
+    await this.addRequiredTextColumn(this.qBlockRanges, "min_total_input_data_compressed_size_bytes");
+    await this.addRequiredTextColumn(this.qBlockRanges, "max_total_input_data_compressed_size_bytes");
+    if (blockRangeMetricColumnsWereMissing) {
+      await this.db.query(`DELETE FROM ${this.qBlockRanges}`);
+    }
     await this.db.query(
       `ALTER TABLE ${this.qBlockRanges}
        ADD COLUMN IF NOT EXISTS total_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
@@ -680,6 +721,25 @@ export class ScannerStorage {
 
   private async addNullableTextColumn(table: string, column: string): Promise<void> {
     await this.db.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT`);
+  }
+
+  private async addRequiredTextColumn(table: string, column: string): Promise<void> {
+    await this.db.query(
+      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT NOT NULL DEFAULT '0'`,
+    );
+  }
+
+  private async hasMissingColumns(tableName: string, columns: readonly string[]): Promise<boolean> {
+    const result = await this.db.query<{ column_name: string }>(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = $1
+         AND table_name = $2
+         AND column_name = ANY($3::text[])`,
+      [this.schema, tableName, columns],
+    );
+    const present = new Set(result.rows.map((row) => row.column_name));
+    return columns.some((column) => !present.has(column));
   }
 
   async getLastSuccessfulBlock(): Promise<bigint | undefined> {
@@ -2010,8 +2070,17 @@ export class ScannerStorage {
         max_base_fee_wei,
         average_base_fee_wei,
         total_gas_used,
+        average_total_gas_used,
+        min_total_gas_used,
+        max_total_gas_used,
         total_input_data_size_bytes,
+        average_total_input_data_size_bytes,
+        min_total_input_data_size_bytes,
+        max_total_input_data_size_bytes,
         total_input_data_compressed_size_bytes,
+        average_total_input_data_compressed_size_bytes,
+        min_total_input_data_compressed_size_bytes,
+        max_total_input_data_compressed_size_bytes,
         total_max_gas,
         min_max_gas_in_block,
         max_max_gas_in_block,
@@ -2036,7 +2105,7 @@ export class ScannerStorage {
         average_batcher_max_tx_size,
         is_complete,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, TRUE, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, TRUE, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -2045,8 +2114,17 @@ export class ScannerStorage {
         max_base_fee_wei = EXCLUDED.max_base_fee_wei,
         average_base_fee_wei = EXCLUDED.average_base_fee_wei,
         total_gas_used = EXCLUDED.total_gas_used,
+        average_total_gas_used = EXCLUDED.average_total_gas_used,
+        min_total_gas_used = EXCLUDED.min_total_gas_used,
+        max_total_gas_used = EXCLUDED.max_total_gas_used,
         total_input_data_size_bytes = EXCLUDED.total_input_data_size_bytes,
+        average_total_input_data_size_bytes = EXCLUDED.average_total_input_data_size_bytes,
+        min_total_input_data_size_bytes = EXCLUDED.min_total_input_data_size_bytes,
+        max_total_input_data_size_bytes = EXCLUDED.max_total_input_data_size_bytes,
         total_input_data_compressed_size_bytes = EXCLUDED.total_input_data_compressed_size_bytes,
+        average_total_input_data_compressed_size_bytes = EXCLUDED.average_total_input_data_compressed_size_bytes,
+        min_total_input_data_compressed_size_bytes = EXCLUDED.min_total_input_data_compressed_size_bytes,
+        max_total_input_data_compressed_size_bytes = EXCLUDED.max_total_input_data_compressed_size_bytes,
         total_max_gas = EXCLUDED.total_max_gas,
         min_max_gas_in_block = EXCLUDED.min_max_gas_in_block,
         max_max_gas_in_block = EXCLUDED.max_max_gas_in_block,
@@ -2081,8 +2159,17 @@ export class ScannerStorage {
         metrics.maxBaseFeeWei,
         metrics.averageBaseFeeWei,
         metrics.totalGasUsed,
+        metrics.averageTotalGasUsed,
+        metrics.minTotalGasUsed,
+        metrics.maxTotalGasUsed,
         metrics.totalInputDataSizeBytes,
+        metrics.averageTotalInputDataSizeBytes,
+        metrics.minTotalInputDataSizeBytes,
+        metrics.maxTotalInputDataSizeBytes,
         metrics.totalInputDataCompressedSizeBytes,
+        metrics.averageTotalInputDataCompressedSizeBytes,
+        metrics.minTotalInputDataCompressedSizeBytes,
+        metrics.maxTotalInputDataCompressedSizeBytes,
         metrics.totalMaxGas,
         metrics.minMaxGasInBlock,
         metrics.maxMaxGasInBlock,
@@ -2152,8 +2239,17 @@ export class ScannerStorage {
         max_base_fee_wei,
         average_base_fee_wei,
         total_gas_used,
+        average_total_gas_used,
+        min_total_gas_used,
+        max_total_gas_used,
         total_input_data_size_bytes,
+        average_total_input_data_size_bytes,
+        min_total_input_data_size_bytes,
+        max_total_input_data_size_bytes,
         total_input_data_compressed_size_bytes,
+        average_total_input_data_compressed_size_bytes,
+        min_total_input_data_compressed_size_bytes,
+        max_total_input_data_compressed_size_bytes,
         total_max_gas,
         min_max_gas_in_block,
         max_max_gas_in_block,
@@ -2192,8 +2288,17 @@ export class ScannerStorage {
       max_base_fee_wei: string;
       average_base_fee_wei: string;
       total_gas_used: string;
+      average_total_gas_used: string;
+      min_total_gas_used: string;
+      max_total_gas_used: string;
       total_input_data_size_bytes: string;
+      average_total_input_data_size_bytes: string;
+      min_total_input_data_size_bytes: string;
+      max_total_input_data_size_bytes: string;
       total_input_data_compressed_size_bytes: string;
+      average_total_input_data_compressed_size_bytes: string;
+      min_total_input_data_compressed_size_bytes: string;
+      max_total_input_data_compressed_size_bytes: string;
       total_max_gas: string;
       min_max_gas_in_block: string;
       max_max_gas_in_block: string;
@@ -2228,8 +2333,17 @@ export class ScannerStorage {
       maxBaseFeeWei: row.max_base_fee_wei,
       averageBaseFeeWei: row.average_base_fee_wei,
       totalGasUsed: row.total_gas_used,
+      averageTotalGasUsed: row.average_total_gas_used,
+      minTotalGasUsed: row.min_total_gas_used,
+      maxTotalGasUsed: row.max_total_gas_used,
       totalInputDataSizeBytes: row.total_input_data_size_bytes,
+      averageTotalInputDataSizeBytes: row.average_total_input_data_size_bytes,
+      minTotalInputDataSizeBytes: row.min_total_input_data_size_bytes,
+      maxTotalInputDataSizeBytes: row.max_total_input_data_size_bytes,
       totalInputDataCompressedSizeBytes: row.total_input_data_compressed_size_bytes,
+      averageTotalInputDataCompressedSizeBytes: row.average_total_input_data_compressed_size_bytes,
+      minTotalInputDataCompressedSizeBytes: row.min_total_input_data_compressed_size_bytes,
+      maxTotalInputDataCompressedSizeBytes: row.max_total_input_data_compressed_size_bytes,
       totalMaxGas: row.total_max_gas,
       minMaxGasInBlock: row.min_max_gas_in_block,
       maxMaxGasInBlock: row.max_max_gas_in_block,

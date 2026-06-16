@@ -74,8 +74,17 @@ export const RANGE_RESPONSE_NAMES = [
   "maxBaseFeeWei",
   "averageBaseFeeWei",
   "totalGasUsed",
+  "averageTotalGasUsed",
+  "minTotalGasUsed",
+  "maxTotalGasUsed",
   "totalInputDataSizeBytes",
+  "averageTotalInputDataSizeBytes",
+  "minTotalInputDataSizeBytes",
+  "maxTotalInputDataSizeBytes",
   "totalInputDataCompressedSizeBytes",
+  "averageTotalInputDataCompressedSizeBytes",
+  "minTotalInputDataCompressedSizeBytes",
+  "maxTotalInputDataCompressedSizeBytes",
   "totalMaxGas",
   "minMaxGasInBlock",
   "maxMaxGasInBlock",
@@ -125,8 +134,17 @@ export interface StoredBlockRange {
   averageBurntFeesWei: string;
   transactionCount: number;
   totalGasUsed: string;
+  averageTotalGasUsed: string;
+  minTotalGasUsed: string;
+  maxTotalGasUsed: string;
   totalInputDataSizeBytes: string;
+  averageTotalInputDataSizeBytes: string;
+  minTotalInputDataSizeBytes: string;
+  maxTotalInputDataSizeBytes: string;
   totalInputDataCompressedSizeBytes: string;
+  averageTotalInputDataCompressedSizeBytes: string;
+  minTotalInputDataCompressedSizeBytes: string;
+  maxTotalInputDataCompressedSizeBytes: string;
   totalMaxGas: string;
   minMaxGasInBlock: string;
   maxMaxGasInBlock: string;
@@ -863,9 +881,24 @@ function decodeRangeResponseRow(
     averageBurntFeesWei: stringValue(values.get("averageBurntFeesWei") ?? null),
     transactionCount: numberValue(values.get("transactionCount") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    averageTotalGasUsed: stringValue(values.get("averageTotalGasUsed") ?? null),
+    minTotalGasUsed: stringValue(values.get("minTotalGasUsed") ?? null),
+    maxTotalGasUsed: stringValue(values.get("maxTotalGasUsed") ?? null),
     totalInputDataSizeBytes: stringValue(values.get("totalInputDataSizeBytes") ?? null),
+    averageTotalInputDataSizeBytes: stringValue(values.get("averageTotalInputDataSizeBytes") ?? null),
+    minTotalInputDataSizeBytes: stringValue(values.get("minTotalInputDataSizeBytes") ?? null),
+    maxTotalInputDataSizeBytes: stringValue(values.get("maxTotalInputDataSizeBytes") ?? null),
     totalInputDataCompressedSizeBytes: stringValue(
       values.get("totalInputDataCompressedSizeBytes") ?? null,
+    ),
+    averageTotalInputDataCompressedSizeBytes: stringValue(
+      values.get("averageTotalInputDataCompressedSizeBytes") ?? null,
+    ),
+    minTotalInputDataCompressedSizeBytes: stringValue(
+      values.get("minTotalInputDataCompressedSizeBytes") ?? null,
+    ),
+    maxTotalInputDataCompressedSizeBytes: stringValue(
+      values.get("maxTotalInputDataCompressedSizeBytes") ?? null,
     ),
     totalMaxGas: stringValue(values.get("totalMaxGas") ?? null),
     minMaxGasInBlock: stringValue(values.get("minMaxGasInBlock") ?? null),
