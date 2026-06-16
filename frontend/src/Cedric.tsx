@@ -23,24 +23,35 @@ export function CedricOnTimer({ intervalMs = 6000 }: { intervalMs?: number }) {
   return <Cedric progress={tick} />;
 }
 
-export function Cedric({ progress }: { progress: number | null }) {
+export function Cedric({
+  progress,
+  initiallyVisible = false,
+  canHide = true,
+}: {
+  progress: number | null;
+  initiallyVisible?: boolean;
+  canHide?: boolean;
+}) {
   // "initial" — hidden for a few seconds after load; "peeking" — up and
   // blinking; "away" — ducked behind the panel until progress advances by 3.
-  const [phase, setPhase] = useState<"initial" | "peeking" | "away">("initial");
+  const [phase, setPhase] = useState<"initial" | "peeking" | "away">(
+    initiallyVisible ? "peeking" : "initial",
+  );
   const blinkCount = useRef(0);
   const hiddenSinceProgress = useRef<number | null>(null);
 
   // Stay hidden briefly on page load, then make the first appearance.
   useEffect(() => {
+    if (initiallyVisible) return;
     const timer = window.setTimeout(() => setPhase("peeking"), CEDRIC_INITIAL_HIDDEN_MS);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [initiallyVisible]);
 
   // Count blinks while peeking; after the 4th, duck away.
   const onIteration = (event: AnimationEvent) => {
     if (event.animationName !== "cedric-blink" || phase !== "peeking") return;
     blinkCount.current += 1;
-    if (blinkCount.current >= CEDRIC_BLINKS_BEFORE_HIDING) {
+    if (canHide && blinkCount.current >= CEDRIC_BLINKS_BEFORE_HIDING) {
       hiddenSinceProgress.current = progress;
       setPhase("away");
     }
@@ -48,7 +59,7 @@ export function Cedric({ progress }: { progress: number | null }) {
 
   // While away, reappear once progress has advanced by 3.
   useEffect(() => {
-    if (phase !== "away" || progress === null) return;
+    if (!canHide || phase !== "away" || progress === null) return;
     if (hiddenSinceProgress.current === null) {
       hiddenSinceProgress.current = progress;
       return;
@@ -57,7 +68,7 @@ export function Cedric({ progress }: { progress: number | null }) {
       blinkCount.current = 0;
       setPhase("peeking");
     }
-  }, [progress, phase]);
+  }, [canHide, progress, phase]);
 
   return (
     <span
@@ -67,7 +78,7 @@ export function Cedric({ progress }: { progress: number | null }) {
       // flashes in his un-positioned spot on load before he ducks. Inline so it
       // applies on the very first paint, before the stylesheet is in effect.
       style={{ visibility: phase === "initial" ? "hidden" : "visible" }}
-      onAnimationIteration={onIteration}
+      onAnimationIteration={canHide ? onIteration : undefined}
     >
       <svg viewBox="0 0 120 130" xmlns="http://www.w3.org/2000/svg">
         {/* ear tufts */}

@@ -25,6 +25,7 @@ import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
 import { ChartsView } from "./ChartsView";
+import { CedricView } from "./CedricView";
 import { GuzzlersView } from "./GuzzlersView";
 import { HealthView } from "./HealthView";
 import { HomeView } from "./HomeView";
@@ -643,6 +644,8 @@ export function App() {
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
           />
+        ) : activeView === "cedric" ? (
+          <CedricView />
         ) : activeView === "admin" ? (
           <AdminView
             settings={pageSettings}
