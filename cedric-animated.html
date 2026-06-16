@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cedric — animated</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: #f4efe8;
+      }
+
+      .cedric {
+        width: 260px;
+        height: auto;
+      }
+
+      .cedric svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        filter: drop-shadow(0 3px 2px rgba(17, 17, 17, 0.18));
+      }
+
+      /* gentle hop of the whole bird when excited */
+      .cedric-body {
+        transform-box: view-box;
+        transform-origin: 60px 130px;
+        animation: cedric-hop 3s ease-in-out infinite;
+      }
+
+      /* ground line fades in only while excited */
+      .cedric-ground {
+        animation: cedric-ground 3s ease-in-out infinite;
+      }
+
+      /* feet squash on landing — origin 0 0 so the matrix maps as authored */
+      .cedric-feet {
+        transform-box: view-box;
+        transform-origin: 0 0;
+        animation: cedric-feet 3s ease-in-out infinite;
+      }
+
+      /* wings: base tuck -> raised excited flare -> base.
+         origin 0 0 so the Inkscape matrices map exactly */
+      .cedric-wing-l {
+        transform-box: view-box;
+        transform-origin: 0 0;
+        animation: cedric-wing-l 3s ease-in-out infinite;
+      }
+      .cedric-wing-r {
+        transform-box: view-box;
+        transform-origin: 0 0;
+        animation: cedric-wing-r 3s ease-in-out infinite;
+      }
+
+      .cedric-eyes {
+        transform-box: view-box;
+        transform-origin: 60px 57px;
+        animation: cedric-blink 3s ease-in-out infinite;
+      }
+      .cedric-pupils {
+        transform-box: view-box;
+        transform: translate(-6px, 5px);
+        animation: cedric-glance 7s ease-in-out infinite;
+      }
+
+      @keyframes cedric-hop {
+        0%, 28%   { transform: translateY(0) scaleY(1); }
+        42%       { transform: translateY(-9px) scaleY(1.03); }
+        60%       { transform: translateY(0) scaleY(0.97); }
+        70%, 100% { transform: translateY(0) scaleY(1); }
+      }
+
+      @keyframes cedric-feet {
+        0%, 30%   { transform: matrix(1, 0, 0, 1, 0, 0); }
+        55%, 70%  { transform: matrix(1.0202038, 0, 0, 0.64150915, -2.525294, 47.149882); }
+        90%, 100% { transform: matrix(1, 0, 0, 1, 0, 0); }
+      }
+
+      @keyframes cedric-ground {
+        0%, 30%   { opacity: 0; }
+        52%, 72%  { opacity: 1; }
+        92%, 100% { opacity: 0; }
+      }
+
+      @keyframes cedric-wing-l {
+        0%, 30%   { transform: matrix(1.6314297, 0, 0, 1.3574654, -13.07786, -32.079865); }
+        52%, 70%  { transform: matrix(1.4872069, 0.85795015, -0.72112841, 1.2045482, 42.199324, -47.920114); }
+        90%, 100% { transform: matrix(1.6314297, 0, 0, 1.3574654, -13.07786, -32.079865); }
+      }
+
+      @keyframes cedric-wing-r {
+        0%, 30%   { transform: matrix(-1.7079786, 0, 0, 1.311455, 134.16594, -27.60912); }
+        52%, 70%  { transform: matrix(-1.4571831, 0.89095922, 0.6841145, 1.1188841, 79.698764, -43.017057); }
+        90%, 100% { transform: matrix(-1.7079786, 0, 0, 1.311455, 134.16594, -27.60912); }
+      }
+
+      @keyframes cedric-blink {
+        0%, 88%, 100% { transform: scaleY(1); }
+        92%, 95%      { transform: scaleY(0.1); }
+      }
+
+      @keyframes cedric-glance {
+        0%, 16%   { transform: translate(-6px, 5px); }
+        26%, 40%  { transform: translate(-7px, 2px); }
+        50%, 63%  { transform: translate(-3px, 7px); }
+        73%, 88%  { transform: translate(-6px, 6px); }
+        98%, 100% { transform: translate(-6px, 5px); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .cedric-body, .cedric-ground, .cedric-feet,
+        .cedric-wing-l, .cedric-wing-r,
+        .cedric-eyes, .cedric-pupils { animation: none; }
+        .cedric-pupils { transform: translate(-6px, 5px); }
+      }
+    </style>
+  </head>
+  <body>
+    <span class="cedric" aria-label="Cedric the owl, getting excited">
+      <svg viewBox="0 0 120 145" xmlns="http://www.w3.org/2000/svg">
+        <rect class="cedric-ground" x="0" y="132.06" width="120.8" height="3.94" fill="#1a1a1a"></rect>
+
+        <g class="cedric-body">
+          <g class="cedric-feet" stroke="#FE7446" stroke-width="3.6" stroke-linecap="round" fill="none">
+            <path d="M49 122 L43 138"></path>
+            <path d="M49 122 L49 140"></path>
+            <path d="M49 122 L55 138"></path>
+            <path d="M71 122 L65 138"></path>
+            <path d="M71 122 L71 140"></path>
+            <path d="M71 122 L77 138"></path>
+          </g>
+
+          <path d="M30 28 L41 7 L54 31 Z" fill="#6E4B30"></path>
+          <path d="M90 28 L79 7 L66 31 Z" fill="#6E4B30"></path>
+          <path d="M16 72 Q16 130 60 130 Q104 130 104 72 Z" fill="#6E4B30"></path>
+          <ellipse cx="60" cy="58" rx="45" ry="43" fill="#6E4B30"></ellipse>
+          <ellipse cx="60" cy="94" rx="31" ry="34" fill="#b79a79"></ellipse>
+
+          <g class="cedric-wing-l">
+            <path d="m 18,74 c -4.666667,22.666667 -1.333333,40.33333 10,53 2,-18 4.192008,-29.391817 4.192008,-42.72515 C 28.192008,80.27485 22.666667,74 18,74 Z" fill="#5a3c26"></path>
+            <g stroke="#6e4b30" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.55">
+              <path d="m 22,88 q 4,2 6,8"></path>
+              <path d="m 21,102 q 4,2 6,8"></path>
+            </g>
+          </g>
+          <g class="cedric-wing-r">
+            <path d="m 18,74 c -4.666667,22.666667 -1.333333,40.33333 10,53 2,-18 4.192008,-29.391817 4.192008,-42.72515 C 28.192008,80.27485 22.666667,74 18,74 Z" fill="#5a3c26"></path>
+            <g stroke="#6e4b30" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.55">
+              <path d="m 22,88 q 4,2 6,8"></path>
+              <path d="m 21,102 q 4,2 6,8"></path>
+            </g>
+          </g>
+
+          <ellipse cx="60" cy="54.373867" rx="37" ry="31.373869" fill="#c49a6c"></ellipse>
+          <path d="m 27.817115,40.998174 q 16.098311,-9.985653 29.178189,1.997131" stroke="#5a3c26" stroke-width="4" fill="none" stroke-linecap="round"></path>
+          <path d="M 91.620094,40.998155 Q 75.521836,31.012651 62.442002,42.995256" stroke="#5a3c26" stroke-width="4.0284" fill="none" stroke-linecap="round"></path>
+          <g class="cedric-eyes">
+            <circle cx="43" cy="57" r="16.5" fill="#FBF7EF"></circle>
+            <circle cx="77" cy="57" r="16.5" fill="#FBF7EF"></circle>
+            <g class="cedric-pupils">
+              <circle cx="43" cy="57" r="7.6" fill="#2A2320"></circle>
+              <circle cx="77" cy="57" r="7.6" fill="#2A2320"></circle>
+              <circle cx="40" cy="54" r="2.3" fill="#FFFFFF"></circle>
+              <circle cx="74" cy="54" r="2.3" fill="#FFFFFF"></circle>
+            </g>
+          </g>
+          <path d="M60 65 L68 73 Q60 82 52 73 Z" fill="#FE7446"></path>
+        </g>
+      </svg>
+    </span>
+  </body>
+</html>
