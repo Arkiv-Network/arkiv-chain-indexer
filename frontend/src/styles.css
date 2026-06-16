@@ -2050,6 +2050,20 @@ button.secondary {
   font-size: 0.8rem;
 }
 
+.ranges-filter-form {
+  align-items: stretch;
+}
+
+.ranges-filter-form .filter-group {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ranges-filter-form .filter-group label {
+  display: flex;
+  flex-direction: column;
+}
+
 .ranges-size-filter select {
   width: 6.25rem;
 }
@@ -2157,6 +2171,10 @@ button.secondary {
   .blocks-date-filter input,
   .blocks-limit-filter select,
   .ranges-size-filter select {
+    width: 100%;
+  }
+
+  .ranges-filter-form .filter-group {
     width: 100%;
   }
 

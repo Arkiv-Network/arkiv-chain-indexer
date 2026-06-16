@@ -70,14 +70,14 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
     },
     {
       key: "rangeStart",
-      label: "Start",
+      label: "Start block",
       group: "Range",
       className: "num",
       render: (row) => row.rangeStart,
     },
     {
       key: "rangeEnd",
-      label: "End",
+      label: "End block",
       group: "Range",
       className: "num",
       render: (row) => row.rangeEnd,
