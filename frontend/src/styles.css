@@ -2074,12 +2074,37 @@ button.secondary {
   transform: rotate(0deg);
 }
 
+.ranges-column-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 0.6rem 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.ranges-column-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ranges-column-group + .ranges-column-group {
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.ranges-column-group-title {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .ranges-column-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
   gap: 0.35rem 0.65rem;
-  padding: 0.35rem 0.6rem 0.7rem;
-  border-top: 1px solid var(--border);
 }
 
 .ranges-column-toggle {

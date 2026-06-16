@@ -48,8 +48,15 @@ const EMPTY: Filters = {
 interface Column<T> {
   key: string;
   label: string;
+  group: string;
   className?: string;
   render: (row: T) => ReactNode;
+}
+
+interface ColumnGroup<T> {
+  key: string;
+  label: string;
+  columns: Column<T>[];
 }
 
 function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlockRange>[] {
@@ -57,206 +64,258 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
     {
       key: "rangeSize",
       label: "Range size",
+      group: "Range",
       className: "num",
       render: (row) => row.rangeSize,
     },
     {
       key: "rangeStart",
       label: "Start",
+      group: "Range",
       className: "num",
       render: (row) => row.rangeStart,
     },
     {
       key: "rangeEnd",
       label: "End",
+      group: "Range",
       className: "num",
       render: (row) => row.rangeEnd,
     },
     {
       key: "minBlockDate",
       label: "Min date",
+      group: "Range",
       render: (row) => fmtDate(row.minBlockDate, timeZone),
     },
     {
       key: "maxBlockDate",
       label: "Max date",
+      group: "Range",
       render: (row) => fmtDate(row.maxBlockDate, timeZone),
     },
     {
       key: "minBaseFeeWei",
       label: "Min base fee (gwei)",
+      group: "Gas price",
       className: "num",
       render: (row) => fmtGwei(row.minBaseFeeWei),
     },
     {
       key: "maxBaseFeeWei",
       label: "Max base fee (gwei)",
+      group: "Gas price",
       className: "num",
       render: (row) => fmtGwei(row.maxBaseFeeWei),
     },
     {
       key: "averageBaseFeeWei",
       label: "Avg base fee (gwei)",
+      group: "Gas price",
       className: "num",
       render: (row) => fmtGwei(row.averageBaseFeeWei),
     },
     {
       key: "totalBlockRewardWei",
       label: `Total rewards (${tokenSymbol})`,
+      group: "Rewards",
       className: "num",
       render: (row) => fmtEth(row.totalBlockRewardWei),
     },
     {
       key: "totalBurntFeesWei",
       label: `Total burnt (${tokenSymbol})`,
+      group: "Rewards",
       className: "num",
       render: (row) => fmtEth(row.totalBurntFeesWei),
     },
     {
       key: "averageBlockRewardWei",
       label: `Avg reward/block (${tokenSymbol})`,
+      group: "Rewards",
       className: "num",
       render: (row) => fmtEth(row.averageBlockRewardWei),
     },
     {
       key: "averageBurntFeesWei",
       label: `Avg burnt/block (${tokenSymbol})`,
+      group: "Rewards",
       className: "num",
       render: (row) => fmtEth(row.averageBurntFeesWei),
     },
     {
       key: "averageFeePriceWei",
       label: "Avg fee price (gwei)",
+      group: "Gas price",
       className: "num",
       render: (row) => fmtGwei(row.averageFeePriceWei),
     },
     {
       key: "averagePriorityFeeWeightedWei",
       label: "Gas-weighted priority (gwei)",
+      group: "Gas price",
       className: "num",
       render: (row) => fmtGwei(row.averagePriorityFeeWeightedWei),
     },
     {
       key: "averagePriorityFeeWei",
       label: "Avg priority fee (gwei)",
+      group: "Gas price",
       className: "num",
       render: (row) => fmtGwei(row.averagePriorityFeeWei),
     },
     {
       key: "averageTransactionGasUsed",
       label: "Avg tx gas",
+      group: "Transactions",
       className: "num",
       render: (row) => fmtInteger(row.averageTransactionGasUsed),
     },
     {
       key: "averageTransactionInputDataSizeBytes",
       label: "Avg tx input",
+      group: "Transactions",
       className: "num",
       render: (row) => fmtBytes(row.averageTransactionInputDataSizeBytes),
     },
     {
       key: "averageTransactionInputDataCompressedSizeBytes",
       label: "Avg tx input zstd",
+      group: "Transactions",
       className: "num",
       render: (row) => fmtBytes(row.averageTransactionInputDataCompressedSizeBytes),
     },
     {
       key: "transactionCount",
       label: "Tx count",
+      group: "Transactions",
       className: "num",
       render: (row) => row.transactionCount,
     },
     {
       key: "minMaxGasInBlock",
       label: "Min block gas limit",
+      group: "Block gas",
       className: "num",
       render: (row) => fmtInteger(row.minMaxGasInBlock),
     },
     {
       key: "maxMaxGasInBlock",
       label: "Max block gas limit",
+      group: "Block gas",
       className: "num",
       render: (row) => fmtInteger(row.maxMaxGasInBlock),
     },
     {
       key: "gasUsed",
       label: "Gas used / total max",
+      group: "Block gas",
       className: "num",
       render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
     },
     {
       key: "totalGasUsed",
       label: "Total gas used",
+      group: "Block gas",
       className: "num",
       render: (row) => fmtInteger(row.totalGasUsed),
     },
     {
       key: "averageTotalGasUsed",
       label: "Avg block gas used",
+      group: "Block gas",
       className: "num",
       render: (row) => fmtInteger(row.averageTotalGasUsed),
     },
     {
       key: "minTotalGasUsed",
       label: "Min block gas used",
+      group: "Block gas",
       className: "num",
       render: (row) => fmtInteger(row.minTotalGasUsed),
     },
     {
       key: "maxTotalGasUsed",
       label: "Max block gas used",
+      group: "Block gas",
       className: "num",
       render: (row) => fmtInteger(row.maxTotalGasUsed),
     },
     {
       key: "totalInputDataSizeBytes",
       label: "Total input data",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.totalInputDataSizeBytes),
     },
     {
       key: "averageTotalInputDataSizeBytes",
       label: "Avg block input data",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.averageTotalInputDataSizeBytes),
     },
     {
       key: "minTotalInputDataSizeBytes",
       label: "Min block input data",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.minTotalInputDataSizeBytes),
     },
     {
       key: "maxTotalInputDataSizeBytes",
       label: "Max block input data",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.maxTotalInputDataSizeBytes),
     },
     {
       key: "totalInputDataCompressedSizeBytes",
       label: "Total input data zstd",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.totalInputDataCompressedSizeBytes),
     },
     {
       key: "averageTotalInputDataCompressedSizeBytes",
       label: "Avg block input zstd",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.averageTotalInputDataCompressedSizeBytes),
     },
     {
       key: "minTotalInputDataCompressedSizeBytes",
       label: "Min block input zstd",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.minTotalInputDataCompressedSizeBytes),
     },
     {
       key: "maxTotalInputDataCompressedSizeBytes",
       label: "Max block input zstd",
+      group: "Data size",
       className: "num",
       render: (row) => fmtBytes(row.maxTotalInputDataCompressedSizeBytes),
     },
   ];
+}
+
+function columnGroupKey(label: string): string {
+  return label.toLowerCase().replace(/\s+/g, "-");
+}
+
+function groupColumns<T>(columns: readonly Column<T>[]): ColumnGroup<T>[] {
+  const groups = new Map<string, ColumnGroup<T>>();
+  for (const column of columns) {
+    const key = columnGroupKey(column.group);
+    const group = groups.get(key);
+    if (group) {
+      group.columns.push(column);
+    } else {
+      groups.set(key, { key, label: column.group, columns: [column] });
+    }
+  }
+  return [...groups.values()];
 }
 
 function buildParams(filters: Filters): URLSearchParams {
@@ -365,6 +424,7 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
 
   const sorted = data ? data.ranges.slice().sort((a, b) => b.rangeStart - a.rangeStart) : [];
   const columns = useMemo(() => rangeColumns(timeZone, tokenSymbol), [timeZone, tokenSymbol]);
+  const columnGroups = useMemo(() => groupColumns(columns), [columns]);
   const visibleColumns = useMemo(() => {
     const visible = new Set(visibleColumnKeys);
     const selected = columns.filter((column) => visible.has(column.key));
@@ -539,21 +599,28 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
           ) : null}
         </div>
         {columnsOpen ? (
-          <div className="ranges-column-grid">
-            {columns.map((column) => {
-              const checked = visibleColumnKeys.includes(column.key);
-              return (
-                <label key={column.key} className="ranges-column-toggle">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={checked && visibleColumns.length === 1}
-                    onChange={() => toggleColumn(column.key)}
-                  />
-                  <span>{column.label}</span>
-                </label>
-              );
-            })}
+          <div className="ranges-column-groups">
+            {columnGroups.map((group) => (
+              <div key={group.key} className="ranges-column-group">
+                <span className="ranges-column-group-title">{group.label}</span>
+                <div className="ranges-column-grid">
+                  {group.columns.map((column) => {
+                    const checked = visibleColumnKeys.includes(column.key);
+                    return (
+                      <label key={column.key} className="ranges-column-toggle">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={checked && visibleColumns.length === 1}
+                          onChange={() => toggleColumn(column.key)}
+                        />
+                        <span>{column.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         ) : null}
       </div>
