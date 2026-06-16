@@ -26,8 +26,17 @@ export interface BlockRangeMetrics {
   maxBaseFeeWei: string;
   averageBaseFeeWei: string;
   totalGasUsed: string;
+  averageTotalGasUsed: string;
+  minTotalGasUsed: string;
+  maxTotalGasUsed: string;
   totalInputDataSizeBytes: string;
+  averageTotalInputDataSizeBytes: string;
+  minTotalInputDataSizeBytes: string;
+  maxTotalInputDataSizeBytes: string;
   totalInputDataCompressedSizeBytes: string;
+  averageTotalInputDataCompressedSizeBytes: string;
+  minTotalInputDataCompressedSizeBytes: string;
+  maxTotalInputDataCompressedSizeBytes: string;
   totalMaxGas: string;
   minMaxGasInBlock: string;
   maxMaxGasInBlock: string;
@@ -131,6 +140,12 @@ export function computeBlockRange(
   let totalGasUsed = 0n;
   let totalInputDataSizeBytes = 0n;
   let totalInputDataCompressedSizeBytes = 0n;
+  let minTotalGasUsed = BigInt(blocks[0]!.totalGasUsed);
+  let maxTotalGasUsed = minTotalGasUsed;
+  let minTotalInputDataSizeBytes = BigInt(blocks[0]!.totalInputDataSizeBytes ?? "0");
+  let maxTotalInputDataSizeBytes = minTotalInputDataSizeBytes;
+  let minTotalInputDataCompressedSizeBytes = BigInt(blocks[0]!.totalInputDataCompressedSizeBytes ?? "0");
+  let maxTotalInputDataCompressedSizeBytes = minTotalInputDataCompressedSizeBytes;
   let totalMaxGas = 0n;
   let minMaxGasInBlock = BigInt(blocks[0]!.maxGasInBlock);
   let maxMaxGasInBlock = minMaxGasInBlock;
@@ -160,10 +175,22 @@ export function computeBlockRange(
     baseFeeSum += baseFee;
 
     const gasUsed = BigInt(block.totalGasUsed);
+    const inputDataSizeBytes = BigInt(block.totalInputDataSizeBytes ?? "0");
+    const inputDataCompressedSizeBytes = BigInt(block.totalInputDataCompressedSizeBytes ?? "0");
     const maxGas = BigInt(block.maxGasInBlock);
     totalGasUsed += gasUsed;
-    totalInputDataSizeBytes += BigInt(block.totalInputDataSizeBytes ?? "0");
-    totalInputDataCompressedSizeBytes += BigInt(block.totalInputDataCompressedSizeBytes ?? "0");
+    totalInputDataSizeBytes += inputDataSizeBytes;
+    totalInputDataCompressedSizeBytes += inputDataCompressedSizeBytes;
+    if (gasUsed < minTotalGasUsed) minTotalGasUsed = gasUsed;
+    if (gasUsed > maxTotalGasUsed) maxTotalGasUsed = gasUsed;
+    if (inputDataSizeBytes < minTotalInputDataSizeBytes) minTotalInputDataSizeBytes = inputDataSizeBytes;
+    if (inputDataSizeBytes > maxTotalInputDataSizeBytes) maxTotalInputDataSizeBytes = inputDataSizeBytes;
+    if (inputDataCompressedSizeBytes < minTotalInputDataCompressedSizeBytes) {
+      minTotalInputDataCompressedSizeBytes = inputDataCompressedSizeBytes;
+    }
+    if (inputDataCompressedSizeBytes > maxTotalInputDataCompressedSizeBytes) {
+      maxTotalInputDataCompressedSizeBytes = inputDataCompressedSizeBytes;
+    }
     totalMaxGas += maxGas;
     if (maxGas < minMaxGasInBlock) minMaxGasInBlock = maxGas;
     if (maxGas > maxMaxGasInBlock) maxMaxGasInBlock = maxGas;
@@ -203,6 +230,9 @@ export function computeBlockRange(
   }
 
   const averageBaseFee = baseFeeSum / rangeSize;
+  const averageTotalGasUsed = totalGasUsed / rangeSize;
+  const averageTotalInputDataSizeBytes = totalInputDataSizeBytes / rangeSize;
+  const averageTotalInputDataCompressedSizeBytes = totalInputDataCompressedSizeBytes / rangeSize;
   const averagePriorityFeeWeighted =
     totalGasUsed === 0n
       ? 0n
@@ -230,8 +260,17 @@ export function computeBlockRange(
     maxBaseFeeWei: maxBaseFee.toString(),
     averageBaseFeeWei: averageBaseFee.toString(),
     totalGasUsed: totalGasUsed.toString(),
+    averageTotalGasUsed: averageTotalGasUsed.toString(),
+    minTotalGasUsed: minTotalGasUsed.toString(),
+    maxTotalGasUsed: maxTotalGasUsed.toString(),
     totalInputDataSizeBytes: totalInputDataSizeBytes.toString(),
+    averageTotalInputDataSizeBytes: averageTotalInputDataSizeBytes.toString(),
+    minTotalInputDataSizeBytes: minTotalInputDataSizeBytes.toString(),
+    maxTotalInputDataSizeBytes: maxTotalInputDataSizeBytes.toString(),
     totalInputDataCompressedSizeBytes: totalInputDataCompressedSizeBytes.toString(),
+    averageTotalInputDataCompressedSizeBytes: averageTotalInputDataCompressedSizeBytes.toString(),
+    minTotalInputDataCompressedSizeBytes: minTotalInputDataCompressedSizeBytes.toString(),
+    maxTotalInputDataCompressedSizeBytes: maxTotalInputDataCompressedSizeBytes.toString(),
     totalMaxGas: totalMaxGas.toString(),
     minMaxGasInBlock: minMaxGasInBlock.toString(),
     maxMaxGasInBlock: maxMaxGasInBlock.toString(),

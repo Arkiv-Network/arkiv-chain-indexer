@@ -185,16 +185,76 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
       render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
     },
     {
+      key: "totalGasUsed",
+      label: "Total gas used",
+      className: "num",
+      render: (row) => fmtInteger(row.totalGasUsed),
+    },
+    {
+      key: "averageTotalGasUsed",
+      label: "Avg block gas used",
+      className: "num",
+      render: (row) => fmtInteger(row.averageTotalGasUsed),
+    },
+    {
+      key: "minTotalGasUsed",
+      label: "Min block gas used",
+      className: "num",
+      render: (row) => fmtInteger(row.minTotalGasUsed),
+    },
+    {
+      key: "maxTotalGasUsed",
+      label: "Max block gas used",
+      className: "num",
+      render: (row) => fmtInteger(row.maxTotalGasUsed),
+    },
+    {
       key: "totalInputDataSizeBytes",
-      label: "Input data",
+      label: "Total input data",
       className: "num",
       render: (row) => fmtBytes(row.totalInputDataSizeBytes),
     },
     {
+      key: "averageTotalInputDataSizeBytes",
+      label: "Avg block input data",
+      className: "num",
+      render: (row) => fmtBytes(row.averageTotalInputDataSizeBytes),
+    },
+    {
+      key: "minTotalInputDataSizeBytes",
+      label: "Min block input data",
+      className: "num",
+      render: (row) => fmtBytes(row.minTotalInputDataSizeBytes),
+    },
+    {
+      key: "maxTotalInputDataSizeBytes",
+      label: "Max block input data",
+      className: "num",
+      render: (row) => fmtBytes(row.maxTotalInputDataSizeBytes),
+    },
+    {
       key: "totalInputDataCompressedSizeBytes",
-      label: "Input data zstd",
+      label: "Total input data zstd",
       className: "num",
       render: (row) => fmtBytes(row.totalInputDataCompressedSizeBytes),
+    },
+    {
+      key: "averageTotalInputDataCompressedSizeBytes",
+      label: "Avg block input zstd",
+      className: "num",
+      render: (row) => fmtBytes(row.averageTotalInputDataCompressedSizeBytes),
+    },
+    {
+      key: "minTotalInputDataCompressedSizeBytes",
+      label: "Min block input zstd",
+      className: "num",
+      render: (row) => fmtBytes(row.minTotalInputDataCompressedSizeBytes),
+    },
+    {
+      key: "maxTotalInputDataCompressedSizeBytes",
+      label: "Max block input zstd",
+      className: "num",
+      render: (row) => fmtBytes(row.maxTotalInputDataCompressedSizeBytes),
     },
   ];
 }

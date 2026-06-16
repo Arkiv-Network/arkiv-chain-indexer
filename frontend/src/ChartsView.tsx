@@ -25,6 +25,7 @@ import {
 import { fmtDate } from "./format";
 import {
   DEFAULT_PARAMETERS,
+  filterParametersForRangeMode,
   getAvailableParameters,
   parseSelectedParameters,
   type ParameterDef,
@@ -181,6 +182,12 @@ interface ChartPoint {
   values: Record<string, string | number | null | undefined>;
 }
 
+interface ParameterGroup {
+  key: string;
+  label: string;
+  parameters: ParameterDef[];
+}
+
 function blockToPoint(b: StoredBlock): ChartPoint {
   return {
     rangeStart: b.blockNumber,
@@ -245,8 +252,17 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
       minMaxGasInBlock: r.minMaxGasInBlock,
       maxMaxGasInBlock: r.maxMaxGasInBlock,
       totalGasUsed: r.totalGasUsed,
+      averageTotalGasUsed: r.averageTotalGasUsed,
+      minTotalGasUsed: r.minTotalGasUsed,
+      maxTotalGasUsed: r.maxTotalGasUsed,
       totalInputDataSizeBytes: r.totalInputDataSizeBytes,
+      averageTotalInputDataSizeBytes: r.averageTotalInputDataSizeBytes,
+      minTotalInputDataSizeBytes: r.minTotalInputDataSizeBytes,
+      maxTotalInputDataSizeBytes: r.maxTotalInputDataSizeBytes,
       totalInputDataCompressedSizeBytes: r.totalInputDataCompressedSizeBytes,
+      averageTotalInputDataCompressedSizeBytes: r.averageTotalInputDataCompressedSizeBytes,
+      minTotalInputDataCompressedSizeBytes: r.minTotalInputDataCompressedSizeBytes,
+      maxTotalInputDataCompressedSizeBytes: r.maxTotalInputDataCompressedSizeBytes,
       totalBlockRewardWei: r.totalBlockRewardWei,
       averageBlockRewardWei: r.averageBlockRewardWei,
       totalBurntFeesWei: r.totalBurntFeesWei,
@@ -271,6 +287,31 @@ function pointKey(point: ChartPoint): string {
   return `${point.rangeSize}:${point.rangeStart}:${point.rangeEnd}`;
 }
 
+function parameterGroupLabel(parameter: ParameterDef): string {
+  if (parameter.axis === "gas-price") return "Gas price";
+  if (parameter.axis === "block-gas-limit" || parameter.axis === "total-gas") return "Block gas";
+  if (parameter.axis.includes("input-data")) return "Data size";
+  if (parameter.axis.includes("reward") || parameter.axis.includes("burnt")) return "Rewards";
+  if (parameter.axis === "tx-count" || parameter.axis.startsWith("avg-tx-")) return "Transactions";
+  if (parameter.axis === "batcher") return "Batcher";
+  return "Other";
+}
+
+function groupParameters(parameters: readonly ParameterDef[]): ParameterGroup[] {
+  const groups = new Map<string, ParameterGroup>();
+  for (const parameter of parameters) {
+    const label = parameterGroupLabel(parameter);
+    const key = label.toLowerCase().replace(/\s+/g, "-");
+    const group = groups.get(key);
+    if (group) {
+      group.parameters.push(parameter);
+    } else {
+      groups.set(key, { key, label, parameters: [parameter] });
+    }
+  }
+  return [...groups.values()];
+}
+
 export function ChartsView({
   locationSearch,
   onLocationChange,
@@ -291,7 +332,12 @@ export function ChartsView({
   const zoomIndex = clampZoomIndex(filters.zoom);
   const pointCount = parseChartPointCount(filters.points);
   const xAxisMode = parseXAxisMode(filters.xAxisMode);
-  const availableParameters = useMemo(() => getAvailableParameters(noBatcher), [noBatcher]);
+  const isRangeMode = zoomIndex > 0;
+  const availableParameters = useMemo(
+    () => filterParametersForRangeMode(getAvailableParameters(noBatcher), isRangeMode),
+    [noBatcher, isRangeMode],
+  );
+  const parameterGroups = useMemo(() => groupParameters(availableParameters), [availableParameters]);
   const selected = useMemo(
     () => parseSelectedParameters(filters.parameters, availableParameters),
     [filters.parameters, availableParameters],
@@ -736,22 +782,29 @@ export function ChartsView({
 
             <div className="sidebar-section">
               <span className="toolbar-label">Parameters</span>
-              <div className="parameters-grid sidebar-params">
-                {availableParameters.map((p) => {
-                  const isOn = selected.includes(p.key);
-                  return (
-                    <label key={p.key} className={`param-check${isOn ? " on" : ""}`}>
-                      <input
-                        type="checkbox"
-                        checked={isOn}
-                        onChange={() => toggleParameter(p.key)}
-                      />
-                      <span className="param-swatch" style={{ background: isOn ? p.color : "transparent", borderColor: p.color }} />
-                      <span className="param-label">{p.label}</span>
-                      <span className="param-unit">{displayUnit(p.unit, tokenSymbol)}</span>
-                    </label>
-                  );
-                })}
+              <div className="parameter-groups">
+                {parameterGroups.map((group) => (
+                  <div key={group.key} className="parameter-group">
+                    <span className="parameter-group-title">{group.label}</span>
+                    <div className="parameters-grid sidebar-params">
+                      {group.parameters.map((p) => {
+                        const isOn = selected.includes(p.key);
+                        return (
+                          <label key={p.key} className={`param-check${isOn ? " on" : ""}`}>
+                            <input
+                              type="checkbox"
+                              checked={isOn}
+                              onChange={() => toggleParameter(p.key)}
+                            />
+                            <span className="param-swatch" style={{ background: isOn ? p.color : "transparent", borderColor: p.color }} />
+                            <span className="param-label">{p.label}</span>
+                            <span className="param-unit">{displayUnit(p.unit, tokenSymbol)}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
