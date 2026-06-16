@@ -90,30 +90,34 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
 
   return (
     <section className="view senders-view">
-      <h2>Sender activity</h2>
-      <form onSubmit={onSubmit} className="senders-form">
-        <label>
-          rows
-          <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
-        </label>
-        <button type="submit">Query</button>
-      </form>
+      <div className="view-heading-row">
+        <h2>Sender activity</h2>
+        <div className="senders-heading-meta">
+          <span className="senders-row-count">{filters.limit} rows</span>
+          <button type="button" className="secondary" onClick={copyPermalink}>
+            Copy link
+          </button>
+        </div>
+      </div>
 
-      <p className={`summary${error ? " error" : ""}`}>
-        {loading
-          ? "Loading..."
-          : error
-            ? `Failed to query sender stats: ${error}`
-            : data
-              ? `${data.count} sender addresses shown${data.truncated ? " (limited)" : ""}`
-              : "No sender stats loaded."}
-      </p>
-
-      <div className="permalink-row">
-        <button type="button" className="secondary" onClick={copyPermalink}>
-          Copy link
-        </button>
-        {copyStatus ? <span>{copyStatus}</span> : null}
+      <div className="senders-filter-panel">
+        <form onSubmit={onSubmit} className="senders-form">
+          <label>
+            rows
+            <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
+          </label>
+          <button type="submit">Query</button>
+        </form>
+        <p className={`summary${error ? " error" : ""}`}>
+          {loading
+            ? "Loading..."
+            : error
+              ? `Failed to query sender stats: ${error}`
+              : data
+                ? `${data.count} sender addresses shown${data.truncated ? " (limited)" : ""}`
+                : "No sender stats loaded."}
+        </p>
+        {copyStatus ? <div className="permalink-row"><span>{copyStatus}</span></div> : null}
       </div>
 
       <div className="table-wrap">

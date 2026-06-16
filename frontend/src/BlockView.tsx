@@ -97,7 +97,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   const block = data?.block;
-  const displayedBlockNumber = block?.blockNumberDecimal ?? appliedBlockNumber;
+  const displayedBlockNumber = block?.blockNumberDecimal ?? (!loading ? appliedBlockNumber : "");
   const adjacentBlocks = useMemo(() => adjacentBlockNumbers(displayedBlockNumber), [displayedBlockNumber]);
   const columns = useMemo(
     () => transactionColumns(tokenSymbol, onLocationChange),
@@ -152,17 +152,17 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
 
         <div className="block-lookup-meta">
           <p className={`block-lookup-status${error ? " error" : ""}`}>
+            <span className="block-lookup-status-label">
+              Block <strong>{displayedBlockNumber.trim() || "—"}</strong>
+            </span>
             {loading ? (
-              "Loading block…"
+              <span className="block-lookup-txcount">Loading block…</span>
             ) : error ? (
-              `Failed to load block: ${error}`
+              <span className="block-lookup-txcount">Failed to load block: {error}</span>
             ) : block ? (
-              <>
-                Block <strong>{block.blockNumberDecimal}</strong>
-                <span className="block-lookup-txcount">{block.transactionCount} txns</span>
-              </>
+              <span className="block-lookup-txcount">{block.transactionCount} txns</span>
             ) : (
-              "Enter a block number to inspect stored block details."
+              <span className="block-lookup-txcount">Enter a block number to inspect stored block details.</span>
             )}
           </p>
 
