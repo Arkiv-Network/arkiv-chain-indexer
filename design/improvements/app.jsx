@@ -281,7 +281,6 @@ function Latest({ blocks, txs }) {
         <div className="section-head">
           <div>
             <span className="bracket-label">live feed</span>
-            <h2>Latest blocks & transactions</h2>
           </div>
         </div>
 
