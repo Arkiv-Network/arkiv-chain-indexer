@@ -14,6 +14,7 @@ describe("frontend navigation visibility", () => {
       "Address",
       "Senders",
       "Records",
+      "Ranges",
       "Charts",
       "Activity",
     ]);

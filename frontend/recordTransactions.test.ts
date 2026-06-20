@@ -21,7 +21,7 @@ describe("record transaction table columns", () => {
       "Block",
       "Hash",
       "From",
-      "Gas used",
+      "Gas Used",
       "Effective fee (gwei)",
     ]);
 
@@ -31,7 +31,7 @@ describe("record transaction table columns", () => {
       "Block",
       "Hash",
       "From",
-      "Gas used",
+      "Gas Used",
       "Tx fee (ETH)",
     ]);
   });

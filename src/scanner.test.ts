@@ -286,7 +286,7 @@ describe("backfillDownForSlice", () => {
     );
 
     expect(lowestBackfilled).toBe(100n);
-    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(rpc.requestedBlocks).toEqual([100n, 99n]);
     expect(storage.backfillNextBlock).toBe(99n);
     expect(storage.lastSuccessfulBlock).toBeUndefined();
   });
@@ -305,7 +305,7 @@ describe("backfillDownForSlice", () => {
     );
 
     expect(lowestBackfilled).toBe(99n);
-    expect(rpc.requestedBlocks).toEqual([100n, 99n]);
+    expect(rpc.requestedBlocks).toEqual([100n, 99n, 99n, 98n]);
     expect(storage.backfillNextBlock).toBe(98n);
   });
 
@@ -322,7 +322,7 @@ describe("backfillDownForSlice", () => {
       runtime,
     );
 
-    expect(rpc.requestedBlocks).toEqual([100n, 99n]);
+    expect(rpc.requestedBlocks).toEqual([100n, 99n, 99n, 98n]);
     expect(runtime.sleeps).toEqual([100, 100]);
     expect(storage.backfillNextBlock).toBe(98n);
   });
@@ -340,7 +340,7 @@ describe("backfillDownForSlice", () => {
       runtime,
     );
 
-    expect(rpc.requestedBlocks).toEqual([100n, 100n]);
+    expect(rpc.requestedBlocks).toEqual([100n, 100n, 99n]);
     expect(runtime.sleeps).toEqual([7]);
     expect(storage.backfillNextBlock).toBe(99n);
   });
@@ -361,7 +361,7 @@ describe("scanForwardToSafeHead", () => {
     );
 
     expect(scanned).toBe(true);
-    expect(rpc.requestedBlocks).toEqual([98n, 99n, 100n]);
+    expect(rpc.requestedBlocks).toEqual([98n, 97n, 99n, 98n, 100n, 99n]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
     expect(storage.backfillNextBlock).toBeUndefined();
   });
@@ -381,7 +381,7 @@ describe("scanForwardToSafeHead", () => {
     );
 
     expect(scanned).toBe(true);
-    expect(rpc.requestedBlocks).toEqual([101n, 102n]);
+    expect(rpc.requestedBlocks).toEqual([101n, 100n, 102n, 101n]);
     expect(storage.lastSuccessfulBlock).toBe(102n);
   });
 
@@ -400,7 +400,28 @@ describe("scanForwardToSafeHead", () => {
     );
 
     expect(scanned).toBe(true);
-    expect(rpc.requestedBlocks).toEqual([91n, 92n, 93n, 94n, 95n, 96n, 97n, 98n, 99n, 100n]);
+    expect(rpc.requestedBlocks).toEqual([
+      91n,
+      90n,
+      92n,
+      91n,
+      93n,
+      92n,
+      94n,
+      93n,
+      95n,
+      94n,
+      96n,
+      95n,
+      97n,
+      96n,
+      98n,
+      97n,
+      99n,
+      98n,
+      100n,
+      99n,
+    ]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
   });
 
@@ -418,7 +439,7 @@ describe("scanForwardToSafeHead", () => {
       runtime,
     );
 
-    expect(rpc.requestedBlocks).toEqual([99n, 99n, 100n]);
+    expect(rpc.requestedBlocks).toEqual([99n, 99n, 98n, 100n, 99n]);
     expect(runtime.sleeps).toEqual([11]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
   });
@@ -468,7 +489,28 @@ describe("runScanner", () => {
       ),
     ).rejects.toThrow("stop after first sleep");
 
-    expect(rpc.requestedBlocks).toEqual([91n, 92n, 93n, 94n, 95n, 96n, 97n, 98n, 99n, 100n]);
+    expect(rpc.requestedBlocks).toEqual([
+      91n,
+      90n,
+      92n,
+      91n,
+      93n,
+      92n,
+      94n,
+      93n,
+      95n,
+      94n,
+      96n,
+      95n,
+      97n,
+      96n,
+      98n,
+      97n,
+      99n,
+      98n,
+      100n,
+      99n,
+    ]);
     expect(storage.lastSuccessfulBlock).toBe(100n);
     expect(storage.backfillNextBlock).toBeUndefined();
   });
@@ -492,7 +534,7 @@ describe("runScanner", () => {
       ),
     ).rejects.toThrow("stop after first sleep");
 
-    expect(rpc.requestedBlocks).toEqual([100n]);
+    expect(rpc.requestedBlocks).toEqual([100n, 99n]);
     expect(storage.backfillNextBlock).toBe(99n);
     expect(storage.lastSuccessfulBlock).toBeUndefined();
     expect(runtime.sleeps).toEqual([100]);
