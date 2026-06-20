@@ -30,6 +30,7 @@ export interface InspectedBlock extends BatcherMetrics {
   blockNumber: number;
   blockNumberDecimal: string;
   blockDate: string;
+  blockTimeSeconds: string;
   baseBlockFeeWei: string;
   totalGasUsed: string;
   totalInputDataSizeBytes?: string;
@@ -77,6 +78,7 @@ export function inspectBlockFromRpc(block: RpcBlock, receipts: RpcReceipt[]): In
     blockNumber: Number(blockNumber),
     blockNumberDecimal: blockNumber.toString(),
     blockDate: new Date(Number(blockTimestampSeconds) * 1000).toISOString(),
+    blockTimeSeconds: "2",
     baseBlockFeeWei: baseFee.toString(),
     totalGasUsed: hexToBigInt(block.gasUsed).toString(),
     maxGasInBlock: hexToBigInt(block.gasLimit).toString(),

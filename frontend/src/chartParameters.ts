@@ -4,6 +4,7 @@ const ETH_IN_WEI = 1_000_000_000_000_000_000;
 const AXIS_GAS_PRICE = "gas-price";
 const AXIS_BLOCK_GAS_LIMIT = "block-gas-limit";
 const AXIS_BATCHER = "batcher";
+const AXIS_BLOCK_TIME = "block-time";
 
 export interface BandDef {
   minKey: string;
@@ -63,6 +64,16 @@ const plainNumber = (value: string | number | undefined | null): number | null =
 };
 
 export const PARAMETERS: ParameterDef[] = [
+  {
+    key: "averageBlockTimeSeconds",
+    label: "Block time",
+    axis: AXIS_BLOCK_TIME,
+    axisLabel: "Block time (seconds)",
+    unit: "s",
+    color: "#0f766e",
+    toNumber: plainNumber,
+    band: { minKey: "minBlockTimeSeconds", maxKey: "maxBlockTimeSeconds" },
+  },
   {
     key: "averageBaseFeeWei",
     label: "Base fee",

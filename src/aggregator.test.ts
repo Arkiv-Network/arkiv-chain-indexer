@@ -302,6 +302,7 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
   return {
     blockDate: "2024-01-01T00:00:00.000Z",
     blockNumber: 1n,
+    blockTimeSeconds: "2",
     baseBlockFeeWei: "100",
     totalGasUsed: "21000",
     totalInputDataSizeBytes: "0",

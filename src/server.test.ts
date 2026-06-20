@@ -391,6 +391,7 @@ describe("GET /blocks", () => {
         {
           blockNumber: 42,
           blockDate: "2024-01-01T00:00:00.000Z",
+          blockTimeSeconds: "2",
           baseBlockFeeWei: "100",
           totalGasUsed: "21000",
           maxGasInBlock: "30000000",
@@ -413,6 +414,7 @@ describe("GET /blocks", () => {
       [
         42,
         "2024-01-01T00:00:00.000Z",
+        "2",
         "100",
         "21000",
         null,
@@ -1446,6 +1448,7 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
   return {
     blockDate: "2024-01-01T00:00:00.000Z",
     blockNumber: 1n,
+    blockTimeSeconds: "2",
     baseBlockFeeWei: "100",
     totalGasUsed: "21000",
     totalInputDataSizeBytes: "0",

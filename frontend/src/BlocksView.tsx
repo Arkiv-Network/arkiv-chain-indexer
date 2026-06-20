@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
-import { fmtBytes, fmtDate, fmtEth, fmtGwei } from "./format";
+import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
 import { BlockNumberLink } from "./blockLinks";
 import {
   buildPermalinkHref,
@@ -63,6 +63,12 @@ function blockColumns(
           <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
         </div>
       ),
+    },
+    {
+      key: "blockTimeSeconds",
+      label: "Block time",
+      className: "num",
+      render: (row) => `${fmtInteger(row.blockTimeSeconds)}s`,
     },
     {
       key: "transactionCount",

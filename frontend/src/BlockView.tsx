@@ -217,6 +217,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
           <dl className="block-summary">
             <Metric label="Block" value={block.blockNumberDecimal} />
             <Metric label="Date" value={fmtDate(block.blockDate, timeZone)} />
+            <Metric label="Block time" value={`${fmtInteger(block.blockTimeSeconds)}s`} />
             <Metric label="Transactions" value={fmtInteger(block.transactionCount)} />
             <Metric label="Base fee" value={`${fmtGwei(block.baseBlockFeeWei)} gwei`} />
             <Metric label="Gas used / limit" value={fmtRatio(block.totalGasUsed, block.maxGasInBlock)} />

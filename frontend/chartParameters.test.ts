@@ -5,6 +5,7 @@ describe("frontend chart parameters", () => {
   test("keeps batcher parameters available by default", () => {
     const keys = getAvailableParameters(false).map((parameter) => parameter.key);
 
+    expect(keys).toContain("averageBlockTimeSeconds");
     expect(keys).toContain("averageBatcherQueueSize");
   });
 

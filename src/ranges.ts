@@ -22,6 +22,9 @@ export interface BlockRangeMetrics {
   rangeEnd: bigint;
   minBlockDate: string;
   maxBlockDate: string;
+  averageBlockTimeSeconds: string;
+  minBlockTimeSeconds: string;
+  maxBlockTimeSeconds: string;
   minBaseFeeWei: string;
   maxBaseFeeWei: string;
   averageBaseFeeWei: string;
@@ -134,6 +137,9 @@ export function computeBlockRange(
 
   let minBlockDate = blocks[0]!.blockDate;
   let maxBlockDate = blocks[0]!.blockDate;
+  let blockTimeSum = 0n;
+  let minBlockTime = BigInt(blocks[0]!.blockTimeSeconds ?? "2");
+  let maxBlockTime = minBlockTime;
   let minBaseFee = BigInt(blocks[0]!.baseBlockFeeWei);
   let maxBaseFee = minBaseFee;
   let baseFeeSum = 0n;
@@ -168,6 +174,11 @@ export function computeBlockRange(
   for (const block of blocks) {
     if (block.blockDate < minBlockDate) minBlockDate = block.blockDate;
     if (block.blockDate > maxBlockDate) maxBlockDate = block.blockDate;
+
+    const blockTime = BigInt(block.blockTimeSeconds ?? "2");
+    blockTimeSum += blockTime;
+    if (blockTime < minBlockTime) minBlockTime = blockTime;
+    if (blockTime > maxBlockTime) maxBlockTime = blockTime;
 
     const baseFee = BigInt(block.baseBlockFeeWei);
     if (baseFee < minBaseFee) minBaseFee = baseFee;
@@ -230,6 +241,7 @@ export function computeBlockRange(
   }
 
   const averageBaseFee = baseFeeSum / rangeSize;
+  const averageBlockTime = blockTimeSum / rangeSize;
   const averageTotalGasUsed = totalGasUsed / rangeSize;
   const averageTotalInputDataSizeBytes = totalInputDataSizeBytes / rangeSize;
   const averageTotalInputDataCompressedSizeBytes = totalInputDataCompressedSizeBytes / rangeSize;
@@ -256,6 +268,9 @@ export function computeBlockRange(
     rangeEnd,
     minBlockDate,
     maxBlockDate,
+    averageBlockTimeSeconds: averageBlockTime.toString(),
+    minBlockTimeSeconds: minBlockTime.toString(),
+    maxBlockTimeSeconds: maxBlockTime.toString(),
     minBaseFeeWei: minBaseFee.toString(),
     maxBaseFeeWei: maxBaseFee.toString(),
     averageBaseFeeWei: averageBaseFee.toString(),

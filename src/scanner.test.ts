@@ -51,6 +51,7 @@ describe("scanOneBlock", () => {
     expect(rpc.requestedReceipts).toEqual([txHash(0), txHash(1), txHash(2), txHash(3)]);
     expect(storage.savedMetrics).toHaveLength(1);
     expect(storage.savedMetrics[0]?.transactionCount).toBe(4);
+    expect(storage.savedMetrics[0]?.blockTimeSeconds).toBe("2");
     expect(storage.savedTransactions).toHaveLength(1);
     expect(storage.savedTransactions[0]?.map((entry) => entry.hash)).toEqual([
       txHash(0),
@@ -568,7 +569,10 @@ class ControlledReceiptRpc {
   }
 
   async getBlockWithTransactions(blockNumber: bigint): Promise<RpcBlock> {
-    expect(blockNumber).toBe(1n);
+    expect([0n, 1n]).toContain(blockNumber);
+    if (blockNumber === 0n) {
+      return blockWithTransactions(0, blockNumber);
+    }
     return this.block;
   }
 
@@ -819,9 +823,10 @@ class StopAfterFirstSleepRuntime extends FakeRuntime {
 }
 
 function blockWithTransactions(transactionCount: number, blockNumber = 1n): RpcBlock {
+  const timestamp = 0x65a0bb80n + ((blockNumber - 1n) * 2n);
   return {
     number: `0x${blockNumber.toString(16)}`,
-    timestamp: "0x65a0bb80",
+    timestamp: `0x${timestamp.toString(16)}`,
     baseFeePerGas: "0x1",
     gasUsed: "0x4",
     gasLimit: "0x1c9c380",
@@ -856,6 +861,7 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
   return {
     blockDate: "2024-01-01T00:00:00.000Z",
     blockNumber: 1n,
+    blockTimeSeconds: "2",
     baseBlockFeeWei: "1",
     totalGasUsed: "0",
     totalInputDataSizeBytes: "0",

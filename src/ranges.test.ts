@@ -77,6 +77,7 @@ describe("computeBlockRange", () => {
     const rangeSize = 100n;
     const blocks = makeBlocks(245_600n, rangeSize, (offset) => ({
       blockDate: new Date(Date.UTC(2024, 0, 1, 0, Number(offset))).toISOString(),
+      blockTimeSeconds: (1n + (offset % 5n)).toString(),
       baseBlockFeeWei: (100n + offset).toString(),
       totalGasUsed: (1_000n + offset).toString(),
       maxGasInBlock: (30_000_000n + offset * 1_000n).toString(),
@@ -102,6 +103,9 @@ describe("computeBlockRange", () => {
     expect(range.rangeEnd).toBe(245_699n);
     expect(range.minBlockDate).toBe(blocks[0]!.blockDate);
     expect(range.maxBlockDate).toBe(blocks[99]!.blockDate);
+    expect(range.averageBlockTimeSeconds).toBe("3");
+    expect(range.minBlockTimeSeconds).toBe("1");
+    expect(range.maxBlockTimeSeconds).toBe("5");
     expect(range.minBaseFeeWei).toBe("100");
     expect(range.maxBaseFeeWei).toBe("199");
 
@@ -369,6 +373,7 @@ function makeBlocks(
     const base: StoredBlock = {
       blockNumber: Number(rangeStart + offset),
       blockDate: "2024-01-01T00:00:00.000Z",
+      blockTimeSeconds: "2",
       baseBlockFeeWei: "100",
       totalGasUsed: "0",
       maxGasInBlock: "30000000",

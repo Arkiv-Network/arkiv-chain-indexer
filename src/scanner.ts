@@ -316,10 +316,11 @@ export async function scanOneBlock(
   const startedAt = performance.now();
   const rpcStatsBefore = rpc.getStatsSnapshot();
   const block = await rpc.getBlockWithTransactions(blockNumber);
+  const previousBlock = blockNumber === 0n ? undefined : await rpc.getBlockWithTransactions(blockNumber - 1n);
   const receipts = await getTransactionReceipts(block, rpc, txReceiptConcurrency);
 
   const metrics = await enrichWithBatcherMetrics(
-    computeBlockMetrics(block, receipts),
+    computeBlockMetrics(block, receipts, previousBlock),
     batcherCollector,
   );
   const inspectedTransactions = inspectBlockFromRpc(block, receipts).transactions;
@@ -474,6 +475,7 @@ function formatBlockSummary(
   return [
     `Block ${metrics.blockNumber.toString()} scanned and stored`,
     `  Date: ${metrics.blockDate}`,
+    `  Block time: ${metrics.blockTimeSeconds}s`,
     `  Block age: ${Number.isFinite(blockAgeMs) ? formatDurationMs(Math.max(0, blockAgeMs)) : "unknown"}`,
     ...(context.safeHead !== undefined
       ? [`  Safe head lag: ${safeHeadLag !== undefined && safeHeadLag >= 0n ? safeHeadLag.toString() : "0"} blocks`]
