@@ -37,6 +37,7 @@ export interface RpcReceipt {
 export interface BlockMetrics extends BatcherMetrics {
   blockDate: string;
   blockNumber: bigint;
+  blockTimeSeconds: string;
   baseBlockFeeWei: string;
   totalGasUsed: string;
   totalInputDataSizeBytes: string;

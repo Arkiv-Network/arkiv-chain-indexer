@@ -28,10 +28,17 @@ describe("computeBlockMetrics", () => {
         effectiveGasPrice: "0x6e",
       },
     ];
+    const previousBlock: RpcBlock = {
+      ...block,
+      number: "0x7a",
+      timestamp: "0x65a0bb7e",
+      transactions: [],
+    };
 
-    expect(computeBlockMetrics(block, receipts)).toEqual({
+    expect(computeBlockMetrics(block, receipts, previousBlock)).toEqual({
       blockDate: "2024-01-12T04:09:36.000Z",
       blockNumber: 123n,
+      blockTimeSeconds: "2",
       baseBlockFeeWei: "100",
       totalGasUsed: "10",
       totalInputDataSizeBytes: "3",
@@ -66,6 +73,7 @@ describe("computeBlockMetrics", () => {
     };
 
     expect(computeBlockMetrics(block, [])).toMatchObject({
+      blockTimeSeconds: "2",
       transactionCount: 0,
       blockRewardWei: "0",
       burntFeesWei: "0",
@@ -117,7 +125,8 @@ describe("computeBlockMetrics", () => {
       },
     ];
 
-    expect(computeBlockMetrics(block, receipts)).toMatchObject({
+    expect(computeBlockMetrics(block, receipts, { ...block, number: "0x7a", timestamp: "0x65a0bb7f", transactions: [] })).toMatchObject({
+      blockTimeSeconds: "1",
       transactionCount: 2,
       burntFeesWei: "1500",
       totalTransactionFeeWei: "1280",

@@ -201,6 +201,9 @@ function blockToPoint(b: StoredBlock): ChartPoint {
       minBaseFeeWei: b.baseBlockFeeWei,
       maxBaseFeeWei: b.baseBlockFeeWei,
       averageBaseFeeWei: b.baseBlockFeeWei,
+      minBlockTimeSeconds: b.blockTimeSeconds,
+      maxBlockTimeSeconds: b.blockTimeSeconds,
+      averageBlockTimeSeconds: b.blockTimeSeconds,
       averageFeePriceWei: b.averageFeePriceWei,
       averagePriorityFeeWei: b.averagePriorityFeeWei,
       averagePriorityFeeWeightedWei: b.averagePriorityFeeWeightedWei,
@@ -246,6 +249,9 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
       minBaseFeeWei: r.minBaseFeeWei,
       maxBaseFeeWei: r.maxBaseFeeWei,
       averageBaseFeeWei: r.averageBaseFeeWei,
+      minBlockTimeSeconds: r.minBlockTimeSeconds,
+      maxBlockTimeSeconds: r.maxBlockTimeSeconds,
+      averageBlockTimeSeconds: r.averageBlockTimeSeconds,
       averageFeePriceWei: r.averageFeePriceWei,
       averagePriorityFeeWei: r.averagePriorityFeeWei,
       averagePriorityFeeWeightedWei: r.averagePriorityFeeWeightedWei,
@@ -289,6 +295,7 @@ function pointKey(point: ChartPoint): string {
 
 function parameterGroupLabel(parameter: ParameterDef): string {
   if (parameter.axis === "gas-price") return "Gas price";
+  if (parameter.axis === "block-time") return "Block time";
   if (parameter.axis === "block-gas-limit" || parameter.axis === "total-gas") return "Block gas";
   if (parameter.axis.includes("input-data")) return "Data size";
   if (parameter.axis.includes("reward") || parameter.axis.includes("burnt")) return "Rewards";

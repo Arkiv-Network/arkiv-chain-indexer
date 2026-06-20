@@ -198,6 +198,7 @@ describe("frontend API helpers", () => {
     expect(result.blocks[0]).toMatchObject({
       blockNumber: 42,
       blockDate: "2024-01-01T00:00:00.000Z",
+      blockTimeSeconds: "0",
       baseBlockFeeWei: "0",
       totalGasUsed: "0",
       maxGasInBlock: "0",
@@ -213,6 +214,7 @@ describe("frontend API helpers", () => {
 
     expect(result?.blockNumber).toBe(43);
     expect(result?.blockDate).toBe("2024-01-01T00:00:00.000Z");
+    expect(result?.blockTimeSeconds).toBe("0");
   });
 
   test("uses latest block list names for compact single-block rows", async () => {
@@ -284,6 +286,9 @@ describe("frontend API helpers", () => {
       rangeStart: 100,
       rangeEnd: 199,
       minBlockDate: "2024-01-01T00:00:00.000Z",
+      averageBlockTimeSeconds: "0",
+      minBlockTimeSeconds: "0",
+      maxBlockTimeSeconds: "0",
       transactionCount: 12,
       totalGasUsed: "252000",
       minBatcherQueueSize: null,

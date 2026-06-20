@@ -3,7 +3,13 @@ import { shouldIgnoreTransaction } from "./transactionFilter";
 import { compressedHexDataByteLength, hexDataByteLength } from "./blockInspector";
 import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
 
-export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): BlockMetrics {
+export const DEFAULT_BLOCK_TIME_SECONDS = 2n;
+
+export function computeBlockMetrics(
+  block: RpcBlock,
+  receipts: RpcReceipt[],
+  previousBlock?: RpcBlock,
+): BlockMetrics {
   if (block.number === null) {
     throw new Error("Cannot store metrics for a pending block");
   }
@@ -19,6 +25,10 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
   const receiptsByHash = new Map(receipts.map((receipt) => [receipt.transactionHash.toLowerCase(), receipt]));
   const blockNumber = hexToBigInt(block.number);
   const blockTimestampSeconds = hexToBigInt(block.timestamp);
+  const blockTimeSeconds =
+    previousBlock === undefined
+      ? DEFAULT_BLOCK_TIME_SECONDS
+      : blockTimestampSeconds - hexToBigInt(previousBlock.timestamp);
   const baseFee = hexToBigInt(block.baseFeePerGas);
   const totalGasUsed = hexToBigInt(block.gasUsed);
   const priorityFees: bigint[] = [];
@@ -70,6 +80,7 @@ export function computeBlockMetrics(block: RpcBlock, receipts: RpcReceipt[]): Bl
   return {
     blockDate: new Date(Number(blockTimestampSeconds) * 1000).toISOString(),
     blockNumber,
+    blockTimeSeconds: blockTimeSeconds.toString(),
     baseBlockFeeWei: baseFee.toString(),
     totalGasUsed: totalGasUsed.toString(),
     totalInputDataSizeBytes: totalInputDataSizeBytes.toString(),

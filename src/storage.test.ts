@@ -51,6 +51,7 @@ if (!hasPostgresForTests()) {
       await storage.saveBlockMetrics({
         blockDate: "2024-01-01T00:00:00.000Z",
         blockNumber: 42n,
+        blockTimeSeconds: "2",
         baseBlockFeeWei: "100",
         totalGasUsed: "21000",
         totalInputDataSizeBytes: "0",
@@ -117,6 +118,7 @@ if (!hasPostgresForTests()) {
       await storage.saveBlockMetrics({
         blockDate: "2024-01-01T00:00:00.000Z",
         blockNumber: bigBlock,
+        blockTimeSeconds: "2",
         baseBlockFeeWei: "100",
         totalGasUsed: "21000",
         totalInputDataSizeBytes: "0",
@@ -1130,6 +1132,7 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
   return {
     blockDate: "2024-01-01T00:00:00.000Z",
     blockNumber: 1n,
+    blockTimeSeconds: "2",
     baseBlockFeeWei: "100",
     totalGasUsed: "21000",
     totalInputDataSizeBytes: "0",

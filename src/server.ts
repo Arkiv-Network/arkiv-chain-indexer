@@ -193,6 +193,7 @@ export interface HealthResponseBody {
 export const BLOCK_RESPONSE_NAMES = [
   "blockNumber",
   "blockDate",
+  "blockTimeSeconds",
   "baseBlockFeeWei",
   "totalGasUsed",
   "totalInputDataSizeBytes",
@@ -230,6 +231,9 @@ export const RANGE_RESPONSE_NAMES = [
   "rangeEnd",
   "minBlockDate",
   "maxBlockDate",
+  "averageBlockTimeSeconds",
+  "minBlockTimeSeconds",
+  "maxBlockTimeSeconds",
   "minBaseFeeWei",
   "maxBaseFeeWei",
   "averageBaseFeeWei",

@@ -1,6 +1,7 @@
 export interface StoredBlock {
   blockNumber: number;
   blockDate: string;
+  blockTimeSeconds: string;
   transactionCount: number;
   baseBlockFeeWei: string;
   blockRewardWei?: string;
@@ -32,6 +33,7 @@ export interface StoredBlock {
 export const BLOCK_RESPONSE_NAMES = [
   "blockNumber",
   "blockDate",
+  "blockTimeSeconds",
   "baseBlockFeeWei",
   "totalGasUsed",
   "totalInputDataSizeBytes",
@@ -70,6 +72,9 @@ export const RANGE_RESPONSE_NAMES = [
   "rangeEnd",
   "minBlockDate",
   "maxBlockDate",
+  "averageBlockTimeSeconds",
+  "minBlockTimeSeconds",
+  "maxBlockTimeSeconds",
   "minBaseFeeWei",
   "maxBaseFeeWei",
   "averageBaseFeeWei",
@@ -119,6 +124,9 @@ export interface StoredBlockRange {
   rangeEnd: number;
   minBlockDate: string;
   maxBlockDate: string;
+  averageBlockTimeSeconds: string;
+  minBlockTimeSeconds: string;
+  maxBlockTimeSeconds: string;
   minBaseFeeWei: string;
   maxBaseFeeWei: string;
   averageBaseFeeWei: string;
@@ -272,6 +280,7 @@ export interface InspectedBlock {
   blockNumber: number;
   blockNumberDecimal: string;
   blockDate: string;
+  blockTimeSeconds: string;
   baseBlockFeeWei: string;
   totalGasUsed: string;
   totalInputDataSizeBytes?: string;
@@ -802,6 +811,7 @@ function decodeBlockResponseRow(row: BlockResponseRow, names: readonly string[] 
   const block: StoredBlock = {
     blockNumber: numberValue(values.get("blockNumber") ?? null),
     blockDate: stringValue(values.get("blockDate") ?? null),
+    blockTimeSeconds: stringValue(values.get("blockTimeSeconds") ?? null),
     baseBlockFeeWei: stringValue(values.get("baseBlockFeeWei") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
     totalInputDataSizeBytes: stringValue(values.get("totalInputDataSizeBytes") ?? null),
@@ -860,6 +870,9 @@ function decodeRangeResponseRow(
     rangeEnd: numberValue(values.get("rangeEnd") ?? null),
     minBlockDate: stringValue(values.get("minBlockDate") ?? null),
     maxBlockDate: stringValue(values.get("maxBlockDate") ?? null),
+    averageBlockTimeSeconds: stringValue(values.get("averageBlockTimeSeconds") ?? null),
+    minBlockTimeSeconds: stringValue(values.get("minBlockTimeSeconds") ?? null),
+    maxBlockTimeSeconds: stringValue(values.get("maxBlockTimeSeconds") ?? null),
     minBaseFeeWei: stringValue(values.get("minBaseFeeWei") ?? null),
     maxBaseFeeWei: stringValue(values.get("maxBaseFeeWei") ?? null),
     averageBaseFeeWei: stringValue(values.get("averageBaseFeeWei") ?? null),

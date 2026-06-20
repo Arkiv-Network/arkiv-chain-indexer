@@ -89,6 +89,7 @@ export interface TransactionRecordsQueryFilter {
 export interface StoredBlock {
   blockNumber: number;
   blockDate: string;
+  blockTimeSeconds: string;
   baseBlockFeeWei: string;
   totalGasUsed: string;
   totalInputDataSizeBytes?: string;
@@ -162,6 +163,9 @@ export interface StoredBlockRange {
   rangeEnd: number;
   minBlockDate: string;
   maxBlockDate: string;
+  averageBlockTimeSeconds: string;
+  minBlockTimeSeconds: string;
+  maxBlockTimeSeconds: string;
   minBaseFeeWei: string;
   maxBaseFeeWei: string;
   averageBaseFeeWei: string;
@@ -326,6 +330,7 @@ export class ScannerStorage {
       CREATE TABLE IF NOT EXISTS ${this.qBlocks} (
         block_number BIGINT PRIMARY KEY,
         block_date TEXT NOT NULL,
+        block_time_seconds TEXT NOT NULL DEFAULT '2',
         base_block_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
         total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
@@ -355,6 +360,10 @@ export class ScannerStorage {
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await this.db.query(
+      `ALTER TABLE ${this.qBlocks}
+       ADD COLUMN IF NOT EXISTS block_time_seconds TEXT NOT NULL DEFAULT '2'`,
+    );
     await this.db.query(
       `ALTER TABLE ${this.qBlocks}
        ADD COLUMN IF NOT EXISTS total_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
@@ -586,6 +595,9 @@ export class ScannerStorage {
         range_end BIGINT NOT NULL,
         min_block_date TEXT NOT NULL,
         max_block_date TEXT NOT NULL,
+        average_block_time_seconds TEXT NOT NULL DEFAULT '2',
+        min_block_time_seconds TEXT NOT NULL DEFAULT '2',
+        max_block_time_seconds TEXT NOT NULL DEFAULT '2',
         min_base_fee_wei TEXT NOT NULL,
         max_base_fee_wei TEXT NOT NULL,
         average_base_fee_wei TEXT NOT NULL,
@@ -629,6 +641,9 @@ export class ScannerStorage {
       )
     `);
     const blockRangeMetricColumnsWereMissing = await this.hasMissingColumns("block_ranges", [
+      "average_block_time_seconds",
+      "min_block_time_seconds",
+      "max_block_time_seconds",
       "average_total_gas_used",
       "min_total_gas_used",
       "max_total_gas_used",
@@ -640,6 +655,9 @@ export class ScannerStorage {
       "max_total_input_data_compressed_size_bytes",
     ]);
     await this.addRequiredTextColumn(this.qBlockRanges, "average_total_gas_used");
+    await this.addRequiredTextColumn(this.qBlockRanges, "average_block_time_seconds", "2");
+    await this.addRequiredTextColumn(this.qBlockRanges, "min_block_time_seconds", "2");
+    await this.addRequiredTextColumn(this.qBlockRanges, "max_block_time_seconds", "2");
     await this.addRequiredTextColumn(this.qBlockRanges, "min_total_gas_used");
     await this.addRequiredTextColumn(this.qBlockRanges, "max_total_gas_used");
     await this.addRequiredTextColumn(this.qBlockRanges, "average_total_input_data_size_bytes");
@@ -723,9 +741,9 @@ export class ScannerStorage {
     await this.db.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT`);
   }
 
-  private async addRequiredTextColumn(table: string, column: string): Promise<void> {
+  private async addRequiredTextColumn(table: string, column: string, defaultValue = "0"): Promise<void> {
     await this.db.query(
-      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT NOT NULL DEFAULT '0'`,
+      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT NOT NULL DEFAULT ${quoteStringLiteral(defaultValue)}`,
     );
   }
 
@@ -915,6 +933,7 @@ export class ScannerStorage {
         `INSERT INTO ${this.qBlocks} AS existing (
           block_number,
           block_date,
+          block_time_seconds,
           base_block_fee_wei,
           total_gas_used,
           total_input_data_size_bytes,
@@ -942,9 +961,10 @@ export class ScannerStorage {
           batcher_max_block_size,
           batcher_max_tx_size,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
+          block_time_seconds = EXCLUDED.block_time_seconds,
           base_block_fee_wei = EXCLUDED.base_block_fee_wei,
           total_gas_used = EXCLUDED.total_gas_used,
           total_input_data_size_bytes = EXCLUDED.total_input_data_size_bytes,
@@ -975,6 +995,7 @@ export class ScannerStorage {
         [
           metrics.blockNumber.toString(),
           metrics.blockDate,
+          metrics.blockTimeSeconds,
           metrics.baseBlockFeeWei,
           metrics.totalGasUsed,
           metrics.totalInputDataSizeBytes,
@@ -1451,6 +1472,7 @@ export class ScannerStorage {
       SELECT
         block_number,
         block_date,
+        block_time_seconds,
         base_block_fee_wei,
         total_gas_used,
         total_input_data_size_bytes,
@@ -1486,6 +1508,7 @@ export class ScannerStorage {
     const result = await this.db.query<{
       block_number: string;
       block_date: string;
+      block_time_seconds: string;
       base_block_fee_wei: string;
       total_gas_used: string;
       total_input_data_size_bytes: string;
@@ -1517,6 +1540,7 @@ export class ScannerStorage {
     return result.rows.map((row) => ({
       blockNumber: Number(row.block_number),
       blockDate: row.block_date,
+      blockTimeSeconds: row.block_time_seconds,
       baseBlockFeeWei: row.base_block_fee_wei,
       totalGasUsed: row.total_gas_used,
       totalInputDataSizeBytes: row.total_input_data_size_bytes,
@@ -1804,6 +1828,7 @@ export class ScannerStorage {
       blockNumber: block.blockNumber,
       blockNumberDecimal: blockNumber.toString(),
       blockDate: block.blockDate,
+      blockTimeSeconds: block.blockTimeSeconds,
       baseBlockFeeWei: block.baseBlockFeeWei,
       totalGasUsed: block.totalGasUsed,
       maxGasInBlock: block.maxGasInBlock,
@@ -2066,6 +2091,9 @@ export class ScannerStorage {
         range_end,
         min_block_date,
         max_block_date,
+        average_block_time_seconds,
+        min_block_time_seconds,
+        max_block_time_seconds,
         min_base_fee_wei,
         max_base_fee_wei,
         average_base_fee_wei,
@@ -2105,11 +2133,14 @@ export class ScannerStorage {
         average_batcher_max_tx_size,
         is_complete,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, TRUE, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, TRUE, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
         max_block_date = EXCLUDED.max_block_date,
+        average_block_time_seconds = EXCLUDED.average_block_time_seconds,
+        min_block_time_seconds = EXCLUDED.min_block_time_seconds,
+        max_block_time_seconds = EXCLUDED.max_block_time_seconds,
         min_base_fee_wei = EXCLUDED.min_base_fee_wei,
         max_base_fee_wei = EXCLUDED.max_base_fee_wei,
         average_base_fee_wei = EXCLUDED.average_base_fee_wei,
@@ -2155,6 +2186,9 @@ export class ScannerStorage {
         metrics.rangeEnd.toString(),
         metrics.minBlockDate,
         metrics.maxBlockDate,
+        metrics.averageBlockTimeSeconds,
+        metrics.minBlockTimeSeconds,
+        metrics.maxBlockTimeSeconds,
         metrics.minBaseFeeWei,
         metrics.maxBaseFeeWei,
         metrics.averageBaseFeeWei,
@@ -2235,6 +2269,9 @@ export class ScannerStorage {
         range_end,
         min_block_date,
         max_block_date,
+        average_block_time_seconds,
+        min_block_time_seconds,
+        max_block_time_seconds,
         min_base_fee_wei,
         max_base_fee_wei,
         average_base_fee_wei,
@@ -2284,6 +2321,9 @@ export class ScannerStorage {
       range_end: string;
       min_block_date: string;
       max_block_date: string;
+      average_block_time_seconds: string;
+      min_block_time_seconds: string;
+      max_block_time_seconds: string;
       min_base_fee_wei: string;
       max_base_fee_wei: string;
       average_base_fee_wei: string;
@@ -2329,6 +2369,9 @@ export class ScannerStorage {
       rangeEnd: Number(row.range_end),
       minBlockDate: row.min_block_date,
       maxBlockDate: row.max_block_date,
+      averageBlockTimeSeconds: row.average_block_time_seconds,
+      minBlockTimeSeconds: row.min_block_time_seconds,
+      maxBlockTimeSeconds: row.max_block_time_seconds,
       minBaseFeeWei: row.min_base_fee_wei,
       maxBaseFeeWei: row.max_base_fee_wei,
       averageBaseFeeWei: row.average_base_fee_wei,
@@ -2622,6 +2665,10 @@ function quoteIdent(name: string): string {
     throw new Error(`Invalid identifier: ${name}`);
   }
   return `"${name}"`;
+}
+
+function quoteStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function regclassName(schema: string, tableName: string): string {

@@ -310,6 +310,7 @@ lose precision.
 | --- | --- |
 | `block_date` | Block timestamp as an ISO-8601 UTC string. |
 | `block_number` | Ethereum block number (PostgreSQL `BIGINT`). |
+| `block_time_seconds` | Integer seconds between this block timestamp and the previous block timestamp; block `0` stores `2`. |
 | `base_block_fee_wei` | Block `baseFeePerGas` in wei. Legacy networks without a base fee store `0`. |
 | `total_gas_used` | Block `gasUsed`. |
 | `max_gas_in_block` | Block `gasLimit`; this is the maximum possible gas for that block and can vary by network. |
