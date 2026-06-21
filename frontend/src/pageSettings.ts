@@ -4,6 +4,7 @@ import {
   type StorageLike,
   writeStoredString,
 } from "./localStorage";
+import { envValues } from "./runtimeConfig";
 
 export interface PageSettings {
   chainName: string;
@@ -130,10 +131,6 @@ export const PAGE_SETTING_DEFINITIONS: readonly PageSettingDefinition[] = [
 export const PAGE_SETTINGS_STORAGE_KEY = "page.settings";
 
 type SettingsDraft = Record<EditablePageSettingsKey, string>;
-
-function envValues(): Record<string, string | undefined> {
-  return ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {});
-}
 
 export function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === "") return fallback;

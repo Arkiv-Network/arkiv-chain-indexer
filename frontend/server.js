@@ -15,6 +15,24 @@ const INDEX_FILE = path.join(STATIC_DIR, "index.html");
 const ONE_WEEK_SECONDS = 60 * 60 * 24 * 7;
 const CACHEABLE_INDEX_ASSET_RE = /^index-[^/]+\.(?:js|css)$/;
 const ENABLE_BROTLI = process.env.NODE_ENV === "production";
+const RUNTIME_CONFIG_ENV_NAMES = [
+  "VITE_CHAIN_NAME",
+  "VITE_TOKEN_SYMBOL",
+  "VITE_TRANSACTION_EXPLORER_BASE_URL",
+  "VITE_BLOCK_TIME_MS",
+  "VITE_STUB_TICK_MS",
+  "VITE_MAX_STUB_BLOCKS",
+  "VITE_STUB_VISIBLE_AGE_MS",
+  "VITE_PING_START_AGE_MS",
+  "VITE_LOADING_METADATA_LEAD_MS",
+  "VITE_NEXT_BLOCK_PING_MS",
+  "VITE_PING_MIN_INTERVAL_MS",
+  "VITE_SCANNER_DELAY_WARNING_AGE_MS",
+  "VITE_HISTOGRAM_WINDOW_MINUTES",
+  "VITE_HISTOGRAM_REFRESH_MS",
+  "VITE_HISTOGRAM_CLOCK_TICK_MS",
+  "VITE_NO_BATCHER",
+];
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -141,6 +159,22 @@ function proxyApi(req, res) {
   req.pipe(proxyReq);
 }
 
+function serveRuntimeConfig(res) {
+  const config = {};
+  for (const name of RUNTIME_CONFIG_ENV_NAMES) {
+    const value = process.env[name];
+    if (value !== undefined) {
+      config[name] = value;
+    }
+  }
+
+  res.writeHead(200, {
+    "content-type": "application/javascript; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(`window.__ARKIV_CONFIG__ = ${JSON.stringify(config)};\n`);
+}
+
 async function serveStatic(req, res) {
   const rawPath = (req.url ?? "/").split("?")[0];
   const decoded = decodeURIComponent(rawPath);
@@ -174,6 +208,10 @@ async function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = req.url ?? "/";
+  if (url === "/config.js" || url.startsWith("/config.js?")) {
+    serveRuntimeConfig(res);
+    return;
+  }
   if (url === "/api" || url.startsWith("/api/") || url.startsWith("/api?")) {
     proxyApi(req, res);
     return;

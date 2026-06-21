@@ -1,13 +1,10 @@
 import { addressDetailHref } from "./permalinks";
+import { envValues } from "./runtimeConfig";
 
 export const DEFAULT_TX_EXPLORER_BASE_URL = "https://explorer.braga.hoodi.arkiv.network/tx/";
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-
-function envValues(): Record<string, string | undefined> {
-  return ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {});
-}
 
 function normalizeTransactionExplorerBaseUrl(value: string | undefined): string | null {
   const trimmed = value?.trim();
