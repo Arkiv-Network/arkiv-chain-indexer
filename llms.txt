@@ -46,6 +46,10 @@ Related scanner and worker settings:
 - `BASELOAD_RPC_NODE` enables backend Baseload workers to submit Arkiv operations.
 - `BASELOAD_MNEMONIC` or `MNEMONIC` controls backend Baseload wallet derivation. If unset, a
   deterministic development mnemonic is used.
+- `BASELOAD_PAYLOAD_PROVIDER_URL` configures the payload provider used by Baseload create/update
+  operations. Optional related settings are `BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY`,
+  `BASELOAD_PAYLOAD_PROVIDER_NAMESPACE` (default `arkiv.entities`), and
+  `BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT` (default `true`).
 
 ## Global API Conventions
 

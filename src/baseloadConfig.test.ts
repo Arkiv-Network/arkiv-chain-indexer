@@ -75,12 +75,52 @@ describe("backend baseload config", () => {
   });
 
   test("reads backend baseload runtime settings from env", () => {
+    const config = parseBaseloadRuntimeConfig({
+      BASELOAD_RPC_NODE: " https://rpc.example.test ",
+      BASELOAD_MNEMONIC: " test test test test test test test test test test test junk ",
+      BASELOAD_PAYLOAD_PROVIDER_URL: " https://payload.example.test/ ",
+      BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY: " submit-secret ",
+      BASELOAD_PAYLOAD_PROVIDER_NAMESPACE: " atlas.test ",
+      BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT: " false ",
+    });
+
+    expect(config.rpcUrl).toBe("https://rpc.example.test");
+    expect(config.mnemonic).toBe("test test test test test test test test test test test junk");
+    expect(config.payloadProvider).toEqual({
+      url: "https://payload.example.test/",
+      bearerKey: "submit-secret",
+      namespace: "atlas.test",
+      verifyReceipt: false,
+    });
+  });
+
+  test("defaults backend baseload payload provider settings when only url is set", () => {
     expect(
       parseBaseloadRuntimeConfig({
-        BASELOAD_RPC_NODE: " https://rpc.example.test ",
-        BASELOAD_MNEMONIC: " test test test test test test test test test test test junk ",
-      }).rpcUrl,
-    ).toBe("https://rpc.example.test");
+        BASELOAD_PAYLOAD_PROVIDER_URL: "http://payload-provider:28883",
+      }).payloadProvider,
+    ).toEqual({
+      url: "http://payload-provider:28883",
+      namespace: "arkiv.entities",
+      verifyReceipt: true,
+    });
+  });
+
+  test("leaves backend baseload payload provider unset without a url", () => {
+    expect(
+      parseBaseloadRuntimeConfig({
+        BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY: "submit-secret",
+      }).payloadProvider,
+    ).toBeNull();
+  });
+
+  test("rejects invalid backend baseload payload provider receipt verification setting", () => {
+    expect(() =>
+      parseBaseloadRuntimeConfig({
+        BASELOAD_PAYLOAD_PROVIDER_URL: "http://payload-provider:28883",
+        BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT: "sometimes",
+      }),
+    ).toThrow("BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT must be a boolean");
   });
 
   test("reads initial baseload config files with backend normalization", async () => {

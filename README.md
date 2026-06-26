@@ -204,6 +204,10 @@ Backend configuration:
 | --- | --- | --- |
 | `BASELOAD_RPC_NODE` | unset | Arkiv JSON-RPC endpoint used by backend workers for block reads, transaction sends, and receipt polling. |
 | `BASELOAD_MNEMONIC` | deterministic development mnemonic | Mnemonic used by the backend to derive worker wallets at `m/44'/60'/0'/0/<walletNumber>`. |
+| `BASELOAD_PAYLOAD_PROVIDER_URL` | unset | Payload provider base URL used by Baseload create/update operations. |
+| `BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY` | unset | Optional bearer token sent to the payload provider. |
+| `BASELOAD_PAYLOAD_PROVIDER_NAMESPACE` | `arkiv.entities` | Payload provider namespace for Baseload entity payloads. |
+| `BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT` | `true` | Whether the SDK verifies signed payload provider receipts before sending a transaction. |
 | `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token required for mutating Baseload worker configuration requests. Readonly requests stay public. |
 | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional container path to a Baseload worker config JSON file that the backend loads once at startup. |
 

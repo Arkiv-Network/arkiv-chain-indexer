@@ -344,7 +344,12 @@ class BaseloadWorkerTask {
             attemptsThisMinute = 0;
           }
 
-          const clientKey = `${this.runtimeConfig.rpcUrl}:${this.runtimeConfig.mnemonic}:${worker.walletNumber}`;
+          const clientKey = JSON.stringify({
+            rpcUrl: this.runtimeConfig.rpcUrl,
+            mnemonic: this.runtimeConfig.mnemonic,
+            payloadProvider: this.runtimeConfig.payloadProvider,
+            walletNumber: worker.walletNumber,
+          });
           if (cachedClients === null || cachedClients.key !== clientKey) {
             const rpc = createRpcClient(this.runtimeConfig.rpcUrl);
             const chainId = await rpc.getChainId();
@@ -706,6 +711,7 @@ function createArkivClient(
     chain,
     transport: http(runtimeConfig.rpcUrl),
     account,
+    ...(runtimeConfig.payloadProvider ? { payloadProvider: runtimeConfig.payloadProvider } : {}),
   });
 }
 

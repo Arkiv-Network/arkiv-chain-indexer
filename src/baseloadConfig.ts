@@ -55,12 +55,21 @@ export interface BaseloadWorkerDraft {
 export interface BaseloadRuntimeConfig {
   rpcUrl: string | null;
   mnemonic: string;
+  payloadProvider?: BaseloadPayloadProviderRuntimeConfig | null;
+}
+
+export interface BaseloadPayloadProviderRuntimeConfig {
+  url: string;
+  bearerKey?: string;
+  namespace: string;
+  verifyReceipt: boolean;
 }
 
 export const BASELOAD_CONFIG_VERSION = 2;
 export const MIN_WALLET_NUMBER = 0;
 export const MAX_WALLET_NUMBER = 100;
 export const BASELOAD_DERIVATION_PATH_PREFIX = "m/44'/60'/0'/0";
+export const DEFAULT_BASELOAD_PAYLOAD_PROVIDER_NAMESPACE = "arkiv.entities";
 export const DEFAULT_BASELOAD_MNEMONIC =
   "parent picture garment parrot churn record stadium pill rocket craft fish fiscal clip virus view diary replace wealth extra kitten door enforce piece nut";
 
@@ -88,7 +97,37 @@ export const EMPTY_BASELOAD_CONFIG: BaseloadConfig = {
 export function parseBaseloadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): BaseloadRuntimeConfig {
   const rpcUrl = env.BASELOAD_RPC_NODE?.trim() || null;
   const mnemonic = env.BASELOAD_MNEMONIC?.trim() || env.MNEMONIC?.trim() || DEFAULT_BASELOAD_MNEMONIC;
-  return { rpcUrl, mnemonic };
+  const payloadProvider = parseBaseloadPayloadProviderRuntimeConfig(env);
+  return { rpcUrl, mnemonic, payloadProvider };
+}
+
+function parseBaseloadPayloadProviderRuntimeConfig(
+  env: NodeJS.ProcessEnv,
+): BaseloadPayloadProviderRuntimeConfig | null {
+  const url = env.BASELOAD_PAYLOAD_PROVIDER_URL?.trim();
+  if (!url) return null;
+
+  const bearerKey = env.BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY?.trim();
+  const namespace =
+    env.BASELOAD_PAYLOAD_PROVIDER_NAMESPACE?.trim() || DEFAULT_BASELOAD_PAYLOAD_PROVIDER_NAMESPACE;
+  const verifyReceipt = parseBaseloadPayloadProviderVerifyReceipt(
+    env.BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT,
+  );
+
+  return {
+    url,
+    ...(bearerKey ? { bearerKey } : {}),
+    namespace,
+    verifyReceipt,
+  };
+}
+
+function parseBaseloadPayloadProviderVerifyReceipt(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return true;
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  throw new Error("BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT must be a boolean");
 }
 
 export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerDraft {
