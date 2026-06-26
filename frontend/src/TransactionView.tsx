@@ -1,5 +1,10 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import { fetchTransactionByHash, type ArkivOperation, type StoredTransaction } from "./api";
+import {
+  fetchTransactionByHash,
+  type ArkivOperation,
+  type ArkivReferenceVerification,
+  type StoredTransaction,
+} from "./api";
 import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
 import { CedricOnTimer } from "./Cedric";
@@ -245,11 +250,15 @@ function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; 
   const entityKey =
     operation.entityKey && !isAllZeroBytes32(operation.entityKey) ? operation.entityKey : null;
   const expirySeconds = (operation.expiresAtBlocks * blockTimeMs) / 1000;
+  const reference = operation.payloadReference ?? null;
+  const verification = operation.referenceVerification ?? null;
+  const verdict = verification ? referenceVerdict(verification) : null;
 
   return (
     <div className="op-card">
       <div className="op-card-head">
         <span className={`op-badge op-${operation.operation}`}>{operation.operation}</span>
+        {operation.isReference ? <span className="op-badge op-reference">reference</span> : null}
         <span className="tx-muted">#{operation.opIndex}</span>
       </div>
       <dl className="tx-detail-grid">
@@ -267,6 +276,48 @@ function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; 
         <Row label="Payload size" title={`${fmtInteger(operation.payloadSizeBytes)} bytes`}>
           {fmtBytes(operation.payloadSizeBytes)}
         </Row>
+        {verdict ? (
+          <Row label="Verification">
+            <div className="op-verification">
+              <span className={`tx-status-badge ${verdict.tone}`}>{verdict.label}</span>
+              {verification && verification.errors.length > 0 ? (
+                <div className="op-verification-errors">
+                  {verification.errors.map((error, index) => (
+                    <div key={index}>{error}</div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </Row>
+        ) : null}
+        {operation.referenceError ? (
+          <Row label="Reference">
+            <span className="tx-status-badge fail">{operation.referenceError}</span>
+          </Row>
+        ) : null}
+        {reference ? (
+          <>
+            <Row label="Provider">{reference.provider}</Row>
+            <Row label="Payload id">
+              <span className="tx-inline">
+                <span className="mono truncate">{reference.id}</span>
+                <CopyButton value={reference.id} label="payload id" />
+              </span>
+            </Row>
+            <Row label="Namespace">{reference.namespace}</Row>
+            <Row label="Checksum">
+              <span className="mono truncate">{reference.checksum}</span>
+            </Row>
+            <Row label="Reference size" title={`${fmtInteger(reference.sizeBytes)} bytes`}>
+              {fmtBytes(reference.sizeBytes)}
+            </Row>
+            {verification?.recoveredSigner ? (
+              <Row label="Signer">
+                <AddressCell address={verification.recoveredSigner} />
+              </Row>
+            ) : null}
+          </>
+        ) : null}
         {operation.attributes.length > 0 ? (
           <Row label="Attributes">
             <div className="op-attributes">
@@ -318,6 +369,19 @@ function statusInfo(status: string | null): { label: string; tone: "ok" | "fail"
   if (status === "1") return { label: "Success", tone: "ok" };
   if (status === "0") return { label: "Failed", tone: "fail" };
   return { label: status ?? "Unknown", tone: "unknown" };
+}
+
+/**
+ * Map a reference verification verdict to a badge label/tone. `valid` already
+ * implies the signer is trusted (the decoder records an untrusted signer as an
+ * error that fails the verdict), so an untrusted signer surfaces under `fail`.
+ */
+function referenceVerdict(
+  verification: ArkivReferenceVerification,
+): { label: string; tone: "ok" | "fail" } {
+  if (verification.valid) return { label: "Verified", tone: "ok" };
+  if (!verification.signerTrusted) return { label: "Untrusted signer", tone: "fail" };
+  return { label: "Invalid", tone: "fail" };
 }
 
 function txTypeLabel(type: string | null): string {

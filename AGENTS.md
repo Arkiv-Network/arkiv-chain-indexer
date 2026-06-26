@@ -31,7 +31,9 @@ docker compose up --build
 - Fetch transaction receipts sequentially for the current block so the scanner handles transactions one by one.
 - Transaction payloads/calldata are never persisted — only Arkiv operation metadata, the payload size, and the
   transaction hash. The decoder's `payload.hex` / `payload.text` and the raw `input` field must never reach the
-  database.
+  database. This holds under reference mode too: we persist the payload reference's receipt metadata
+  (`payload_reference`) and the verification verdict (`reference_verification`), but never the referenced entity
+  bytes (the bytes live in the payload provider, not on-chain).
 - Keep network-dependent tests opt-in. Normal `bun test` should not require an RPC endpoint **or** a database;
   storage / aggregator / server tests skip themselves unless `TEST_DATABASE_URL` is set.
 
@@ -50,11 +52,14 @@ docker compose up --build
 
 - Runtime code lives in `src/`.
 - `src/rpc.ts` intentionally uses raw JSON-RPC over `fetch` to avoid runtime dependencies.
-- `src/arkivOperations.ts` talks to the external arkiv-transaction-decoder microservice (compose service
-  `decoder`, env `DECODER_URL`, defaulted by compose to `http://decoder:3000`). Decoded operation metadata is
-  stored in `transaction_operations` (no payloads) in the same transaction as the block's transaction rows. A
-  decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes the whole block
-  retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
+- `src/arkivOperations.ts` POSTs to the external atlas-transaction-decoder (Rust) microservice at
+  `<DECODER_URL>/decode` (compose service `decoder`, defaulted by compose to `http://decoder:28884`). It sends the
+  chain id obtained once from `eth_chainId` so the decoder verifies any v1 payload reference against the right
+  trusted-signer allowlist (`DEFAULT_CHAIN_ID` is only the decoder's fallback). Decoded operation metadata —
+  including `is_reference`, the parsed `payload_reference`, the offline `reference_verification` verdict, and
+  `reference_error` — is stored in `transaction_operations` (no payloads) in the same transaction as the block's
+  transaction rows. A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes
+  the whole block retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
   `GET /transactions` rows that have stored operations.
 - `src/storage.ts` uses `pg` (node-postgres) with a connection pool. The whole storage API is async. Optionally
   takes a `schema` so tests can run in isolated schemas against a shared database.

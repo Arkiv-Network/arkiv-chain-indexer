@@ -227,6 +227,40 @@ export interface ArkivOperationAttribute {
   value: string;
 }
 
+export interface ArkivReferenceVerification {
+  valid: boolean;
+  signerTrusted: boolean;
+  chainId: number;
+  claimedSigner: string | null;
+  recoveredSigner: string | null;
+  messageHash: string | null;
+  errors: string[];
+}
+
+export interface ArkivPayloadReference {
+  kind: string;
+  version: number;
+  provider: string;
+  id: string;
+  namespace: string;
+  contentType?: string;
+  checksum: string;
+  sizeBytes: number;
+  submittedAt: string;
+  nonce: string;
+  payment: number;
+  signature: {
+    scheme: string;
+    signer: string;
+    receipt: Record<string, unknown>;
+    messageHash: string;
+    signature: string;
+    r: string;
+    s: string;
+    v: number;
+  };
+}
+
 export interface ArkivOperation {
   opIndex: number; // 0-based index of the operation within the tx's execute() call
   operationType: number; // 1=create 2=update 3=extend 4=transfer 5=delete 6=expire
@@ -237,6 +271,11 @@ export interface ArkivOperation {
   attributes: ArkivOperationAttribute[];
   expiresAtBlocks: number; // uint32 from decoder (0 when not applicable)
   newOwner: string | null; // address for transfer ops, null otherwise
+  // Reference mode (optional: absent on pre-reference rows / older fixtures).
+  isReference?: boolean; // true when the payload is a v1 payload reference
+  payloadReference?: ArkivPayloadReference | null; // provider receipt metadata, never entity bytes
+  referenceVerification?: ArkivReferenceVerification | null; // offline EIP-191 verdict
+  referenceError?: string | null; // set when a reference payload failed to parse
 }
 
 export interface ArkivOperationSummaryEntry {

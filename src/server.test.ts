@@ -938,6 +938,10 @@ describe("GET /transaction/:hash", () => {
         attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
         expiresAtBlocks: 100,
         newOwner: null,
+        isReference: false,
+        payloadReference: null,
+        referenceVerification: null,
+        referenceError: null,
       },
     ];
     const requestedHashes: string[] = [];

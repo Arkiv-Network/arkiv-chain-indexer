@@ -4257,6 +4257,10 @@ th:not(.num) .sort-header {
   --op-color: var(--muted);
 }
 
+.op-badge.op-reference {
+  --op-color: var(--ark-blue);
+}
+
 .op-badge-list {
   display: inline-flex;
   align-items: center;
@@ -4289,6 +4293,21 @@ th:not(.num) .sort-header {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+.op-verification {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  align-items: flex-start;
+}
+
+.op-verification-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: var(--ark-orange);
+  font-size: 0.82rem;
 }
 
 .charts-status {

@@ -13,6 +13,54 @@ export interface ArkivOperationAttribute {
   value: string;
 }
 
+/**
+ * Offline EIP-191 verification verdict the decoder returns for a payload
+ * reference. Mirrors the decoder's `ReferenceVerification` (reference.rs) and
+ * the on-chain precompile: `valid` is true only when every check the chain
+ * would make passed, and `signerTrusted` records whether the recovered signer
+ * is in the trusted payload-provider allowlist for the decode `chainId`.
+ */
+export interface ArkivReferenceVerification {
+  valid: boolean;
+  signerTrusted: boolean;
+  chainId: number;
+  claimedSigner: string | null;
+  recoveredSigner: string | null;
+  messageHash: string | null;
+  errors: string[];
+}
+
+/**
+ * Parsed v1 payload reference embedded in an operation payload. Under
+ * reference mode the entity bytes never travel on-chain; this carries only the
+ * provider's content-addressed receipt metadata (id/checksum/sizeBytes/
+ * signature) — never the entity bytes. Kept loose so a parsed-but-evolving
+ * reference still round-trips through storage as jsonb.
+ */
+export interface ArkivPayloadReference {
+  kind: string;
+  version: number;
+  provider: string;
+  id: string;
+  namespace: string;
+  contentType?: string;
+  checksum: string;
+  sizeBytes: number;
+  submittedAt: string;
+  nonce: string;
+  payment: number;
+  signature: {
+    scheme: string;
+    signer: string;
+    receipt: Record<string, unknown>;
+    messageHash: string;
+    signature: string;
+    r: string;
+    s: string;
+    v: number;
+  };
+}
+
 export interface ArkivOperation {
   /** 0-based index of the operation within the transaction's execute() call. */
   opIndex: number;
@@ -27,6 +75,14 @@ export interface ArkivOperation {
   attributes: ArkivOperationAttribute[];
   expiresAtBlocks: number;
   newOwner: string | null;
+  /** True when the payload is a v1 payload reference (decoder `payload.isReference`). */
+  isReference: boolean;
+  /** Parsed v1 reference metadata; null unless this op carries a payload reference. */
+  payloadReference: ArkivPayloadReference | null;
+  /** Offline EIP-191 verification verdict; null unless a reference was present. */
+  referenceVerification: ArkivReferenceVerification | null;
+  /** Set when contentType is a reference but the payload failed to parse. */
+  referenceError: string | null;
 }
 
 export interface ArkivOperationSummaryEntry {
@@ -42,23 +98,34 @@ export interface TransactionArkivOperations {
 }
 
 /**
- * Client for the arkiv-transaction-decoder microservice. A 400 response means
+ * Client for the atlas-transaction-decoder microservice. A 400 response means
  * the calldata is not an Arkiv execute() call (not an error); any other failure
  * throws so the caller retries the whole block and no silent gaps are created.
+ *
+ * `chainId`, when set, is sent with each request so the decoder verifies any
+ * embedded payload reference against the trusted-signer allowlist for the
+ * scanner's actual chain (the decoder otherwise falls back to its own default).
  */
 export class ArkivDecoderClient {
-  constructor(readonly baseUrl: string) {
+  constructor(
+    readonly baseUrl: string,
+    readonly chainId?: number,
+  ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 
   async decodeCalldata(data: Hex): Promise<ArkivOperation[] | null> {
-    const url = `${this.baseUrl}/api/decode`;
+    const url = `${this.baseUrl}/decode`;
+    const body =
+      this.chainId !== undefined
+        ? JSON.stringify({ data, chainId: this.chainId })
+        : JSON.stringify({ data });
     let response: Response;
     try {
       response = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ data }),
+        body,
       });
     } catch (error) {
       throw new Error(
@@ -135,6 +202,34 @@ function parseDecoderOperation(operation: unknown, opIndex: number): ArkivOperat
     attributes: operation.attributes.map(parseDecoderAttribute),
     expiresAtBlocks: typeof operation.expiresAtBlocks === "number" ? operation.expiresAtBlocks : 0,
     newOwner: typeof operation.newOwner === "string" ? operation.newOwner : null,
+    // Reference-mode metadata. `isReference` lives under `payload`; the parsed
+    // reference, its verification verdict, and any parse error are top-level.
+    // The reference carries provider receipt metadata only — never entity bytes.
+    isReference:
+      typeof operation.payload.isReference === "boolean" ? operation.payload.isReference : false,
+    payloadReference: isRecord(operation.payloadReference)
+      ? (operation.payloadReference as unknown as ArkivPayloadReference)
+      : null,
+    referenceVerification: isRecord(operation.referenceVerification)
+      ? parseReferenceVerification(operation.referenceVerification)
+      : null,
+    referenceError: typeof operation.referenceError === "string" ? operation.referenceError : null,
+  };
+}
+
+function parseReferenceVerification(value: Record<string, unknown>): ArkivReferenceVerification {
+  return {
+    valid: value.valid === true,
+    signerTrusted: value.signerTrusted === true,
+    chainId: typeof value.chainId === "number" ? value.chainId : 0,
+    // The decoder omits these fields (serde skip-if-none/empty) rather than
+    // emitting null, so treat absence as null/[].
+    claimedSigner: typeof value.claimedSigner === "string" ? value.claimedSigner : null,
+    recoveredSigner: typeof value.recoveredSigner === "string" ? value.recoveredSigner : null,
+    messageHash: typeof value.messageHash === "string" ? value.messageHash : null,
+    errors: Array.isArray(value.errors)
+      ? value.errors.filter((entry): entry is string => typeof entry === "string")
+      : [],
   };
 }
 

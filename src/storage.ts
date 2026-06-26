@@ -12,6 +12,8 @@ import type {
   ArkivOperation,
   ArkivOperationAttribute,
   ArkivOperationSummaryEntry,
+  ArkivPayloadReference,
+  ArkivReferenceVerification,
   TransactionArkivOperations,
 } from "./arkivOperations";
 import type { BaseloadConfig } from "./baseloadConfig";
@@ -491,7 +493,9 @@ export class ScannerStorage {
        ADD COLUMN IF NOT EXISTS input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
     );
     // Decoded Arkiv operation metadata per transaction. Payloads/calldata are
-    // never stored — only payload_size_bytes. expires_at_blocks is BIGINT
+    // never stored — only payload_size_bytes. Under reference mode we also keep
+    // the provider's payload-reference receipt metadata and the offline
+    // verification verdict (never the entity bytes). expires_at_blocks is BIGINT
     // because uint32 max exceeds the int4 range.
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactionOperations} (
@@ -508,10 +512,32 @@ export class ScannerStorage {
         attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
         expires_at_blocks BIGINT,
         new_owner TEXT,
+        is_reference BOOLEAN NOT NULL DEFAULT FALSE,
+        payload_reference JSONB,
+        reference_verification JSONB,
+        reference_error TEXT,
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (block_number, position, op_index)
       )
     `);
+    // Backfill columns on tables created before reference mode. Defaults keep
+    // existing rows valid; the rich reference objects stay null until re-scanned.
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactionOperations}
+       ADD COLUMN IF NOT EXISTS is_reference BOOLEAN NOT NULL DEFAULT FALSE`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactionOperations}
+       ADD COLUMN IF NOT EXISTS payload_reference JSONB`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactionOperations}
+       ADD COLUMN IF NOT EXISTS reference_verification JSONB`,
+    );
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactionOperations}
+       ADD COLUMN IF NOT EXISTS reference_error TEXT`,
+    );
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_hash_idx")}
        ON ${this.qTransactionOperations} (hash)`,
@@ -1317,11 +1343,19 @@ export class ScannerStorage {
     // Postgres caps one statement at 65,535 bind parameters and a single
     // transaction can pack thousands of cheap operations, so insert in bounded
     // chunks. Still atomic: saveBlockMetrics wraps this in BEGIN/COMMIT.
-    const columnsPerRow = 13;
+    const columnsPerRow = 17;
     const maxRowsPerInsert = 2_000;
     for (let start = 0; start < rows.length; start += maxRowsPerInsert) {
       const chunk = rows.slice(start, start + maxRowsPerInsert);
-      const params: Array<string | number | null | ArkivOperationAttribute[]> = [];
+      const params: Array<
+        | string
+        | number
+        | boolean
+        | null
+        | ArkivOperationAttribute[]
+        | ArkivPayloadReference
+        | ArkivReferenceVerification
+      > = [];
       const values = chunk.map(({ transaction, operation }, rowIndex) => {
         const offset = rowIndex * columnsPerRow;
         params.push(
@@ -1335,18 +1369,25 @@ export class ScannerStorage {
           operation.entityKey,
           operation.contentType,
           operation.payloadSizeBytes,
-          // Bind the array itself: Bun.sql serializes JS objects/arrays to
-          // jsonb documents but double-encodes pre-stringified JSON strings
+          // Bind the array/object itself: Bun.sql serializes JS objects/arrays
+          // to jsonb documents but double-encodes pre-stringified JSON strings
           // into jsonb string scalars.
           operation.attributes,
           operation.expiresAtBlocks.toString(),
           operation.newOwner,
+          operation.isReference,
+          // Reference receipt metadata + verdict (never entity bytes); jsonb.
+          operation.payloadReference,
+          operation.referenceVerification,
+          operation.referenceError,
         );
         const placeholders = Array.from(
           { length: columnsPerRow },
           (_unused, columnIndex) => `$${offset + columnIndex + 1}`,
         );
-        placeholders[10] = `${placeholders[10]}::jsonb`;
+        placeholders[10] = `${placeholders[10]}::jsonb`; // attributes
+        placeholders[14] = `${placeholders[14]}::jsonb`; // payload_reference
+        placeholders[15] = `${placeholders[15]}::jsonb`; // reference_verification
         return `(${placeholders.join(", ")})`;
       });
 
@@ -1364,7 +1405,11 @@ export class ScannerStorage {
           payload_size_bytes,
           attributes,
           expires_at_blocks,
-          new_owner
+          new_owner,
+          is_reference,
+          payload_reference,
+          reference_verification,
+          reference_error
         ) VALUES ${values.join(", ")}`,
         params,
       );
@@ -1382,7 +1427,11 @@ export class ScannerStorage {
         payload_size_bytes,
         attributes,
         expires_at_blocks,
-        new_owner
+        new_owner,
+        is_reference,
+        payload_reference,
+        reference_verification,
+        reference_error
       FROM ${this.qTransactionOperations}
       WHERE hash = $1
       ORDER BY block_number, position, op_index`,
@@ -2737,6 +2786,12 @@ interface TransactionOperationRow {
   attributes: ArkivOperationAttribute[] | string;
   expires_at_blocks: string | null;
   new_owner: string | null;
+  is_reference: boolean;
+  // The `| string` union mirrors `attributes`: defends against a legacy
+  // double-encoded jsonb row written before Bun.sql object-binding.
+  payload_reference: ArkivPayloadReference | string | null;
+  reference_verification: ArkivReferenceVerification | string | null;
+  reference_error: string | null;
 }
 
 interface TransactionRow {
@@ -2869,7 +2924,22 @@ function mapTransactionOperationRow(row: TransactionOperationRow): ArkivOperatio
         : row.attributes,
     expiresAtBlocks: Number(row.expires_at_blocks ?? 0),
     newOwner: row.new_owner,
+    // is_reference is NOT NULL DEFAULT FALSE, so always a real boolean.
+    isReference: row.is_reference,
+    payloadReference: parseJsonbColumn<ArkivPayloadReference>(row.payload_reference),
+    referenceVerification: parseJsonbColumn<ArkivReferenceVerification>(row.reference_verification),
+    referenceError: row.reference_error,
   };
+}
+
+/**
+ * Read a nullable jsonb column. Bun.sql parses jsonb to a JS value on read, but
+ * a legacy double-encoded row surfaces as a JSON string — parse those, mirroring
+ * the attributes handling above.
+ */
+function parseJsonbColumn<T>(value: T | string | null): T | null {
+  if (value === null) return null;
+  return typeof value === "string" ? (JSON.parse(value) as T) : value;
 }
 
 function mapTransactionRow(row: TransactionRow): StoredTransaction {

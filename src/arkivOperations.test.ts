@@ -46,6 +46,59 @@ function decoderOperationFixture(overrides: Record<string, unknown> = {}): Recor
   };
 }
 
+const REFERENCE_CONTENT_TYPE = "application/vnd.atlas.payload-reference+json";
+
+/**
+ * A reference-mode operation as the decoder emits it: the payload is flagged
+ * `isReference` and carries hex bytes (which must still be dropped), with the
+ * parsed reference, verdict, and any parse error alongside it.
+ */
+function referenceOperationFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    operationType: 1,
+    operation: "create",
+    entityKey: `0x${"00".repeat(32)}`,
+    contentType: REFERENCE_CONTENT_TYPE,
+    payload: { hex: "0xb10bb10b", size: 700, isReference: true },
+    payloadReference: {
+      kind: "atlas.payloadReference",
+      version: 1,
+      provider: "atlas-payload-provider",
+      id: "a".repeat(64),
+      namespace: "atlas.test",
+      checksum: `sha256:${"b".repeat(64)}`,
+      sizeBytes: 700,
+      submittedAt: "2026-06-24T15:24:30Z",
+      nonce: `0x${"00".repeat(31)}01`,
+      payment: 100000,
+      signature: {
+        scheme: "eip191",
+        signer: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+        receipt: { service: "atlas-payload-provider" },
+        messageHash: `0x${"cd".repeat(32)}`,
+        signature: `0x${"ef".repeat(65)}`,
+        r: `0x${"11".repeat(32)}`,
+        s: `0x${"22".repeat(32)}`,
+        v: 27,
+      },
+    },
+    referenceVerification: {
+      valid: true,
+      signerTrusted: true,
+      chainId: 1337,
+      claimedSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      recoveredSigner: "0x7e5f4552091a69125d5dFcB7b8C2659029395Bdf",
+      messageHash: `0x${"cd".repeat(32)}`,
+      errors: [],
+    },
+    attributes: [],
+    expiresAtBlocks: 10,
+    approxExpiresInSeconds: 20,
+    newOwner: null,
+    ...overrides,
+  };
+}
+
 function decoderResponse(operations: unknown[]): Response {
   return Response.json({ functionName: "execute", operations });
 }
@@ -75,9 +128,7 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
 
     const operations = await client.decodeCalldata("0x1234");
 
-    expect(calls).toEqual([
-      { url: "http://decoder.test/api/decode", body: { data: "0x1234" } },
-    ]);
+    expect(calls).toEqual([{ url: "http://decoder.test/decode", body: { data: "0x1234" } }]);
     expect(operations).toEqual([
       {
         opIndex: 0,
@@ -89,10 +140,25 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
         attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
         expiresAtBlocks: 100,
         newOwner: null,
+        isReference: false,
+        payloadReference: null,
+        referenceVerification: null,
+        referenceError: null,
       },
     ]);
     expect(JSON.stringify(operations)).not.toContain("0xdeadbeef");
     expect(JSON.stringify(operations)).not.toContain("secret payload");
+  });
+
+  test("sends the chain id in the request body when configured", async () => {
+    const calls = stubFetch(() => decoderResponse([decoderOperationFixture()]));
+    const client = new ArkivDecoderClient("http://decoder.test", 42069);
+
+    await client.decodeCalldata("0x1234");
+
+    expect(calls).toEqual([
+      { url: "http://decoder.test/decode", body: { data: "0x1234", chainId: 42069 } },
+    ]);
   });
 
   test("assigns opIndex from the operation order in the response", async () => {
@@ -122,7 +188,7 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
     const client = new ArkivDecoderClient("http://decoder.test");
 
     expect(client.decodeCalldata("0xabcd")).rejects.toThrow(
-      "Arkiv decoder at http://decoder.test/api/decode returned HTTP 500",
+      "Arkiv decoder at http://decoder.test/decode returned HTTP 500",
     );
   });
 
@@ -133,7 +199,7 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
     const client = new ArkivDecoderClient("http://decoder.test");
 
     expect(client.decodeCalldata("0xabcd")).rejects.toThrow(
-      "Arkiv decoder request to http://decoder.test/api/decode failed: connection refused",
+      "Arkiv decoder request to http://decoder.test/decode failed: connection refused",
     );
   });
 
@@ -144,6 +210,74 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
     expect(client.decodeCalldata("0xabcd")).rejects.toThrow(
       "Arkiv decoder returned an unexpected response shape",
     );
+  });
+
+  test("captures reference-mode metadata and verdict while still dropping payload bytes", async () => {
+    stubFetch(() => decoderResponse([referenceOperationFixture()]));
+    const client = new ArkivDecoderClient("http://decoder.test", 1337);
+
+    const operations = await client.decodeCalldata("0x1234");
+
+    expect(operations).toHaveLength(1);
+    expect(operations?.[0]).toMatchObject({
+      isReference: true,
+      contentType: REFERENCE_CONTENT_TYPE,
+      payloadSizeBytes: 700,
+      payloadReference: { provider: "atlas-payload-provider", id: "a".repeat(64) },
+      referenceVerification: { valid: true, signerTrusted: true, errors: [] },
+      referenceError: null,
+    });
+    // The reference receipt is kept, but the raw payload bytes are not.
+    expect(JSON.stringify(operations)).not.toContain("0xb10bb10b");
+  });
+
+  test("captures a reference parse error without a parsed reference", async () => {
+    stubFetch(() =>
+      decoderResponse([
+        referenceOperationFixture({
+          payloadReference: undefined,
+          referenceVerification: undefined,
+          referenceError: "payload is not a valid payload reference: expected value",
+        }),
+      ]),
+    );
+    const client = new ArkivDecoderClient("http://decoder.test", 1337);
+
+    const operations = await client.decodeCalldata("0x1234");
+
+    expect(operations?.[0]).toMatchObject({
+      isReference: true,
+      payloadReference: null,
+      referenceVerification: null,
+      referenceError: "payload is not a valid payload reference: expected value",
+    });
+  });
+
+  test("preserves a failed verification verdict and its errors", async () => {
+    stubFetch(() =>
+      decoderResponse([
+        referenceOperationFixture({
+          referenceVerification: {
+            valid: false,
+            signerTrusted: false,
+            chainId: 42069,
+            recoveredSigner: "0x7e5f4552091a69125d5dFcB7b8C2659029395Bdf",
+            errors: ["signer 0x7e5f… is not in the trusted payload-provider allowlist for chain 42069"],
+          },
+        }),
+      ]),
+    );
+    const client = new ArkivDecoderClient("http://decoder.test", 42069);
+
+    const operations = await client.decodeCalldata("0x1234");
+
+    expect(operations?.[0]?.referenceVerification).toMatchObject({
+      valid: false,
+      signerTrusted: false,
+      claimedSigner: null,
+      messageHash: null,
+    });
+    expect(operations?.[0]?.referenceVerification?.errors).toHaveLength(1);
   });
 });
 

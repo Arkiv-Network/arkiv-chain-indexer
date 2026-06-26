@@ -99,7 +99,9 @@ jobs:
       - name: Build and push decoder image
         uses: docker/build-push-action@v6
         with:
-          context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#v0.1.0
+          # atlas-transaction-decoder (Rust) — reference-mode decoder. Keep this
+          # ref in lockstep with docker-compose.yml so the published image matches.
+          context: https://github.com/atlas-chain/atlas-transaction-decoder.git#44b6a8f714664420235666c9ab792cb2d0ddbdfb
           push: true
           tags: ${{ steps.decoder-meta.outputs.tags }}
           labels: ${{ steps.decoder-meta.outputs.labels }}

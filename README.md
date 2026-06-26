@@ -40,11 +40,15 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
 
 The `decoder` compose service builds the
-[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) microservice from its
-pinned `v0.1.0` tag. The scanners send Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL` (compose
-defaults it to `http://decoder:3000`) and store the decoded operation metadata in the `transaction_operations`
+[atlas-transaction-decoder](https://github.com/atlas-chain/atlas-transaction-decoder) (Rust) microservice. The
+scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
+`DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
-payload size. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
+payload size. Under v1 reference mode, create/update ops carry a signed provider reference (content type
+`application/vnd.atlas.payload-reference+json`); the scanner additionally records that reference's receipt
+metadata and the decoder's offline EIP-191 verification verdict (still never the entity bytes). The scanner probes
+`eth_chainId` once at startup and sends it with each request so references are verified against the right
+trusted-signer allowlist. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
 
 The main `scanner` container only ever scans forward near the safe chain head (it always runs with
 `SCANNER_DISABLE_BACKFILL=true`). Historical backfill runs exclusively in the separate `backfill-scanner` container
@@ -163,7 +167,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
-| `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder base URL. When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads). The gap filler accepts the same option. |
+| `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional atlas-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Show help:
@@ -353,9 +357,12 @@ For empty blocks all averages are stored as `0`.
 When a decoder URL is configured and transaction rows are stored, decoded Arkiv operations land in the
 `transaction_operations` table, keyed by `(block_number, position, op_index)` and indexed by transaction hash and
 entity key. Each row stores metadata only: operation type and name, entity key, content type, attribute key/value
-pairs (JSONB), expiry in blocks, new owner, and the payload size in bytes. Transaction payloads and calldata are
-never persisted. Re-scanning a block replaces its operation rows in the same database transaction as its
-transaction rows.
+pairs (JSONB), expiry in blocks, new owner, and the payload size in bytes. For v1 reference-mode operations it also
+stores `is_reference`, the parsed payload reference (`payload_reference`, JSONB — provider receipt metadata such as
+id, checksum, size, and signature, never the entity bytes), the offline verification verdict
+(`reference_verification`, JSONB — `valid`, `signerTrusted`, recovered signer, and any errors), and
+`reference_error` when a reference payload failed to parse. Transaction payloads and calldata are never persisted.
+Re-scanning a block replaces its operation rows in the same database transaction as its transaction rows.
 
 ### Range Aggregates
 
@@ -569,8 +576,9 @@ the field.
 
 Returns one stored transaction as `{ "transaction": ... }`. The transaction always includes an `operations`
 array with the decoded Arkiv operation metadata recorded for it (empty when none): operation type/name, entity
-key, content type, attributes, expiry, new owner, and `payloadSizeBytes`. Payload bytes are never stored or
-returned. Returns `404` when the hash is unknown or transaction data is disabled.
+key, content type, attributes, expiry, new owner, and `payloadSizeBytes`, plus the reference-mode fields
+`isReference`, `payloadReference`, `referenceVerification`, and `referenceError` for v1 reference operations.
+Payload bytes are never stored or returned. Returns `404` when the hash is unknown or transaction data is disabled.
 
 ### `GET /senders`
 

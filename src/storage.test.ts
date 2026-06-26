@@ -959,6 +959,17 @@ if (!hasPostgresForTests()) {
         { key: "version", valueType: 1, valueTypeName: "uint", value: "7" },
       ]);
       expect(stored[0]?.expiresAtBlocks).toBe(4_294_967_295);
+      // Reference receipt + verdict round-trip through jsonb; the inline op
+      // reads back with the reference columns null/false.
+      expect(stored[0]?.isReference).toBe(true);
+      expect(stored[0]?.payloadReference?.provider).toBe("atlas-payload-provider");
+      expect(stored[0]?.referenceVerification).toMatchObject({ valid: true, signerTrusted: true });
+      expect(stored[1]).toMatchObject({
+        isReference: false,
+        payloadReference: null,
+        referenceVerification: null,
+        referenceError: null,
+      });
       expect(await storage.getOperationsByHash("0xother")).toEqual([]);
     });
 
@@ -974,6 +985,10 @@ if (!hasPostgresForTests()) {
         attributes: [],
         expiresAtBlocks: 0,
         newOwner: null,
+        isReference: false,
+        payloadReference: null,
+        referenceVerification: null,
+        referenceError: null,
       };
       const operations: TransactionArkivOperations[] = [
         {
@@ -1034,7 +1049,7 @@ if (!hasPostgresForTests()) {
 
     test("chunks operation inserts past the bind-parameter limit", async () => {
       const storage = await withStorage();
-      // 5,050 rows × 13 columns would exceed Postgres's 65,535 bind-parameter
+      // 5,050 rows × 17 columns would exceed Postgres's 65,535 bind-parameter
       // cap in a single INSERT; the writer must split into chunked statements.
       const operationCount = 5_050;
       const baseOperation = arkivOperationsFixture("0xfeed", 0)[0]!.operations[1]!;
@@ -1077,12 +1092,16 @@ if (!hasPostgresForTests()) {
           "entity_key",
           "expires_at_blocks",
           "hash",
+          "is_reference",
           "new_owner",
           "op_index",
           "operation",
           "operation_type",
+          "payload_reference",
           "payload_size_bytes",
           "position",
+          "reference_error",
+          "reference_verification",
           "scanned_at",
         ]);
       } finally {
@@ -1103,7 +1122,7 @@ function arkivOperationsFixture(hash: string, position: number): TransactionArki
           operationType: 1,
           operation: "create",
           entityKey: `0x${"ab".repeat(32)}`,
-          contentType: "application/json",
+          contentType: "application/vnd.atlas.payload-reference+json",
           payloadSizeBytes: 512,
           attributes: [
             { key: "project", valueType: 2, valueTypeName: "string", value: "demo" },
@@ -1111,6 +1130,40 @@ function arkivOperationsFixture(hash: string, position: number): TransactionArki
           ],
           expiresAtBlocks: 4_294_967_295,
           newOwner: null,
+          // Reference op: receipt metadata + verdict round-trip through jsonb.
+          isReference: true,
+          payloadReference: {
+            kind: "atlas.payloadReference",
+            version: 1,
+            provider: "atlas-payload-provider",
+            id: "a".repeat(64),
+            namespace: "atlas.test",
+            checksum: `sha256:${"b".repeat(64)}`,
+            sizeBytes: 700,
+            submittedAt: "2026-06-24T15:24:30Z",
+            nonce: `0x${"00".repeat(31)}01`,
+            payment: 100000,
+            signature: {
+              scheme: "eip191",
+              signer: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+              receipt: { service: "atlas-payload-provider" },
+              messageHash: `0x${"cd".repeat(32)}`,
+              signature: `0x${"ef".repeat(65)}`,
+              r: `0x${"11".repeat(32)}`,
+              s: `0x${"22".repeat(32)}`,
+              v: 27,
+            },
+          },
+          referenceVerification: {
+            valid: true,
+            signerTrusted: true,
+            chainId: 1337,
+            claimedSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+            recoveredSigner: "0x7e5f4552091a69125d5dFcB7b8C2659029395Bdf",
+            messageHash: `0x${"cd".repeat(32)}`,
+            errors: [],
+          },
+          referenceError: null,
         },
         {
           opIndex: 1,
@@ -1122,6 +1175,11 @@ function arkivOperationsFixture(hash: string, position: number): TransactionArki
           attributes: [],
           expiresAtBlocks: 0,
           newOwner: "0x9999999999999999999999999999999999999999",
+          // Inline (non-reference) op: reference columns stay null/false.
+          isReference: false,
+          payloadReference: null,
+          referenceVerification: null,
+          referenceError: null,
         },
       ],
     },

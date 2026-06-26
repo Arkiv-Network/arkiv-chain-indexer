@@ -53,6 +53,11 @@ export class EthereumRpcClient {
     return BigInt(result);
   }
 
+  async getChainId(): Promise<number> {
+    const result = await this.request<Hex>("eth_chainId", []);
+    return Number(BigInt(result));
+  }
+
   async getBlockWithTransactions(blockNumber: bigint): Promise<RpcBlock> {
     const result = await this.request<RpcBlock | null>("eth_getBlockByNumber", [
       blockNumberToHex(blockNumber),

@@ -17,7 +17,23 @@ async function main(): Promise<void> {
     const batcherCollector = config.batcherCollectorUrl
       ? new HttpBatcherCollector(config.batcherCollectorUrl)
       : undefined;
-    const decoderClient = config.decoderUrl ? new ArkivDecoderClient(config.decoderUrl) : undefined;
+    // Probe the chain id once so the decoder verifies payload references against
+    // the right trusted-signer allowlist. On failure fall back to the decoder's
+    // own default chain id (degrades verification trust off the dev chain, so
+    // make it visible). Only probed when decoding is enabled.
+    const decoderChainId = config.decoderUrl
+      ? await rpc.getChainId().catch((error) => {
+          console.warn(
+            `Could not determine chain id for the Arkiv decoder; reference verification will use the decoder default: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return undefined;
+        })
+      : undefined;
+    const decoderClient = config.decoderUrl
+      ? new ArkivDecoderClient(config.decoderUrl, decoderChainId)
+      : undefined;
     storage = await ScannerStorage.open(config.databaseUrl);
 
     if (config.redisUrl) {
