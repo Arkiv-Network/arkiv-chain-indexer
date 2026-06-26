@@ -6,6 +6,7 @@ import {
   createBaseloadWorkerDraft,
   createBaseloadWorkerFromDraft,
   getAvailableWalletNumbers,
+  MAX_BASELOAD_ENTITIES_PER_REQUEST,
   moveDraftToNextAvailableWallet,
   normalizeBaseloadConfig,
   parseBaseloadConfigJson,
@@ -344,6 +345,7 @@ export function BaseloadView({
             <input
               type="number"
               min="1"
+              max={MAX_BASELOAD_ENTITIES_PER_REQUEST}
               step="1"
               value={draft.entitiesPerRequest}
               onChange={onDraftChange("entitiesPerRequest")}
@@ -700,6 +702,7 @@ function WorkerCard({
             storageKey={editableStorageKey(worker.id, "entitiesPerRequest")}
             value={worker.entitiesPerRequest}
             min={1}
+            max={MAX_BASELOAD_ENTITIES_PER_REQUEST}
             step="1"
             integer
             onChange={(value) => {
@@ -1024,6 +1027,7 @@ function EditableNumber({
   storageKey,
   value,
   min,
+  max,
   step,
   integer = false,
   placeholder,
@@ -1032,6 +1036,7 @@ function EditableNumber({
   storageKey: string;
   value: number | null;
   min: number;
+  max?: number;
   step: string;
   integer?: boolean;
   placeholder?: string;
@@ -1050,7 +1055,12 @@ function EditableNumber({
       return;
     }
     const next = Number(text);
-    if (!Number.isFinite(next) || next < min || (integer && !Number.isInteger(next))) {
+    if (
+      !Number.isFinite(next) ||
+      next < min ||
+      (max !== undefined && next > max) ||
+      (integer && !Number.isInteger(next))
+    ) {
       removeStoredValue(storageKey);
       setText(value === null ? "" : String(value));
       return;
@@ -1069,6 +1079,7 @@ function EditableNumber({
       className="table-input"
       type="number"
       min={min}
+      max={max}
       step={step}
       placeholder={placeholder}
       value={text}

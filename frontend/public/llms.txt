@@ -409,6 +409,9 @@ timeBombOffsetSeconds, walletNumber, walletAddress, startBlock, endBlock,
 durationSeconds, ttlSeconds
 ```
 
+`entitiesPerRequest` is normalized to at most `1`; use `opsPerMinute` or multiple worker
+wallets to scale load instead of multi-entity mutation batches.
+
 ### `GET /baseload`
 
 Returns backend Baseload state, enabled/runtime availability, active config, and worker statuses.

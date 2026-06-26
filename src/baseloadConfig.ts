@@ -68,6 +68,7 @@ export interface BaseloadPayloadProviderRuntimeConfig {
 export const BASELOAD_CONFIG_VERSION = 2;
 export const MIN_WALLET_NUMBER = 0;
 export const MAX_WALLET_NUMBER = 100;
+export const MAX_BASELOAD_ENTITIES_PER_REQUEST = 1;
 export const BASELOAD_DERIVATION_PATH_PREFIX = "m/44'/60'/0'/0";
 export const DEFAULT_BASELOAD_PAYLOAD_PROVIDER_NAMESPACE = "arkiv.entities";
 export const DEFAULT_BASELOAD_MNEMONIC =
@@ -170,10 +171,12 @@ export function createBaseloadWorkerFromDraft(
         allowFloat: true,
         min: 0,
       }),
-      entitiesPerRequest: parseFiniteNumber("Entities per request", draft.entitiesPerRequest, {
-        allowFloat: false,
-        min: 1,
-      }),
+      entitiesPerRequest: clampEntitiesPerRequest(
+        parseFiniteNumber("Entities per request", draft.entitiesPerRequest, {
+          allowFloat: false,
+          min: 1,
+        }),
+      ),
       singleCreatePayloadSize: parseFiniteNumber("Single create payload size", draft.singleCreatePayloadSize, {
         allowFloat: false,
         min: 0,
@@ -347,9 +350,11 @@ function normalizeBaseloadWorker(
     opsPerMinute: coerceNumber("Operations per minute", input.opsPerMinute, {
       min: 0,
     }),
-    entitiesPerRequest: coerceInteger("Entities per request", input.entitiesPerRequest, {
-      min: 1,
-    }),
+    entitiesPerRequest: clampEntitiesPerRequest(
+      coerceInteger("Entities per request", input.entitiesPerRequest, {
+        min: 1,
+      }),
+    ),
     singleCreatePayloadSize: coerceInteger(
       "Single create payload size",
       input.singleCreatePayloadSize,
@@ -403,6 +408,10 @@ function assertUniqueWallets(workers: readonly BaseloadWorkerConfig[]) {
     }
     seen.add(worker.walletNumber);
   }
+}
+
+function clampEntitiesPerRequest(value: number): number {
+  return Math.min(value, MAX_BASELOAD_ENTITIES_PER_REQUEST);
 }
 
 function parseFiniteNumber(

@@ -61,7 +61,7 @@ describe("backend baseload config", () => {
       "create",
     ]);
     expect(config.workers[0]?.timeBombOffsetSeconds).toBe(120);
-    expect(config.workers[1]?.entitiesPerRequest).toBe(3);
+    expect(config.workers[1]?.entitiesPerRequest).toBe(1);
     expect(config.workers[1]?.entityPoolSize).toBe(4);
     expect(() =>
       normalizeBaseloadConfig({ workers: [{ walletNumber: 0, behavior: "explode" }] }),

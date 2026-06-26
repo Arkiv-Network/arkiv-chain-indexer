@@ -271,7 +271,8 @@ Worker behaviors (`behavior` field):
 Worker mechanics:
 
 - Each configured worker runs on the backend within its configured start block, optional end block, and optional duration.
-- Each worker targets up to its configured operations per minute. Each operation submits one batched Arkiv mutation request for up to `entitiesPerRequest` entities. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
+- `entitiesPerRequest` is currently normalized to at most `1`; increase load with `opsPerMinute` or multiple worker wallets instead of multi-entity mutation batches.
+- Each worker targets up to its configured operations per minute. Each operation submits one Arkiv mutation request for up to `entitiesPerRequest` entities. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
 - Each worker performs one request at a time and waits for the transaction receipt before submitting the next one (`create-ownership` sends one create batch and then one ownership-change batch because ownership changes need the newly created entity keys).
 - Gas is set aggressively from the worker's max gas price: both `maxFeePerGas` and `maxPriorityFeePerGas` use the configured gwei value.
 - Each create or update uses a random binary payload of the configured size, a project attribute, and the configured count of random string and numeric attributes. Defaults are two string attributes and two numeric attributes.

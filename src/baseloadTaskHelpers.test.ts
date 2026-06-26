@@ -25,8 +25,8 @@ describe("baseload task helpers", () => {
     expect(getMinuteAttemptLimit(3)).toBe(3);
     expect(getMinuteAttemptLimit(2.75)).toBe(2);
     expect(getMinuteAttemptLimit(0.5)).toBe(0);
-    expect(getEntitiesPerRequestLimit(3)).toBe(3);
-    expect(getEntitiesPerRequestLimit(2.75)).toBe(2);
+    expect(getEntitiesPerRequestLimit(3)).toBe(1);
+    expect(getEntitiesPerRequestLimit(2.75)).toBe(1);
     expect(getEntitiesPerRequestLimit(0)).toBe(1);
     expect(getMillisecondsUntilNextMinute(1_000, 31_000)).toBe(30_000);
     expect(getMillisecondsUntilNextMinute(1_000, 61_000)).toBe(0);

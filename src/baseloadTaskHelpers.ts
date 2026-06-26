@@ -1,4 +1,7 @@
-import { type BaseloadWorkerConfig } from "./baseloadConfig";
+import {
+  MAX_BASELOAD_ENTITIES_PER_REQUEST,
+  type BaseloadWorkerConfig,
+} from "./baseloadConfig";
 
 export const BASELOAD_PROJECT_ATTRIBUTE = {
   key: "project",
@@ -51,7 +54,7 @@ export function getMinuteAttemptLimit(opsPerMinute: number): number {
 
 export function getEntitiesPerRequestLimit(entitiesPerRequest: number): number {
   if (!Number.isFinite(entitiesPerRequest) || entitiesPerRequest < 1) return 1;
-  return Math.floor(entitiesPerRequest);
+  return Math.min(Math.floor(entitiesPerRequest), MAX_BASELOAD_ENTITIES_PER_REQUEST);
 }
 
 export function chooseBaseloadOperation(

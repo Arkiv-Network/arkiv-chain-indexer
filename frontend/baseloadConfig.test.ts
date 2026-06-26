@@ -65,7 +65,7 @@ describe("baseload config helpers", () => {
           behavior: "create-update",
           maxGasPriceGwei: 5.5,
           opsPerMinute: 2.25,
-          entitiesPerRequest: 4,
+          entitiesPerRequest: 1,
           singleCreatePayloadSize: 100,
           singleCreateStringArgumentCount: 3,
           singleCreateNumberArgumentCount: 4,
