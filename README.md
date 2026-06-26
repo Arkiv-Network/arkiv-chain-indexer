@@ -23,9 +23,6 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Set `ARKIV_JS_SDK` in `.env` before building if you need the Docker image to use a specific
-`arkiv-sdk-js` branch, tag, or commit. It defaults to `develop`.
- 
 Open:
 
 - Frontend: <http://localhost:23560> (the React app talks to the backend through the same origin at `/api/*`)
@@ -199,7 +196,7 @@ metric columns.
 ## Baseload Backend Workers
 
 The Baseload view is a control plane for backend tasks. It never sends Arkiv RPC calls or private-key material
-from the browser. All create transactions are produced by the backend process using `@arkiv-network/sdk`.
+from the browser. All create transactions are produced by the backend process using `@atlas-chain/sdk`.
 
 Backend configuration:
 

@@ -1,4 +1,4 @@
-import { createWalletClient, http, type WalletArkivClient } from "@arkiv-network/sdk";
+import { createWalletClient, http, type WalletArkivClient } from "@atlas-chain/sdk";
 import { defineChain } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 import {
@@ -835,7 +835,7 @@ async function mutateBaseloadEntities(
 ): Promise<BaseloadMutationResult> {
   const mutateEntities = (client as BaseloadMutationClient).mutateEntities;
   if (typeof mutateEntities !== "function") {
-    throw new Error("@arkiv-network/sdk WalletArkivClient does not expose mutateEntities");
+    throw new Error("@atlas-chain/sdk WalletArkivClient does not expose mutateEntities");
   }
   return normalizeBaseloadMutationResult(await mutateEntities.call(client, parameters, txParams));
 }

@@ -22,7 +22,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@arkiv-network/sdk": "file:arkiv-sdk-js/arkiv-network-sdk-latest.tgz",
+    "@atlas-chain/sdk": "0.6.12",
     "commander": "^15.0.0",
     "viem": "^2.38.2"
   }
