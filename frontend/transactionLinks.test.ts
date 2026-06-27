@@ -1,24 +1,50 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_PAYLOAD_PROVIDER_BASE_URL,
-  DEFAULT_TX_EXPLORER_BASE_URL,
+  DEFAULT_TRANSACTION_DECODER_BASE_URL,
   addressSearchHref,
   payloadInfoHref,
   readPayloadProviderBaseUrl,
+  readTransactionDecoderBaseUrl,
   readTransactionExplorerBaseUrl,
+  transactionDecoderHref,
   transactionExplorerHref,
 } from "./src/transactionLinks";
 
 describe("transaction links", () => {
-  test("links transaction hashes to the Arkiv Hoodi explorer", () => {
+  test("links transaction hashes to the Atlas transaction decoder", () => {
     const hash = "0xf8da0a7fd7af9dae0730e43b9d0184500de5c77975dd3e644e2da22c044891c6";
 
-    expect(transactionExplorerHref(hash)).toBe(
-      "https://explorer.braga.hoodi.arkiv.network/tx/0xf8da0a7fd7af9dae0730e43b9d0184500de5c77975dd3e644e2da22c044891c6",
+    expect(transactionDecoderHref(hash)).toBe(`${DEFAULT_TRANSACTION_DECODER_BASE_URL}?tx=${hash}`);
+    expect(transactionExplorerHref(hash)).toBe(`${DEFAULT_TRANSACTION_DECODER_BASE_URL}?tx=${hash}`);
+  });
+
+  test("reads configured transaction decoder base URLs", () => {
+    expect(
+      readTransactionDecoderBaseUrl({
+        VITE_TRANSACTION_DECODER_BASE_URL: "https://decoder.example.test",
+      }),
+    ).toBe("https://decoder.example.test/");
+  });
+
+  test("falls back to configured transaction explorer base URLs", () => {
+    expect(
+      readTransactionDecoderBaseUrl({
+        VITE_TRANSACTION_EXPLORER_BASE_URL: "https://legacy.example.test/tx",
+      }),
+    ).toBe("https://legacy.example.test/tx/");
+  });
+
+  test("defaults invalid transaction decoder base URLs", () => {
+    expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "" })).toBe(
+      DEFAULT_TRANSACTION_DECODER_BASE_URL,
+    );
+    expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "ftp://example.test/" })).toBe(
+      DEFAULT_TRANSACTION_DECODER_BASE_URL,
     );
   });
 
-  test("reads configured transaction explorer base URLs", () => {
+  test("still reads configured transaction explorer base URLs for compatibility", () => {
     expect(
       readTransactionExplorerBaseUrl({
         VITE_TRANSACTION_EXPLORER_BASE_URL: "https://explorer.example.test/tx",
@@ -26,19 +52,10 @@ describe("transaction links", () => {
     ).toBe("https://explorer.example.test/tx/");
   });
 
-  test("defaults invalid transaction explorer base URLs", () => {
-    expect(readTransactionExplorerBaseUrl({ VITE_TRANSACTION_EXPLORER_BASE_URL: "" })).toBe(
-      DEFAULT_TX_EXPLORER_BASE_URL,
-    );
-    expect(readTransactionExplorerBaseUrl({ VITE_TRANSACTION_EXPLORER_BASE_URL: "ftp://example.test/tx/" })).toBe(
-      DEFAULT_TX_EXPLORER_BASE_URL,
-    );
-  });
-
   test("does not build explorer links for missing or malformed transaction hashes", () => {
-    expect(transactionExplorerHref(null)).toBeNull();
-    expect(transactionExplorerHref("")).toBeNull();
-    expect(transactionExplorerHref("0x1234")).toBeNull();
+    expect(transactionDecoderHref(null)).toBeNull();
+    expect(transactionDecoderHref("")).toBeNull();
+    expect(transactionDecoderHref("0x1234")).toBeNull();
   });
 
   test("builds internal address detail links", () => {

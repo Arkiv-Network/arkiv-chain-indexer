@@ -3,6 +3,7 @@
 interface ImportMetaEnv {
   readonly VITE_CHAIN_NAME?: string;
   readonly VITE_TOKEN_SYMBOL?: string;
+  readonly VITE_TRANSACTION_DECODER_BASE_URL?: string;
   readonly VITE_TRANSACTION_EXPLORER_BASE_URL?: string;
   readonly VITE_BLOCK_TIME_MS?: string;
   readonly VITE_STUB_TICK_MS?: string;

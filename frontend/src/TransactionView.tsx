@@ -12,7 +12,7 @@ import { CedricOnTimer } from "./Cedric";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { transactionDetailHref, writeTransactionPermalink } from "./permalinks";
-import { payloadInfoHref, transactionExplorerHref } from "./transactionLinks";
+import { payloadInfoHref, transactionDecoderHref } from "./transactionLinks";
 
 interface TransactionViewProps {
   hash: string | null;
@@ -154,7 +154,7 @@ function TransactionDetail({
   onLocationChange: () => void;
 }) {
   const status = statusInfo(transaction.status);
-  const explorerHref = transactionExplorerHref(transaction.hash);
+  const decoderHref = transactionDecoderHref(transaction.hash);
   const isContractCreation = !transaction.to && Boolean(transaction.contractAddress);
   const operations = transaction.operations ?? [];
 
@@ -166,9 +166,9 @@ function TransactionDetail({
         <span className={`tx-status-badge ${status.tone}`}>{status.label}</span>
         <span className="tx-detail-hash mono">{transaction.hash}</span>
         <CopyButton value={transaction.hash} label="transaction hash" />
-        {explorerHref ? (
-          <a className="tx-explorer-link" href={explorerHref} target="_blank" rel="noreferrer">
-            Explorer ↗
+        {decoderHref ? (
+          <a className="tx-explorer-link" href={decoderHref} target="_blank" rel="noreferrer">
+            Decode ↗
           </a>
         ) : null}
       </div>

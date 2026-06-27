@@ -2,6 +2,7 @@ import { addressDetailHref } from "./permalinks";
 import { envValues } from "./runtimeConfig";
 
 export const DEFAULT_TX_EXPLORER_BASE_URL = "https://explorer.braga.hoodi.arkiv.network/tx/";
+export const DEFAULT_TRANSACTION_DECODER_BASE_URL = "https://decoder.atlas.arkiv-global.net/";
 export const DEFAULT_PAYLOAD_PROVIDER_BASE_URL = "https://payload.atlas.arkiv-global.net/";
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -30,13 +31,27 @@ export function readTransactionExplorerBaseUrl(
   return normalizeHttpBaseUrl(env.VITE_TRANSACTION_EXPLORER_BASE_URL) ?? DEFAULT_TX_EXPLORER_BASE_URL;
 }
 
-const TX_EXPLORER_BASE_URL = readTransactionExplorerBaseUrl();
+export function readTransactionDecoderBaseUrl(
+  env: Record<string, string | undefined> = envValues(),
+): string {
+  return (
+    normalizeHttpBaseUrl(env.VITE_TRANSACTION_DECODER_BASE_URL) ??
+    normalizeHttpBaseUrl(env.VITE_TRANSACTION_EXPLORER_BASE_URL) ??
+    DEFAULT_TRANSACTION_DECODER_BASE_URL
+  );
+}
 
-export function transactionExplorerHref(hash: string | null | undefined): string | null {
+const TRANSACTION_DECODER_BASE_URL = readTransactionDecoderBaseUrl();
+
+export function transactionDecoderHref(hash: string | null | undefined): string | null {
   const value = hash?.trim();
   if (!value || !TX_HASH_RE.test(value)) return null;
-  return `${TX_EXPLORER_BASE_URL}${value}`;
+  const url = new URL(TRANSACTION_DECODER_BASE_URL);
+  url.searchParams.set("tx", value);
+  return url.toString();
 }
+
+export const transactionExplorerHref = transactionDecoderHref;
 
 export function readPayloadProviderBaseUrl(
   env: Record<string, string | undefined> = envValues(),
