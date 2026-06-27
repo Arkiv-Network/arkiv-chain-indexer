@@ -34,11 +34,7 @@ export function readTransactionExplorerBaseUrl(
 export function readTransactionDecoderBaseUrl(
   env: Record<string, string | undefined> = envValues(),
 ): string {
-  return (
-    normalizeHttpBaseUrl(env.VITE_TRANSACTION_DECODER_BASE_URL) ??
-    normalizeHttpBaseUrl(env.VITE_TRANSACTION_EXPLORER_BASE_URL) ??
-    DEFAULT_TRANSACTION_DECODER_BASE_URL
-  );
+  return normalizeHttpBaseUrl(env.VITE_TRANSACTION_DECODER_BASE_URL) ?? DEFAULT_TRANSACTION_DECODER_BASE_URL;
 }
 
 const TRANSACTION_DECODER_BASE_URL = readTransactionDecoderBaseUrl();

@@ -27,12 +27,12 @@ describe("transaction links", () => {
     ).toBe("https://decoder.example.test/");
   });
 
-  test("falls back to configured transaction explorer base URLs", () => {
+  test("ignores configured transaction explorer base URLs for decoder links", () => {
     expect(
       readTransactionDecoderBaseUrl({
         VITE_TRANSACTION_EXPLORER_BASE_URL: "https://legacy.example.test/tx",
       }),
-    ).toBe("https://legacy.example.test/tx/");
+    ).toBe(DEFAULT_TRANSACTION_DECODER_BASE_URL);
   });
 
   test("defaults invalid transaction decoder base URLs", () => {
