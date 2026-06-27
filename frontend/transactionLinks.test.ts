@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_PAYLOAD_PROVIDER_BASE_URL,
   DEFAULT_TX_EXPLORER_BASE_URL,
   addressSearchHref,
+  payloadInfoHref,
+  readPayloadProviderBaseUrl,
   readTransactionExplorerBaseUrl,
   transactionExplorerHref,
 } from "./src/transactionLinks";
@@ -48,5 +51,32 @@ describe("transaction links", () => {
     expect(addressSearchHref(null)).toBeNull();
     expect(addressSearchHref("")).toBeNull();
     expect(addressSearchHref("0x1234")).toBeNull();
+  });
+
+  test("links payload reference ids to the payload provider", () => {
+    const id = "a806b74c6c933e9c0c3cfd7c099c7c6cdbf86bef1a48da310a90bd050c37b4e5";
+    expect(payloadInfoHref(id)).toBe(`${DEFAULT_PAYLOAD_PROVIDER_BASE_URL}payloads/${id}`);
+    // Mixed-case input is normalized to the lowercase content-addressed id.
+    expect(payloadInfoHref(id.toUpperCase())).toBe(`${DEFAULT_PAYLOAD_PROVIDER_BASE_URL}payloads/${id}`);
+  });
+
+  test("reads configured and defaults invalid payload provider base URLs", () => {
+    expect(
+      readPayloadProviderBaseUrl({ VITE_PAYLOAD_PROVIDER_BASE_URL: "https://payload.example.test" }),
+    ).toBe("https://payload.example.test/");
+    expect(readPayloadProviderBaseUrl({ VITE_PAYLOAD_PROVIDER_BASE_URL: "" })).toBe(
+      DEFAULT_PAYLOAD_PROVIDER_BASE_URL,
+    );
+    expect(
+      readPayloadProviderBaseUrl({ VITE_PAYLOAD_PROVIDER_BASE_URL: "ftp://payload.example.test" }),
+    ).toBe(DEFAULT_PAYLOAD_PROVIDER_BASE_URL);
+  });
+
+  test("does not build payload links for missing or malformed ids", () => {
+    expect(payloadInfoHref(null)).toBeNull();
+    expect(payloadInfoHref("")).toBeNull();
+    expect(payloadInfoHref("not-hex")).toBeNull();
+    // 0x-prefixed or wrong-length ids are not valid content-addressed ids.
+    expect(payloadInfoHref("0xa806b74c")).toBeNull();
   });
 });

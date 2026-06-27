@@ -6,12 +6,13 @@ import {
   type StoredTransaction,
 } from "./api";
 import { AddressCell } from "./TransactionsView";
+import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
 import { CedricOnTimer } from "./Cedric";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { transactionDetailHref, writeTransactionPermalink } from "./permalinks";
-import { transactionExplorerHref } from "./transactionLinks";
+import { payloadInfoHref, transactionExplorerHref } from "./transactionLinks";
 
 interface TransactionViewProps {
   hash: string | null;
@@ -253,6 +254,7 @@ function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; 
   const reference = operation.payloadReference ?? null;
   const verification = operation.referenceVerification ?? null;
   const verdict = verification ? referenceVerdict(verification) : null;
+  const payloadHref = reference ? payloadInfoHref(reference.id) : null;
 
   return (
     <div className="op-card">
@@ -297,10 +299,36 @@ function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; 
         ) : null}
         {reference ? (
           <>
-            <Row label="Provider">{reference.provider}</Row>
+            <Row label="Provider">
+              <span className="tx-inline">
+                {verification?.recoveredSigner ? (
+                  <AddressFace
+                    address={verification.recoveredSigner}
+                    width={18}
+                    height={18}
+                    className="op-provider-face"
+                    alt=""
+                    title={`Signer identicon for ${verification.recoveredSigner}`}
+                  />
+                ) : null}
+                <span>{reference.provider}</span>
+              </span>
+            </Row>
             <Row label="Payload id">
               <span className="tx-inline">
-                <span className="mono truncate">{reference.id}</span>
+                {payloadHref ? (
+                  <a
+                    className="mono truncate"
+                    href={payloadHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="View payload info on the payload provider"
+                  >
+                    {reference.id}
+                  </a>
+                ) : (
+                  <span className="mono truncate">{reference.id}</span>
+                )}
                 <CopyButton value={reference.id} label="payload id" />
               </span>
             </Row>

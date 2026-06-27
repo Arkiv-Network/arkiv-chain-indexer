@@ -4310,6 +4310,16 @@ th:not(.num) .sort-header {
   font-size: 0.82rem;
 }
 
+/* Signer identicon shown next to the payload provider, reusing the address
+   blockies image so the responsible provider is visually identifiable. */
+.op-provider-face {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  vertical-align: middle;
+  flex: none;
+}
+
 .charts-status {
   font-size: 0.82rem;
   color: var(--fg);
