@@ -4,6 +4,7 @@ import { ScannerStorage } from "./storage";
 import { RedisGuzzlerStore } from "./guzzlerStore";
 import { parseBaseloadRuntimeConfig, readBaseloadConfigFile } from "./baseloadConfig";
 import { BaseloadRuntime } from "./baseloadRuntime";
+import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import type { GuzzlerStore } from "./guzzlers";
 
 async function main(): Promise<void> {
@@ -30,6 +31,18 @@ async function main(): Promise<void> {
           `(${initialBaseloadConfig.workers.length} workers)`,
       );
     }
+    const payloadProviderPaymentResolver =
+      config.protocolScheduleUrl ||
+      config.protocolSchedulePath ||
+      config.payloadProviderPaymentShareBps !== undefined
+        ? new PayloadProviderPaymentResolver({
+            ...(config.protocolScheduleUrl ? { scheduleUrl: config.protocolScheduleUrl } : {}),
+            ...(config.protocolSchedulePath ? { schedulePath: config.protocolSchedulePath } : {}),
+            ...(config.payloadProviderPaymentShareBps !== undefined
+              ? { providerShareBps: config.payloadProviderPaymentShareBps }
+              : {}),
+          })
+        : undefined;
     const server = createBlockServer(storage, {
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
@@ -39,6 +52,7 @@ async function main(): Promise<void> {
         ? { baseloadAdminBearerToken: config.baseloadAdminBearerToken }
         : {}),
       ...(guzzlerStore ? { guzzlerStore } : {}),
+      ...(payloadProviderPaymentResolver ? { payloadProviderPaymentResolver } : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);

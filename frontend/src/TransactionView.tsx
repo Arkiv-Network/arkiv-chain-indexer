@@ -3,6 +3,7 @@ import {
   fetchTransactionByHash,
   type ArkivOperation,
   type ArkivReferenceVerification,
+  type PayloadProviderPaymentBreakdown,
   type StoredTransaction,
 } from "./api";
 import { AddressCell } from "./TransactionsView";
@@ -157,6 +158,7 @@ function TransactionDetail({
   const decoderHref = transactionDecoderHref(transaction.hash);
   const isContractCreation = !transaction.to && Boolean(transaction.contractAddress);
   const operations = transaction.operations ?? [];
+  const payloadProviderPayments = transaction.payloadProviderPayments ?? null;
 
   return (
     <div className="tx-cedric-card-wrap">
@@ -237,11 +239,88 @@ function TransactionDetail({
       {operations.length > 0 ? (
         <section className="tx-detail-group tx-detail-operations">
           <h3>Arkiv operations ({operations.length})</h3>
+          {payloadProviderPayments ? (
+            <PayloadProviderPaymentsPanel
+              payments={payloadProviderPayments}
+              tokenSymbol={tokenSymbol}
+            />
+          ) : null}
           {operations.map((operation) => (
             <OperationCard key={operation.opIndex} operation={operation} blockTimeMs={blockTimeMs} />
           ))}
         </section>
       ) : null}
+      </div>
+    </div>
+  );
+}
+
+function PayloadProviderPaymentsPanel({
+  payments,
+  tokenSymbol,
+}: {
+  payments: PayloadProviderPaymentBreakdown;
+  tokenSymbol: string;
+}) {
+  const sourceLabel =
+    payments.source === "protocolSchedule"
+      ? "protocol schedule"
+      : payments.source === "configuredShareBps"
+        ? "configured split"
+        : "split unavailable";
+  const splitLabel =
+    payments.providerShareBps === null ? "—" : `${(payments.providerShareBps / 100).toFixed(2)}%`;
+
+  return (
+    <div className="payload-payment-panel">
+      <div className="payload-payment-head">
+        <div>
+          <h4>Payload provider payments</h4>
+          <p>
+            {payments.entries.length} reference payment
+            {payments.entries.length === 1 ? "" : "s"} - {sourceLabel}
+          </p>
+        </div>
+        <span className={`tx-status-badge ${payments.enabled ? "ok" : "unknown"}`}>
+          {payments.enabled ? "enabled" : "not active"}
+        </span>
+      </div>
+      <dl className="payload-payment-totals">
+        <Row label="Signed payment">{paymentValue(payments.totalPaymentWei, tokenSymbol)}</Row>
+        <Row label="Provider share">{splitLabel}</Row>
+        <Row label="Provider earned">{paymentValue(payments.totalProviderEarnedWei, tokenSymbol)}</Row>
+        <Row label="Burned">{paymentValue(payments.totalBurnedWei, tokenSymbol)}</Row>
+        <Row label="Minimum payment">
+          {payments.minimumPaymentWei === null ? "—" : paymentValue(payments.minimumPaymentWei, tokenSymbol)}
+        </Row>
+      </dl>
+
+      <div className="payload-payment-providers">
+        {payments.providers.map((provider) => (
+          <div
+            className="payload-payment-provider"
+            key={`${provider.provider}:${provider.signer ?? ""}`}
+          >
+            <div>
+              <strong>{provider.provider}</strong>
+              <span>{provider.paymentCount} payment{provider.paymentCount === 1 ? "" : "s"}</span>
+            </div>
+            {provider.signer ? <AddressCell address={provider.signer} /> : <span>—</span>}
+            <div>{paymentValue(provider.providerEarnedWei, tokenSymbol)}</div>
+            <div className="tx-muted">burn {paymentValue(provider.burnedWei, tokenSymbol)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="payload-payment-entries">
+        {payments.entries.map((entry) => (
+          <div className="payload-payment-entry" key={`${entry.opIndex}:${entry.payloadId}`}>
+            <span className="tx-muted">op #{entry.opIndex}</span>
+            <span className="mono truncate">{entry.payloadId}</span>
+            <span>{paymentValue(entry.providerEarnedWei, tokenSymbol)}</span>
+            <span className="tx-muted">burn {paymentValue(entry.burnedWei, tokenSymbol)}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -370,6 +449,10 @@ function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; 
       </dl>
     </div>
   );
+}
+
+function paymentValue(wei: string, tokenSymbol: string): string {
+  return `${fmtInteger(wei)} wei (${fmtEth(wei)} ${tokenSymbol})`;
 }
 
 function isAllZeroBytes32(value: string): boolean {

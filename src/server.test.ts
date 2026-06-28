@@ -26,6 +26,7 @@ import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
 import type { ScannerStorage, StoredTransactionRecord } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
+import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import {
   closeTestPools,
   createIsolatedStorage,
@@ -966,6 +967,77 @@ describe("GET /transaction/:hash", () => {
     expect(requestedHashes).toEqual([hash]);
     expect(body.transaction.hash).toBe(hash);
     expect(body.transaction.operations).toEqual(operations);
+  });
+
+  test("attaches payload provider payment breakdown to reference transactions", async () => {
+    const operations: ArkivOperation[] = [
+      {
+        opIndex: 0,
+        operationType: 1,
+        operation: "create",
+        entityKey: `0x${"11".repeat(32)}`,
+        contentType: "application/vnd.atlas.payload-reference+json",
+        payloadSizeBytes: 64,
+        attributes: [],
+        expiresAtBlocks: 100,
+        newOwner: null,
+        isReference: true,
+        payloadReference: {
+          kind: "atlas.payloadReference",
+          version: 1,
+          provider: "atlas-payload-provider",
+          id: "a".repeat(64),
+          namespace: "atlas.test",
+          checksum: `sha256:${"b".repeat(64)}`,
+          sizeBytes: 64,
+          submittedAt: "2026-06-24T15:24:30Z",
+          nonce: `0x${"00".repeat(31)}01`,
+          payment: 1000,
+          signature: {
+            scheme: "eip191",
+            signer: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+            receipt: {},
+            messageHash: `0x${"cd".repeat(32)}`,
+            signature: `0x${"ef".repeat(65)}`,
+            r: `0x${"11".repeat(32)}`,
+            s: `0x${"22".repeat(32)}`,
+            v: 27,
+          },
+        },
+        referenceVerification: {
+          valid: true,
+          signerTrusted: true,
+          chainId: 42069,
+          claimedSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+          recoveredSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+          messageHash: `0x${"cd".repeat(32)}`,
+          errors: [],
+        },
+        referenceError: null,
+      },
+    ];
+    const storage = {
+      getTransactionByHash: async () => ({ ...storedTransactionFixture(), blockNumberDecimal: "123" }),
+      getOperationsByHash: async () => operations,
+    } as unknown as ScannerStorage;
+    const resolver = new PayloadProviderPaymentResolver({ providerShareBps: 7000 });
+
+    const response = await handleRequest(
+      new Request(`http://example.test/transaction/${hash}`),
+      storage,
+      { payloadProviderPaymentResolver: resolver },
+    );
+    const body = (await response.json()) as TransactionByHashResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.transaction.payloadProviderPayments).toMatchObject({
+      enabled: true,
+      providerShareBps: 7000,
+      totalPaymentWei: "1000",
+      totalProviderEarnedWei: "700",
+      totalBurnedWei: "300",
+      source: "configuredShareBps",
+    });
   });
 
   test("returns an empty operations array when none are stored", async () => {

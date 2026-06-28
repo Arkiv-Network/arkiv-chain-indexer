@@ -284,6 +284,37 @@ export interface ArkivOperationSummaryEntry {
   count: number;
 }
 
+export interface PayloadProviderPaymentEntry {
+  opIndex: number;
+  provider: string;
+  signer: string | null;
+  payloadId: string;
+  paymentWei: string;
+  providerEarnedWei: string;
+  burnedWei: string;
+}
+
+export interface PayloadProviderPaymentProviderTotal {
+  provider: string;
+  signer: string | null;
+  paymentCount: number;
+  paymentWei: string;
+  providerEarnedWei: string;
+  burnedWei: string;
+}
+
+export interface PayloadProviderPaymentBreakdown {
+  enabled: boolean;
+  providerShareBps: number | null;
+  minimumPaymentWei: string | null;
+  totalPaymentWei: string;
+  totalProviderEarnedWei: string;
+  totalBurnedWei: string;
+  entries: PayloadProviderPaymentEntry[];
+  providers: PayloadProviderPaymentProviderTotal[];
+  source: "protocolSchedule" | "configuredShareBps" | "unconfigured";
+}
+
 export interface InspectedTransaction {
   blockNumber?: number;
   blockNumberDecimal?: string;
@@ -313,6 +344,8 @@ export interface InspectedTransaction {
   operations?: ArkivOperation[];
   /** Per-operation-type counts; present on /transactions list rows that have stored operations. */
   operationsSummary?: ArkivOperationSummaryEntry[];
+  /** Payload-reference payment split for transaction detail rows. */
+  payloadProviderPayments?: PayloadProviderPaymentBreakdown;
 }
 
 export interface InspectedBlock {

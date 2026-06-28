@@ -170,6 +170,14 @@ Configuration can be passed through CLI flags or environment variables.
 | `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional atlas-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
+Backend transaction-detail payment display:
+
+| CLI flag | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--protocol-schedule-url` | `ARKIV_PROTOCOL_SCHEDULE_URL` or `SERVER_PROTOCOL_SCHEDULE_URL` | unset | Optional Arkiv protocol schedule URL. `/transaction/<hash>` uses its active `payloadProviderPayment.providerShareBps` entry to split signed payload-reference payments into provider-earned and burned native token. |
+| `--protocol-schedule-path` | `ARKIV_PROTOCOL_SCHEDULE_PATH` or `SERVER_PROTOCOL_SCHEDULE_PATH` | unset | Optional local protocol schedule JSON path. Takes precedence over URL when both are set. |
+| `--payload-provider-payment-share-bps` | `PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS` or `SERVER_PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS` | unset | Optional provider-share basis-point override used only when no schedule URL/path is configured. |
+
 Show help:
 
 ```sh

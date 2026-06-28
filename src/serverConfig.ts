@@ -1,4 +1,11 @@
-import { CliHelpRequested, coerceBoolean, coercePort, parseCli, type CliSpec } from "./cli";
+import {
+  CliHelpRequested,
+  coerceBoolean,
+  coerceInt,
+  coercePort,
+  parseCli,
+  type CliSpec,
+} from "./cli";
 
 export interface ServerConfig {
   databaseUrl: string;
@@ -8,6 +15,9 @@ export interface ServerConfig {
   baseloadAdminBearerToken?: string;
   baseloadInitialConfigPath?: string;
   redisUrl?: string;
+  protocolScheduleUrl?: string;
+  protocolSchedulePath?: string;
+  payloadProviderPaymentShareBps?: number;
 }
 
 const DEFAULT_PORT = 3000;
@@ -61,6 +71,24 @@ const SPEC: CliSpec = {
         "Optional Redis connection string. When set, the /guzzlers endpoint serves recent-sender statistics.",
       env: ["REDIS_URL", "SERVER_REDIS_URL"],
     },
+    {
+      flags: "--protocol-schedule-url <url>",
+      description:
+        "Optional Arkiv protocol schedule URL used to split payload-provider payments.",
+      env: ["ARKIV_PROTOCOL_SCHEDULE_URL", "SERVER_PROTOCOL_SCHEDULE_URL"],
+    },
+    {
+      flags: "--protocol-schedule-path <path>",
+      description:
+        "Optional local Arkiv protocol schedule JSON path used to split payload-provider payments.",
+      env: ["ARKIV_PROTOCOL_SCHEDULE_PATH", "SERVER_PROTOCOL_SCHEDULE_PATH"],
+    },
+    {
+      flags: "--payload-provider-payment-share-bps <bps>",
+      description:
+        "Optional provider-share basis points override used when no protocol schedule is configured.",
+      env: ["PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS", "SERVER_PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS"],
+    },
   ],
 };
 
@@ -85,6 +113,18 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   const baseloadAdminBearerToken = cli.value("baseload-admin-bearer-token");
   const baseloadInitialConfigPath = cli.value("baseload-initial-config");
   const redisUrl = cli.value("redis-url");
+  const protocolScheduleUrl = cli.value("protocol-schedule-url");
+  const protocolSchedulePath = cli.value("protocol-schedule-path");
+  const payloadProviderPaymentShareBpsValue = cli.value("payload-provider-payment-share-bps");
+  const payloadProviderPaymentShareBps = payloadProviderPaymentShareBpsValue
+    ? coerceInt("--payload-provider-payment-share-bps", payloadProviderPaymentShareBpsValue)
+    : undefined;
+  if (
+    payloadProviderPaymentShareBps !== undefined &&
+    (payloadProviderPaymentShareBps < 0 || payloadProviderPaymentShareBps > 10_000)
+  ) {
+    throw new Error("--payload-provider-payment-share-bps must be between 0 and 10000");
+  }
 
   return {
     databaseUrl,
@@ -94,5 +134,8 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     ...(baseloadAdminBearerToken ? { baseloadAdminBearerToken } : {}),
     ...(baseloadInitialConfigPath ? { baseloadInitialConfigPath } : {}),
     ...(redisUrl ? { redisUrl } : {}),
+    ...(protocolScheduleUrl ? { protocolScheduleUrl } : {}),
+    ...(protocolSchedulePath ? { protocolSchedulePath } : {}),
+    ...(payloadProviderPaymentShareBps !== undefined ? { payloadProviderPaymentShareBps } : {}),
   };
 }

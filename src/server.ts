@@ -21,6 +21,11 @@ import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import {
+  buildPayloadProviderPaymentBreakdown,
+  PayloadProviderPaymentResolver,
+  type PayloadProviderPaymentBreakdown,
+} from "./payloadProviderPayments";
+import {
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
   MAX_SENDERS_PER_QUERY,
@@ -50,6 +55,7 @@ export interface BlockServerOptions {
   baseloadRuntime?: BaseloadRuntime;
   baseloadAdminBearerToken?: string;
   guzzlerStore?: GuzzlerStore;
+  payloadProviderPaymentResolver?: PayloadProviderPaymentResolver;
 }
 
 export interface BlocksResponseBody {
@@ -105,7 +111,9 @@ export interface TransactionsResponseBody {
 }
 
 export interface TransactionByHashResponseBody {
-  transaction: StoredTransaction;
+  transaction: StoredTransaction & {
+    payloadProviderPayments?: PayloadProviderPaymentBreakdown;
+  };
 }
 
 export interface TransactionRecordsResponseBody {
@@ -321,6 +329,9 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
           ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
           : {}),
         ...(options.guzzlerStore ? { guzzlerStore: options.guzzlerStore } : {}),
+        ...(options.payloadProviderPaymentResolver
+          ? { payloadProviderPaymentResolver: options.payloadProviderPaymentResolver }
+          : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -413,7 +424,11 @@ export async function handleRequest(
     if (!transactionDataEnabled) {
       return jsonError(404, "Transaction data is disabled");
     }
-    return handleGetTransactionByHash(transactionByHashMatch[1], storage);
+    return handleGetTransactionByHash(
+      transactionByHashMatch[1],
+      storage,
+      options.payloadProviderPaymentResolver,
+    );
   }
 
   if (url.pathname === "/transaction-records") {
@@ -828,14 +843,33 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
   return jsonResponse(body);
 }
 
-async function handleGetTransactionByHash(hash: string, storage: ScannerStorage): Promise<Response> {
+async function handleGetTransactionByHash(
+  hash: string,
+  storage: ScannerStorage,
+  payloadProviderPaymentResolver?: PayloadProviderPaymentResolver,
+): Promise<Response> {
   const transaction = await storage.getTransactionByHash(hash);
   if (!transaction) {
     return jsonError(404, `Transaction ${hash} was not found in storage`);
   }
   const operations = await storage.getOperationsByHash(hash);
+  let payloadProviderPayments: PayloadProviderPaymentBreakdown | null = null;
+  if (payloadProviderPaymentResolver) {
+    const resolved = await payloadProviderPaymentResolver.resolve(transaction.blockNumberDecimal);
+    payloadProviderPayments = buildPayloadProviderPaymentBreakdown(
+      operations,
+      resolved.params,
+      resolved.source,
+    );
+  } else {
+    payloadProviderPayments = buildPayloadProviderPaymentBreakdown(operations, null, "unconfigured");
+  }
   return jsonResponse({
-    transaction: { ...transaction, operations },
+    transaction: {
+      ...transaction,
+      operations,
+      ...(payloadProviderPayments ? { payloadProviderPayments } : {}),
+    },
   } satisfies TransactionByHashResponseBody);
 }
 
