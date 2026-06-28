@@ -5,6 +5,8 @@ export interface ServerConfig {
   port: number;
   hostname?: string;
   transactionDataEnabled: boolean;
+  baseloadAdminBearerToken?: string;
+  baseloadInitialConfigPath?: string;
   redisUrl?: string;
 }
 
@@ -42,6 +44,18 @@ const SPEC: CliSpec = {
       default: "true",
     },
     {
+      flags: "--baseload-admin-bearer-token <token>",
+      description:
+        "Bearer token required for mutating Baseload worker requests. Defaults to BASELOAD_ADMIN_BEARER_TOKEN. If unset, Baseload mutations are unrestricted.",
+      env: ["BASELOAD_ADMIN_BEARER_TOKEN"],
+    },
+    {
+      flags: "--baseload-initial-config <path>",
+      description:
+        "Optional Baseload worker config JSON file to load once at backend startup. Defaults to BASELOAD_INITIAL_CONFIG_PATH.",
+      env: ["BASELOAD_INITIAL_CONFIG_PATH"],
+    },
+    {
       flags: "--redis-url <url>",
       description:
         "Optional Redis connection string. When set, the /guzzlers endpoint serves recent-sender statistics.",
@@ -68,6 +82,8 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     "--transaction-data-enabled",
     cli.value("transaction-data-enabled")!,
   );
+  const baseloadAdminBearerToken = cli.value("baseload-admin-bearer-token");
+  const baseloadInitialConfigPath = cli.value("baseload-initial-config");
   const redisUrl = cli.value("redis-url");
 
   return {
@@ -75,6 +91,8 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     port,
     ...(hostname ? { hostname } : {}),
     transactionDataEnabled,
+    ...(baseloadAdminBearerToken ? { baseloadAdminBearerToken } : {}),
+    ...(baseloadInitialConfigPath ? { baseloadInitialConfigPath } : {}),
     ...(redisUrl ? { redisUrl } : {}),
   };
 }

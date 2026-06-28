@@ -208,43 +208,17 @@ services:
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
-      PORTAL_BASE_URL: ${PORTAL_BASE_URL:-https://scanner.arkiv-global.net}
-    ports:
-      - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
-    extra_hosts: *extra-hosts
-    command: ["bun", "run", "serve"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-
-  baseload-provider:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    restart: unless-stopped
-    environment:
-      SERVER_PORT: 3000
-      SERVER_HOSTNAME: 0.0.0.0
       BASELOAD_RPC_NODE: ${BASELOAD_RPC_NODE:-}
       BASELOAD_MNEMONIC: ${BASELOAD_MNEMONIC:-}
       BASELOAD_ADMIN_BEARER_TOKEN: ${BASELOAD_ADMIN_BEARER_TOKEN:-}
       BASELOAD_INITIAL_CONFIG_PATH: ${BASELOAD_INITIAL_CONFIG_PATH:-}
-      BASELOAD_PAYLOAD_PROVIDER_URL: ${BASELOAD_PAYLOAD_PROVIDER_URL:-}
-      BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY: ${BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY:-}
-      BASELOAD_PAYLOAD_PROVIDER_NAMESPACE: ${BASELOAD_PAYLOAD_PROVIDER_NAMESPACE:-arkiv.entities}
-      BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT: ${BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT:-true}
-      BASELOAD_SQLITE_PATH: /app/baseload-config/baseload-provider.sqlite
+      PORTAL_BASE_URL: ${PORTAL_BASE_URL:-https://scanner.arkiv-global.net}
     ports:
-      - "${BASELOAD_PROVIDER_HOST:-127.0.0.1}:${BASELOAD_PROVIDER_PORT:-3001}:3000"
+      - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
     volumes:
-      - ${BASELOAD_PROVIDER_DATA_DIR:-./baseload-config}:/app/baseload-config
+      - ${BASELOAD_CONFIG_DIR:-./baseload-config}:/app/baseload-config:ro
     extra_hosts: *extra-hosts
-    command: ["bun", "run", "serve-baseload"]
+    command: ["bun", "run", "serve"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
       interval: 10s

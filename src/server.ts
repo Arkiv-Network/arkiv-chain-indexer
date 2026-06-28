@@ -18,7 +18,7 @@ import {
   type GuzzlerWindowLeaderboard,
 } from "./guzzlers";
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
-import { normalizeBaseloadConfig, type BaseloadConfig } from "./baseloadConfig";
+import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import {
   MAX_BLOCKS_PER_QUERY,
@@ -43,19 +43,11 @@ import {
   type TransactionRecordsQueryFilter,
 } from "./storage";
 
-export interface BaseloadConfigStorage {
-  listBaseloadConfigs(): Promise<StoredBaseloadConfigSummary[]>;
-  getBaseloadConfig(name: string): Promise<StoredBaseloadConfig | undefined>;
-  saveBaseloadConfig(name: string, config: BaseloadConfig): Promise<StoredBaseloadConfig>;
-  deleteBaseloadConfig(name: string): Promise<boolean>;
-}
-
 export interface BlockServerOptions {
   port?: number;
   hostname?: string;
   transactionDataEnabled?: boolean;
   baseloadRuntime?: BaseloadRuntime;
-  baseloadConfigStorage?: BaseloadConfigStorage;
   baseloadAdminBearerToken?: string;
   guzzlerStore?: GuzzlerStore;
 }
@@ -317,7 +309,7 @@ const CORS_HEADERS: Record<string, string> = {
 };
 const LLMS_TXT_FILE = new URL("../llms.txt", import.meta.url);
 
-export function createBlockServer(storage: ScannerStorage | null, options: BlockServerOptions = {}) {
+export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
   const serveOptions: { port: number; fetch: (request: Request) => Promise<Response>; hostname?: string } = {
     port: options.port ?? 0,
@@ -325,7 +317,6 @@ export function createBlockServer(storage: ScannerStorage | null, options: Block
       handleRequest(request, storage, {
         transactionDataEnabled,
         ...(options.baseloadRuntime ? { baseloadRuntime: options.baseloadRuntime } : {}),
-        ...(options.baseloadConfigStorage ? { baseloadConfigStorage: options.baseloadConfigStorage } : {}),
         ...(options.baseloadAdminBearerToken !== undefined
           ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
           : {}),
@@ -340,7 +331,7 @@ export function createBlockServer(storage: ScannerStorage | null, options: Block
 
 export async function handleRequest(
   request: Request,
-  storage: ScannerStorage | null,
+  storage: ScannerStorage,
   options: BlockServerOptions = {},
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -359,14 +350,10 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/baseload/configs" || url.pathname.startsWith("/baseload/configs/")) {
-    const baseloadConfigStorage = options.baseloadConfigStorage ?? storage;
-    if (!baseloadConfigStorage) {
-      return jsonError(503, "Baseload config storage is unavailable");
-    }
     return handleBaseloadConfigsRequest(
       request,
       url,
-      baseloadConfigStorage,
+      storage,
       options.baseloadRuntime,
       options.baseloadAdminBearerToken,
     );
@@ -381,14 +368,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/health") {
-    if (!storage) {
-      return handleGetProviderHealth(transactionDataEnabled, options.baseloadRuntime);
-    }
     return handleGetHealth(storage, transactionDataEnabled, options.guzzlerStore);
-  }
-
-  if (!storage) {
-    return jsonError(404, `Not found: ${url.pathname}`);
   }
 
   if (url.pathname === "/guzzlers") {
@@ -487,7 +467,7 @@ async function handleBaseloadRequest(
 async function handleBaseloadConfigsRequest(
   request: Request,
   url: URL,
-  storage: BaseloadConfigStorage,
+  storage: ScannerStorage,
   baseloadRuntime: BaseloadRuntime | undefined,
   adminBearerToken: string | undefined,
 ): Promise<Response> {
@@ -655,22 +635,6 @@ async function handleGetHealth(
   };
 
   return jsonResponse(body);
-}
-
-async function handleGetProviderHealth(
-  transactionDataEnabled: boolean,
-  baseloadRuntime: BaseloadRuntime | undefined,
-): Promise<Response> {
-  return jsonResponse({
-    ok: true,
-    serverTimeUtc: new Date().toISOString(),
-    build: readBuildInfo(),
-    features: {
-      transactionData: transactionDataEnabled,
-      guzzlers: false,
-      baseload: baseloadRuntime !== undefined,
-    },
-  });
 }
 
 async function handleGetLlmsTxt(): Promise<Response> {
