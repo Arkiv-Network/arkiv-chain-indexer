@@ -14,6 +14,7 @@ export interface PayloadProviderPaymentEntry {
   provider: string;
   signer: string | null;
   payloadId: string;
+  paymentGasUnits: string;
   paymentWei: string;
   providerEarnedWei: string;
   burnedWei: string;
@@ -23,6 +24,7 @@ export interface PayloadProviderPaymentProviderTotal {
   provider: string;
   signer: string | null;
   paymentCount: number;
+  paymentGasUnits: string;
   paymentWei: string;
   providerEarnedWei: string;
   burnedWei: string;
@@ -31,7 +33,9 @@ export interface PayloadProviderPaymentProviderTotal {
 export interface PayloadProviderPaymentBreakdown {
   enabled: boolean;
   providerShareBps: number | null;
+  minimumPaymentGasUnits: string | null;
   minimumPaymentWei: string | null;
+  totalPaymentGasUnits: string;
   totalPaymentWei: string;
   totalProviderEarnedWei: string;
   totalBurnedWei: string;
@@ -128,6 +132,7 @@ export function buildPayloadProviderPaymentBreakdown(
   operations: readonly ArkivOperation[],
   params: PayloadProviderPaymentParams | null,
   source: PayloadProviderPaymentBreakdown["source"],
+  baseFeeWei: string | number | bigint,
 ): PayloadProviderPaymentBreakdown | null {
   const referenceOperations = operations.filter(
     (operation) => operation.payloadReference && operation.referenceVerification?.valid,
@@ -135,9 +140,11 @@ export function buildPayloadProviderPaymentBreakdown(
   if (referenceOperations.length === 0) return null;
 
   const providerShareBps = params?.enabled ? params.providerShareBps : null;
+  const baseFee = BigInt(baseFeeWei);
   const entries = referenceOperations.map((operation) => {
     const reference = operation.payloadReference!;
-    const payment = BigInt(reference.payment);
+    const paymentGasUnits = BigInt(reference.payment);
+    const payment = paymentGasUnits * baseFee;
     const providerEarned =
       providerShareBps === null
         ? 0n
@@ -152,6 +159,7 @@ export function buildPayloadProviderPaymentBreakdown(
         reference.signature.signer ??
         null,
       payloadId: reference.id,
+      paymentGasUnits: paymentGasUnits.toString(),
       paymentWei: payment.toString(),
       providerEarnedWei: providerEarned.toString(),
       burnedWei: burned.toString(),
@@ -159,10 +167,12 @@ export function buildPayloadProviderPaymentBreakdown(
   });
 
   const providersByKey = new Map<string, PayloadProviderPaymentProviderTotal>();
+  let totalPaymentGasUnits = 0n;
   let totalPayment = 0n;
   let totalProviderEarned = 0n;
   let totalBurned = 0n;
   for (const entry of entries) {
+    totalPaymentGasUnits += BigInt(entry.paymentGasUnits);
     totalPayment += BigInt(entry.paymentWei);
     totalProviderEarned += BigInt(entry.providerEarnedWei);
     totalBurned += BigInt(entry.burnedWei);
@@ -173,11 +183,15 @@ export function buildPayloadProviderPaymentBreakdown(
         provider: entry.provider,
         signer: entry.signer,
         paymentCount: 0,
+        paymentGasUnits: "0",
         paymentWei: "0",
         providerEarnedWei: "0",
         burnedWei: "0",
       };
     existing.paymentCount += 1;
+    existing.paymentGasUnits = (
+      BigInt(existing.paymentGasUnits) + BigInt(entry.paymentGasUnits)
+    ).toString();
     existing.paymentWei = (BigInt(existing.paymentWei) + BigInt(entry.paymentWei)).toString();
     existing.providerEarnedWei = (
       BigInt(existing.providerEarnedWei) + BigInt(entry.providerEarnedWei)
@@ -189,7 +203,10 @@ export function buildPayloadProviderPaymentBreakdown(
   return {
     enabled: params?.enabled === true,
     providerShareBps,
-    minimumPaymentWei: params?.minimumPayment ?? null,
+    minimumPaymentGasUnits: params?.minimumPayment ?? null,
+    minimumPaymentWei:
+      params?.minimumPayment !== undefined ? (BigInt(params.minimumPayment) * baseFee).toString() : null,
+    totalPaymentGasUnits: totalPaymentGasUnits.toString(),
     totalPaymentWei: totalPayment.toString(),
     totalProviderEarnedWei: totalProviderEarned.toString(),
     totalBurnedWei: totalBurned.toString(),

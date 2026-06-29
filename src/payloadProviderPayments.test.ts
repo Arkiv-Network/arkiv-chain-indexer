@@ -38,15 +38,18 @@ describe("payload provider payments", () => {
       ],
       { enabled: true, providerShareBps: 7000, minimumPayment: "100" },
       "protocolSchedule",
+      "10",
     );
 
     expect(breakdown).toMatchObject({
       enabled: true,
       providerShareBps: 7000,
-      totalPaymentWei: "1900",
-      totalProviderEarnedWei: "1330",
-      totalBurnedWei: "570",
-      minimumPaymentWei: "100",
+      totalPaymentGasUnits: "1900",
+      totalPaymentWei: "19000",
+      totalProviderEarnedWei: "13300",
+      totalBurnedWei: "5700",
+      minimumPaymentGasUnits: "100",
+      minimumPaymentWei: "1000",
       source: "protocolSchedule",
     });
     expect(breakdown?.providers).toEqual([
@@ -54,17 +57,19 @@ describe("payload provider payments", () => {
         provider: "provider-a",
         signer: "0x1111111111111111111111111111111111111111",
         paymentCount: 2,
-        paymentWei: "1500",
-        providerEarnedWei: "1050",
-        burnedWei: "450",
+        paymentGasUnits: "1500",
+        paymentWei: "15000",
+        providerEarnedWei: "10500",
+        burnedWei: "4500",
       },
       {
         provider: "provider-b",
         signer: "0x2222222222222222222222222222222222222222",
         paymentCount: 1,
-        paymentWei: "400",
-        providerEarnedWei: "280",
-        burnedWei: "120",
+        paymentGasUnits: "400",
+        paymentWei: "4000",
+        providerEarnedWei: "2800",
+        burnedWei: "1200",
       },
     ]);
   });

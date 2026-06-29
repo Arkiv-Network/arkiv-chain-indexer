@@ -48,6 +48,7 @@ export interface ArkivPayloadReference {
   sizeBytes: number;
   submittedAt: string;
   nonce: string;
+  /** Signed provider payment gas units. Converted to wei with the block base fee. */
   payment: number;
   signature: {
     scheme: string;

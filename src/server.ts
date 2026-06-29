@@ -860,9 +860,15 @@ async function handleGetTransactionByHash(
       operations,
       resolved.params,
       resolved.source,
+      transaction.baseBlockFeeWei,
     );
   } else {
-    payloadProviderPayments = buildPayloadProviderPaymentBreakdown(operations, null, "unconfigured");
+    payloadProviderPayments = buildPayloadProviderPaymentBreakdown(
+      operations,
+      null,
+      "unconfigured",
+      transaction.baseBlockFeeWei,
+    );
   }
   return jsonResponse({
     transaction: {

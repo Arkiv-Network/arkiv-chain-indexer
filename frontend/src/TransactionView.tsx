@@ -286,12 +286,19 @@ function PayloadProviderPaymentsPanel({
         </span>
       </div>
       <dl className="payload-payment-totals">
-        <Row label="Signed payment">{paymentValue(payments.totalPaymentWei, tokenSymbol)}</Row>
+        <Row label="Signed payment">
+          {paymentValue(payments.totalPaymentWei, tokenSymbol)}
+          {payments.totalPaymentGasUnits ? ` (${fmtInteger(payments.totalPaymentGasUnits)} gas units)` : ""}
+        </Row>
         <Row label="Provider share">{splitLabel}</Row>
         <Row label="Provider earned">{paymentValue(payments.totalProviderEarnedWei, tokenSymbol)}</Row>
         <Row label="Burned">{paymentValue(payments.totalBurnedWei, tokenSymbol)}</Row>
         <Row label="Minimum payment">
-          {payments.minimumPaymentWei === null ? "—" : paymentValue(payments.minimumPaymentWei, tokenSymbol)}
+          {payments.minimumPaymentWei === null
+            ? "—"
+            : `${paymentValue(payments.minimumPaymentWei, tokenSymbol)}${
+                payments.minimumPaymentGasUnits ? ` (${fmtInteger(payments.minimumPaymentGasUnits)} gas units)` : ""
+              }`}
         </Row>
       </dl>
 

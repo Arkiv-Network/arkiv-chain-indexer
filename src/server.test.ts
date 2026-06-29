@@ -1033,9 +1033,10 @@ describe("GET /transaction/:hash", () => {
     expect(body.transaction.payloadProviderPayments).toMatchObject({
       enabled: true,
       providerShareBps: 7000,
-      totalPaymentWei: "1000",
-      totalProviderEarnedWei: "700",
-      totalBurnedWei: "300",
+      totalPaymentGasUnits: "1000",
+      totalPaymentWei: "100000",
+      totalProviderEarnedWei: "70000",
+      totalBurnedWei: "30000",
       source: "configuredShareBps",
     });
   });

@@ -248,6 +248,7 @@ export interface ArkivPayloadReference {
   sizeBytes: number;
   submittedAt: string;
   nonce: string;
+  /** Signed provider payment gas units. Converted to wei with the block base fee. */
   payment: number;
   signature: {
     scheme: string;
@@ -289,6 +290,7 @@ export interface PayloadProviderPaymentEntry {
   provider: string;
   signer: string | null;
   payloadId: string;
+  paymentGasUnits?: string;
   paymentWei: string;
   providerEarnedWei: string;
   burnedWei: string;
@@ -298,6 +300,7 @@ export interface PayloadProviderPaymentProviderTotal {
   provider: string;
   signer: string | null;
   paymentCount: number;
+  paymentGasUnits?: string;
   paymentWei: string;
   providerEarnedWei: string;
   burnedWei: string;
@@ -306,7 +309,9 @@ export interface PayloadProviderPaymentProviderTotal {
 export interface PayloadProviderPaymentBreakdown {
   enabled: boolean;
   providerShareBps: number | null;
+  minimumPaymentGasUnits?: string | null;
   minimumPaymentWei: string | null;
+  totalPaymentGasUnits?: string;
   totalPaymentWei: string;
   totalProviderEarnedWei: string;
   totalBurnedWei: string;

@@ -174,7 +174,7 @@ Backend transaction-detail payment display:
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
-| `--protocol-schedule-url` | `ARKIV_PROTOCOL_SCHEDULE_URL` or `SERVER_PROTOCOL_SCHEDULE_URL` | unset | Optional Arkiv protocol schedule URL. `/transaction/<hash>` uses its active `payloadProviderPayment.providerShareBps` entry to split signed payload-reference payments into provider-earned and burned native token. |
+| `--protocol-schedule-url` | `ARKIV_PROTOCOL_SCHEDULE_URL` or `SERVER_PROTOCOL_SCHEDULE_URL` | unset | Optional Arkiv protocol schedule URL. `/transaction/<hash>` uses its active `payloadProviderPayment.providerShareBps` entry to split signed payload-reference payment gas units, converted with the transaction block's base fee, into provider-earned and burned native token. |
 | `--protocol-schedule-path` | `ARKIV_PROTOCOL_SCHEDULE_PATH` or `SERVER_PROTOCOL_SCHEDULE_PATH` | unset | Optional local protocol schedule JSON path. Takes precedence over URL when both are set. |
 | `--payload-provider-payment-share-bps` | `PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS` or `SERVER_PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS` | unset | Optional provider-share basis-point override used only when no schedule URL/path is configured. |
 
