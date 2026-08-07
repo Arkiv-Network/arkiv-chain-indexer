@@ -1,5 +1,5 @@
-import { createWalletClient, http, type WalletArkivClient } from "@atlas-chain/sdk";
-import { defineChain } from "viem";
+import { createWalletClient, type WalletArkivClient } from "@arkiv-network/sdk";
+import { defineChain, http } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 import {
   BASELOAD_DERIVATION_PATH_PREFIX,
@@ -106,10 +106,7 @@ type BaseloadMutationResult = {
 };
 
 type BaseloadMutationClient = WalletArkivClient & {
-  mutateEntities?: (
-    data: BaseloadMutationParameters,
-    txParams?: BaseloadTxParams,
-  ) => Promise<unknown>;
+  mutateEntities?: (data: unknown, txParams?: BaseloadTxParams) => Promise<unknown>;
 };
 
 const BALANCE_POLL_INTERVAL_MS = 10_000;
@@ -711,7 +708,6 @@ function createArkivClient(
     chain,
     transport: http(runtimeConfig.rpcUrl),
     account,
-    ...(runtimeConfig.payloadProvider ? { payloadProvider: runtimeConfig.payloadProvider } : {}),
   });
 }
 
@@ -841,9 +837,53 @@ async function mutateBaseloadEntities(
 ): Promise<BaseloadMutationResult> {
   const mutateEntities = (client as BaseloadMutationClient).mutateEntities;
   if (typeof mutateEntities !== "function") {
-    throw new Error("@atlas-chain/sdk WalletArkivClient does not expose mutateEntities");
+    throw new Error("@arkiv-network/sdk WalletArkivClient does not expose mutateEntities");
   }
-  return normalizeBaseloadMutationResult(await mutateEntities.call(client, parameters, txParams));
+  return normalizeBaseloadMutationResult(
+    await mutateEntities.call(client, toSdkMutationParameters(parameters), txParams),
+  );
+}
+
+// The SDK requires expiresIn to be a positive multiple of the 2s block time;
+// round odd TTLs (e.g. a time bomb's remaining seconds) up to the next block.
+function toBlockAlignedExpiresIn(expiresIn: number): number {
+  return Math.max(2, Math.ceil(expiresIn / 2) * 2);
+}
+
+function toSdkMutationParameters(parameters: BaseloadMutationParameters): unknown {
+  const updates = parameters.updates ?? [];
+  // The engine ignores expiry on UPDATE, but the pool bookkeeping treats an
+  // update as a TTL refresh — so each update also extends in the same batch.
+  const extensions = [
+    ...updates.map((input) => ({
+      entityKey: input.entityKey,
+      expiresIn: toBlockAlignedExpiresIn(input.expiresIn),
+    })),
+    ...(parameters.extensions ?? []).map((extension) => ({
+      ...extension,
+      expiresIn: toBlockAlignedExpiresIn(extension.expiresIn),
+    })),
+  ];
+  return {
+    ...parameters,
+    ...(parameters.creates
+      ? {
+          creates: parameters.creates.map((input) => ({
+            ...input,
+            expiresIn: toBlockAlignedExpiresIn(input.expiresIn),
+          })),
+        }
+      : {}),
+    ...(updates.length
+      ? {
+          updates: updates.map((input) => ({
+            ...input,
+            expiresIn: toBlockAlignedExpiresIn(input.expiresIn),
+          })),
+        }
+      : {}),
+    ...(extensions.length || parameters.extensions ? { extensions } : {}),
+  };
 }
 
 function normalizeBaseloadMutationResult(result: unknown): BaseloadMutationResult {

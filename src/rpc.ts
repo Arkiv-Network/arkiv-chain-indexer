@@ -34,7 +34,10 @@ export class EthereumRpcClient {
     responseBytes: 0,
   };
 
-  constructor(readonly rpcUrl: string) {}
+  constructor(
+    readonly rpcUrl: string,
+    private readonly apiKey: string | undefined = process.env.SCANNER_RPC_API_KEY,
+  ) {}
 
   getStatsSnapshot(): RpcStats {
     return { ...this.stats };
@@ -97,6 +100,7 @@ export class EthereumRpcClient {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
       },
       body,
     });
