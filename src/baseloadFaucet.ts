@@ -4,9 +4,17 @@ import { parseEther } from "viem";
 export interface BaseloadFaucetRuntimeConfig {
   url: string;
   password: string;
-  /** Drip once a wallet drops below this balance. */
+  /**
+   * Drip once a wallet drops below this balance. Drips repeat until the wallet is
+   * back above the floor, so this is what sets the resting balance: a wallet comes
+   * to rest in [minBalance, minBalance + dripAmount).
+   */
   minBalanceWei: bigint;
-  /** Never drip when the resulting balance would reach this ceiling. */
+  /**
+   * Never drip when the resulting balance would reach this ceiling. It is a safety
+   * net rather than the resting point — the floor is reached first — so it must be
+   * at least minBalance + dripAmount (see parseBaseloadFaucetRuntimeConfig).
+   */
   maxBalanceWei: bigint;
   /** Expected size of a single drip, used to project the post-drip balance. */
   dripAmountWei: bigint;
@@ -45,8 +53,14 @@ export function parseBaseloadFaucetRuntimeConfig(
     "BASELOAD_FAUCET_DRIP_AMOUNT",
   );
 
-  if (maxBalanceWei <= minBalanceWei) {
-    throw new Error("BASELOAD_FAUCET_MAX_BALANCE must be greater than BASELOAD_FAUCET_MIN_BALANCE");
+  // A ceiling below floor + drip leaves a band where a wallet is under the floor
+  // yet every drip is refused for overshooting: it would stall there until it
+  // burned back down. Reject that instead of starving wallets at runtime.
+  if (maxBalanceWei < minBalanceWei + dripAmountWei) {
+    throw new Error(
+      "BASELOAD_FAUCET_MAX_BALANCE must be at least BASELOAD_FAUCET_MIN_BALANCE plus " +
+        "BASELOAD_FAUCET_DRIP_AMOUNT, otherwise wallets below the floor are refused a drip",
+    );
   }
 
   const cooldownSeconds = parseNumberEnv(
@@ -94,6 +108,10 @@ export type FaucetDripDecision =
 /**
  * Decides whether a wallet should be dripped. The ceiling is checked against the
  * *projected* post-drip balance so a top-up can never push a wallet to maxBalanceWei.
+ *
+ * Drips repeat while the wallet is under the floor, so it is minBalanceWei — not
+ * the ceiling — that determines where a wallet comes to rest: an empty wallet is
+ * dripped until it first clears the floor, landing in [min, min + dripAmount).
  */
 export function decideDrip(
   balanceWei: bigint,

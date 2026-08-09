@@ -33,6 +33,21 @@ describe("decideDrip", () => {
     });
   });
 
+  test("comes to rest just under the floor plus one drip", () => {
+    // An empty wallet is dripped until it first clears the floor; with a 100 floor
+    // and 100 drips that is 0 -> 100 and no further. The floor, not the ceiling,
+    // is what caps a wallet: raising the floor raises the resting balance.
+    let balance = 0n;
+    let drips = 0;
+    while (decideDrip(balance, LIMITS, null, 0).drip) {
+      balance += LIMITS.dripAmountWei;
+      drips += 1;
+      expect(balance).toBeLessThan(LIMITS.maxBalanceWei);
+    }
+    expect(drips).toBe(1);
+    expect(balance).toBe(parseEther("100"));
+  });
+
   test("holds off during the cooldown", () => {
     expect(decideDrip(0n, LIMITS, 5_000, 60_000)).toEqual({ drip: false, reason: "cooldown" });
     expect(decideDrip(0n, LIMITS, 61_000, 60_000)).toEqual({ drip: true });
@@ -64,15 +79,30 @@ describe("parseBaseloadFaucetRuntimeConfig", () => {
     });
   });
 
-  test("rejects a ceiling at or below the floor", () => {
-    expect(() =>
+  test("rejects a ceiling that would refuse drips to a wallet under the floor", () => {
+    // At or below the floor, and in the band where floor + drip overshoots the
+    // ceiling: both leave low wallets permanently un-drippable.
+    for (const max of ["100", "150"]) {
+      expect(() =>
+        parseBaseloadFaucetRuntimeConfig({
+          BASELOAD_FAUCET_URL: "https://f",
+          BASELOAD_FAUCET_PASSWORD: "p",
+          BASELOAD_FAUCET_MIN_BALANCE: "100",
+          BASELOAD_FAUCET_MAX_BALANCE: max,
+        }),
+      ).toThrow(/must be at least/);
+    }
+  });
+
+  test("accepts a ceiling exactly one drip above the floor", () => {
+    expect(
       parseBaseloadFaucetRuntimeConfig({
         BASELOAD_FAUCET_URL: "https://f",
         BASELOAD_FAUCET_PASSWORD: "p",
-        BASELOAD_FAUCET_MIN_BALANCE: "100",
-        BASELOAD_FAUCET_MAX_BALANCE: "100",
+        BASELOAD_FAUCET_MIN_BALANCE: "250",
+        BASELOAD_FAUCET_MAX_BALANCE: "350",
       }),
-    ).toThrow(/must be greater than/);
+    ).toMatchObject({ minBalanceWei: parseEther("250"), maxBalanceWei: parseEther("350") });
   });
 });
 

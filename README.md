@@ -222,8 +222,8 @@ Backend configuration:
 | `BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT` | `true` | Whether the SDK verifies signed payload provider receipts before sending a transaction. |
 | `BASELOAD_FAUCET_URL` | unset | Internal faucet base URL. Setting it enables automatic wallet top-ups; the password then becomes mandatory. |
 | `BASELOAD_FAUCET_PASSWORD` | unset | Password for the faucet's `POST /login` form. Required when `BASELOAD_FAUCET_URL` is set. |
-| `BASELOAD_FAUCET_MIN_BALANCE` | `100` | Ether. A wallet is dripped once its balance falls below this floor. |
-| `BASELOAD_FAUCET_MAX_BALANCE` | `200` | Ether. A drip is skipped when it would leave the wallet at or above this ceiling. |
+| `BASELOAD_FAUCET_MIN_BALANCE` | `100` | Ether. A wallet is dripped once its balance falls below this floor. Drips repeat until the wallet is back over it, so the floor sets the resting balance: wallets settle in `[MIN, MIN + DRIP)`. |
+| `BASELOAD_FAUCET_MAX_BALANCE` | `200` | Ether. A drip is skipped when it would leave the wallet at or above this ceiling. It is a safety net, not the resting point, and must be at least `MIN + DRIP` — a lower ceiling would refuse drips to wallets that are already below the floor. |
 | `BASELOAD_FAUCET_DRIP_AMOUNT` | `100` | Ether. Expected size of one drip, used to project the post-drip balance against the ceiling. |
 | `BASELOAD_FAUCET_COOLDOWN_SECONDS` | `60` | Minimum gap between two drips for the same wallet. |
 | `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token required for mutating Baseload worker configuration requests. Readonly requests stay public. |
