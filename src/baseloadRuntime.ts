@@ -1,6 +1,7 @@
 import { createWalletClient, type WalletArkivClient } from "@arkiv-network/sdk";
-import { defineChain, http } from "viem";
+import { defineChain, formatEther, http } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
+import { BaseloadFaucetClient } from "./baseloadFaucet";
 import {
   BASELOAD_DERIVATION_PATH_PREFIX,
   EMPTY_BASELOAD_CONFIG,
@@ -119,8 +120,10 @@ export class BaseloadRuntime {
   private balancePollTimer: ReturnType<typeof setTimeout> | null = null;
   private balancePollInFlight = false;
   private stopped = false;
+  private readonly faucet: BaseloadFaucetClient | null;
 
   constructor(private readonly runtimeConfig: BaseloadRuntimeConfig) {
+    this.faucet = runtimeConfig.faucet ? new BaseloadFaucetClient(runtimeConfig.faucet) : null;
     if (runtimeConfig.rpcUrl) {
       this.scheduleBalancePoll(0);
     }
@@ -191,13 +194,15 @@ export class BaseloadRuntime {
       await Promise.all(
         workers.map(async (worker) => {
           const updatedAt = new Date().toISOString();
+          let balanceWei: bigint | null = null;
           try {
             const result = await callRpc(rpcUrl, "eth_getBalance", [worker.walletAddress, "latest"]);
             if (typeof result !== "string") {
               throw new Error("eth_getBalance returned a non-string result");
             }
+            balanceWei = BigInt(result);
             this.balances.set(worker.id, {
-              balanceWei: BigInt(result).toString(),
+              balanceWei: balanceWei.toString(),
               updatedAt,
             });
           } catch (error) {
@@ -212,11 +217,32 @@ export class BaseloadRuntime {
               error: verbose,
             });
           }
+          if (balanceWei !== null) await this.topUpFromFaucet(worker, balanceWei);
         }),
       );
     } finally {
       this.balancePollInFlight = false;
       this.scheduleBalancePoll(BALANCE_POLL_INTERVAL_MS);
+    }
+  }
+
+  /**
+   * Keeps a worker wallet funded from the internal faucet. Never throws: a faucet
+   * outage must not stop balance polling or the workers themselves.
+   */
+  private async topUpFromFaucet(worker: BaseloadWorkerConfig, balanceWei: bigint) {
+    if (!this.faucet) return;
+    try {
+      const result = await this.faucet.maybeTopUp(worker.walletAddress, balanceWei);
+      if (result.requested) {
+        console.log(
+          `[baseload] faucet dripped wallet ${worker.walletNumber} (${worker.walletAddress}) at ${formatEther(balanceWei)} ETH`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `[baseload] faucet top-up failed for wallet ${worker.walletNumber} (${worker.walletAddress}): ${describeError(error)}`,
+      );
     }
   }
 

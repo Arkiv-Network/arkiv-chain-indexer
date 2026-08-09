@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { mnemonicToAccount } from "viem/accounts";
+import {
+  parseBaseloadFaucetRuntimeConfig,
+  type BaseloadFaucetRuntimeConfig,
+} from "./baseloadFaucet";
 
 export const BASELOAD_WORKER_BEHAVIORS = [
   "create",
@@ -56,6 +60,7 @@ export interface BaseloadRuntimeConfig {
   rpcUrl: string | null;
   mnemonic: string;
   payloadProvider?: BaseloadPayloadProviderRuntimeConfig | null;
+  faucet?: BaseloadFaucetRuntimeConfig | null;
 }
 
 export interface BaseloadPayloadProviderRuntimeConfig {
@@ -99,7 +104,8 @@ export function parseBaseloadRuntimeConfig(env: NodeJS.ProcessEnv = process.env)
   const rpcUrl = env.BASELOAD_RPC_NODE?.trim() || null;
   const mnemonic = env.BASELOAD_MNEMONIC?.trim() || env.MNEMONIC?.trim() || DEFAULT_BASELOAD_MNEMONIC;
   const payloadProvider = parseBaseloadPayloadProviderRuntimeConfig(env);
-  return { rpcUrl, mnemonic, payloadProvider };
+  const faucet = parseBaseloadFaucetRuntimeConfig(env);
+  return { rpcUrl, mnemonic, payloadProvider, faucet };
 }
 
 function parseBaseloadPayloadProviderRuntimeConfig(
