@@ -4,8 +4,10 @@ import {
   fmtDate,
   fmtDurationSeconds,
   fmtEth,
+  fmtGasPrice,
   fmtGwei,
   fmtInteger,
+  fmtTokenAmount,
   fmtMillions,
   fmtRatio,
   fmtSig,
@@ -22,6 +24,33 @@ describe("frontend format helpers", () => {
     expect(fmtGwei("1234567890")).toBe("1.235");
     expect(fmtGwei("1234000000")).toBe("1.234");
     expect(fmtGwei("not-a-number")).toBe("not-a-number");
+  });
+
+  test("formats gas prices in the unit that can show them", () => {
+    expect(fmtGasPrice(undefined)).toBe("—");
+    expect(fmtGasPrice(null)).toBe("—");
+    expect(fmtGasPrice("0")).toBe("0 wei");
+    expect(fmtGasPrice("10000000000")).toBe("10 gwei");
+    expect(fmtGasPrice("1234567890")).toBe("1.235 gwei");
+    expect(fmtGasPrice("100000000")).toBe("0.1 gwei");
+    expect(fmtGasPrice("1000000")).toBe("0.001 gwei");
+    // Arkiv devnet prices: gwei would render every one of these as "0".
+    expect(fmtGasPrice("999999")).toBe("999999 wei");
+    expect(fmtGasPrice("9")).toBe("9 wei");
+    expect(fmtGasPrice("7")).toBe("7 wei");
+    expect(fmtGasPrice("2")).toBe("2 wei");
+    expect(fmtGasPrice("not-a-number")).toBe("not-a-number");
+  });
+
+  test("formats token amounts, falling back to wei below ETH resolution", () => {
+    expect(fmtTokenAmount(undefined, "ETH")).toBe("—");
+    expect(fmtTokenAmount("0", "ETH")).toBe("0 ETH");
+    expect(fmtTokenAmount("1000000000000000000", "ETH")).toBe("1 ETH");
+    expect(fmtTokenAmount("10000000000", "ETH")).toBe("0.00000001 ETH");
+    // A 113432 gas transaction at 9 wei costs 1020888 wei — "0 ETH" hides it.
+    expect(fmtTokenAmount("1020888", "ETH")).toBe("1020888 wei");
+    expect(fmtTokenAmount("1", "TOK")).toBe("1 wei");
+    expect(fmtTokenAmount("not-a-number", "ETH")).toBe("not-a-number");
   });
 
   test("formats wei values as ETH with 4 significant digits", () => {

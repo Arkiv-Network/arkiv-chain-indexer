@@ -5,7 +5,7 @@ import {
   type BlockInspectResponse,
   type InspectedTransaction,
 } from "./api";
-import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtRatio, fmtTokenAmount } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
@@ -219,25 +219,25 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
             <Metric label="Date" value={fmtDate(block.blockDate, timeZone)} />
             <Metric label="Block time" value={`${fmtInteger(block.blockTimeSeconds)}s`} />
             <Metric label="Transactions" value={fmtInteger(block.transactionCount)} />
-            <Metric label="Base fee" value={`${fmtGwei(block.baseBlockFeeWei)} gwei`} />
+            <Metric label="Base fee" value={fmtGasPrice(block.baseBlockFeeWei)} />
             <Metric label="Gas used / limit" value={fmtRatio(block.totalGasUsed, block.maxGasInBlock)} />
             <Metric label="Input data" value={fmtBytes(block.totalInputDataSizeBytes)} />
             <Metric label="Input data zstd" value={fmtBytes(block.totalInputDataCompressedSizeBytes)} />
-            <Metric label="Block reward" value={`${fmtEth(block.blockRewardWei)} ${tokenSymbol}`} />
-            <Metric label="Burnt fees" value={`${fmtEth(block.burntFeesWei)} ${tokenSymbol}`} />
-            <Metric label="Total tx fees" value={`${fmtEth(block.totalTransactionFeeWei)} ${tokenSymbol}`} />
-            <Metric label="Avg fee price" value={`${fmtGwei(block.averageFeePriceWei)} gwei`} />
-            <Metric label="Avg tx fee" value={`${fmtEth(block.averageTransactionFeeWei)} ${tokenSymbol}`} />
+            <Metric label="Block reward" value={fmtTokenAmount(block.blockRewardWei, tokenSymbol)} />
+            <Metric label="Burnt fees" value={fmtTokenAmount(block.burntFeesWei, tokenSymbol)} />
+            <Metric label="Total tx fees" value={fmtTokenAmount(block.totalTransactionFeeWei, tokenSymbol)} />
+            <Metric label="Avg fee price" value={fmtGasPrice(block.averageFeePriceWei)} />
+            <Metric label="Avg tx fee" value={fmtTokenAmount(block.averageTransactionFeeWei, tokenSymbol)} />
             <Metric label="Avg tx gas" value={fmtInteger(block.averageTransactionGasUsed)} />
             <Metric label="Avg tx input data" value={fmtBytes(block.averageTransactionInputDataSizeBytes)} />
             <Metric
               label="Avg tx input zstd"
               value={fmtBytes(block.averageTransactionInputDataCompressedSizeBytes)}
             />
-            <Metric label="Avg priority fee" value={`${fmtGwei(block.averagePriorityFeeWei)} gwei`} />
+            <Metric label="Avg priority fee" value={fmtGasPrice(block.averagePriorityFeeWei)} />
             <Metric
               label="Gas-weighted priority"
-              value={`${fmtGwei(block.averagePriorityFeeWeightedWei)} gwei`}
+              value={fmtGasPrice(block.averagePriorityFeeWeightedWei)}
             />
             {noBatcher ? null : (
               <>
@@ -354,15 +354,15 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     },
     {
       key: "effectiveGasPriceWei",
-      label: "Effective fee (gwei)",
+      label: "Effective fee",
       className: "num",
-      render: (row) => fmtGwei(row.effectiveGasPriceWei),
+      render: (row) => fmtGasPrice(row.effectiveGasPriceWei),
     },
     {
       key: "transactionFeeWei",
-      label: `Tx fee (${tokenSymbol})`,
+      label: "Tx fee",
       className: "num",
-      render: (row) => fmtEth(row.transactionFeeWei),
+      render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
     },
   ];
 }

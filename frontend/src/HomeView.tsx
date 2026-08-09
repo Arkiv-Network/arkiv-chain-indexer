@@ -14,7 +14,15 @@ import {
 } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
+import {
+  fmtBytes,
+  fmtDate,
+  fmtGasPrice,
+  fmtInteger,
+  fmtTokenAmount,
+  pickGasPriceUnit,
+  weiToGasPriceNumber,
+} from "./format";
 import { InfoTooltip } from "./InfoTooltip";
 import { buildPermalinkHref, shouldHandleClientNavigation, writePermalink } from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
@@ -389,7 +397,7 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
         <div className="home-stats home-stats--summary">
           <MetricCard
             label="Current base fee"
-            value={latestBlock ? `${fmtGwei(latestBlock.baseBlockFeeWei)} gwei` : "—"}
+            value={latestBlock ? fmtGasPrice(latestBlock.baseBlockFeeWei) : "—"}
           />
           <MetricCard
             label="Average gas / block · last minute"
@@ -549,7 +557,7 @@ function HomeWalletActivityPanel({
                 <div className="home-feed-side">
                   <strong>#{index + 1}</strong>
                   <span>
-                    {fmtEth(guzzler.totalFeeWei)} {tokenSymbol} fees
+                    {fmtTokenAmount(guzzler.totalFeeWei, tokenSymbol)} fees
                   </span>
                 </div>
               </a>
@@ -706,13 +714,13 @@ function BlockFeedItem({
             <b>{fmtInteger(block.transactionCount)}</b> txns
           </span>
           <span>
-            <b>{fmtGwei(block.averageFeePriceWei)}</b> gwei avg fee
+            <b>{fmtGasPrice(block.averageFeePriceWei)}</b> avg fee
           </span>
         </div>
       </div>
       <div className="home-feed-side">
-        <strong>{fmtGwei(block.baseBlockFeeWei)} gwei</strong>
-        <span>{fmtEth(block.burntFeesWei ?? "0")} {tokenSymbol} burnt</span>
+        <strong>{fmtGasPrice(block.baseBlockFeeWei)}</strong>
+        <span>{fmtTokenAmount(block.burntFeesWei ?? "0", tokenSymbol)} burnt</span>
       </div>
     </article>
   );
@@ -744,6 +752,13 @@ function LiveHistograms({
 }) {
   const [currentMinuteMs, setCurrentMinuteMs] = useState(
     () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS,
+  );
+
+  // Arkiv chains price gas in single-digit wei, where a gwei axis flattens the
+  // whole series onto zero — pick the unit from the data instead.
+  const baseFeeUnit = useMemo(
+    () => pickGasPriceUnit(blocks.map((block) => block.baseBlockFeeWei)),
+    [blocks],
   );
 
   // Re-render every second so the window shifts when the wall clock crosses
@@ -838,23 +853,16 @@ function LiveHistograms({
       )}
       <MinAvgMaxPanel
         title="Base block fee"
-        unitLabel="gwei"
+        unitLabel={baseFeeUnit}
         blocks={blocks}
         currentMinuteMs={currentMinuteMs}
         histogramWindowMinutes={settings.histogramWindowMinutes}
         colorVar="--ark-orange"
         colorFallback="#fe7446"
-        extractValue={(block) => {
-          try {
-            const gwei = Number(BigInt(block.baseBlockFeeWei)) / 1e9;
-            return Number.isFinite(gwei) ? gwei : null;
-          } catch {
-            return null;
-          }
-        }}
+        extractValue={(block) => weiToGasPriceNumber(block.baseBlockFeeWei, baseFeeUnit)}
         hoverLabel="Base fee"
-        yTicksuffix=" gwei"
-        hoverFormat=",.3f"
+        yTicksuffix={` ${baseFeeUnit}`}
+        hoverFormat={baseFeeUnit === "wei" ? ",.0f" : ",.3f"}
         infoLabel="What is base block fee?"
         infoTitle="Base block fee (EIP‑1559)"
         infoBody={
@@ -866,8 +874,13 @@ function LiveHistograms({
               The base fee is burnt rather than paid to miners.
             </p>
             <p>
-              Shown in gwei (1 gwei = 10^-9 {settings.tokenSymbol}). The solid line is the per-minute
-              average; the band shows the per‑minute min/max range.
+              Shown in {baseFeeUnit}
+              {baseFeeUnit === "gwei"
+                ? ` (1 gwei = 10^-9 ${settings.tokenSymbol})`
+                : ` (1 ${settings.tokenSymbol} = 10^18 wei)`}
+              , the smallest unit that keeps this chain's fees readable. The solid
+              line is the per-minute average; the band shows the per‑minute min/max
+              range.
             </p>
           </>
         }

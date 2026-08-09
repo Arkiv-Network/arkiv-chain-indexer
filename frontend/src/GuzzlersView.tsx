@@ -3,7 +3,7 @@ import { AddressFace } from "./AddressFace";
 import { Cedric } from "./Cedric";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
-import { fmtDurationSeconds, fmtEth, fmtInteger } from "./format";
+import { fmtDurationSeconds, fmtInteger, fmtTokenAmount } from "./format";
 import { GuzzlerActivityView } from "./GuzzlerActivityView";
 import {
   activityWindowForMs,
@@ -302,8 +302,8 @@ function GuzzlerCard({
           <dd>{fmtInteger(guzzler.transactionCount)}</dd>
         </div>
         <div>
-          <dt>Fees ({tokenSymbol})</dt>
-          <dd>{fmtEth(guzzler.totalFeeWei)}</dd>
+          <dt>Fees</dt>
+          <dd>{fmtTokenAmount(guzzler.totalFeeWei, tokenSymbol)}</dd>
         </div>
       </dl>
     </li>

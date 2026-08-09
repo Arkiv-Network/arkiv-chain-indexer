@@ -9,30 +9,30 @@ describe("record transaction table columns", () => {
       "Block",
       "Hash",
       "From",
-      "Effective fee (gwei)",
-      "Tx fee (ETH)",
+      "Effective fee",
+      "Tx fee",
     ]);
   });
 
   test("does not repeat the active fee metric for fee records", () => {
     expect(recordColumnLabelsForCategory("transaction_fee", "ETH")).toEqual([
       "Rank",
-      "Fee paid (ETH)",
+      "Fee paid",
       "Block",
       "Hash",
       "From",
       "Gas Used",
-      "Effective fee (gwei)",
+      "Effective fee",
     ]);
 
     expect(recordColumnLabelsForCategory("effective_fee", "ETH")).toEqual([
       "Rank",
-      "Effective fee (gwei)",
+      "Effective fee",
       "Block",
       "Hash",
       "From",
       "Gas Used",
-      "Tx fee (ETH)",
+      "Tx fee",
     ]);
   });
 });

@@ -7,7 +7,7 @@ import {
 } from "./api";
 import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
+import { fmtDate, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
 import { TransactionHashLink } from "./TransactionView";
 import { renderTableHeader } from "./tableHeader";
 
@@ -44,16 +44,16 @@ function categories(tokenSymbol: string): RecordCategory[] {
     {
       key: "transaction_fee",
       title: "Maximum fee paid",
-      valueLabel: `Fee paid (${tokenSymbol})`,
+      valueLabel: "Fee paid",
       duplicateColumnKey: "transactionFeeWei",
-      renderValue: (row) => fmtEth(row.recordValue),
+      renderValue: (row) => fmtTokenAmount(row.recordValue, tokenSymbol),
     },
     {
       key: "effective_fee",
       title: "Highest effective fee",
-      valueLabel: "Effective fee (gwei)",
+      valueLabel: "Effective fee",
       duplicateColumnKey: "effectiveGasPriceWei",
-      renderValue: (row) => fmtGwei(row.recordValue),
+      renderValue: (row) => fmtGasPrice(row.recordValue),
     },
   ];
 }
@@ -107,15 +107,15 @@ function recordColumns(
     },
     {
       key: "effectiveGasPriceWei",
-      label: "Effective fee (gwei)",
+      label: "Effective fee",
       className: "num",
-      render: (row) => fmtGwei(row.effectiveGasPriceWei),
+      render: (row) => fmtGasPrice(row.effectiveGasPriceWei),
     },
     {
       key: "transactionFeeWei",
-      label: `Tx fee (${tokenSymbol})`,
+      label: "Tx fee",
       className: "num",
-      render: (row) => fmtEth(row.transactionFeeWei),
+      render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
     },
   ];
 

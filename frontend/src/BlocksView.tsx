@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
-import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
+import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
 import { BlockNumberLink } from "./blockLinks";
 import {
   buildPermalinkHref,
@@ -78,7 +78,7 @@ function blockColumns(
     },
     {
       key: "baseBlockFeeWei",
-      label: "Base fee (gwei)",
+      label: "Base fee",
       className: "num",
       render: (row) => (
         <BaseFeeCell
@@ -89,15 +89,15 @@ function blockColumns(
     },
     {
       key: "burntFeesWei",
-      label: `Burnt fees (${tokenSymbol})`,
+      label: "Burnt fees",
       className: "num",
-      render: (row) => fmtEth(row.burntFeesWei ?? "0"),
+      render: (row) => fmtTokenAmount(row.burntFeesWei ?? "0", tokenSymbol),
     },
     {
       key: "averageFeePriceWei",
-      label: "Avg fee price (gwei)",
+      label: "Avg fee price",
       className: "num",
-      render: (row) => fmtGwei(row.averageFeePriceWei),
+      render: (row) => fmtGasPrice(row.averageFeePriceWei),
     },
     {
       key: "averageTransactionGasUsed",
@@ -137,7 +137,7 @@ function BaseFeeCell({
   const diff = baseFeeDifference(baseFeeWei, previousBaseFeeWei);
   return (
     <div className="base-fee-cell">
-      <span>{fmtGwei(baseFeeWei)}</span>
+      <span>{fmtGasPrice(baseFeeWei)}</span>
       <span className={`base-fee-diff ${diff.className}`}>{diff.label}</span>
     </div>
   );
@@ -153,7 +153,7 @@ function baseFeeDifference(
     if (delta === 0n) return { label: "0", className: "flat" };
     const prefix = delta > 0n ? "+" : "";
     return {
-      label: `${prefix}${fmtGwei(delta.toString())}`,
+      label: `${prefix}${fmtGasPrice(delta.toString())}`,
       className: delta > 0n ? "up" : "down",
     };
   } catch {

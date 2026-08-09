@@ -4,7 +4,7 @@ import { addressDisplay } from "./addressAliases";
 import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
 import { CedricOnTimer } from "./Cedric";
-import { fmtBytes, fmtDate, fmtEth, fmtGwei, fmtInteger } from "./format";
+import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
 import {
   buildAddressPermalinkHref,
   buildPermalinkHref,
@@ -195,15 +195,15 @@ function transactionColumns(
   };
   const effectiveFee: Column = {
     key: "effectiveGasPriceWei",
-    label: "Effective fee (gwei)",
+    label: "Effective fee",
     className: "num",
-    render: (row) => fmtGwei(row.effectiveGasPriceWei),
+    render: (row) => fmtGasPrice(row.effectiveGasPriceWei),
   };
   const txFee: Column = {
     key: "transactionFeeWei",
-    label: `Tx fee (${tokenSymbol})`,
+    label: "Tx fee",
     className: "num",
-    render: (row) => fmtEth(row.transactionFeeWei),
+    render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
   };
 
   // When scoped to a single address every row shares the same sender, so the

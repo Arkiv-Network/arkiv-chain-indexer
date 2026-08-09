@@ -10,7 +10,16 @@ import { AddressCell } from "./TransactionsView";
 import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
 import { CedricOnTimer } from "./Cedric";
-import { fmtBytes, fmtDate, fmtDurationSeconds, fmtEth, fmtGwei, fmtInteger, fmtRatio } from "./format";
+import {
+  fmtBytes,
+  fmtDate,
+  fmtDurationSeconds,
+  fmtEth,
+  fmtGasPrice,
+  fmtInteger,
+  fmtRatio,
+  fmtTokenAmount,
+} from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { transactionDetailHref, writeTransactionPermalink } from "./permalinks";
 import { payloadInfoHref, transactionDecoderHref } from "./transactionLinks";
@@ -207,7 +216,7 @@ function TransactionDetail({
             ) : null}
             <Row label="Type">{txTypeLabel(transaction.type)}</Row>
             <Row label="Nonce">{transaction.nonce ?? "—"}</Row>
-            <Row label={`Value (${tokenSymbol})`}>{fmtEth(transaction.valueWei)}</Row>
+            <Row label="Value">{fmtTokenAmount(transaction.valueWei, tokenSymbol)}</Row>
           </dl>
         </section>
 
@@ -225,13 +234,15 @@ function TransactionDetail({
         <section className="tx-detail-group">
           <h3>Fees</h3>
           <dl className="tx-detail-grid">
-            <Row label={`Transaction fee (${tokenSymbol})`}>{fmtEth(transaction.transactionFeeWei)}</Row>
-            <Row label="Effective gas price">{gwei(transaction.effectiveGasPriceWei)}</Row>
-            <Row label="Base fee">{gwei(transaction.baseBlockFeeWei)}</Row>
-            <Row label="Priority fee">{gwei(transaction.priorityFeeWei)}</Row>
-            <Row label="Gas price">{gwei(transaction.gasPriceWei)}</Row>
-            <Row label="Max fee per gas">{gwei(transaction.maxFeePerGasWei)}</Row>
-            <Row label="Max priority per gas">{gwei(transaction.maxPriorityFeePerGasWei)}</Row>
+            <Row label="Transaction fee">
+              {fmtTokenAmount(transaction.transactionFeeWei, tokenSymbol)}
+            </Row>
+            <Row label="Effective gas price">{fmtGasPrice(transaction.effectiveGasPriceWei)}</Row>
+            <Row label="Base fee">{fmtGasPrice(transaction.baseBlockFeeWei)}</Row>
+            <Row label="Priority fee">{fmtGasPrice(transaction.priorityFeeWei)}</Row>
+            <Row label="Gas price">{fmtGasPrice(transaction.gasPriceWei)}</Row>
+            <Row label="Max fee per gas">{fmtGasPrice(transaction.maxFeePerGasWei)}</Row>
+            <Row label="Max priority per gas">{fmtGasPrice(transaction.maxPriorityFeePerGasWei)}</Row>
           </dl>
         </section>
       </div>
@@ -475,12 +486,6 @@ function Row({ label, children, title }: { label: string; children: ReactNode; t
       </dd>
     </div>
   );
-}
-
-/** Render a wei value in gwei with a trailing unit, or an em dash when absent. */
-function gwei(weiStr: string | null | undefined): string {
-  if (weiStr === undefined || weiStr === null) return "—";
-  return `${fmtGwei(weiStr)} gwei`;
 }
 
 function statusInfo(status: string | null): { label: string; tone: "ok" | "fail" | "unknown" } {

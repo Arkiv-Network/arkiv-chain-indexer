@@ -1,5 +1,9 @@
 const GWEI_IN_WEI = 1_000_000_000n;
 const ETH_IN_WEI = 1_000_000_000_000_000_000n;
+/** 0.001 gwei — under this, a gas price reads better as exact wei. */
+const GWEI_DISPLAY_FLOOR_WEI = 1_000_000n;
+/** 1e-8 ETH — the point where fmtEth starts rendering an amount as "0". */
+const ETH_DISPLAY_FLOOR_WEI = 10_000_000_000n;
 const SIG_DIGITS = 4;
 const MAX_DECIMALS = 9;
 const ZERO_THRESHOLD = 1e-8;
@@ -17,6 +21,89 @@ export function fmtGwei(weiStr: string | null | undefined): string {
   } catch {
     return String(weiStr);
   }
+}
+
+/**
+ * Render a gas price with the unit that keeps it readable, e.g. "9 wei" or
+ * "1.235 gwei". Arkiv chains price gas in single-digit wei, and gwei cannot show
+ * that: 9 wei is 9e-9 gwei, which rounds to "0". Below 0.001 gwei the gwei form is
+ * more leading zeros than digits, so exact wei is used instead.
+ */
+export function fmtGasPrice(weiStr: string | null | undefined): string {
+  if (weiStr === undefined || weiStr === null) return "—";
+  let wei: bigint;
+  try {
+    wei = BigInt(weiStr);
+  } catch {
+    return String(weiStr);
+  }
+  // Zero has no scale to pick a unit from; wei is the stored unit and reads
+  // consistently next to the wei-scale values it sits beside in a list.
+  if (wei === 0n) return "0 wei";
+  const abs = wei < 0n ? -wei : wei;
+  if (abs < GWEI_DISPLAY_FLOOR_WEI) return `${wei.toString()} wei`;
+  return `${fmtSig(weiToScaledNumber(wei, GWEI_IN_WEI))} gwei`;
+}
+
+export type GasPriceUnit = "wei" | "gwei";
+
+/**
+ * Pick the unit a series of gas prices should be plotted in. Charting wei-scale
+ * prices in gwei flattens the whole series onto zero, so a series that never
+ * reaches 0.001 gwei is plotted in wei instead.
+ */
+export function pickGasPriceUnit(weiValues: Iterable<string | null | undefined>): GasPriceUnit {
+  let max = 0n;
+  for (const value of weiValues) {
+    if (value === undefined || value === null) continue;
+    try {
+      const wei = BigInt(value);
+      const abs = wei < 0n ? -wei : wei;
+      if (abs > max) max = abs;
+    } catch {
+      // Unparseable values are skipped; they cannot be plotted either.
+    }
+  }
+  return max > 0n && max < GWEI_DISPLAY_FLOOR_WEI ? "wei" : "gwei";
+}
+
+/** Convert a wei amount into a chartable number in the given gas price unit. */
+export function weiToGasPriceNumber(
+  weiStr: string | null | undefined,
+  unit: GasPriceUnit,
+): number | null {
+  if (weiStr === undefined || weiStr === null) return null;
+  let wei: bigint;
+  try {
+    wei = BigInt(weiStr);
+  } catch {
+    return null;
+  }
+  const value = unit === "wei" ? Number(wei) : weiToScaledNumber(wei, GWEI_IN_WEI);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Render a token amount with its unit, falling back to exact wei when the amount
+ * is too small to show in whole tokens — a 1020888 wei fee is 1.02e-12 ETH, which
+ * fmtEth renders as "0".
+ */
+export function fmtTokenAmount(
+  weiStr: string | null | undefined,
+  tokenSymbol: string,
+  options: FmtSigOptions = {},
+): string {
+  if (weiStr === undefined || weiStr === null) return "—";
+  let wei: bigint;
+  try {
+    wei = BigInt(weiStr);
+  } catch {
+    return String(weiStr);
+  }
+  if (wei === 0n) return `0 ${tokenSymbol}`;
+  const abs = wei < 0n ? -wei : wei;
+  if (abs < ETH_DISPLAY_FLOOR_WEI) return `${wei.toString()} wei`;
+  return `${fmtEth(wei.toString(), options)} ${tokenSymbol}`;
 }
 
 export function fmtEth(

@@ -4,7 +4,7 @@ import Plotly from "plotly.js-basic-dist-min";
 import { AddressFace } from "./AddressFace";
 import { fetchGuzzlerHistory, type GuzzlerHistoryPoint, type GuzzlerHistoryResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
-import { fmtDate, fmtDurationSeconds, fmtEth, fmtInteger, fmtMillions } from "./format";
+import { fmtDate, fmtDurationSeconds, fmtInteger, fmtMillions, fmtTokenAmount } from "./format";
 import {
   activityPlotRange,
   filterPointsByWindow,
@@ -208,8 +208,8 @@ export function GuzzlerActivityView({
           <dd>{fmtMillions(summary.totalGasUsed)}</dd>
         </div>
         <div className="stat-wide">
-          <dt>Fees ({tokenSymbol})</dt>
-          <dd>{fmtEth(summary.totalFeeWei)}</dd>
+          <dt>Fees</dt>
+          <dd>{fmtTokenAmount(summary.totalFeeWei, tokenSymbol)}</dd>
         </div>
         <div>
           <dt>Active minutes</dt>
@@ -283,7 +283,7 @@ function buildActivityPlot(
         fmtDate(point.startTime, timeZone),
         fmtInteger(point.transactionCount),
         fmtMillions(point.totalGasUsed),
-        `${fmtEth(point.totalFeeWei)} ${tokenSymbol}`,
+        fmtTokenAmount(point.totalFeeWei, tokenSymbol),
       ] as [string, string, string, string],
   );
 
