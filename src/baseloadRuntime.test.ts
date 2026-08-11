@@ -3,6 +3,8 @@ import {
   isBaseloadTransactionReceiptSuccessful,
   readBaseloadCreatedEntityKeyFromSdkResult,
   readBaseloadEntityKeysFromSdkResult,
+  toSdkMutationParameters,
+  type BaseloadMutationParameters,
 } from "./baseloadRuntime";
 
 const TX_HASH = `0x${"aa".repeat(32)}` as `0x${string}`;
@@ -66,5 +68,54 @@ describe("baseload runtime receipt handling", () => {
 
   test("keeps compatibility with receipt fixtures that omit status", () => {
     expect(isBaseloadTransactionReceiptSuccessful({ transactionHash: TX_HASH })).toBe(true);
+  });
+});
+
+function updateInput(entityKey: `0x${string}`, expiresIn: number) {
+  return {
+    entityKey,
+    btl: 1,
+    data: new Uint8Array([1]),
+    expiresIn,
+    annotations: [],
+  } as unknown as NonNullable<BaseloadMutationParameters["updates"]>[number];
+}
+
+function sdkExtensions(parameters: BaseloadMutationParameters): Array<{ entityKey: string; expiresIn: number }> {
+  const sdk = toSdkMutationParameters(parameters) as {
+    extensions?: Array<{ entityKey: string; expiresIn: number }>;
+  };
+  return sdk.extensions ?? [];
+}
+
+describe("baseload SDK mutation parameters", () => {
+  test("extends past the update's own TTL so the engine never sees an unchanged expiry", () => {
+    // The engine measures expiry in blocks: an update landing in the block that
+    // last set the expiry would compute the same value and revert the batch with
+    // ExpiryNotExtended, so the batched extension must clear it by a block.
+    expect(sdkExtensions({ updates: [updateInput(ENTITY_KEY, 60)] })).toEqual([
+      { entityKey: ENTITY_KEY, expiresIn: 62 },
+    ]);
+  });
+
+  test("keeps update-derived extensions aligned to the 2s block time", () => {
+    expect(sdkExtensions({ updates: [updateInput(ENTITY_KEY, 61)] })).toEqual([
+      { entityKey: ENTITY_KEY, expiresIn: 64 },
+    ]);
+  });
+
+  test("leaves explicitly requested extensions at their aligned TTL", () => {
+    expect(sdkExtensions({ extensions: [{ entityKey: SECOND_ENTITY_KEY, expiresIn: 61 }] })).toEqual([
+      { entityKey: SECOND_ENTITY_KEY, expiresIn: 62 },
+    ]);
+  });
+
+  test("carries an extension for every entity in an update batch", () => {
+    expect(
+      sdkExtensions({ updates: [updateInput(ENTITY_KEY, 60), updateInput(SECOND_ENTITY_KEY, 60)] }),
+    ).toEqual([
+      { entityKey: ENTITY_KEY, expiresIn: 62 },
+      { entityKey: SECOND_ENTITY_KEY, expiresIn: 62 },
+    ]);
   });
 });

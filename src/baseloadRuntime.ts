@@ -89,7 +89,7 @@ type BaseloadTxParams = {
   nonce: number;
 };
 
-type BaseloadMutationParameters = {
+export type BaseloadMutationParameters = {
   creates?: ReturnType<typeof createBaseloadEntityInput>[];
   updates?: ReturnType<typeof createBaseloadUpdateInput>[];
   deletes?: Array<{ entityKey: HexString }>;
@@ -870,20 +870,27 @@ async function mutateBaseloadEntities(
   );
 }
 
+const BLOCK_TIME_SECONDS = 2;
+
 // The SDK requires expiresIn to be a positive multiple of the 2s block time;
 // round odd TTLs (e.g. a time bomb's remaining seconds) up to the next block.
 function toBlockAlignedExpiresIn(expiresIn: number): number {
-  return Math.max(2, Math.ceil(expiresIn / 2) * 2);
+  return Math.max(BLOCK_TIME_SECONDS, Math.ceil(expiresIn / BLOCK_TIME_SECONDS) * BLOCK_TIME_SECONDS);
 }
 
-function toSdkMutationParameters(parameters: BaseloadMutationParameters): unknown {
+export function toSdkMutationParameters(parameters: BaseloadMutationParameters): unknown {
   const updates = parameters.updates ?? [];
   // The engine ignores expiry on UPDATE, but the pool bookkeeping treats an
   // update as a TTL refresh — so each update also extends in the same batch.
+  //
+  // The extension carries one extra block: the engine measures expiry in blocks
+  // and reverts the whole batch with ExpiryNotExtended when the new expiry only
+  // matches the current one, which is exactly what happens when an update lands
+  // in the same block that last set the entity's expiry (same TTL, same block).
   const extensions = [
     ...updates.map((input) => ({
       entityKey: input.entityKey,
-      expiresIn: toBlockAlignedExpiresIn(input.expiresIn),
+      expiresIn: toBlockAlignedExpiresIn(input.expiresIn) + BLOCK_TIME_SECONDS,
     })),
     ...(parameters.extensions ?? []).map((extension) => ({
       ...extension,
