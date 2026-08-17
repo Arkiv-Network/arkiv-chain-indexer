@@ -128,7 +128,7 @@ describe("baseload config helpers", () => {
     expect(wallets).not.toContain(3);
     expect(wallets).not.toContain(100);
     expect(wallets[0]).toBe(1);
-    expect(wallets.at(-1)).toBe(99);
+    expect(wallets.at(-1)).toBe(250);
   });
 
   test("defaults a new draft to the smallest available wallet", () => {

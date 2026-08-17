@@ -39,7 +39,7 @@ export interface BaseloadWorkerDraft {
 
 export const BASELOAD_CONFIG_VERSION = 2;
 export const MIN_WALLET_NUMBER = 0;
-export const MAX_WALLET_NUMBER = 100;
+export const MAX_WALLET_NUMBER = 250;
 // One transaction may carry several entity operations. Raising this is the lever
 // for pushing gas and bytes per *RPC call*, which matters because the bouncer
 // meters calls per second per IP, not work per call: 6 workers on 1 entity/call

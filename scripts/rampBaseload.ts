@@ -85,6 +85,31 @@ async function main() {
       entities: { type: "string" },
       payload: { type: "string" },
       behavior: { type: "string" },
+      /**
+       * Gwei ceiling a worker will pay. It doubles as the throttle point under a
+       * saturating load: once the base fee climbs past it the worker stops
+       * sending, so the fleet self-limits instead of chasing the fee market up.
+       */
+      "max-gas-price": { type: "string" },
+      /**
+       * A heterogeneous fleet, as `<count>x<payloadBytes>` groups:
+       *   --groups 20x4096,20x8192,20x16384,20x32768
+       * Mixed transaction sizes compete for the same block space, so this is how
+       * you see which size actually wins throughput rather than testing each in
+       * isolation. Overrides --workers and --payload.
+       */
+      groups: { type: "string" },
+      /**
+       * Spread per-worker fee ceilings over a `min:max` gwei range, e.g. 1:10.
+       * Under a saturating load the base fee climbs until it prices workers out,
+       * so a spread turns the fleet into a fee ladder: the cheap workers drop
+       * out first and the load self-limits gradually instead of all at once.
+       *
+       * The range is applied *within* each --groups group, not across the fleet,
+       * so payload size and fee ceiling stay independent variables — otherwise
+       * the smallest payloads would get all the cheapest ceilings.
+       */
+      "spread-gas-price": { type: "string" },
       report: { type: "boolean", default: false },
     },
   });
@@ -101,6 +126,27 @@ async function main() {
   const entities = values.entities === undefined ? undefined : Number(values.entities);
   const payload = values.payload === undefined ? undefined : Number(values.payload);
   const workerCount = values.workers === undefined ? undefined : Number(values.workers);
+  const maxGasPriceGwei =
+    values["max-gas-price"] === undefined ? undefined : Number(values["max-gas-price"]);
+  let spread: { min: number; max: number } | undefined;
+  if (values["spread-gas-price"] !== undefined) {
+    const match = /^([\d.]+):([\d.]+)$/.exec(String(values["spread-gas-price"]).trim());
+    if (!match) throw new Error("--spread-gas-price must look like <min>:<max>, e.g. 1:10");
+    const min = Number(match[1]);
+    const max = Number(match[2]);
+    if (!(min > 0) || !(max > min)) throw new Error("--spread-gas-price needs 0 < min < max");
+    spread = { min, max };
+  }
+
+  /** Evenly spaced ceiling for index `i` of `count`; a lone worker gets the max. */
+  const spreadGasPrice = (i: number, count: number): number | undefined => {
+    if (!spread) return undefined;
+    const step = count <= 1 ? 1 : i / (count - 1);
+    return Math.round((spread.min + (spread.max - spread.min) * step) * 100) / 100;
+  };
+  if (maxGasPriceGwei !== undefined && (!Number.isFinite(maxGasPriceGwei) || maxGasPriceGwei <= 0)) {
+    throw new Error("--max-gas-price must be a positive number of gwei");
+  }
 
   if (entities !== undefined && payload !== undefined && entities * payload > MAX_TX_PAYLOAD_BYTES) {
     throw new Error(
@@ -109,8 +155,69 @@ async function main() {
     );
   }
 
-  const template = state.config.workers[0];
-  if (!template) throw new Error("no existing worker to use as a template");
+  // Falls back to a built-in template so the fleet can be rebuilt from empty —
+  // stopping the load sets workers to [], and that must not become a dead end.
+  const template: Worker = state.config.workers[0] ?? {
+    id: "creator-w0",
+    behavior: "create",
+    walletNumber: 0,
+    entitiesPerRequest: 1,
+    singleCreatePayloadSize: 51200,
+    maxGasPriceGwei: 10,
+    opsPerMinute: 60,
+    singleCreateStringArgumentCount: 1,
+    singleCreateNumberArgumentCount: 1,
+    entityPoolSize: 10,
+    timeBombOffsetSeconds: 600,
+    startBlock: 0,
+    endBlock: null,
+    durationSeconds: null,
+    ttlSeconds: 1800,
+  };
+
+  if (values.groups) {
+    const groups = String(values.groups)
+      .split(",")
+      .map((spec) => {
+        const match = /^(\d+)x(\d+)$/.exec(spec.trim());
+        if (!match) throw new Error(`--groups entry "${spec}" must look like <count>x<payloadBytes>`);
+        return { count: Number(match[1]), payloadBytes: Number(match[2]) };
+      });
+
+    const grouped: Worker[] = [];
+    for (const group of groups) {
+      if (group.payloadBytes > MAX_TX_PAYLOAD_BYTES) {
+        throw new Error(`--groups payload ${group.payloadBytes} exceeds the ~100KB per-tx budget`);
+      }
+      for (let i = 0; i < group.count; i += 1) {
+        const walletNumber = grouped.length;
+        const spreadCap = spreadGasPrice(i, group.count);
+        grouped.push({
+          ...template,
+          id: `p${group.payloadBytes}-w${walletNumber}`,
+          behavior: values.behavior ?? "create",
+          walletNumber,
+          entitiesPerRequest: 1,
+          singleCreatePayloadSize: group.payloadBytes,
+          ...(spreadCap !== undefined
+            ? { maxGasPriceGwei: spreadCap }
+            : maxGasPriceGwei !== undefined
+              ? { maxGasPriceGwei }
+              : {}),
+        });
+      }
+    }
+    if (grouped.length > 250) {
+      throw new Error(`${grouped.length} workers exceeds MAX_WALLET_NUMBER (250 derived wallets)`);
+    }
+    await putConfig(backendUrl, token, grouped);
+    const summary = groups.map((g) => `${g.count}x${(g.payloadBytes / 1024).toFixed(0)}KB`).join(", ");
+    const capLabel = spread
+      ? `maxGasPrice spread ${spread.min}-${spread.max} gwei within each group`
+      : `maxGasPrice ${maxGasPriceGwei ?? template.maxGasPriceGwei} gwei`;
+    console.log(`Applied ${grouped.length} workers: ${summary}, ${capLabel}`);
+    return;
+  }
 
   let workers = [...state.config.workers];
   if (workerCount !== undefined) {
@@ -142,13 +249,15 @@ async function main() {
       : {}),
     ...(entities !== undefined ? { entitiesPerRequest: entities } : {}),
     ...(payload !== undefined ? { singleCreatePayloadSize: payload } : {}),
+    ...(maxGasPriceGwei !== undefined ? { maxGasPriceGwei } : {}),
   }));
 
   await putConfig(backendUrl, token, workers);
   const perTx = (entities ?? template.entitiesPerRequest) * (payload ?? template.singleCreatePayloadSize);
   console.log(
     `Applied: ${workers.length} workers x ${entities ?? template.entitiesPerRequest} entities ` +
-      `x ${payload ?? template.singleCreatePayloadSize} bytes = ${perTx.toLocaleString()} bytes/tx`,
+      `x ${payload ?? template.singleCreatePayloadSize} bytes = ${perTx.toLocaleString()} bytes/tx` +
+      `, maxGasPrice ${maxGasPriceGwei ?? template.maxGasPriceGwei} gwei`,
   );
 }
 
