@@ -122,6 +122,18 @@ export function getMillisecondsUntilNextMinute(windowStartedAtMs: number, nowMs:
   return Math.max(0, windowStartedAtMs + 60_000 - nowMs);
 }
 
+/**
+ * True when a worker's limits actually depend on the chain height. Workers with
+ * no block window (the common load-test case) do not need `eth_blockNumber` at
+ * all, and skipping it removes one RPC call from every single operation — call
+ * budget is the scarce resource, so this is throughput, not just tidiness.
+ */
+export function needsCurrentBlock(
+  worker: Pick<BaseloadWorkerConfig, "startBlock" | "endBlock">,
+): boolean {
+  return worker.startBlock > 0 || worker.endBlock !== null;
+}
+
 export function getBaseloadLimitState(
   worker: BaseloadWorkerConfig,
   currentBlock: number,

@@ -24,6 +24,7 @@ import {
   createBaseloadEntityInput,
   createBaseloadUpdateInput,
   getEntitiesPerRequestLimit,
+  needsCurrentBlock,
   getBaseloadLimitState,
   getMillisecondsUntilNextMinute,
   getMinuteAttemptLimit,
@@ -119,6 +120,16 @@ type BaseloadMutationClient = WalletArkivClient & {
 };
 
 const BALANCE_POLL_INTERVAL_MS = 10_000;
+/** How often a worker without a block window refreshes the height just for display. */
+const BLOCK_DISPLAY_REFRESH_MS = 15_000;
+/** One block time: a receipt cannot land sooner, so polling earlier only burns budget. */
+const RECEIPT_FIRST_POLL_DELAY_MS = 2_000;
+const RECEIPT_POLL_INTERVAL_MS = 1_000;
+
+/** Spreads fleet-wide waits over a window so polls do not land on one tick. */
+function jitteredDelay(baseMs: number): number {
+  return Math.round(baseMs * (0.75 + Math.random() * 0.5));
+}
 
 export class BaseloadRuntime {
   private config: BaseloadConfig = EMPTY_BASELOAD_CONFIG;
@@ -353,6 +364,8 @@ class BaseloadWorkerTask {
       deletedCount: 0,
       ownershipChangedCount: 0,
     };
+    let lastKnownBlock = 0;
+    let lastBlockFetchedAtMs = 0;
     let activeWorkerKey = configKey(this.worker);
     let cachedClients: { key: string; arkiv: WalletArkivClient; rpc: BaseloadRpcClient } | null = null;
 
@@ -426,7 +439,17 @@ class BaseloadWorkerTask {
           }
           const clients = cachedClients;
 
-          const currentBlock = await clients.rpc.getBlockNumber();
+          // Only spend a call on the height when a block window depends on it;
+          // otherwise refresh it occasionally just so the status view is not stale.
+          let currentBlock = lastKnownBlock;
+          if (needsCurrentBlock(worker)) {
+            currentBlock = await clients.rpc.getBlockNumber();
+            lastKnownBlock = currentBlock;
+          } else if (nowMs - lastBlockFetchedAtMs >= BLOCK_DISPLAY_REFRESH_MS) {
+            currentBlock = await clients.rpc.getBlockNumber();
+            lastKnownBlock = currentBlock;
+            lastBlockFetchedAtMs = nowMs;
+          }
           const limitState = getBaseloadLimitState(worker, currentBlock, runStartedAtMs, nowMs);
 
           if (limitState.type === "before-start") {
@@ -837,6 +860,12 @@ function createRpcClient(
       return Number(nonce);
     },
     waitForTransactionReceipt: async (txHash, signal) => {
+      // A receipt cannot exist before the next block, so the first poll of a
+      // freshly sent transaction is always wasted. Wait out roughly one block
+      // first, and jitter every wait: without it every worker polls on the same
+      // tick and the fleet's traffic arrives as spikes that trip the per-IP
+      // rate limit while the average budget sits half idle.
+      await sleep(jitteredDelay(RECEIPT_FIRST_POLL_DELAY_MS), signal);
       while (!signal.aborted) {
         const result = await callRpc(endpoint, "eth_getTransactionReceipt", [txHash], ring);
         if (result !== null) {
@@ -845,7 +874,7 @@ function createRpcClient(
           }
           return result;
         }
-        await sleep(1_000, signal);
+        await sleep(jitteredDelay(RECEIPT_POLL_INTERVAL_MS), signal);
       }
       throw new Error(`Stopped while waiting for transaction receipt ${txHash}`);
     },

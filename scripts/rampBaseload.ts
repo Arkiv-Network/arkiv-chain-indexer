@@ -128,8 +128,18 @@ async function main() {
     }
   }
 
-  workers = workers.map((worker) => ({
+  workers = workers.map((worker, index) => ({
     ...worker,
+    // --behavior applies to the whole fleet, not just newly added workers: the
+    // churn behaviours keep a client-side entity pool that desynchronises from
+    // the chain under load ("Transaction failed: no entity 0x…") and wedges the
+    // worker, so an all-creator fleet is what sustains throughput.
+    ...(values.behavior
+      ? {
+          behavior: values.behavior,
+          id: `${values.behavior === "create" ? "creator" : "churner"}-w${worker.walletNumber ?? index}`,
+        }
+      : {}),
     ...(entities !== undefined ? { entitiesPerRequest: entities } : {}),
     ...(payload !== undefined ? { singleCreatePayloadSize: payload } : {}),
   }));
