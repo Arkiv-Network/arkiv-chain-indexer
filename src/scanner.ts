@@ -6,7 +6,7 @@ import { computeBlockMetrics } from "./metrics";
 import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { BatcherMetricsSource } from "./batcher";
 import type { GuzzlerRecorder } from "./guzzlers";
-import type { BlockMetrics, RpcBlock, RpcReceipt } from "./types";
+import type { BlockMetrics, Hex, RpcBlock, RpcReceipt } from "./types";
 import type { EthereumRpcClient, RpcStats } from "./rpc";
 import type { ScannerConfig } from "./config";
 import type { BlockProgressUpdate, ScannerStorage } from "./storage";
@@ -433,18 +433,65 @@ async function getTransactionReceipts(
     throw new Error("Transaction receipt concurrency must be greater than zero");
   }
 
-  const receipts: RpcReceipt[] = [];
-  for (const transaction of block.transactions) {
-    if (shouldIgnoreTransaction(transaction)) {
-      continue;
+  const hashes = block.transactions
+    .filter((transaction) => !shouldIgnoreTransaction(transaction))
+    .map((transaction) => transaction.hash);
+
+  // Fetch receipts with a bounded worker pool instead of one-at-a-time. A full
+  // block carries one eth_getTransactionReceipt per transaction, and fetching
+  // those serially made per-block scan time grow with transaction count (a 130-tx
+  // block took ~6s against a 2s block time, so the scanner fell permanently
+  // behind under load). Downstream matches receipts to transactions by hash, so
+  // the arrival order does not matter; we still write each into its slot to keep
+  // the returned array deterministic.
+  const receipts: RpcReceipt[] = new Array(hashes.length);
+  const poolSize = Math.min(txReceiptConcurrency, hashes.length);
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= hashes.length) return;
+      receipts[index] = await fetchReceiptWithRetry(rpc, hashes[index]!);
     }
-    receipts.push(await rpc.getTransactionReceipt(transaction.hash));
   }
+
+  await Promise.all(Array.from({ length: poolSize }, () => worker()));
   return receipts;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const RECEIPT_RETRY_MAX_ATTEMPTS = 5;
+const RECEIPT_RETRY_BASE_MS = 250;
+
+/**
+ * Fetches one receipt, retrying a rate-limit rejection in place with backoff.
+ *
+ * Without this, a single 429 anywhere in a block propagates out of
+ * getTransactionReceipts and fails the whole block, so scanBlockWithRetry
+ * re-fetches every receipt in it — under sustained rate limiting that multiplies
+ * the call volume several-fold and burns through the API-key quota. Retrying just
+ * the one throttled receipt keeps the amplification at 1x. Non-rate-limit errors
+ * still propagate immediately (a real fault should fail fast, not spin).
+ */
+async function fetchReceiptWithRetry(rpc: EthereumRpcClient, hash: Hex): Promise<RpcReceipt> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await rpc.getTransactionReceipt(hash);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const rateLimited = message.includes("429");
+      if (!rateLimited || attempt >= RECEIPT_RETRY_MAX_ATTEMPTS) throw error;
+      // Exponential backoff with jitter so the pool's workers do not all retry
+      // on the same tick and re-trigger the limit together.
+      const backoff = RECEIPT_RETRY_BASE_MS * 2 ** (attempt - 1);
+      await sleep(backoff * (0.5 + Math.random()));
+    }
+  }
 }
 
 async function recordChainProgress(

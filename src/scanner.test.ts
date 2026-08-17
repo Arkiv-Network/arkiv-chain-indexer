@@ -20,7 +20,7 @@ import type { InspectedTransaction } from "./blockInspector";
 import type { BlockMetrics, Hex, RpcBlock, RpcReceipt } from "./types";
 
 describe("scanOneBlock", () => {
-  test("fetches transaction receipts sequentially and stores transactions after all receipts finish", async () => {
+  test("fetches transaction receipts with bounded concurrency and stores transactions after all receipts finish", async () => {
     const rpc = new ControlledReceiptRpc(blockWithTransactions(4));
     const storage = new FakeStorage();
 
@@ -31,24 +31,26 @@ describe("scanOneBlock", () => {
       2,
     );
 
-    await waitUntil(() => rpc.pending.length === 1);
-    expect(rpc.maxActiveReceipts).toBe(1);
-    expect(rpc.requestedReceipts).toEqual([txHash(0)]);
+    // Concurrency 2 → the first two receipts are in flight together, not serial.
+    await waitUntil(() => rpc.pending.length === 2);
+    expect(rpc.maxActiveReceipts).toBe(2);
+    expect(rpc.requestedReceipts).toEqual([txHash(0), txHash(1)]);
     expect(storage.savedMetrics).toHaveLength(0);
 
-    rpc.resolveNext();
-    await waitUntil(() => rpc.requestedReceipts.length === 2);
-    expect(rpc.maxActiveReceipts).toBe(1);
-    expect(storage.savedMetrics).toHaveLength(0);
-
+    // Resolving one frees a worker slot, which immediately picks up the next tx.
     rpc.resolveNext();
     await waitUntil(() => rpc.requestedReceipts.length === 3);
+    expect(rpc.maxActiveReceipts).toBe(2);
+    expect(storage.savedMetrics).toHaveLength(0);
+
     rpc.resolveNext();
     await waitUntil(() => rpc.requestedReceipts.length === 4);
-    rpc.resolveNext();
+    rpc.resolveAll();
     await scanPromise;
 
-    expect(rpc.requestedReceipts).toEqual([txHash(0), txHash(1), txHash(2), txHash(3)]);
+    expect(rpc.requestedReceipts.slice().sort()).toEqual(
+      [txHash(0), txHash(1), txHash(2), txHash(3)].slice().sort(),
+    );
     expect(storage.savedMetrics).toHaveLength(1);
     expect(storage.savedMetrics[0]?.transactionCount).toBe(4);
     expect(storage.savedMetrics[0]?.blockTimeSeconds).toBe("2");
@@ -240,13 +242,14 @@ describe("scanOneBlock", () => {
       2,
     );
 
-    await waitUntil(() => rpc.pending.length === 1);
+    // Concurrency 2 → two receipts are in flight; failing either aborts the block.
+    await waitUntil(() => rpc.pending.length === 2);
     rpc.rejectNext(new Error("receipt failed"));
 
     await expect(scanPromise).rejects.toThrow("receipt failed");
     expect(storage.savedMetrics).toHaveLength(0);
     expect(storage.savedTransactions).toHaveLength(0);
-    expect(rpc.requestedReceipts).toEqual([txHash(0)]);
+    expect(rpc.requestedReceipts).toEqual([txHash(0), txHash(1)]);
   });
 });
 

@@ -73,7 +73,8 @@ const SPEC: CliSpec = {
     {
       flags: "--tx-receipt-concurrency <n>",
       description:
-        "Legacy setting accepted for compatibility; receipts are fetched sequentially.",
+        "Max concurrent eth_getTransactionReceipt requests per block. Higher values keep " +
+        "up with heavy blocks but spend more of the RPC rate-limit budget.",
       env: ["SCANNER_TX_RECEIPT_CONCURRENCY"],
       default: DEFAULT_TX_RECEIPT_CONCURRENCY.toString(),
     },
