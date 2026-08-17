@@ -1,7 +1,15 @@
-import { createWalletClient, type WalletArkivClient } from "@arkiv-network/sdk";
+import { createWalletClient, ExpirationTime, type WalletArkivClient } from "@arkiv-network/sdk";
+import { u64 } from "@arkiv-network/sdk/attr";
 import { defineChain, formatEther, http } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 import { BaseloadFaucetClient } from "./baseloadFaucet";
+import {
+  BaseloadRpcKeyPool,
+  bareRpcEndpoint,
+  maskKey,
+  type BaseloadRpcEndpoint,
+} from "./baseloadRpcKeys";
+import { RpcKeyRing, attachRpcKeyRing } from "./rpcKeyRing";
 import {
   BASELOAD_DERIVATION_PATH_PREFIX,
   EMPTY_BASELOAD_CONFIG,
@@ -121,9 +129,17 @@ export class BaseloadRuntime {
   private balancePollInFlight = false;
   private stopped = false;
   private readonly faucet: BaseloadFaucetClient | null;
+  private readonly rpcKeys: BaseloadRpcKeyPool | null;
+  private rpcKeyRing: RpcKeyRing | null = null;
 
   constructor(private readonly runtimeConfig: BaseloadRuntimeConfig) {
     this.faucet = runtimeConfig.faucet ? new BaseloadFaucetClient(runtimeConfig.faucet) : null;
+    this.rpcKeys = runtimeConfig.rpcKeys ? new BaseloadRpcKeyPool(runtimeConfig.rpcKeys) : null;
+    // Load the shared rotating pool in the background; workers fall back to the
+    // single configured key until it lands.
+    void attachRpcKeyRing({ setKeyRing: (ring) => { this.rpcKeyRing = ring; } }, "baseload").catch(
+      (error) => console.error(`[rpc-keys] baseload could not load the key pool: ${describeError(error)}`),
+    );
     if (runtimeConfig.rpcUrl) {
       this.scheduleBalancePoll(0);
     }
@@ -196,7 +212,15 @@ export class BaseloadRuntime {
           const updatedAt = new Date().toISOString();
           let balanceWei: bigint | null = null;
           try {
-            const result = await callRpc(rpcUrl, "eth_getBalance", [worker.walletAddress, "latest"]);
+            // Poll each wallet through that worker's own key, so the poller does
+            // not spend a shared key's rate-limit budget on behalf of the fleet.
+            const endpoint = await resolveRpcEndpoint(this.rpcKeys, rpcUrl, worker.id, this.rpcKeyRing);
+            const result = await callRpc(
+              endpoint,
+              "eth_getBalance",
+              [worker.walletAddress, "latest"],
+              this.rpcKeyRing,
+            );
             if (typeof result !== "string") {
               throw new Error("eth_getBalance returned a non-string result");
             }
@@ -266,9 +290,15 @@ export class BaseloadRuntime {
         this.tasks.delete(worker.id);
       }
 
-      const task = new BaseloadWorkerTask(worker, this.runtimeConfig, (status) => {
-        this.statuses.set(status.workerId, status);
-      });
+      const task = new BaseloadWorkerTask(
+        worker,
+        this.runtimeConfig,
+        (status) => {
+          this.statuses.set(status.workerId, status);
+        },
+        this.rpcKeys,
+        () => this.rpcKeyRing,
+      );
       this.tasks.set(worker.id, task);
       task.start();
     }
@@ -285,6 +315,8 @@ class BaseloadWorkerTask {
     worker: BaseloadWorkerConfig,
     private readonly runtimeConfig: BaseloadRuntimeConfig,
     private readonly onStatus: (status: BaseloadWorkerStatus) => void,
+    private readonly rpcKeys: BaseloadRpcKeyPool | null = null,
+    private readonly getKeyRing: () => RpcKeyRing | null = () => null,
   ) {
     this.worker = worker;
   }
@@ -367,18 +399,28 @@ class BaseloadWorkerTask {
             attemptsThisMinute = 0;
           }
 
+          // Minting is lazy and slow (the generator solves a captcha), so the
+          // first pass through the loop may sit here for a while; a failure
+          // surfaces as a worker error and is retried on the next pass.
+          const endpoint = await resolveRpcEndpoint(
+            this.rpcKeys,
+            this.runtimeConfig.rpcUrl,
+            worker.id,
+            this.rpcKeys ? null : this.getKeyRing(),
+          );
           const clientKey = JSON.stringify({
-            rpcUrl: this.runtimeConfig.rpcUrl,
+            rpcUrl: endpoint.url,
+            headers: endpoint.headers,
             mnemonic: this.runtimeConfig.mnemonic,
             payloadProvider: this.runtimeConfig.payloadProvider,
             walletNumber: worker.walletNumber,
           });
           if (cachedClients === null || cachedClients.key !== clientKey) {
-            const rpc = createRpcClient(this.runtimeConfig.rpcUrl);
+            const rpc = createRpcClient(endpoint, this.getKeyRing());
             const chainId = await rpc.getChainId();
             cachedClients = {
               key: clientKey,
-              arkiv: createArkivClient(worker, this.runtimeConfig, chainId),
+              arkiv: createArkivClient(worker, this.runtimeConfig, chainId, endpoint),
               rpc,
             };
           }
@@ -703,10 +745,33 @@ class BaseloadWorkerTask {
   }
 }
 
+/**
+ * The RPC endpoint a worker should use, in precedence order:
+ *
+ * 1. a rotating key ring (`RPC_KEY_POOL_FILE`) — one pool shared with the
+ *    scanner, drawn per call so monthly quota drains evenly across the keys;
+ * 2. a per-worker generated key from the Arkiv Hub generator;
+ * 3. the shared `BASELOAD_RPC_NODE` exactly as before.
+ */
+async function resolveRpcEndpoint(
+  pool: BaseloadRpcKeyPool | null,
+  rpcUrl: string,
+  workerId: string,
+  ring: RpcKeyRing | null = null,
+): Promise<BaseloadRpcEndpoint> {
+  if (ring) {
+    const key = ring.leaseFor(workerId);
+    if (key) return { url: rpcUrl, headers: { "x-api-key": key }, key };
+  }
+  if (!pool) return bareRpcEndpoint(rpcUrl);
+  return pool.endpointFor(rpcUrl, workerId);
+}
+
 function createArkivClient(
   worker: BaseloadWorkerConfig,
   runtimeConfig: BaseloadRuntimeConfig,
   chainId: number,
+  endpoint: BaseloadRpcEndpoint,
 ): WalletArkivClient {
   if (!runtimeConfig.rpcUrl) {
     throw new Error("BASELOAD_RPC_NODE is required");
@@ -726,21 +791,24 @@ function createArkivClient(
       symbol: "ETH",
     },
     rpcUrls: {
-      default: { http: [runtimeConfig.rpcUrl] },
+      default: { http: [endpoint.url] },
     },
   });
 
   return createWalletClient({
     chain,
-    transport: http(runtimeConfig.rpcUrl),
+    transport: http(endpoint.url, { fetchOptions: { headers: endpoint.headers } }),
     account,
   });
 }
 
-function createRpcClient(rpcUrl: string): BaseloadRpcClient {
+function createRpcClient(
+  endpoint: BaseloadRpcEndpoint,
+  ring: RpcKeyRing | null = null,
+): BaseloadRpcClient {
   return {
     getChainId: async () => {
-      const result = await callRpc(rpcUrl, "eth_chainId", []);
+      const result = await callRpc(endpoint, "eth_chainId", [], ring);
       if (typeof result !== "string") {
         throw new Error("RPC eth_chainId returned a non-string result");
       }
@@ -751,14 +819,14 @@ function createRpcClient(rpcUrl: string): BaseloadRpcClient {
       return Number(chainId);
     },
     getBlockNumber: async () => {
-      const result = await callRpc(rpcUrl, "eth_blockNumber", []);
+      const result = await callRpc(endpoint, "eth_blockNumber", [], ring);
       if (typeof result !== "string") {
         throw new Error("RPC eth_blockNumber returned a non-string result");
       }
       return Number(BigInt(result));
     },
     getLatestNonce: async (address) => {
-      const result = await callRpc(rpcUrl, "eth_getTransactionCount", [address, "latest"]);
+      const result = await callRpc(endpoint, "eth_getTransactionCount", [address, "latest"], ring);
       if (typeof result !== "string") {
         throw new Error("RPC eth_getTransactionCount returned a non-string result");
       }
@@ -770,7 +838,7 @@ function createRpcClient(rpcUrl: string): BaseloadRpcClient {
     },
     waitForTransactionReceipt: async (txHash, signal) => {
       while (!signal.aborted) {
-        const result = await callRpc(rpcUrl, "eth_getTransactionReceipt", [txHash]);
+        const result = await callRpc(endpoint, "eth_getTransactionReceipt", [txHash], ring);
         if (result !== null) {
           if (!isRecord(result)) {
             throw new Error(`RPC eth_getTransactionReceipt returned a non-object receipt for ${txHash}`);
@@ -872,10 +940,27 @@ async function mutateBaseloadEntities(
 
 const BLOCK_TIME_SECONDS = 2;
 
-// The SDK requires expiresIn to be a positive multiple of the 2s block time;
+// The SDK requires a lifetime to be a positive multiple of the 2s block time;
 // round odd TTLs (e.g. a time bomb's remaining seconds) up to the next block.
 function toBlockAlignedExpiresIn(expiresIn: number): number {
   return Math.max(BLOCK_TIME_SECONDS, Math.ceil(expiresIn / BLOCK_TIME_SECONDS) * BLOCK_TIME_SECONDS);
+}
+
+function toExpires(expiresIn: number) {
+  return ExpirationTime.fromSeconds(toBlockAlignedExpiresIn(expiresIn));
+}
+
+// Bare numbers default to i32 in SDK 0.8, which the baseload's 48-bit random
+// values overflow — tag every number as u64 to keep the old value range.
+function toAttributeInputs(
+  attributes: Array<{ key: string; value: string | number }>,
+): Record<string, string | ReturnType<typeof u64>> {
+  return Object.fromEntries(
+    attributes.map((attribute) => [
+      attribute.key,
+      typeof attribute.value === "number" ? u64(attribute.value) : attribute.value,
+    ]),
+  );
 }
 
 export function toSdkMutationParameters(parameters: BaseloadMutationParameters): unknown {
@@ -890,32 +975,41 @@ export function toSdkMutationParameters(parameters: BaseloadMutationParameters):
   const extensions = [
     ...updates.map((input) => ({
       entityKey: input.entityKey,
-      expiresIn: toBlockAlignedExpiresIn(input.expiresIn) + BLOCK_TIME_SECONDS,
+      expires: ExpirationTime.fromSeconds(
+        toBlockAlignedExpiresIn(input.expiresIn) + BLOCK_TIME_SECONDS,
+      ),
     })),
     ...(parameters.extensions ?? []).map((extension) => ({
-      ...extension,
-      expiresIn: toBlockAlignedExpiresIn(extension.expiresIn),
+      entityKey: extension.entityKey,
+      expires: toExpires(extension.expiresIn),
     })),
   ];
   return {
-    ...parameters,
     ...(parameters.creates
       ? {
           creates: parameters.creates.map((input) => ({
-            ...input,
-            expiresIn: toBlockAlignedExpiresIn(input.expiresIn),
+            payload: input.payload,
+            contentType: input.contentType,
+            attributes: toAttributeInputs(input.attributes),
+            expires: toExpires(input.expiresIn),
           })),
         }
       : {}),
     ...(updates.length
       ? {
-          updates: updates.map((input) => ({
-            ...input,
-            expiresIn: toBlockAlignedExpiresIn(input.expiresIn),
+          // SDK 0.8 replaced whole-entity updates with patches; `set` overwrites
+          // the named attributes and the payload replaces the entity's contents.
+          patches: updates.map((input) => ({
+            entityKey: input.entityKey,
+            payload: input.payload,
+            contentType: input.contentType,
+            set: toAttributeInputs(input.attributes),
           })),
         }
       : {}),
-    ...(extensions.length || parameters.extensions ? { extensions } : {}),
+    ...(parameters.deletes ? { deletes: parameters.deletes } : {}),
+    ...(extensions.length ? { extensions } : {}),
+    ...(parameters.ownershipChanges ? { ownershipChanges: parameters.ownershipChanges } : {}),
   };
 }
 
@@ -926,7 +1020,11 @@ function normalizeBaseloadMutationResult(result: unknown): BaseloadMutationResul
   return {
     txHash: result.txHash,
     createdEntities: readOptionalEntityKeyArray(result.createdEntities, "createdEntities", result.txHash),
-    updatedEntities: readOptionalEntityKeyArray(result.updatedEntities, "updatedEntities", result.txHash),
+    updatedEntities: readOptionalEntityKeyArray(
+      result.patchedEntities ?? result.updatedEntities,
+      "patchedEntities",
+      result.txHash,
+    ),
     deletedEntities: readOptionalEntityKeyArray(result.deletedEntities, "deletedEntities", result.txHash),
     extendedEntities: readOptionalEntityKeyArray(result.extendedEntities, "extendedEntities", result.txHash),
     ownershipChanges: readOptionalEntityKeyArray(result.ownershipChanges, "ownershipChanges", result.txHash),
@@ -973,24 +1071,36 @@ function lastEntityKey(entityKeys: readonly HexString[]): HexString {
   return entityKey;
 }
 
-async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
+async function callRpc(
+  endpoint: BaseloadRpcEndpoint,
+  method: string,
+  params: unknown[],
+  ring: RpcKeyRing | null = null,
+): Promise<unknown> {
+  // Worker statuses are served over HTTP, so never let a key reach an error message.
+  const target = describeRpcTarget(endpoint.url);
   let response: Response;
   try {
-    response = await fetch(rpcUrl, {
+    response = await fetch(endpoint.url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...endpoint.headers },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });
   } catch (error) {
     throw new Error(
-      `RPC ${method} request to ${rpcUrl} failed before any response: ${describeError(error)}`,
+      `RPC ${method} request to ${target} failed before any response: ${describeError(error)}`,
       { cause: error },
     );
   }
   const text = await response.text();
+  // Report before throwing: a QUOTA_EXCEEDED body is exactly the signal that
+  // must retire this key, and it arrives on a non-ok response.
+  if (ring && endpoint.key) {
+    ring.noteResponse(endpoint.key, response.status, response.headers, text);
+  }
   if (!response.ok) {
     throw new Error(
-      `RPC ${method} at ${rpcUrl} failed with HTTP ${response.status} ${response.statusText}: ${text}`,
+      `RPC ${method} at ${target} failed with HTTP ${response.status} ${response.statusText}: ${text}`,
     );
   }
 
@@ -998,16 +1108,21 @@ async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promi
   try {
     body = JSON.parse(text) as typeof body;
   } catch {
-    throw new Error(`RPC ${method} at ${rpcUrl} returned non-JSON body: ${text}`);
+    throw new Error(`RPC ${method} at ${target} returned non-JSON body: ${text}`);
   }
   if (body.error) {
     const code = typeof body.error.code === "number" ? ` (code ${body.error.code})` : "";
     const data = body.error.data === undefined ? "" : ` data=${JSON.stringify(body.error.data)}`;
     throw new Error(
-      `RPC ${method} at ${rpcUrl} failed: ${body.error.message ?? JSON.stringify(body.error)}${code}${data}`,
+      `RPC ${method} at ${target} failed: ${body.error.message ?? JSON.stringify(body.error)}${code}${data}`,
     );
   }
   return body.result;
+}
+
+/** Renders an RPC URL for logs, masking a key carried as the last path segment. */
+export function describeRpcTarget(rpcUrl: string): string {
+  return rpcUrl.replace(/ark_live_[A-Za-z0-9_-]+/g, (key) => maskKey(key));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

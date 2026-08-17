@@ -40,7 +40,15 @@ export interface BaseloadWorkerDraft {
 export const BASELOAD_CONFIG_VERSION = 2;
 export const MIN_WALLET_NUMBER = 0;
 export const MAX_WALLET_NUMBER = 100;
-export const MAX_BASELOAD_ENTITIES_PER_REQUEST = 1;
+// One transaction may carry several entity operations. Raising this is the lever
+// for pushing gas and bytes per *RPC call*, which matters because the bouncer
+// meters calls per second per IP, not work per call: 6 workers on 1 entity/call
+// filled only ~8M of the 36M block gas limit.
+//
+// The engine caps a transaction at ~128KiB including calldata overhead, so keep
+// entitiesPerRequest x singleCreatePayloadSize under ~100KB; above that every
+// worker fails with "Execution error without revert data".
+export const MAX_BASELOAD_ENTITIES_PER_REQUEST = 64;
 
 export const DEFAULT_BASELOAD_WORKER_VALUES = {
   behavior: "create" as BaseloadWorkerBehavior,

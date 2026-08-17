@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ExpirationTime } from "@arkiv-network/sdk";
 import {
   isBaseloadTransactionReceiptSuccessful,
   readBaseloadCreatedEntityKeyFromSdkResult,
@@ -74,16 +75,16 @@ describe("baseload runtime receipt handling", () => {
 function updateInput(entityKey: `0x${string}`, expiresIn: number) {
   return {
     entityKey,
-    btl: 1,
-    data: new Uint8Array([1]),
+    payload: new Uint8Array([1]),
+    contentType: "application/octet-stream",
+    attributes: [],
     expiresIn,
-    annotations: [],
   } as unknown as NonNullable<BaseloadMutationParameters["updates"]>[number];
 }
 
-function sdkExtensions(parameters: BaseloadMutationParameters): Array<{ entityKey: string; expiresIn: number }> {
+function sdkExtensions(parameters: BaseloadMutationParameters): Array<{ entityKey: string; expires: unknown }> {
   const sdk = toSdkMutationParameters(parameters) as {
-    extensions?: Array<{ entityKey: string; expiresIn: number }>;
+    extensions?: Array<{ entityKey: string; expires: unknown }>;
   };
   return sdk.extensions ?? [];
 }
@@ -94,19 +95,19 @@ describe("baseload SDK mutation parameters", () => {
     // last set the expiry would compute the same value and revert the batch with
     // ExpiryNotExtended, so the batched extension must clear it by a block.
     expect(sdkExtensions({ updates: [updateInput(ENTITY_KEY, 60)] })).toEqual([
-      { entityKey: ENTITY_KEY, expiresIn: 62 },
+      { entityKey: ENTITY_KEY, expires: ExpirationTime.fromSeconds(62) },
     ]);
   });
 
   test("keeps update-derived extensions aligned to the 2s block time", () => {
     expect(sdkExtensions({ updates: [updateInput(ENTITY_KEY, 61)] })).toEqual([
-      { entityKey: ENTITY_KEY, expiresIn: 64 },
+      { entityKey: ENTITY_KEY, expires: ExpirationTime.fromSeconds(64) },
     ]);
   });
 
   test("leaves explicitly requested extensions at their aligned TTL", () => {
     expect(sdkExtensions({ extensions: [{ entityKey: SECOND_ENTITY_KEY, expiresIn: 61 }] })).toEqual([
-      { entityKey: SECOND_ENTITY_KEY, expiresIn: 62 },
+      { entityKey: SECOND_ENTITY_KEY, expires: ExpirationTime.fromSeconds(62) },
     ]);
   });
 
@@ -114,8 +115,24 @@ describe("baseload SDK mutation parameters", () => {
     expect(
       sdkExtensions({ updates: [updateInput(ENTITY_KEY, 60), updateInput(SECOND_ENTITY_KEY, 60)] }),
     ).toEqual([
-      { entityKey: ENTITY_KEY, expiresIn: 62 },
-      { entityKey: SECOND_ENTITY_KEY, expiresIn: 62 },
+      { entityKey: ENTITY_KEY, expires: ExpirationTime.fromSeconds(62) },
+      { entityKey: SECOND_ENTITY_KEY, expires: ExpirationTime.fromSeconds(62) },
+    ]);
+  });
+
+  test("maps updates onto SDK patches that replace payload and set attributes", () => {
+    const sdk = toSdkMutationParameters({ updates: [updateInput(ENTITY_KEY, 60)] }) as {
+      patches?: Array<Record<string, unknown>>;
+      updates?: unknown;
+    };
+    expect(sdk.updates).toBeUndefined();
+    expect(sdk.patches).toEqual([
+      {
+        entityKey: ENTITY_KEY,
+        payload: new Uint8Array([1]),
+        contentType: "application/octet-stream",
+        set: {},
+      },
     ]);
   });
 });

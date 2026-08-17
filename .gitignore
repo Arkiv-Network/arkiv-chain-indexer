@@ -14,3 +14,9 @@ bun.lock
 /*.png
 /baseload-config/*
 !/baseload-config/.gitkeep
+rpc-keys/
+
+# Local secrets and scratch — never publish
+cheesecake-rpc-keys.md
+.env.bak.*
+__pycache__/

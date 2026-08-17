@@ -4,6 +4,10 @@ import {
   parseBaseloadFaucetRuntimeConfig,
   type BaseloadFaucetRuntimeConfig,
 } from "./baseloadFaucet";
+import {
+  parseBaseloadRpcKeyRuntimeConfig,
+  type BaseloadRpcKeyRuntimeConfig,
+} from "./baseloadRpcKeys";
 
 export const BASELOAD_WORKER_BEHAVIORS = [
   "create",
@@ -61,6 +65,8 @@ export interface BaseloadRuntimeConfig {
   mnemonic: string;
   payloadProvider?: BaseloadPayloadProviderRuntimeConfig | null;
   faucet?: BaseloadFaucetRuntimeConfig | null;
+  /** When set, every worker gets its own generated RPC key instead of sharing one. */
+  rpcKeys?: BaseloadRpcKeyRuntimeConfig | null;
 }
 
 export interface BaseloadPayloadProviderRuntimeConfig {
@@ -73,7 +79,15 @@ export interface BaseloadPayloadProviderRuntimeConfig {
 export const BASELOAD_CONFIG_VERSION = 2;
 export const MIN_WALLET_NUMBER = 0;
 export const MAX_WALLET_NUMBER = 100;
-export const MAX_BASELOAD_ENTITIES_PER_REQUEST = 1;
+// One transaction may carry several entity operations. Raising this is the lever
+// for pushing gas and bytes per *RPC call*, which matters because the bouncer
+// meters calls per second per IP, not work per call: 6 workers on 1 entity/call
+// filled only ~8M of the 36M block gas limit.
+//
+// The engine caps a transaction at ~128KiB including calldata overhead, so keep
+// entitiesPerRequest x singleCreatePayloadSize under ~100KB; above that every
+// worker fails with "Execution error without revert data".
+export const MAX_BASELOAD_ENTITIES_PER_REQUEST = 64;
 export const BASELOAD_DERIVATION_PATH_PREFIX = "m/44'/60'/0'/0";
 export const DEFAULT_BASELOAD_PAYLOAD_PROVIDER_NAMESPACE = "arkiv.entities";
 export const DEFAULT_BASELOAD_MNEMONIC =
@@ -105,7 +119,8 @@ export function parseBaseloadRuntimeConfig(env: NodeJS.ProcessEnv = process.env)
   const mnemonic = env.BASELOAD_MNEMONIC?.trim() || env.MNEMONIC?.trim() || DEFAULT_BASELOAD_MNEMONIC;
   const payloadProvider = parseBaseloadPayloadProviderRuntimeConfig(env);
   const faucet = parseBaseloadFaucetRuntimeConfig(env);
-  return { rpcUrl, mnemonic, payloadProvider, faucet };
+  const rpcKeys = parseBaseloadRpcKeyRuntimeConfig(env);
+  return { rpcUrl, mnemonic, payloadProvider, faucet, rpcKeys };
 }
 
 function parseBaseloadPayloadProviderRuntimeConfig(

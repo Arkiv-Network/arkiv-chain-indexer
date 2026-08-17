@@ -18,15 +18,21 @@ import {
   randomOwnerAddress,
   type BaseloadPoolEntry,
 } from "./baseloadTaskHelpers";
-import { type BaseloadWorkerConfig } from "./baseloadConfig";
+import {
+  MAX_BASELOAD_ENTITIES_PER_REQUEST,
+  type BaseloadWorkerConfig,
+} from "./baseloadConfig";
 
 describe("baseload task helpers", () => {
   test("uses whole minute attempt budgets without fractional carryover", () => {
     expect(getMinuteAttemptLimit(3)).toBe(3);
     expect(getMinuteAttemptLimit(2.75)).toBe(2);
     expect(getMinuteAttemptLimit(0.5)).toBe(0);
-    expect(getEntitiesPerRequestLimit(3)).toBe(1);
-    expect(getEntitiesPerRequestLimit(2.75)).toBe(1);
+    expect(getEntitiesPerRequestLimit(3)).toBe(3);
+    expect(getEntitiesPerRequestLimit(0)).toBe(1);
+    // Clamped at the cap: one transaction still has to fit the engine's ~128KiB.
+    expect(getEntitiesPerRequestLimit(1000)).toBe(MAX_BASELOAD_ENTITIES_PER_REQUEST);
+    expect(getEntitiesPerRequestLimit(2.75)).toBe(2);
     expect(getEntitiesPerRequestLimit(0)).toBe(1);
     expect(getMillisecondsUntilNextMinute(1_000, 31_000)).toBe(30_000);
     expect(getMillisecondsUntilNextMinute(1_000, 61_000)).toBe(0);

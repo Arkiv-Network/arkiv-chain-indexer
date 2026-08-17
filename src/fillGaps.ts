@@ -8,6 +8,7 @@ import {
 } from "./cli";
 import { ArkivDecoderClient } from "./arkivOperations";
 import { EthereumRpcClient } from "./rpc";
+import { attachRpcKeyRing } from "./rpcKeyRing";
 import { scanOneBlock } from "./scanner";
 import { ScannerStorage, type BlockGap } from "./storage";
 
@@ -261,6 +262,7 @@ async function main(): Promise<void> {
   try {
     const config = parseConfig(process.argv.slice(2));
     const rpc = new EthereumRpcClient(config.rpcUrl);
+    await attachRpcKeyRing(rpc, "gap-filler");
     // Probe the chain id once so the decoder verifies payload references against
     // the right trusted-signer allowlist; fall back to the decoder default and
     // warn on failure. Only probed when decoding is enabled.

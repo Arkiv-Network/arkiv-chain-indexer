@@ -44,6 +44,26 @@ services:
       # TRUSTED_PROVIDER_SIGNERS: ${TRUSTED_PROVIDER_SIGNERS:-}
     restart: unless-stopped
 
+  # Arkiv-Network/api-key-generator: mints Arkiv Hub devnet API keys on demand by
+  # driving the Hub's SIWE login + Cap.js captcha in a headless Chromium. Baseload
+  # calls it once per worker so each worker hammers the RPC on its own key (and so
+  # its own rate-limit bucket) instead of the whole fleet sharing one.
+  #
+  # It carries a browser, so it only starts when asked for: put
+  # COMPOSE_PROFILES=rpc-keys in .env (alongside BASELOAD_RPC_KEY_SERVICE_URL).
+  arkiv-keys:
+    image: ${ARKIV_KEY_GENERATOR_IMAGE:-ghcr.io/arkiv-network/api-key-generator:latest}
+    profiles: ["rpc-keys"]
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   scanner:
     build:
       context: .
@@ -64,6 +84,9 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
       SCANNER_RPC_API_KEY: ${SCANNER_RPC_API_KEY:-}
+      # Rotating key pool (see scripts/provisionRpcKeys.ts). Overrides the single
+      # key above when the file holds more than one key.
+      RPC_KEY_POOL_FILE: ${RPC_KEY_POOL_FILE:-}
       DECODER_URL: ${DECODER_URL-http://decoder:28884}
       # The scanner container only ever scans forward from the safe head.
       SCANNER_DISABLE_BACKFILL: true
@@ -73,6 +96,8 @@ services:
       # Legacy no-op: receipts are fetched sequentially (see README).
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+    volumes:
+      - ${RPC_KEY_DIR:-./rpc-keys}:/app/rpc-keys:ro
     extra_hosts: *extra-hosts
     command: ["bun", "run", "scan"]
 
@@ -93,6 +118,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
       SCANNER_RPC_API_KEY: ${SCANNER_RPC_API_KEY:-}
+      # Rotating key pool (see scripts/provisionRpcKeys.ts). Overrides the single
+      # key above when the file holds more than one key.
+      RPC_KEY_POOL_FILE: ${RPC_KEY_POOL_FILE:-}
       DECODER_URL: ${DECODER_URL-http://decoder:28884}
       SCANNER_BACKFILL_ONLY: "true"
       # Master switch: when true (the default) this container idles and does no
@@ -106,6 +134,8 @@ services:
       # Legacy no-op: receipts are fetched sequentially (see README).
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+    volumes:
+      - ${RPC_KEY_DIR:-./rpc-keys}:/app/rpc-keys:ro
     extra_hosts: *extra-hosts
     command: ["bun", "run", "scan"]
 
@@ -186,6 +216,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
       SCANNER_RPC_FULL_NODE: ${SCANNER_RPC_FULL_NODE}
       SCANNER_RPC_API_KEY: ${SCANNER_RPC_API_KEY:-}
+      # Rotating key pool (see scripts/provisionRpcKeys.ts). Overrides the single
+      # key above when the file holds more than one key.
+      RPC_KEY_POOL_FILE: ${RPC_KEY_POOL_FILE:-}
       DECODER_URL: ${DECODER_URL-http://decoder:28884}
       GAP_FILL_INTERVAL_MS: ${GAP_FILL_INTERVAL_MS:-60000}
       GAP_FILL_MAX_BLOCKS_PER_CYCLE: ${GAP_FILL_MAX_BLOCKS_PER_CYCLE:-500}
@@ -195,6 +228,8 @@ services:
       # Legacy no-op: receipts are fetched sequentially (see README).
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+    volumes:
+      - ${RPC_KEY_DIR:-./rpc-keys}:/app/rpc-keys:ro
     extra_hosts: *extra-hosts
     command: ["bun", "run", "fill-gaps"]
 
@@ -227,6 +262,15 @@ services:
       BASELOAD_FAUCET_MAX_BALANCE: ${BASELOAD_FAUCET_MAX_BALANCE:-}
       BASELOAD_FAUCET_DRIP_AMOUNT: ${BASELOAD_FAUCET_DRIP_AMOUNT:-}
       BASELOAD_FAUCET_COOLDOWN_SECONDS: ${BASELOAD_FAUCET_COOLDOWN_SECONDS:-}
+      # Per-worker RPC keys. Empty (the default) keeps every worker on the single
+      # key baked into BASELOAD_RPC_NODE.
+      BASELOAD_RPC_KEY_SERVICE_URL: ${BASELOAD_RPC_KEY_SERVICE_URL:-}
+      BASELOAD_RPC_KEY_PLACEMENT: ${BASELOAD_RPC_KEY_PLACEMENT:-}
+      BASELOAD_RPC_KEY_HEADER: ${BASELOAD_RPC_KEY_HEADER:-}
+      BASELOAD_RPC_KEY_NAME_PREFIX: ${BASELOAD_RPC_KEY_NAME_PREFIX:-}
+      BASELOAD_RPC_KEY_STORE: ${BASELOAD_RPC_KEY_STORE:-/app/baseload-keys/rpc-keys.json}
+      BASELOAD_RPC_KEY_TIMEOUT_SECONDS: ${BASELOAD_RPC_KEY_TIMEOUT_SECONDS:-}
+      RPC_KEY_POOL_FILE: ${RPC_KEY_POOL_FILE:-}
       ARKIV_PROTOCOL_SCHEDULE_URL: ${ARKIV_PROTOCOL_SCHEDULE_URL:-}
       ARKIV_PROTOCOL_SCHEDULE_PATH: ${ARKIV_PROTOCOL_SCHEDULE_PATH:-}
       PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: ${PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS:-}
@@ -234,6 +278,10 @@ services:
       - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
     volumes:
       - ${BASELOAD_CONFIG_DIR:-./baseload-config}:/app/baseload-config:ro
+      # baseload-config is read-only, so minted keys get their own writable volume;
+      # keeping it across restarts saves a captcha solve per worker.
+      - baseloadkeys:/app/baseload-keys
+      - ${RPC_KEY_DIR:-./rpc-keys}:/app/rpc-keys:ro
     extra_hosts: *extra-hosts
     command: ["bun", "run", "serve"]
     healthcheck:
@@ -277,3 +325,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  baseloadkeys:

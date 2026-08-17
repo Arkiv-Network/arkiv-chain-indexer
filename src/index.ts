@@ -4,6 +4,7 @@ import { HttpBatcherCollector } from "./batcher";
 import { GuzzlerService } from "./guzzlerService";
 import { RedisGuzzlerStore } from "./guzzlerStore";
 import { EthereumRpcClient } from "./rpc";
+import { attachRpcKeyRing } from "./rpcKeyRing";
 import { runScanner } from "./scanner";
 import { ScannerStorage } from "./storage";
 
@@ -14,6 +15,7 @@ async function main(): Promise<void> {
   try {
     const config = parseConfig(process.argv.slice(2));
     const rpc = new EthereumRpcClient(config.rpcUrl);
+    await attachRpcKeyRing(rpc, "scanner");
     const batcherCollector = config.batcherCollectorUrl
       ? new HttpBatcherCollector(config.batcherCollectorUrl)
       : undefined;

@@ -228,6 +228,41 @@ Backend configuration:
 | `BASELOAD_FAUCET_COOLDOWN_SECONDS` | `60` | Minimum gap between two drips for the same wallet. |
 | `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token required for mutating Baseload worker configuration requests. Readonly requests stay public. |
 | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional container path to a Baseload worker config JSON file that the backend loads once at startup. |
+| `BASELOAD_RPC_KEY_SERVICE_URL` | unset | Base URL of an [api-key-generator](https://github.com/Arkiv-Network/api-key-generator) instance. Setting it gives every worker its own generated RPC key instead of the one shared key in `BASELOAD_RPC_NODE`. |
+| `BASELOAD_RPC_KEY_PLACEMENT` | `bearer` | How a key is attached: `bearer` (`Authorization: Bearer <key>`), `header` (see below), or `path` (key as the last URL segment). |
+| `BASELOAD_RPC_KEY_HEADER` | `X-Api-Key` | Header name used when the placement is `header`. |
+| `BASELOAD_RPC_KEY_NAME_PREFIX` | `baseload` | Keys are requested from the generator as `<prefix>_<worker id>`. |
+| `BASELOAD_RPC_KEY_STORE` | `baseload-keys/rpc-keys.json` | JSON file the minted keys are cached in. Compose points this at a writable volume so a restart reuses keys. |
+| `BASELOAD_RPC_KEY_TIMEOUT_SECONDS` | `180` | Budget for one mint. Minting solves a captcha proof-of-work, so it is slow. |
+
+### Per-worker RPC keys
+
+A single API key is rate-limited as one bucket, and that bucket — not the chain — is the first thing to refuse
+traffic as the worker count grows (on a bouncer-fronted devnet, ~7 workers on one key is enough to draw steady
+HTTP 429s on `eth_getTransactionCount`/`eth_blockNumber`). Pointing `BASELOAD_RPC_KEY_SERVICE_URL` at an
+[api-key-generator](https://github.com/Arkiv-Network/api-key-generator) instance gives each worker its own key,
+so the limit scales with the fleet:
+
+```sh
+# .env
+COMPOSE_PROFILES=rpc-keys
+BASELOAD_RPC_KEY_SERVICE_URL=http://arkiv-keys:8787
+# No key in the URL any more — each worker brings its own.
+BASELOAD_RPC_NODE=https://braga.hoodi.arkiv.network/rpc
+```
+
+The `arkiv-keys` Compose service runs the generator image. It sits behind the `rpc-keys` profile because it
+carries a headless Chromium, so it only starts when `COMPOSE_PROFILES` asks for it.
+
+Keys are minted lazily on a worker's first RPC call, one at a time (the generator shares a single browser across
+requests), and written to `BASELOAD_RPC_KEY_STORE` on the `baseloadkeys` volume so a restart does not pay for the
+captcha again. A mint failure surfaces as a worker error and is retried on the next pass; the other workers keep
+running on the keys they already hold.
+
+The generator mints **Arkiv Hub** keys (`devnet.hub.arkiv.network`), one per freshly generated wallet. A
+per-network bouncer such as `rpc.<network>.db-chain.devnet.gobas.me` keeps its own key store and answers Hub keys
+with HTTP 401 — for those networks mint keys through the network's `rpc-control` endpoint instead and set
+`BASELOAD_RPC_KEY_PLACEMENT=header` or `path` to match.
 
 ### Initial Baseload config with Docker Compose
 
