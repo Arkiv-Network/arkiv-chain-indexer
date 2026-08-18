@@ -4877,3 +4877,155 @@ a.home-feed-item:hover {
 .cedric-page-art > .cedric.is-peeking {
   transform: translateX(-50%) translateY(0);
 }
+
+/* ── Scanner sync banner ─────────────────────────────────────────────────── */
+
+.sync-banner {
+  --sync-accent: var(--muted);
+  border-bottom: 1px solid var(--border);
+  border-left: 4px solid var(--sync-accent);
+  background: color-mix(in oklab, var(--sync-accent) 10%, var(--bg));
+  color: var(--fg);
+}
+
+.sync-banner-info {
+  --sync-accent: var(--accent);
+}
+
+.sync-banner-warn {
+  --sync-accent: var(--op-amber);
+}
+
+.sync-banner-danger {
+  --sync-accent: var(--op-red);
+}
+
+.sync-banner-ok {
+  --sync-accent: var(--ok);
+}
+
+.sync-banner-main {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0.6rem 1.5rem;
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.sync-banner-badge {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  background: color-mix(in oklab, var(--sync-accent) 22%, transparent);
+  color: var(--sync-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sync-banner-text {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.sync-banner-detail {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.sync-banner-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0.25rem 0.6rem;
+  background: transparent;
+  color: var(--fg);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.sync-banner-toggle:hover {
+  border-color: var(--line-strong);
+}
+
+.sync-details {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 1.5rem 0.85rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.35rem 1.25rem;
+  font-size: 0.85rem;
+}
+
+.sync-detail {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px dotted var(--border);
+  padding-bottom: 0.2rem;
+}
+
+.sync-detail-label {
+  color: var(--muted);
+}
+
+.sync-detail-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.sync-panel {
+  margin-bottom: 1rem;
+  border-left: 4px solid var(--sync-accent, var(--border));
+  background: color-mix(in oklab, var(--sync-accent, var(--bg)) 8%, var(--bg));
+}
+
+.sync-panel-heading {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.sync-panel-heading h3 {
+  margin: 0;
+}
+
+.sync-panel-headline {
+  margin: 0 0 0.2rem;
+  font-weight: 600;
+}
+
+.sync-panel-detail {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sync-panel .sync-details {
+  padding: 0;
+}
+
+@media (max-width: 720px) {
+  .sync-banner-main {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 0.6rem 1rem;
+  }
+
+  .sync-details {
+    padding: 0 1rem 0.85rem;
+  }
+}

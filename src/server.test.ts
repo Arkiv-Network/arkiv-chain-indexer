@@ -17,6 +17,7 @@ import {
   type HealthResponseBody,
   type RangesResponseBody,
   type SendersResponseBody,
+  type SyncStatusResponseBody,
   type TransactionByHashResponseBody,
   type TransactionRecordsResponseBody,
   type TransactionsResponseBody,
@@ -33,6 +34,7 @@ import {
   hasPostgresForTests,
 } from "./testPostgres";
 import type { BlockMetrics } from "./types";
+import type { ScanSample } from "./syncStatus";
 
 const RANGE_SIZE = DEFAULT_RANGE_SIZE;
 const TEST_MNEMONIC = "test test test test test test test test test test test junk";
@@ -1210,6 +1212,7 @@ describe("GET /health", () => {
         safeHeadBlock: 107n,
         latestObservedAt: "2024-01-01T00:00:10.000Z",
       }),
+      getForwardScanSamples: async () => [],
       getDatabaseStats: async () => ({
         totalSizeBytes: "65536",
         tables: [
@@ -1238,6 +1241,8 @@ describe("GET /health", () => {
     expect(body.scanner.safeHeadLagBlocks).toBe("7");
     expect(body.scanner.lastBlockAgeSeconds).toBeGreaterThanOrEqual(0);
     expect(body.features.transactionData).toBe(true);
+    expect(body.sync.lagBlocks).toBe("10");
+    expect(body.sync.state).toBe("stalled");
     expect(body.database.totalSizeBytes).toBe("65536");
     expect(body.database.tables[0]).toEqual({
       tableName: "blocks",
@@ -1251,6 +1256,7 @@ describe("GET /health", () => {
   test("reports disabled transaction data feature", async () => {
     const storage = {
       getScannerProgress: async () => ({}),
+      getForwardScanSamples: async () => [],
       getDatabaseStats: async () => ({
         totalSizeBytes: "0",
         tables: [],
@@ -1266,6 +1272,64 @@ describe("GET /health", () => {
 
     expect(response.status).toBe(200);
     expect(body.features.transactionData).toBe(false);
+  });
+});
+
+describe("GET /sync", () => {
+  /** Storage double serving a scanner that trails the head but is closing in. */
+  function catchingUpStorage(now: Date): ScannerStorage {
+    const samples: ScanSample[] = [];
+    for (let index = 100; index >= 0; index -= 1) {
+      samples.push({
+        blockNumber: BigInt(1000 - index),
+        // Chain block time 2s; the scanner stores 10 blocks per second.
+        blockDate: new Date(now.getTime() - 100_000 - index * 2000).toISOString(),
+        scannedAtUtc: new Date(now.getTime() - index * 100).toISOString(),
+      });
+    }
+    return {
+      getScannerProgress: async () => ({
+        lastSuccessfulBlock: 1000n,
+        lastSuccessfulBlockDate: new Date(now.getTime() - 100_000).toISOString(),
+        lastSuccessfulScannedAt: now.toISOString(),
+        latestObservedBlock: 1050n,
+        safeHeadBlock: 1047n,
+        latestObservedAt: now.toISOString(),
+      }),
+      getForwardScanSamples: async () => samples,
+    } as unknown as ScannerStorage;
+  }
+
+  test("reports lag, throughput, and an ETA", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/sync"),
+      catchingUpStorage(new Date()),
+    );
+    const body = (await response.json()) as SyncStatusResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.sync.state).toBe("catching-up");
+    expect(body.sync.lagBlocks).toBe("50");
+    expect(body.sync.scanBlocksPerSecond).toBeCloseTo(10, 3);
+    expect(body.sync.chainBlockTimeSeconds).toBeCloseTo(2, 3);
+    expect(body.sync.speedupFactor).toBeCloseTo(20, 3);
+    expect(body.sync.etaSeconds).toBeCloseTo(50 / 9.5, 2);
+    expect(body.sync.etaUtc).toMatch(/Z$/);
+    expect(body.sync.summary).toContain("catching up");
+  });
+
+  test("is unknown for an empty database", async () => {
+    const storage = {
+      getScannerProgress: async () => ({}),
+      getForwardScanSamples: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(new Request("http://example.test/sync"), storage);
+    const body = (await response.json()) as SyncStatusResponseBody;
+
+    expect(body.sync.state).toBe("unknown");
+    expect(body.sync.lagBlocks).toBeNull();
   });
 });
 

@@ -665,6 +665,63 @@ Example:
 curl 'http://localhost:3000/ranges?rangeSize=50&rangeStartGt=245500&rangeStartLt=245700'
 ```
 
+### `GET /sync`
+
+Reports how far the forward scanner trails the chain head, whether the gap is closing, and when the scanner is
+expected to catch up. `GET /health` embeds the identical object under `sync`; this endpoint skips the per-table
+database statistics so the frontend can poll it every few seconds.
+
+```json
+{
+  "ok": true,
+  "serverTimeUtc": "2026-08-18T12:48:48.910Z",
+  "sync": {
+    "state": "catching-up",
+    "summary": "Scanner is 598 blocks (19m 58s) behind and catching up at 10.92x chain speed; synced in ~2m 1s",
+    "lastSuccessfulBlock": "217867",
+    "lastSuccessfulBlockDate": "2026-08-18T12:28:51.000Z",
+    "latestObservedBlock": "218296",
+    "latestObservedAtUtc": "2026-08-18T12:43:09.944Z",
+    "headObservationAgeSeconds": 338.966,
+    "headObservationStale": true,
+    "estimatedHeadBlock": "218465",
+    "observedLagBlocks": "429",
+    "lagBlocks": "598",
+    "lagSeconds": 1197.91,
+    "chainBlockTimeSeconds": 2,
+    "chainBlocksPerSecond": 0.5,
+    "scanBlocksPerSecond": 5.46,
+    "speedupFactor": 10.92,
+    "netCatchUpBlocksPerSecond": 4.96,
+    "etaSeconds": 120.55,
+    "etaUtc": "2026-08-18T12:50:49.456Z",
+    "measuredWindowSeconds": 109.692,
+    "measuredBlocks": 599
+  }
+}
+```
+
+`state` is one of:
+
+| State | Meaning |
+| --- | --- |
+| `synced` | At the chain head (5 blocks or fewer behind). |
+| `catching-up` | Behind, but scanning faster than the chain produces blocks; `etaSeconds` estimates the catch-up time. |
+| `holding` | Behind and matching chain speed, so the gap is steady and there is no ETA. |
+| `falling-behind` | Behind and scanning slower than the chain; the gap grows and there is no ETA. |
+| `stalled` | Behind and nothing has been stored for over two minutes. |
+| `unknown` | Not enough stored blocks or head observations to measure progress yet. |
+
+Notes on how the numbers are derived:
+
+- Scan and chain rates are measured over the run of blocks at the scan tip (up to 600 blocks), skipping blocks the
+  backfill scanner wrote, since those move downward and would invent forward progress. The measurement window
+  extends to *now*, so an idle scanner's rate decays instead of freezing at its last burst speed.
+- The forward scanner only re-reads the chain head once per scan loop, so `latestObservedBlock` can be minutes old
+  during a long catch-up (`headObservationStale` flags that). `estimatedHeadBlock` extrapolates it to now using the
+  measured block time, and `lagBlocks` is measured against that estimate; `observedLagBlocks` uses the raw
+  observation.
+
 ### Server configuration
 
 | CLI flag | Environment variable | Default | Description |
@@ -699,6 +756,14 @@ are hidden:
 - **Transactions** — stored transaction query table for exact block, block range, and date range inspection.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
 - **Charts** — interactive historical chart view with links from selected block points into Transactions.
+
+Every page carries a **scanner sync banner** above the content whenever the indexer trails the chain head. It
+polls `GET /sync` every 10 seconds and states how far behind the scanner is (in blocks and in chain time),
+whether the gap is closing, at what multiple of chain speed it is scanning, and the estimated time to be in
+sync. "Details" expands the full measurement — last stored block, estimated and last observed chain head, scan
+and chain rates, gap trend, and the sample window. The Health view shows the same information as a permanent
+panel. The banner stays hidden while the scanner is at the head, and only appears once the lag exceeds
+`VITE_SCANNER_DELAY_WARNING_AGE_MS` of chain time.
 
 ### Frontend configuration
 

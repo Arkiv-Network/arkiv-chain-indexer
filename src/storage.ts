@@ -18,6 +18,7 @@ import type {
 } from "./arkivOperations";
 import type { BaseloadConfig } from "./baseloadConfig";
 import type { BatcherMetrics } from "./batcher";
+import type { ScanSample } from "./syncStatus";
 
 const LAST_SUCCESSFUL_BLOCK_KEY = "last_successful_block";
 const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
@@ -210,6 +211,9 @@ export interface StoredBlockRange {
 export interface ScannerStorageOptions {
   schema?: string;
 }
+
+/** Default number of tip blocks sampled when measuring scan throughput. */
+export const DEFAULT_SCAN_SAMPLE_LIMIT = 600;
 
 export interface ScannerProgress {
   lastSuccessfulBlock?: bigint;
@@ -930,6 +934,35 @@ export class ScannerStorage {
     );
     const row = result.rows[0];
     return row ? BigInt(row.value) : undefined;
+  }
+
+  /**
+   * Recent stored blocks at the scan tip, ascending by block number, used to
+   * measure how fast the scanner advances and how fast the chain produces
+   * blocks. Ordered by the primary key, so it stays cheap on a large table.
+   */
+  async getForwardScanSamples(limit = DEFAULT_SCAN_SAMPLE_LIMIT): Promise<ScanSample[]> {
+    const result = await this.db.query<{
+      block_number: string;
+      block_date: string;
+      scanned_at_utc: string;
+    }>(
+      `SELECT
+         block_number::text AS block_number,
+         block_date,
+         to_char(scanned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS scanned_at_utc
+       FROM ${this.qBlocks}
+       ORDER BY block_number DESC
+       LIMIT $1`,
+      [Math.max(2, Math.trunc(limit))],
+    );
+    return result.rows
+      .map((row) => ({
+        blockNumber: BigInt(row.block_number),
+        blockDate: row.block_date,
+        scannedAtUtc: row.scanned_at_utc,
+      }))
+      .reverse();
   }
 
   private async getStoredBlockTiming(

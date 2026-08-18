@@ -377,6 +377,7 @@ describe("GET /health guzzlers feature flag", () => {
       safeHeadBlock: null,
       latestObservedAt: null,
     }),
+    getForwardScanSamples: async () => [],
     getDatabaseStats: async () => ({ totalSizeBytes: "0", tables: [] }),
   } as unknown as ScannerStorage;
 

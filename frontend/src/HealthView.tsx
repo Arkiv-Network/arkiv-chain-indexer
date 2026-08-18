@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth, type HealthResponse } from "./api";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtInteger, fmtUtcDate } from "./format";
+import { SyncDetails } from "./SyncStatusBanner";
+import { describeSync } from "./syncStatus";
 
 interface HealthViewProps {
   timeZone: string;
@@ -33,6 +35,8 @@ export function HealthView({ timeZone }: HealthViewProps) {
   }, [load]);
 
   const scanner = data?.scanner;
+  const sync = data?.sync ?? null;
+  const syncPresentation = describeSync(sync);
   const database = data?.database;
   const guzzlers = data?.guzzlers;
   const guzzlersEnabled = guzzlers?.enabled ?? data?.features.guzzlers ?? false;
@@ -46,6 +50,17 @@ export function HealthView({ timeZone }: HealthViewProps) {
         </button>
       </div>
       {error ? <p className="error">{error}</p> : null}
+      {sync ? (
+        <section className={`health-panel sync-panel sync-banner-${syncPresentation.tone}`}>
+          <div className="sync-panel-heading">
+            <h3>Sync status</h3>
+            <span className="sync-banner-badge">{syncPresentation.label}</span>
+          </div>
+          <p className="sync-panel-headline">{syncPresentation.headline}</p>
+          <p className="sync-panel-detail">{syncPresentation.detail}</p>
+          <SyncDetails status={sync} timeZone={timeZone} />
+        </section>
+      ) : null}
       <div className="health-grid">
         <section className="health-panel">
           <h3>Scanner progress</h3>

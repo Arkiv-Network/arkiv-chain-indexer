@@ -87,6 +87,7 @@ Related scanner and worker settings:
 | --- | --- | --- |
 | `OPTIONS` | any | CORS preflight. |
 | `GET` | `/health` | Backend, scanner, database, feature, and guzzler cache health. |
+| `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
 | `GET` | `/blocks` | Compact rows for stored per-block metrics. |
 | `GET` | `/blocks/:blockNumber` | One compact stored block row. |
 | `GET` | `/block/:blockNumber` | Stored block plus stored transaction rows for inspection. |
@@ -122,6 +123,25 @@ Returns:
 - `features`: booleans for `transactionData` and `guzzlers`.
 - `guzzlers`: Redis cache health: `enabled`, `entryCount`, `bucketCount`, `oldestBucket`,
   `newestBucket`, `totalSizeBytes`.
+- `sync`: the same object served by `GET /sync`.
+
+## `GET /sync`
+
+Reports how far the forward scanner is behind the chain head and whether it is closing the gap.
+Cheaper than `/health` (no database size statistics), so it is safe to poll every few seconds.
+
+Returns `ok`, `serverTimeUtc`, and `sync` with:
+
+- `state`: `synced`, `catching-up`, `holding`, `falling-behind`, `stalled`, or `unknown`.
+- `summary`: one-line human-readable status.
+- `lagBlocks` / `lagSeconds`: distance to the estimated chain head, in blocks and in chain time.
+- `observedLagBlocks`: distance to the last head the scanner actually observed.
+- `estimatedHeadBlock`, `latestObservedBlock`, `latestObservedAtUtc`, `headObservationAgeSeconds`,
+  `headObservationStale`: chain head observation and its extrapolation to now.
+- `scanBlocksPerSecond`, `chainBlocksPerSecond`, `chainBlockTimeSeconds`, `speedupFactor`,
+  `netCatchUpBlocksPerSecond`: measured throughput and trend.
+- `etaSeconds` / `etaUtc`: projected time to be in sync; `null` unless the state is `catching-up`.
+- `measuredBlocks`, `measuredWindowSeconds`: the sample window the rates were measured over.
 
 ## `GET /blocks`
 

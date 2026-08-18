@@ -325,12 +325,6 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
     if (!Number.isFinite(latestTimeMs)) return null;
     return `${formatBehind(Math.max(0, nowMs - latestTimeMs))} behind`;
   }, [latestBlock, nowMs]);
-  const scannerDelayed = useMemo(() => {
-    if (blocksError || !latestBlock) return false;
-    const latestTimeMs = new Date(latestBlock.blockDate).getTime();
-    if (!Number.isFinite(latestTimeMs)) return false;
-    return nowMs - latestTimeMs >= settings.scannerDelayWarningAgeMs;
-  }, [latestBlock, nowMs, blocksError, settings.scannerDelayWarningAgeMs]);
 
   const openGuzzlersView = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (!shouldHandleClientNavigation(event)) return;
@@ -366,23 +360,6 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
           <div className="home-connection-alert__body">
             <strong>No connection to the scanner</strong>
             <span>Showing the last received data — automatic retry in progress.</span>
-          </div>
-        </div>
-      ) : scannerDelayed ? (
-        <div
-          className="home-connection-alert home-connection-alert--warn"
-          role="alert"
-          aria-live="polite"
-        >
-          <span className="home-connection-alert__icon" aria-hidden="true">
-            ⚠
-          </span>
-          <div className="home-connection-alert__body">
-            <strong>Scanner is delayed</strong>
-            <span>
-              The latest indexed block is more than a minute old — the data shown may not
-              represent the current state of the network.
-            </span>
           </div>
         </div>
       ) : null}

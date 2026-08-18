@@ -28,6 +28,7 @@ import { ChartsView } from "./ChartsView";
 import { CedricView } from "./CedricView";
 import { GuzzlersView } from "./GuzzlersView";
 import { HealthView } from "./HealthView";
+import { SyncStatusBanner } from "./SyncStatusBanner";
 import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
 import { navLabelForView, visibleNavItems } from "./navigation";
@@ -544,6 +545,10 @@ export function App() {
           </div>
         </div>
       </header>
+      <SyncStatusBanner
+        timeZone={timeZone}
+        minLagSeconds={pageSettings.scannerDelayWarningAgeMs / 1000}
+      />
       <main className={mainClassName}>
         {activeView === "home" ? (
           <HomeView

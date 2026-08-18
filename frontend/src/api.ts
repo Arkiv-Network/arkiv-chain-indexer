@@ -564,6 +564,45 @@ export interface DatabaseTableStats {
   totalSizeBytes: string;
 }
 
+export type SyncState =
+  | "synced"
+  | "catching-up"
+  | "falling-behind"
+  | "holding"
+  | "stalled"
+  | "unknown";
+
+/** Scanner sync progress, as served by `GET /sync` and embedded in `GET /health`. */
+export interface SyncStatus {
+  state: SyncState;
+  summary: string;
+  lastSuccessfulBlock: string | null;
+  lastSuccessfulBlockDate: string | null;
+  latestObservedBlock: string | null;
+  latestObservedAtUtc: string | null;
+  headObservationAgeSeconds: number | null;
+  headObservationStale: boolean;
+  estimatedHeadBlock: string | null;
+  observedLagBlocks: string | null;
+  lagBlocks: string | null;
+  lagSeconds: number | null;
+  chainBlockTimeSeconds: number | null;
+  chainBlocksPerSecond: number | null;
+  scanBlocksPerSecond: number | null;
+  speedupFactor: number | null;
+  netCatchUpBlocksPerSecond: number | null;
+  etaSeconds: number | null;
+  etaUtc: string | null;
+  measuredWindowSeconds: number | null;
+  measuredBlocks: number | null;
+}
+
+export interface SyncStatusResponse {
+  ok: boolean;
+  serverTimeUtc: string;
+  sync: SyncStatus;
+}
+
 export interface HealthResponse {
   ok: boolean;
   serverTimeUtc: string;
@@ -584,6 +623,7 @@ export interface HealthResponse {
     headLagBlocks: string | null;
     safeHeadLagBlocks: string | null;
   };
+  sync?: SyncStatus;
   database: {
     totalSizeBytes: string;
     tables: DatabaseTableStats[];
@@ -1223,6 +1263,11 @@ export function fetchSenders(params: URLSearchParams): Promise<SendersResponse> 
 
 export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", new URLSearchParams());
+}
+
+/** Cheap poll for the scanner sync banner; `/health` is too heavy to poll. */
+export function fetchSyncStatus(): Promise<SyncStatusResponse> {
+  return getJson<SyncStatusResponse>("/sync", new URLSearchParams());
 }
 
 export function fetchGuzzlers(limit?: number, window?: string): Promise<GuzzlersResponse> {

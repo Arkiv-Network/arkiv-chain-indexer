@@ -20,6 +20,7 @@ import {
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
+import { computeSyncStatus, type SyncStatus } from "./syncStatus";
 import {
   buildPayloadProviderPaymentBreakdown,
   PayloadProviderPaymentResolver,
@@ -178,6 +179,8 @@ export interface HealthResponseBody {
     headLagBlocks: string | null;
     safeHeadLagBlocks: string | null;
   };
+  /** Same payload as `GET /sync`. */
+  sync: SyncStatus;
   database: DatabaseStats;
   features: {
     transactionData: boolean;
@@ -380,6 +383,10 @@ export async function handleRequest(
 
   if (url.pathname === "/health") {
     return handleGetHealth(storage, transactionDataEnabled, options.guzzlerStore);
+  }
+
+  if (url.pathname === "/sync") {
+    return handleGetSyncStatus(storage);
   }
 
   if (url.pathname === "/guzzlers") {
@@ -609,10 +616,12 @@ async function handleGetHealth(
 ): Promise<Response> {
   const guzzlers = await readGuzzlerCacheHealth(guzzlerStore);
   const now = new Date();
-  const [progress, database] = await Promise.all([
+  const [progress, samples, database] = await Promise.all([
     storage.getScannerProgress(),
+    storage.getForwardScanSamples(),
     storage.getDatabaseStats(),
   ]);
+  const sync = computeSyncStatus({ now, ...progress, samples });
   const lastBlockAgeSeconds = secondsBetween(now, progress.lastSuccessfulBlockDate);
   const latestObservationAgeSeconds = secondsBetween(now, progress.latestObservedAt);
   const headLagBlocks =
@@ -641,6 +650,7 @@ async function handleGetHealth(
       headLagBlocks,
       safeHeadLagBlocks,
     },
+    sync,
     database,
     features: {
       transactionData: transactionDataEnabled,
@@ -897,6 +907,31 @@ async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): P
     records: await storage.queryTransactionRecords({ limit }),
   };
 
+  return jsonResponse(body);
+}
+
+export interface SyncStatusResponseBody {
+  ok: boolean;
+  serverTimeUtc: string;
+  sync: SyncStatus;
+}
+
+/**
+ * Cheap, dedicated sync-progress endpoint. `/health` carries the same payload
+ * but also walks the per-table database statistics, which is too heavy for the
+ * frontend banner to poll every few seconds.
+ */
+async function handleGetSyncStatus(storage: ScannerStorage): Promise<Response> {
+  const now = new Date();
+  const [progress, samples] = await Promise.all([
+    storage.getScannerProgress(),
+    storage.getForwardScanSamples(),
+  ]);
+  const body: SyncStatusResponseBody = {
+    ok: true,
+    serverTimeUtc: now.toISOString(),
+    sync: computeSyncStatus({ now, ...progress, samples }),
+  };
   return jsonResponse(body);
 }
 

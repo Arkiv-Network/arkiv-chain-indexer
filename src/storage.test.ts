@@ -77,6 +77,24 @@ if (!hasPostgresForTests()) {
       expect(await storage.getLastSuccessfulBlock()).toBe(42n);
     });
 
+    test("returns tip blocks ascending for sync-rate sampling", async () => {
+      const storage = await withStorage();
+
+      for (const blockNumber of [10n, 11n, 12n]) {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({
+            blockNumber,
+            blockDate: new Date(Number(blockNumber) * 2000).toISOString(),
+          }),
+        );
+      }
+
+      const samples = await storage.getForwardScanSamples(2);
+      expect(samples.map((sample) => sample.blockNumber)).toEqual([11n, 12n]);
+      expect(samples[1]?.blockDate).toBe(new Date(24_000).toISOString());
+      expect(samples[1]?.scannedAtUtc).toMatch(/Z$/);
+    });
+
     test("saves backfill cursor separately from forward progress", async () => {
       const storage = await withStorage();
 
