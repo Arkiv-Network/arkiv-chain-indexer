@@ -20,3 +20,6 @@ rpc-keys/
 cheesecake-rpc-keys.md
 .env.bak.*
 __pycache__/
+
+# Locally built Arkiv SDK, produced by scripts/syncLocalSdk.sh
+vendor/

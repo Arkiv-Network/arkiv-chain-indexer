@@ -11,7 +11,7 @@
     "fill-gaps": "bun run src/fillGaps.ts",
     "collect-batcher": "bun run src/batcherCollector.ts",
     "serve": "bun run src/serve.ts",
-    "test": "bun test",
+    "test": "bun test ./src ./frontend",
     "typecheck": "tsc --noEmit",
     "screenshot": "bun run scripts/screenshot.ts"
   },
@@ -22,7 +22,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@arkiv-network/sdk": "0.8.0-dev.1",
+    "@arkiv-network/sdk": "0.8.0-advanced.2",
     "commander": "^15.0.0",
     "viem": "^2.38.2"
   }

@@ -235,6 +235,27 @@ Backend configuration:
 | `BASELOAD_RPC_KEY_STORE` | `baseload-keys/rpc-keys.json` | JSON file the minted keys are cached in. Compose points this at a writable volume so a restart reuses keys. |
 | `BASELOAD_RPC_KEY_TIMEOUT_SECONDS` | `180` | Budget for one mint. Minting solves a captcha proof-of-work, so it is slow. |
 
+### RPC calls per operation
+
+A worker's rate-limit budget, not the chain, is what caps a load run, so each operation is sent over the SDK's
+advanced path (`sendMutation` / local receipt decoding) rather than the everyday `mutateEntities`, which bundles
+build, send, wait and decode and pays for each in RPC calls.
+
+| Per operation | Before | Now |
+| --- | --- | --- |
+| `eth_getTransactionCount` (nonce) | 1 | 0 — read once per worker, then advanced locally behind each confirmed receipt |
+| `eth_blockNumber` (expiry head) | 1 | 0 — receipts carry the height, extrapolated at the 2s block time between them |
+| `eth_estimateGas` | 1 | 0 — the limit is learned from the gas a batch of the same shape burnt, with 50% headroom |
+| `eth_sendRawTransaction` | 1 | 1 |
+| `eth_getTransactionReceipt` | SDK polling + 1 confirmation read | the worker's own jittered polls only |
+
+The remaining fixed costs are one `eth_chainId` per client and one `eth_getBalance` per worker per 10s balance
+poll. A first batch of a given shape still spends one `eth_estimateGas`, and the first send on a client spends one
+rejected `eth_fillTransaction` probe unless the chain id is supplied (it is).
+
+Anything that fails — a rejected send, a reverted batch — makes the worker forget both the cached nonce and that
+shape's gas limit, so the next attempt re-reads them from the chain.
+
 ### Per-worker RPC keys
 
 A single API key is rate-limited as one bucket, and that bucket — not the chain — is the first thing to refuse

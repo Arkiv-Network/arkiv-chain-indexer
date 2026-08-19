@@ -1,6 +1,13 @@
-import { createWalletClient, ExpirationTime, type WalletArkivClient } from "@arkiv-network/sdk";
+import {
+  createWalletClient,
+  decodeMutationResult,
+  ExpirationTime,
+  sendMutation,
+  type EntityMutationOps,
+  type WalletArkivClient,
+} from "@arkiv-network/sdk";
 import { u64 } from "@arkiv-network/sdk/attr";
-import { defineChain, formatEther, http } from "viem";
+import { defineChain, formatEther, http, type TransactionReceipt } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 import { BaseloadFaucetClient } from "./baseloadFaucet";
 import {
@@ -96,6 +103,16 @@ type BaseloadTxParams = {
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
   nonce: number;
+  /**
+   * Supplying the limit keeps viem from spending an `eth_estimateGas` on every
+   * send; it is learned from the gas a batch of the same shape actually burnt.
+   */
+  gas?: bigint;
+  /**
+   * Naming the chain stops viem probing the node with `eth_fillTransaction`
+   * (which a plain Ethereum node rejects) before the first send on a client.
+   */
+  chainId?: number;
 };
 
 export type BaseloadMutationParameters = {
@@ -113,10 +130,6 @@ type BaseloadMutationResult = {
   deletedEntities: HexString[];
   extendedEntities: HexString[];
   ownershipChanges: HexString[];
-};
-
-type BaseloadMutationClient = WalletArkivClient & {
-  mutateEntities?: (data: unknown, txParams?: BaseloadTxParams) => Promise<unknown>;
 };
 
 const BALANCE_POLL_INTERVAL_MS = 10_000;
@@ -367,7 +380,20 @@ class BaseloadWorkerTask {
     let lastKnownBlock = 0;
     let lastBlockFetchedAtMs = 0;
     let activeWorkerKey = configKey(this.worker);
-    let cachedClients: { key: string; arkiv: WalletArkivClient; rpc: BaseloadRpcClient } | null = null;
+    let cachedClients: {
+      key: string;
+      arkiv: WalletArkivClient;
+      rpc: BaseloadRpcClient;
+      chainId: number;
+    } | null = null;
+    // The wallet sends one transaction at a time and waits for its receipt, so
+    // the next nonce is simply the last confirmed one plus one. Reading it back
+    // from the chain before every send used to cost a call per operation; it is
+    // now read once and re-read only after a failure, when what the chain thinks
+    // may no longer match.
+    let nextNonce: number | null = null;
+    // Gas limits observed per batch shape, so viem never has to estimate.
+    const gasLimitByShape = new Map<string, bigint>();
 
     try {
       while (!this.abortController.signal.aborted) {
@@ -435,7 +461,11 @@ class BaseloadWorkerTask {
               key: clientKey,
               arkiv: createArkivClient(worker, this.runtimeConfig, chainId, endpoint),
               rpc,
+              chainId,
             };
+            // A new endpoint may be a different node with a different view of
+            // the mempool; re-read the nonce before trusting it again.
+            nextNonce = null;
           }
           const clients = cachedClients;
 
@@ -445,6 +475,7 @@ class BaseloadWorkerTask {
           if (needsCurrentBlock(worker)) {
             currentBlock = await clients.rpc.getBlockNumber();
             lastKnownBlock = currentBlock;
+            lastBlockFetchedAtMs = nowMs;
           } else if (nowMs - lastBlockFetchedAtMs >= BLOCK_DISPLAY_REFRESH_MS) {
             currentBlock = await clients.rpc.getBlockNumber();
             lastKnownBlock = currentBlock;
@@ -528,16 +559,68 @@ class BaseloadWorkerTask {
           // Note for an agent:
           // This code was changed by hand and do not change the following parameters:
           // maxPriorityFeePerGas is OK to be minimal and 1
-          // There is an issue with gas estimation in SDK so just overwrite with safe value
-          // const SAFE_GAS_LIMIT = 500000n;
           const SUFFICIENT_PRIORITY_FEE_PER_GAS = 2n;
-          // Use the latest confirmed nonce so a re-send replaces any pending
-          // tx that's been sitting in the mempool (under-priced, RPC reset, etc.).
-          const sendTxParams = async () => ({
-            maxFeePerGas,
-            maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
-            nonce: await clients.rpc.getLatestNonce(worker.walletAddress),
-          });
+
+          /**
+           * Sends one batch and waits for it to land: one `eth_sendRawTransaction`
+           * plus the receipt polls, and nothing else. Nonce, gas limit and chain
+           * id are all supplied, so neither the SDK nor viem looks anything up.
+           */
+          const submitAndConfirm = async (
+            parameters: BaseloadMutationParameters,
+          ): Promise<BaseloadMutationResult> => {
+            if (nextNonce === null) {
+              // Reading the latest confirmed nonce also drops any stuck pending
+              // transaction of ours: the next send reuses its slot.
+              nextNonce = await clients.rpc.getLatestNonce(worker.walletAddress);
+            }
+            const shape = baseloadGasShapeKey(parameters);
+            const gas = gasLimitByShape.get(shape);
+            // Every send moves the wallet's nonce on, so anything that goes wrong
+            // from here on leaves this worker's idea of it untrustworthy: forget
+            // it and read the chain's again next time.
+            let receipt: BaseloadTransactionReceipt;
+            let txHash: HexString;
+            try {
+              txHash = await sendBaseloadMutation(
+                clients.arkiv,
+                parameters,
+                {
+                  maxFeePerGas,
+                  maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
+                  nonce: nextNonce,
+                  chainId: clients.chainId,
+                  // Unset for the first batch of a shape only: viem estimates it
+                  // once, and the receipt below teaches us the limit from there on.
+                  ...(gas !== undefined ? { gas } : {}),
+                },
+                estimateCurrentBlock(lastKnownBlock, lastBlockFetchedAtMs, Date.now()),
+              );
+              receipt = await waitForSuccessfulTransactionReceipt(
+                clients.rpc,
+                txHash,
+                this.abortController.signal,
+              );
+            } catch (error) {
+              nextNonce = null;
+              // A batch that ran out of gas must not reuse the limit that starved it.
+              gasLimitByShape.delete(shape);
+              throw error;
+            }
+            nextNonce += 1;
+            const gasUsed = readReceiptQuantity(receipt, "gasUsed");
+            if (gasUsed !== null && gasUsed > 0n) {
+              gasLimitByShape.set(shape, learnBaseloadGasLimit(gasUsed));
+            }
+            // Every receipt names the block it landed in, which keeps the height
+            // the next batch resolves its expiry against fresh for free.
+            const minedBlock = readReceiptQuantity(receipt, "blockNumber");
+            if (minedBlock !== null && Number(minedBlock) > lastKnownBlock) {
+              lastKnownBlock = Number(minedBlock);
+              lastBlockFetchedAtMs = Date.now();
+            }
+            return decodeBaseloadMutationReceipt(txHash, receipt);
+          };
           const entitiesPerRequest = getEntitiesPerRequestLimit(worker.entitiesPerRequest);
 
           switch (operation) {
@@ -561,12 +644,7 @@ class BaseloadWorkerTask {
                     : `Creating ${describeEntityCount(inputs.length)}`,
                 ...statusCounts(),
               });
-              const result = await mutateBaseloadEntities(
-                clients.arkiv,
-                { creates: inputs },
-                await sendTxParams(),
-              );
-              await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
+              const result = await submitAndConfirm({ creates: inputs });
               const entityKeys = readBaseloadEntityKeysFromSdkResult(
                 result.createdEntities,
                 result.txHash,
@@ -594,12 +672,7 @@ class BaseloadWorkerTask {
                 message: `Creating ${describeEntityCount(inputs.length)} before ownership change`,
                 ...statusCounts(),
               });
-              const created = await mutateBaseloadEntities(
-                clients.arkiv,
-                { creates: inputs },
-                await sendTxParams(),
-              );
-              await waitForSuccessfulTransactionReceipt(clients.rpc, created.txHash, this.abortController.signal);
+              const created = await submitAndConfirm({ creates: inputs });
               const createdEntityKeys = readBaseloadEntityKeysFromSdkResult(
                 created.createdEntities,
                 created.txHash,
@@ -618,17 +691,10 @@ class BaseloadWorkerTask {
                 entityKey: lastEntityKey(createdEntityKeys),
                 txHash: created.txHash,
               });
-              const owned = await mutateBaseloadEntities(
-                clients.arkiv,
+              const owned = await submitAndConfirm(
                 // SDK validation currently ignores ownership-only batches unless another
                 // mutation key is present; an empty extensions array keeps the tx ownership-only.
                 { ownershipChanges, extensions: [] },
-                await sendTxParams(),
-              );
-              await waitForSuccessfulTransactionReceipt(
-                clients.rpc,
-                owned.txHash,
-                this.abortController.signal,
               );
               const changedEntityKeys = readBaseloadEntityKeysFromSdkResult(
                 owned.ownershipChanges,
@@ -657,13 +723,11 @@ class BaseloadWorkerTask {
                 message: `Updating ${describeEntityCount(entries.length)}`,
                 ...statusCounts(),
               });
-              const result = await mutateBaseloadEntities(
-                clients.arkiv,
-                { updates: entries.map((entry) => createBaseloadUpdateInput(worker, entry.entityKey)) },
-                await sendTxParams(),
-              );
+              let result: BaseloadMutationResult;
               try {
-                await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
+                result = await submitAndConfirm({
+                  updates: entries.map((entry) => createBaseloadUpdateInput(worker, entry.entityKey)),
+                });
               } catch (error) {
                 if (error instanceof BaseloadTransactionRevertedError) {
                   const revertedEntries = new Set(entries);
@@ -700,13 +764,11 @@ class BaseloadWorkerTask {
                 message: `Deleting ${describeEntityCount(entries.length)}`,
                 ...statusCounts(),
               });
-              const result = await mutateBaseloadEntities(
-                clients.arkiv,
-                { deletes: entries.map((entry) => ({ entityKey: entry.entityKey })) },
-                await sendTxParams(),
-              );
+              let result: BaseloadMutationResult;
               try {
-                await waitForSuccessfulTransactionReceipt(clients.rpc, result.txHash, this.abortController.signal);
+                result = await submitAndConfirm({
+                  deletes: entries.map((entry) => ({ entityKey: entry.entityKey })),
+                });
               } catch (error) {
                 if (error instanceof BaseloadTransactionRevertedError) {
                   const revertedEntries = new Set(entries);
@@ -953,18 +1015,123 @@ async function waitForSuccessfulTransactionReceipt(
   return receipt;
 }
 
-async function mutateBaseloadEntities(
+/**
+ * Submits a batch over the SDK's advanced path and returns as soon as the node
+ * accepts it.
+ *
+ * The everyday `mutateEntities` bundles build + send + wait + decode, and pays
+ * for the whole bundle in RPC calls: a height lookup, a nonce, a gas estimate,
+ * then viem polling for the receipt. Here every input is supplied up front, so
+ * submitting a batch costs exactly one `eth_sendRawTransaction`; the caller owns
+ * the waiting (see {@link waitForSuccessfulTransactionReceipt}) and decodes the
+ * receipt locally (see {@link decodeBaseloadMutationReceipt}).
+ */
+export async function sendBaseloadMutation(
   client: WalletArkivClient,
   parameters: BaseloadMutationParameters,
   txParams: BaseloadTxParams,
-): Promise<BaseloadMutationResult> {
-  const mutateEntities = (client as BaseloadMutationClient).mutateEntities;
-  if (typeof mutateEntities !== "function") {
-    throw new Error("@arkiv-network/sdk WalletArkivClient does not expose mutateEntities");
+  currentBlock: bigint | undefined,
+): Promise<HexString> {
+  const result = await sendMutation(client, toSdkMutationParameters(parameters) as EntityMutationOps, {
+    ...(currentBlock !== undefined ? { currentBlock } : {}),
+    txParams,
+  });
+  if (!isBytes32Hex(result?.txHash)) {
+    throw new Error(`SDK sendMutation returned an invalid transaction hash: ${safeStringify(result)}`);
   }
-  return normalizeBaseloadMutationResult(
-    await mutateEntities.call(client, toSdkMutationParameters(parameters), txParams),
-  );
+  return result.txHash;
+}
+
+/**
+ * Reads the entity keys a mined batch produced straight out of the receipt the
+ * worker already waited for. Zero RPC calls — the alternative, asking the SDK
+ * for the mutation result, would re-fetch the same receipt.
+ */
+export function decodeBaseloadMutationReceipt(
+  txHash: HexString,
+  receipt: BaseloadTransactionReceipt,
+): BaseloadMutationResult {
+  const decoded = decodeMutationResult({
+    ...receipt,
+    // The engine events are all this reads; the rest of the receipt is passed
+    // through untouched.
+    logs: Array.isArray(receipt.logs) ? receipt.logs : [],
+  } as unknown as TransactionReceipt);
+  return {
+    txHash,
+    createdEntities: readOptionalEntityKeyArray(decoded.createdEntities, "createdEntities", txHash),
+    updatedEntities: readOptionalEntityKeyArray(decoded.patchedEntities, "patchedEntities", txHash),
+    deletedEntities: readOptionalEntityKeyArray(decoded.deletedEntities, "deletedEntities", txHash),
+    extendedEntities: readOptionalEntityKeyArray(decoded.extendedEntities, "extendedEntities", txHash),
+    ownershipChanges: readOptionalEntityKeyArray(decoded.ownershipChanges, "ownershipChanges", txHash),
+  };
+}
+
+/**
+ * The chain head to resolve a batch's relative expiry against, without spending
+ * a call on it.
+ *
+ * Heights come in free with every receipt, but a worker that sends rarely still
+ * holds an old one, and resolving a lifetime against a stale head would cut the
+ * entity's life short. Blocks arrive on a fixed cadence, so carry the last known
+ * height forward by the time that has passed since it was read.
+ */
+export function estimateCurrentBlock(
+  lastKnownBlock: number,
+  lastKnownBlockAtMs: number,
+  nowMs: number,
+): bigint | undefined {
+  if (lastKnownBlock <= 0 || lastKnownBlockAtMs <= 0) return undefined;
+  const elapsedBlocks = Math.max(0, Math.floor((nowMs - lastKnownBlockAtMs) / (BLOCK_TIME_SECONDS * 1000)));
+  return BigInt(lastKnownBlock + elapsedBlocks);
+}
+
+/**
+ * Identifies batches whose gas cost should be the same: same operation mix, same
+ * batch size. Worker payload and attribute sizes are fixed by its config, so a
+ * shape's gas is stable and worth remembering.
+ */
+export function baseloadGasShapeKey(parameters: BaseloadMutationParameters): string {
+  return [
+    parameters.creates?.length ?? 0,
+    parameters.updates?.length ?? 0,
+    parameters.deletes?.length ?? 0,
+    parameters.extensions?.length ?? 0,
+    parameters.ownershipChanges?.length ?? 0,
+  ].join(":");
+}
+
+/** Headroom over an observed burn, so a slightly heavier batch of the same shape still fits. */
+const GAS_LIMIT_HEADROOM_PERCENT = 50n;
+/** Never learn a limit below this: tiny observations would starve the next batch. */
+const MIN_LEARNED_GAS_LIMIT = 200_000n;
+/** Nor above this, so one odd receipt cannot push a worker past what a block can hold. */
+const MAX_LEARNED_GAS_LIMIT = 30_000_000n;
+
+/** Turns the gas a batch actually burnt into the limit to send the next one with. */
+export function learnBaseloadGasLimit(gasUsed: bigint): bigint {
+  const withHeadroom = (gasUsed * (100n + GAS_LIMIT_HEADROOM_PERCENT)) / 100n;
+  if (withHeadroom < MIN_LEARNED_GAS_LIMIT) return MIN_LEARNED_GAS_LIMIT;
+  if (withHeadroom > MAX_LEARNED_GAS_LIMIT) return MAX_LEARNED_GAS_LIMIT;
+  return withHeadroom;
+}
+
+/** Reads a quantity field (`gasUsed`, `blockNumber`, …) off a raw JSON-RPC receipt. */
+export function readReceiptQuantity(
+  receipt: BaseloadTransactionReceipt,
+  field: string,
+): bigint | null {
+  const value = receipt[field];
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
+  if (typeof value === "string" && /^(0x[0-9a-fA-F]+|\d+)$/.test(value)) {
+    try {
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 const BLOCK_TIME_SECONDS = 2;
@@ -1039,24 +1206,6 @@ export function toSdkMutationParameters(parameters: BaseloadMutationParameters):
     ...(parameters.deletes ? { deletes: parameters.deletes } : {}),
     ...(extensions.length ? { extensions } : {}),
     ...(parameters.ownershipChanges ? { ownershipChanges: parameters.ownershipChanges } : {}),
-  };
-}
-
-function normalizeBaseloadMutationResult(result: unknown): BaseloadMutationResult {
-  if (!isRecord(result) || !isBytes32Hex(result.txHash)) {
-    throw new Error(`SDK mutateEntities returned an invalid transaction result: ${safeStringify(result)}`);
-  }
-  return {
-    txHash: result.txHash,
-    createdEntities: readOptionalEntityKeyArray(result.createdEntities, "createdEntities", result.txHash),
-    updatedEntities: readOptionalEntityKeyArray(
-      result.patchedEntities ?? result.updatedEntities,
-      "patchedEntities",
-      result.txHash,
-    ),
-    deletedEntities: readOptionalEntityKeyArray(result.deletedEntities, "deletedEntities", result.txHash),
-    extendedEntities: readOptionalEntityKeyArray(result.extendedEntities, "extendedEntities", result.txHash),
-    ownershipChanges: readOptionalEntityKeyArray(result.ownershipChanges, "ownershipChanges", result.txHash),
   };
 }
 
