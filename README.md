@@ -39,8 +39,9 @@ The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so produ
 block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
 
-The `decoder` compose service builds the
-[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) microservice. The
+The `decoder` compose service runs the released
+[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) image, pinned to
+`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.0`; set `ARKIV_DECODER_IMAGE` to run a different build. The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
@@ -210,7 +211,7 @@ metric columns.
 ## Baseload Backend Workers
 
 The Baseload view is a control plane for backend tasks. It never sends Arkiv RPC calls or private-key material
-from the browser. All create transactions are produced by the backend process using `@atlas-chain/sdk`.
+from the browser. All create transactions are produced by the backend process using `@arkiv-network/sdk`.
 
 Backend configuration:
 
