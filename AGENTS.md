@@ -52,12 +52,12 @@ docker compose up --build
 
 - Runtime code lives in `src/`.
 - `src/rpc.ts` intentionally uses raw JSON-RPC over `fetch` to avoid runtime dependencies.
-- `src/arkivOperations.ts` POSTs to the external atlas-transaction-decoder (Rust) microservice at
+- `src/arkivOperations.ts` POSTs to the external arkiv-transaction-decoder (Bun) microservice at
   `<DECODER_URL>/decode` (compose service `decoder`, defaulted by compose to `http://decoder:28884`). It sends the
-  chain id obtained once from `eth_chainId` so the decoder verifies any v1 payload reference against the right
-  trusted-signer allowlist (`DEFAULT_CHAIN_ID` is only the decoder's fallback). Decoded operation metadata —
-  including `is_reference`, the parsed `payload_reference`, the offline `reference_verification` verdict, and
-  `reference_error` — is stored in `transaction_operations` (no payloads) in the same transaction as the block's
+  chain id obtained once from `eth_chainId` so a decoder that verifies v1 payload references uses the right
+  trusted-signer allowlist; arkiv-transaction-decoder does not parse references and ignores it. Decoded operation
+  metadata — including `is_reference`, the parsed `payload_reference`, the offline `reference_verification` verdict,
+  and `reference_error` — is stored in `transaction_operations` (no payloads) in the same transaction as the block's
   transaction rows. A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes
   the whole block retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
   `GET /transactions` rows that have stored operations.

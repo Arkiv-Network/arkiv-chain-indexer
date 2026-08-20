@@ -40,15 +40,17 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
 
 The `decoder` compose service builds the
-[atlas-transaction-decoder](https://github.com/atlas-chain/atlas-transaction-decoder) (Rust) microservice. The
+[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) microservice. The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
-payload size. Under v1 reference mode, create/update ops carry a signed provider reference (content type
-`application/vnd.atlas.payload-reference+json`); the scanner additionally records that reference's receipt
-metadata and the decoder's offline EIP-191 verification verdict (still never the entity bytes). The scanner probes
-`eth_chainId` once at startup and sends it with each request so references are verified against the right
-trusted-signer allowlist. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
+payload size. It reads both the tagged-union `execute()` format the chain carries today (selector `0x49650044`,
+where the payload and content type arrive as the `$payload` and `$contentType` system attributes) and the older
+struct format still sitting in historical blocks. A create's `entity_key` is null: the engine derives the key from
+the owner, its entity nonce and the salt, and calldata alone carries none of the first two. This decoder does not
+parse v1 payload references, so `is_reference`, `payload_reference` and `reference_verification` stay unset — it
+was swapped in for atlas-transaction-decoder, which did parse them but refused every registry call the chain now
+makes. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
 
 The main `scanner` container only ever scans forward near the safe chain head (it always runs with
 `SCANNER_DISABLE_BACKFILL=true`). Historical backfill runs exclusively in the separate `backfill-scanner` container
@@ -167,7 +169,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
-| `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional atlas-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
+| `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict from a decoder that parses references. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
 
 Backend transaction-detail payment display:

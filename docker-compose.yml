@@ -29,19 +29,22 @@ services:
       timeout: 5s
       retries: 20
 
-  # atlas-transaction-decoder (Rust) microservice used by the scanners to decode
-  # Arkiv registry execute() calldata into operation metadata. Under v1 payload-
-  # reference mode create/update ops carry a signed provider reference, which the
-  # decoder parses and verifies offline (payloads are never stored). It listens on
-  # 28884 (matches the DECODER_URL defaults below). The scanner sends the real
-  # chainId per request, so DEFAULT_CHAIN_ID is only a fallback.
+  # Arkiv-Network/arkiv-transaction-decoder (Bun) microservice used by the
+  # scanners to decode Arkiv registry execute() calldata into operation metadata.
+  # It reads the tagged-union format the chain carries today (selector
+  # 0x49650044) as well as the older struct format still sitting in historical
+  # blocks, and reports a payload as its size alone — entity payload bytes never
+  # leave it. PORT puts it on 28884, matching the DECODER_URL defaults below.
+  #
+  # It replaces atlas-transaction-decoder, which only knew the struct format and
+  # so refused every registry call the chain now makes. It does not parse v1
+  # payload references, so is_reference / payload_reference /
+  # reference_verification stay unset until it learns to.
   decoder:
     build:
-      context: https://github.com/atlas-chain/atlas-transaction-decoder.git#44b6a8f714664420235666c9ab792cb2d0ddbdfb
+      context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#48ec7606c1ea6058e938a4218c699c2a599e4154
     environment:
-      DEFAULT_CHAIN_ID: ${DECODER_DEFAULT_CHAIN_ID:-1337}
-      # Optional extra trusted payload-provider signers (comma-separated 0x...).
-      # TRUSTED_PROVIDER_SIGNERS: ${TRUSTED_PROVIDER_SIGNERS:-}
+      PORT: 28884
     restart: unless-stopped
 
   # Arkiv-Network/api-key-generator: mints Arkiv Hub devnet API keys on demand by

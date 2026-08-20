@@ -31,8 +31,8 @@ export interface ArkivOperationAttribute {
 }
 
 /**
- * Offline EIP-191 verification verdict the decoder returns for a payload
- * reference. Mirrors the decoder's `ReferenceVerification` (reference.rs) and
+ * Offline EIP-191 verification verdict a decoder returns for a payload
+ * reference. Mirrors a reference-parsing decoder's `ReferenceVerification` and
  * the on-chain precompile: `valid` is true only when every check the chain
  * would make passed, and `signerTrusted` records whether the recovered signer
  * is in the trusted payload-provider allowlist for the decode `chainId`.
@@ -116,7 +116,7 @@ export interface TransactionArkivOperations {
 }
 
 /**
- * Client for the atlas-transaction-decoder microservice. A 400 response means
+ * Client for the arkiv-transaction-decoder microservice. A 400 response means
  * the calldata is not an Arkiv execute() call (not an error); any other failure
  * throws so the caller retries the whole block and no silent gaps are created.
  *
