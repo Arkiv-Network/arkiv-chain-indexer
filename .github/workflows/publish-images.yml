@@ -99,9 +99,11 @@ jobs:
       - name: Build and push decoder image
         uses: docker/build-push-action@v6
         with:
-          # atlas-transaction-decoder (Rust) — reference-mode decoder. Keep this
-          # ref in lockstep with docker-compose.yml so the published image matches.
-          context: https://github.com/atlas-chain/atlas-transaction-decoder.git#44b6a8f714664420235666c9ab792cb2d0ddbdfb
+          # arkiv-transaction-decoder v0.2.0 (Bun). Keep this ref in lockstep
+          # with the image docker-compose.yml pins, so what a deployment runs is
+          # what this repo is tested against. It replaced atlas-transaction-decoder,
+          # which could not read the execute() format the chain now carries.
+          context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#48ec7606c1ea6058e938a4218c699c2a599e4154
           push: true
           tags: ${{ steps.decoder-meta.outputs.tags }}
           labels: ${{ steps.decoder-meta.outputs.labels }}
