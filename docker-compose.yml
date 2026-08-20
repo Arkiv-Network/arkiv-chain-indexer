@@ -41,8 +41,7 @@ services:
   # payload references, so is_reference / payload_reference /
   # reference_verification stay unset until it learns to.
   decoder:
-    build:
-      context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#48ec7606c1ea6058e938a4218c699c2a599e4154
+    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.0}
     environment:
       PORT: 28884
     restart: unless-stopped
