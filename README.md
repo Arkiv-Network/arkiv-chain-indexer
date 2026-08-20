@@ -238,7 +238,7 @@ Backend configuration:
 ### RPC calls per operation
 
 A worker's rate-limit budget, not the chain, is what caps a load run, so each operation is sent over the SDK's
-advanced path (`sendMutation` / local receipt decoding) rather than the everyday `mutateEntities`, which bundles
+advanced path (`sendMutation` / local receipt decoding) rather than the everyday `executeBatch`, which bundles
 build, send, wait and decode and pays for each in RPC calls.
 
 | Per operation | Before | Now |

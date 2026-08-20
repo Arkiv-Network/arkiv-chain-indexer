@@ -1019,7 +1019,7 @@ async function waitForSuccessfulTransactionReceipt(
  * Submits a batch over the SDK's advanced path and returns as soon as the node
  * accepts it.
  *
- * The everyday `mutateEntities` bundles build + send + wait + decode, and pays
+ * The everyday `executeBatch` bundles build + send + wait + decode, and pays
  * for the whole bundle in RPC calls: a height lookup, a nonce, a gas estimate,
  * then viem polling for the receipt. Here every input is supplied up front, so
  * submitting a batch costs exactly one `eth_sendRawTransaction`; the caller owns
@@ -1213,13 +1213,13 @@ function readOptionalEntityKeyArray(value: unknown, fieldName: string, txHash: H
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     throw new Error(
-      `SDK mutateEntities returned invalid ${fieldName} for transaction ${txHash}: expected array`,
+      `SDK executeBatch returned invalid ${fieldName} for transaction ${txHash}: expected array`,
     );
   }
   return value.map((entityKey, index) => {
     if (!isBytes32Hex(entityKey)) {
       throw new Error(
-        `SDK mutateEntities returned invalid ${fieldName}[${index}] for transaction ${txHash}: ${String(
+        `SDK executeBatch returned invalid ${fieldName}[${index}] for transaction ${txHash}: ${String(
           entityKey,
         )}`,
       );
