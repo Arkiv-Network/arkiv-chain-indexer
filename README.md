@@ -121,7 +121,7 @@ docker compose -f docker-compose-arkiv-tests.yml up --build
 
 Requirements:
 
-- [Bun](https://bun.sh/) 1.3 or newer
+- [Bun](https://bun.sh/) 1.4 or newer
 - A PostgreSQL 13+ instance reachable via `DATABASE_URL`
 - An Ethereum JSON-RPC full-node endpoint
 
