@@ -5,9 +5,11 @@
  *
  * The bouncer's control-service takes a caller-supplied key value
  * (`PUT /keys/{key}` with `{active, quota, origins[], ipwl[]}`), so the keys are
- * generated here and registered one by one. This is the per-network path: the
- * Arkiv Hub generator (api-key-generator) mints Hub keys, which a db-chain
- * bouncer answers with 401 because it keeps its own key store.
+ * generated here and registered one by one. This is the per-network path, needed
+ * when a bouncer only trusts its own key store. Cheesecake no longer does: as of
+ * 2026-08-20 it also accepts Arkiv Hub keys (api-key-generator / the portal at
+ * stage.hub.arkiv.network), so either source works there — check with one
+ * eth_blockNumber before provisioning a whole pool.
  *
  * Usage:
  *   RPC_CONTROL_URL=https://rpc-control.<net>.db-chain.devnet.gobas.me \

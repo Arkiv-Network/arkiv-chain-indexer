@@ -280,10 +280,13 @@ requests), and written to `BASELOAD_RPC_KEY_STORE` on the `baseloadkeys` volume 
 captcha again. A mint failure surfaces as a worker error and is retried on the next pass; the other workers keep
 running on the keys they already hold.
 
-The generator mints **Arkiv Hub** keys (`devnet.hub.arkiv.network`), one per freshly generated wallet. A
-per-network bouncer such as `rpc.<network>.db-chain.devnet.gobas.me` keeps its own key store and answers Hub keys
-with HTTP 401 — for those networks mint keys through the network's `rpc-control` endpoint instead and set
-`BASELOAD_RPC_KEY_PLACEMENT=header` or `path` to match.
+The generator mints **Arkiv Hub** keys, one per freshly generated wallet. The Hub portal moved to
+`stage.hub.arkiv.network` (the generator still targets `devnet.hub.arkiv.network`); as of 2026-08-20 the
+cheesecake bouncer accepts Hub keys from either portal, so a Hub-minted pool works directly against
+`rpc.cheesecake.db-chain.devnet.gobas.me`. That has not always been true — a per-network bouncer keeps its own key
+store and may answer Hub keys with HTTP 401, in which case mint through the network's `rpc-control` endpoint
+instead and set `BASELOAD_RPC_KEY_PLACEMENT=header` or `path` to match. Check with a single `eth_blockNumber`
+before provisioning a whole pool.
 
 ### Initial Baseload config with Docker Compose
 
