@@ -183,6 +183,37 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
     expect(await client.decodeCalldata("0xabcd")).toBeNull();
   });
 
+  test("warns once per selector when the decoder cannot read registry calldata", async () => {
+    stubFetch(() =>
+      Response.json(
+        { error: { message: "input is neither Arkiv execute() calldata (selector 0xba8ccf92)" } },
+        { status: 400 },
+      ),
+    );
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: string) => warnings.push(message);
+
+    try {
+      for (let call = 0; call < 3; call += 1) {
+        await client.decodeCalldata("0x49650044deadbeef");
+      }
+      await client.decodeCalldata("0xba8ccf92deadbeef");
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    // One warning for each distinct selector, however often it repeats.
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("selector 0x49650044");
+    expect(warnings[0]).toContain("http://decoder.test");
+    // The decoder's own explanation rides along, so the mismatch is readable
+    // from the log line alone.
+    expect(warnings[0]).toContain("selector 0xba8ccf92)");
+    expect(warnings[1]).toContain("selector 0xba8ccf92 ");
+  });
+
   test("throws on decoder server errors with the decoder URL", async () => {
     stubFetch(() => Response.json({ error: "boom" }, { status: 500 }));
     const client = new ArkivDecoderClient("http://decoder.test");

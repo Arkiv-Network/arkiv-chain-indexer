@@ -5,6 +5,23 @@ export const ARKIV_REGISTRY_ADDRESS = "0x440000000000000000000000000000000000004
 
 const arkivRegistryAddress = ARKIV_REGISTRY_ADDRESS.toLowerCase();
 
+/** How often a repeating decoder refusal is warned about, in refusals. */
+const REJECTION_WARNING_INTERVAL = 1000;
+
+/**
+ * Pulls the decoder's explanation out of a 400 body, which is
+ * `{"error":{"message":"…"},"ok":false}`. Older builds answer with a bare
+ * `{"error":"…"}` string, so accept both and give up quietly on anything else —
+ * the reason only decorates a warning.
+ */
+async function readRejectionReason(response: Response): Promise<string | undefined> {
+  const body: unknown = await response.json().catch(() => null);
+  if (!isRecord(body)) return undefined;
+  if (typeof body.error === "string") return body.error;
+  if (isRecord(body.error) && typeof body.error.message === "string") return body.error.message;
+  return undefined;
+}
+
 export interface ArkivOperationAttribute {
   key: string;
   valueType: number;
@@ -108,11 +125,39 @@ export interface TransactionArkivOperations {
  * scanner's actual chain (the decoder otherwise falls back to its own default).
  */
 export class ArkivDecoderClient {
+  /** How many calls the decoder has refused, per selector. See {@link noteRejection}. */
+  private readonly rejectedSelectors = new Map<string, number>();
+
   constructor(
     readonly baseUrl: string,
     readonly chainId?: number,
   ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+  }
+
+  /**
+   * Warns the first time a selector is refused, then once per
+   * {@link REJECTION_WARNING_INTERVAL} after that.
+   *
+   * Every caller reaches this only for a transaction addressed to the registry,
+   * so a refusal is never routine: it means the decoder cannot read calldata
+   * the chain accepted, and those operations go unstored. A decoder older than
+   * the chain's current `execute()` wire format refuses *every* registry call,
+   * which without this warning is indistinguishable from a chain carrying no
+   * Arkiv traffic at all — the failure mode this repo actually hit, where
+   * `transaction_operations` sat empty across 786k scanned transactions.
+   */
+  private noteRejection(data: Hex, reason: string | undefined): void {
+    const selector = data.slice(0, 10);
+    const refusals = (this.rejectedSelectors.get(selector) ?? 0) + 1;
+    this.rejectedSelectors.set(selector, refusals);
+    if (refusals > 1 && refusals % REJECTION_WARNING_INTERVAL !== 0) return;
+    console.warn(
+      `Arkiv decoder at ${this.baseUrl} cannot decode registry calldata with selector ` +
+        `${selector} (${refusals} so far)${reason ? `: ${reason}` : ""}. Operations for these ` +
+        `transactions are not being stored; the decoder is likely older than the chain's ` +
+        `current execute() format.`,
+    );
   }
 
   async decodeCalldata(data: Hex): Promise<ArkivOperation[] | null> {
@@ -135,6 +180,7 @@ export class ArkivDecoderClient {
     }
 
     if (response.status === 400) {
+      this.noteRejection(data, await readRejectionReason(response));
       return null;
     }
     if (!response.ok) {
