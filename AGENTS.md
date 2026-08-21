@@ -85,7 +85,8 @@ docker compose up --build
 - `Dockerfile` (root) builds a single Bun image used by `scanner`, `aggregator`, and `backend` services. The
   service-specific entry point is picked via `command:` in `docker-compose.yml`.
 - `frontend/Dockerfile` builds an nginx image serving the static UI.
-- `decoder/Dockerfile` republishes the released arkiv-transaction-decoder image as this repo's `decoder` image
-  with `PORT=28884`. Deployments probe that port and never pass `PORT`, so it must stay set here; upstream's own
-  default is 3000. Compose runs the upstream image directly and sets `PORT` itself.
+- The `decoder` image this repo publishes is built by `.github/workflows/publish-images.yml` from
+  arkiv-transaction-decoder's source at a pinned commit, with `--build-arg PORT=28884`. Deployments probe that
+  port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. Compose runs the
+  released upstream image directly and sets `PORT` itself.
 - All required env vars live in `.env.example`.

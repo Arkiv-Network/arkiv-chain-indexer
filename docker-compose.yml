@@ -36,12 +36,12 @@ services:
   # blocks, and reports a payload as its size alone — entity payload bytes never
   # leave it. PORT puts it on 28884, matching the DECODER_URL defaults below.
   #
-  # It replaces atlas-transaction-decoder, which only knew the struct format and
-  # so refused every registry call the chain now makes. It does not parse v1
-  # payload references, so is_reference / payload_reference /
-  # reference_verification stay unset until it learns to.
+  # The decoder it replaced only knew the struct format, and so refused every
+  # registry call the chain now makes. This one does not parse v1 payload
+  # references, so is_reference / payload_reference / reference_verification
+  # stay unset until it learns to.
   decoder:
-    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.0}
+    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.1}
     environment:
       PORT: 28884
     restart: unless-stopped

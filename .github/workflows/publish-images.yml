@@ -99,13 +99,18 @@ jobs:
       - name: Build and push decoder image
         uses: docker/build-push-action@v6
         with:
-          # decoder/Dockerfile re-publishes the released arkiv-transaction-decoder
-          # image (Bun) under this repo's release tag, with PORT=28884 — the port
-          # the db-chain chart probes and points DECODER_URL at. That decoder
-          # replaced atlas-transaction-decoder, which could not read the execute()
-          # format the chain now carries but did default to 28884; the port is set
-          # here so swapping the decoder cannot silently move it again.
-          context: ./decoder
+          # arkiv-transaction-decoder v0.2.1 (Bun), built from source and published under this
+          # repo's release tag beside app and frontend so a deployment pins all three at once.
+          # Keep this ref in lockstep with the image docker-compose.yml pins, so what a deployment
+          # runs is what this repo is tested against.
+          #
+          # PORT is baked in rather than left to the runtime: the db-chain chart runs the decoder
+          # as a native sidecar, TCP-probes 28884 and points DECODER_URL at it while passing no
+          # PORT, so an image binding the decoder's standalone default of 3000 fails its startup
+          # probe and crash-loops.
+          context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#9239c4d89c3d9b1b27e10abd3e8d4458f5508fa7
+          build-args: |
+            PORT=28884
           push: true
           tags: ${{ steps.decoder-meta.outputs.tags }}
           labels: ${{ steps.decoder-meta.outputs.labels }}

@@ -41,7 +41,7 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 
 The `decoder` compose service runs the released
 [arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) image, pinned to
-`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.0`; set `ARKIV_DECODER_IMAGE` to run a different build. The
+`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.1`; set `ARKIV_DECODER_IMAGE` to run a different build. The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
@@ -50,16 +50,16 @@ where the payload and content type arrive as the `$payload` and `$contentType` s
 struct format still sitting in historical blocks. A create's `entity_key` is null: the engine derives the key from
 the owner, its entity nonce and the salt, and calldata alone carries none of the first two. This decoder does not
 parse v1 payload references, so `is_reference`, `payload_reference` and `reference_verification` stay unset — it
-was swapped in for atlas-transaction-decoder, which did parse them but refused every registry call the chain now
-makes. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
+was swapped in for the decoder that came before it, which did parse them but refused every registry call the
+chain now makes. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
 
-Releases republish that same decoder as `ghcr.io/arkiv-network/arkiv-chain-indexer/decoder`, built by
-`decoder/Dockerfile` from the pinned upstream image with `PORT=28884` baked in. Kubernetes deployments pin the
-app, frontend and decoder images together under one release tag and TCP-probe the decoder on 28884 without
-passing `PORT`, so that port is part of this image's contract, not a compose detail: upstream defaults `PORT` to
-3000, being a standalone service, and a decoder published without the override binds 3000, fails its startup
-probe and crash-loops. Keep the digest in `decoder/Dockerfile` in lockstep with the image the compose service
-pins.
+Releases publish that same decoder as `ghcr.io/arkiv-network/arkiv-chain-indexer/decoder`, built from
+arkiv-transaction-decoder's source at the pinned commit with `--build-arg PORT=28884`. Kubernetes deployments
+pin the app, frontend and decoder images together under one release tag and TCP-probe the decoder on 28884
+without passing `PORT`, so that port is part of this image's contract rather than a compose detail: the decoder
+binds 3000 on its own, being a standalone service, and an image published without the build arg fails its
+startup probe and crash-loops. Keep the commit the publish workflow builds in lockstep with the image the
+compose service pins.
 
 The main `scanner` container only ever scans forward near the safe chain head (it always runs with
 `SCANNER_DISABLE_BACKFILL=true`). Historical backfill runs exclusively in the separate `backfill-scanner` container
