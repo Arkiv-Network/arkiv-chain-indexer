@@ -53,6 +53,14 @@ parse v1 payload references, so `is_reference`, `payload_reference` and `referen
 was swapped in for atlas-transaction-decoder, which did parse them but refused every registry call the chain now
 makes. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
 
+Releases republish that same decoder as `ghcr.io/arkiv-network/arkiv-chain-indexer/decoder`, built by
+`decoder/Dockerfile` from the pinned upstream image with `PORT=28884` baked in. Kubernetes deployments pin the
+app, frontend and decoder images together under one release tag and TCP-probe the decoder on 28884 without
+passing `PORT`, so that port is part of this image's contract, not a compose detail: upstream defaults `PORT` to
+3000, being a standalone service, and a decoder published without the override binds 3000, fails its startup
+probe and crash-loops. Keep the digest in `decoder/Dockerfile` in lockstep with the image the compose service
+pins.
+
 The main `scanner` container only ever scans forward near the safe chain head (it always runs with
 `SCANNER_DISABLE_BACKFILL=true`). Historical backfill runs exclusively in the separate `backfill-scanner` container
 with `SCANNER_BACKFILL_ONLY=true`, sleeping for `SCANNER_BACKFILL_SLEEP_MS` after every successfully stored backfill
