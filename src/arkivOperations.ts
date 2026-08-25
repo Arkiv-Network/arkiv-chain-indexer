@@ -1,9 +1,15 @@
 import { shouldIgnoreTransaction } from "./transactionFilter";
-import type { Hex, RpcBlock } from "./types";
+import type { Hex, RpcBlock, RpcReceipt } from "./types";
 
 export const ARKIV_REGISTRY_ADDRESS = "0x4400000000000000000000000000000000000044";
 
+/** topic0 of the engine's `EntityCreated(bytes32,address,uint64,uint8)` event. */
+export const ENTITY_CREATED_TOPIC0 =
+  "0xb282d7c494b8899aa8015cd07be621530beb03409eb8c5e8fdc1411ba64356a5";
+
 const arkivRegistryAddress = ARKIV_REGISTRY_ADDRESS.toLowerCase();
+
+const CREATE_OPERATION_TYPE = 1;
 
 /** How often a repeating decoder refusal is warned about, in refusals. */
 const REJECTION_WARNING_INTERVAL = 1000;
@@ -196,11 +202,21 @@ export class ArkivDecoderClient {
  * `position` is the index in `block.transactions` BEFORE filtering — the same
  * convention as src/blockInspector.ts — so rows align with the
  * `(block_number, position)` primary key of the transactions table.
+ *
+ * `receipts`, when given, supplies the entity keys of create operations, which
+ * calldata alone cannot: the engine derives a created key from the owner and
+ * its entity counter, and announces it only in the `EntityCreated` receipt log.
  */
 export async function decodeBlockArkivOperations(
   block: RpcBlock,
   client: ArkivDecoderClient,
+  receipts?: RpcReceipt[],
 ): Promise<TransactionArkivOperations[]> {
+  const receiptsByHash = new Map<string, RpcReceipt>();
+  for (const receipt of receipts ?? []) {
+    receiptsByHash.set(receipt.transactionHash.toLowerCase(), receipt);
+  }
+
   const results: TransactionArkivOperations[] = [];
   for (const [position, transaction] of block.transactions.entries()) {
     if (shouldIgnoreTransaction(transaction)) {
@@ -214,10 +230,63 @@ export async function decodeBlockArkivOperations(
     }
     const operations = await client.decodeCalldata(transaction.input);
     if (operations !== null && operations.length > 0) {
+      fillCreateEntityKeys(
+        transaction.hash,
+        operations,
+        receiptsByHash.get(transaction.hash.toLowerCase()),
+      );
       results.push({ position, hash: transaction.hash, operations });
     }
   }
   return results;
+}
+
+/**
+ * Fills the entity keys of a transaction's create operations from its receipt's
+ * `EntityCreated` logs.
+ *
+ * The engine emits exactly one `EntityCreated` per successful create, in
+ * operation order, so the Nth create in the calldata pairs with the Nth
+ * `EntityCreated` in the receipt. When the counts disagree the pairing cannot
+ * be trusted, so the keys are left null rather than guessed — silently for a
+ * reverted transaction (which emits no logs at all), loudly otherwise.
+ */
+export function fillCreateEntityKeys(
+  transactionHash: Hex,
+  operations: ArkivOperation[],
+  receipt: RpcReceipt | undefined,
+): void {
+  const creates = operations.filter(
+    (operation) => operation.operationType === CREATE_OPERATION_TYPE,
+  );
+  if (creates.length === 0 || !receipt) {
+    return;
+  }
+
+  const createdKeys = (receipt.logs ?? [])
+    .filter(
+      (log) =>
+        log.address.toLowerCase() === arkivRegistryAddress &&
+        log.topics[0]?.toLowerCase() === ENTITY_CREATED_TOPIC0,
+    )
+    .map((log) => log.topics[1])
+    .filter((topic): topic is Hex => typeof topic === "string");
+
+  if (createdKeys.length !== creates.length) {
+    if (receipt.status !== "0x0") {
+      console.warn(
+        `Transaction ${transactionHash} decodes to ${creates.length} create operation(s) but its ` +
+          `receipt carries ${createdKeys.length} EntityCreated log(s); leaving their entity keys null`,
+      );
+    }
+    return;
+  }
+
+  creates.forEach((operation, index) => {
+    if (operation.entityKey === null) {
+      operation.entityKey = createdKeys[index]!;
+    }
+  });
 }
 
 function parseDecoderResponse(body: unknown): ArkivOperation[] {

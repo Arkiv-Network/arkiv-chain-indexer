@@ -8,6 +8,7 @@ import {
 } from "./scanner";
 import {
   ARKIV_REGISTRY_ADDRESS,
+  ENTITY_CREATED_TOPIC0,
   type ArkivDecoderClient,
   type ArkivOperation,
   type TransactionArkivOperations,
@@ -201,6 +202,50 @@ describe("scanOneBlock", () => {
     expect(storage.savedOperations).toEqual([
       [{ position: 1, hash: txHash(1), operations: decoder.operations }],
     ]);
+  });
+
+  test("fills create operation entity keys from EntityCreated receipt logs", async () => {
+    const block = blockWithTransactions(1);
+    block.transactions[0] = {
+      ...block.transactions[0]!,
+      to: ARKIV_REGISTRY_ADDRESS as Hex,
+      input: "0x1234" as Hex,
+    };
+    const entityKey = `0x${"ee".repeat(32)}` as Hex;
+    class EntityCreatedRpc extends StaticBlockRpc {
+      override async getTransactionReceipt(hash: Hex): Promise<RpcReceipt> {
+        return {
+          ...receiptFor(hash),
+          status: "0x1",
+          logs: [
+            {
+              address: ARKIV_REGISTRY_ADDRESS as Hex,
+              topics: [ENTITY_CREATED_TOPIC0 as Hex, entityKey, `0x${"33".repeat(32)}` as Hex],
+              data: "0x",
+            },
+          ],
+        };
+      }
+    }
+    const rpc = new EntityCreatedRpc(block);
+    const storage = new FakeStorage();
+    const decoder = new FakeDecoderClient();
+    decoder.operations[0]!.entityKey = null;
+
+    await scanOneBlock(
+      1n,
+      rpc as unknown as EthereumRpcClient,
+      storage as unknown as ScannerStorage,
+      1,
+      { kind: "lastSuccessfulBlock" },
+      {},
+      true,
+      undefined,
+      undefined,
+      decoder as unknown as ArkivDecoderClient,
+    );
+
+    expect(storage.savedOperations[0]?.[0]?.operations[0]?.entityKey).toBe(entityKey);
   });
 
   test("skips Arkiv decoding when transaction row storage is disabled", async () => {

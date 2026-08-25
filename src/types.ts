@@ -25,6 +25,12 @@ export interface RpcBlock {
   transactions: RpcTransaction[];
 }
 
+export interface RpcLog {
+  address: Hex;
+  topics: Hex[];
+  data: Hex;
+}
+
 export interface RpcReceipt {
   transactionHash: Hex;
   gasUsed: Hex;
@@ -32,6 +38,7 @@ export interface RpcReceipt {
   effectiveGasPrice?: Hex;
   status?: Hex;
   contractAddress?: Hex | null;
+  logs?: RpcLog[];
 }
 
 export interface BlockMetrics extends BatcherMetrics {

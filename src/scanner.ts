@@ -329,7 +329,7 @@ export async function scanOneBlock(
   // decoder outage cannot create silent gaps in stored operations.
   const operations =
     decoderClient && saveTransactionData
-      ? await decodeBlockArkivOperations(block, decoderClient)
+      ? await decodeBlockArkivOperations(block, decoderClient, receipts)
       : undefined;
   await storage.saveBlockMetrics(
     metrics,

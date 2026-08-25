@@ -47,8 +47,10 @@ scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`
 table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
 payload size. It reads both the tagged-union `execute()` format the chain carries today (selector `0x49650044`,
 where the payload and content type arrive as the `$payload` and `$contentType` system attributes) and the older
-struct format still sitting in historical blocks. A create's `entity_key` is null: the engine derives the key from
-the owner, its entity nonce and the salt, and calldata alone carries none of the first two. This decoder does not
+struct format still sitting in historical blocks. Calldata alone cannot yield a create's `entity_key` (the engine
+derives the key from the owner, its entity nonce and the salt, and calldata carries none of the first two), so the
+scanner fills it from the `EntityCreated` log in the transaction receipt it already fetches; it stays null only
+when the transaction reverted or the receipt's log count does not match the calldata's creates. This decoder does not
 parse v1 payload references, so `is_reference`, `payload_reference` and `reference_verification` stay unset — it
 was swapped in for the decoder that came before it, which did parse them but refused every registry call the
 chain now makes. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
@@ -440,7 +442,8 @@ For empty blocks all averages are stored as `0`.
 
 When a decoder URL is configured and transaction rows are stored, decoded Arkiv operations land in the
 `transaction_operations` table, keyed by `(block_number, position, op_index)` and indexed by transaction hash and
-entity key. Each row stores metadata only: operation type and name, entity key, content type, attribute key/value
+entity key. Each row stores metadata only: operation type and name, entity key (for creates, read from the
+receipt's `EntityCreated` log rather than calldata), content type, attribute key/value
 pairs (JSONB), expiry in blocks, new owner, and the payload size in bytes. For v1 reference-mode operations it also
 stores `is_reference`, the parsed payload reference (`payload_reference`, JSONB — provider receipt metadata such as
 id, checksum, size, and signature, never the entity bytes), the offline verification verdict

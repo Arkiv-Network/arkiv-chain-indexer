@@ -2,10 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   ARKIV_REGISTRY_ADDRESS,
   ArkivDecoderClient,
+  ENTITY_CREATED_TOPIC0,
   decodeBlockArkivOperations,
 } from "./arkivOperations";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
-import type { Hex, RpcBlock, RpcTransaction } from "./types";
+import type { Hex, RpcBlock, RpcLog, RpcReceipt, RpcTransaction } from "./types";
 
 const originalFetch = globalThis.fetch;
 
@@ -373,5 +374,113 @@ describe("decodeBlockArkivOperations", () => {
 
     expect(await decodeBlockArkivOperations(block, client)).toEqual([]);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("create entity keys from receipts", () => {
+  const KEY_A = `0x${"aa".repeat(32)}` as Hex;
+  const KEY_B = `0x${"bb".repeat(32)}` as Hex;
+  const OWNER_TOPIC = `0x${"11".repeat(12)}${"22".repeat(20)}` as Hex;
+
+  function entityCreatedLog(entityKey: Hex): RpcLog {
+    return {
+      address: ARKIV_REGISTRY_ADDRESS as Hex,
+      topics: [ENTITY_CREATED_TOPIC0 as Hex, entityKey, OWNER_TOPIC],
+      data: "0x",
+    };
+  }
+
+  function receiptFixture(hash: Hex, logs: RpcLog[], overrides: Partial<RpcReceipt> = {}): RpcReceipt {
+    return { transactionHash: hash, gasUsed: "0x5208", status: "0x1", logs, ...overrides };
+  }
+
+  test("fills create entity keys from EntityCreated logs in operation order", async () => {
+    stubFetch(() =>
+      decoderResponse([
+        decoderOperationFixture({ entityKey: null }),
+        decoderOperationFixture({ operationType: 2, operation: "update" }),
+        decoderOperationFixture({ entityKey: null }),
+      ]),
+    );
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const block = blockFixture([
+      transactionFixture(0, { to: ARKIV_REGISTRY_ADDRESS as Hex, input: "0x01" }),
+    ]);
+    const hash = block.transactions[0]!.hash;
+    const receipt = receiptFixture(hash, [
+      // A foreign log and a non-EntityCreated registry log must both be ignored.
+      { ...entityCreatedLog(`0x${"99".repeat(32)}` as Hex), address: `0x${"99".repeat(20)}` as Hex },
+      entityCreatedLog(KEY_A),
+      { address: ARKIV_REGISTRY_ADDRESS as Hex, topics: [`0x${"cc".repeat(32)}` as Hex], data: "0x" },
+      entityCreatedLog(KEY_B),
+    ]);
+
+    const results = await decodeBlockArkivOperations(block, client, [receipt]);
+
+    expect(results[0]?.operations.map((operation) => operation.entityKey)).toEqual([
+      KEY_A,
+      `0x${"11".repeat(32)}`,
+      KEY_B,
+    ]);
+  });
+
+  test("matches receipts to transactions case-insensitively by hash", async () => {
+    stubFetch(() => decoderResponse([decoderOperationFixture({ entityKey: null })]));
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const block = blockFixture([
+      transactionFixture(0, {
+        hash: `0x${"ab".repeat(32)}` as Hex,
+        to: ARKIV_REGISTRY_ADDRESS as Hex,
+        input: "0x01",
+      }),
+    ]);
+    const receipt = receiptFixture(`0x${"AB".repeat(32)}` as Hex, [entityCreatedLog(KEY_A)]);
+
+    const results = await decodeBlockArkivOperations(block, client, [receipt]);
+
+    expect(results[0]?.operations[0]?.entityKey).toBe(KEY_A);
+  });
+
+  test("leaves create entity keys null when log and create counts disagree", async () => {
+    stubFetch(() =>
+      decoderResponse([
+        decoderOperationFixture({ entityKey: null }),
+        decoderOperationFixture({ entityKey: null }),
+      ]),
+    );
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const block = blockFixture([
+      transactionFixture(0, { to: ARKIV_REGISTRY_ADDRESS as Hex, input: "0x01" }),
+    ]);
+    const receipt = receiptFixture(block.transactions[0]!.hash, [entityCreatedLog(KEY_A)]);
+
+    const results = await decodeBlockArkivOperations(block, client, [receipt]);
+
+    expect(results[0]?.operations.map((operation) => operation.entityKey)).toEqual([null, null]);
+  });
+
+  test("leaves create entity keys null for a reverted transaction", async () => {
+    stubFetch(() => decoderResponse([decoderOperationFixture({ entityKey: null })]));
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const block = blockFixture([
+      transactionFixture(0, { to: ARKIV_REGISTRY_ADDRESS as Hex, input: "0x01" }),
+    ]);
+    const receipt = receiptFixture(block.transactions[0]!.hash, [], { status: "0x0" });
+
+    const results = await decodeBlockArkivOperations(block, client, [receipt]);
+
+    expect(results[0]?.operations[0]?.entityKey).toBeNull();
+  });
+
+  test("leaves operations untouched without receipts", async () => {
+    stubFetch(() => decoderResponse([decoderOperationFixture({ entityKey: null })]));
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const block = blockFixture([
+      transactionFixture(0, { to: ARKIV_REGISTRY_ADDRESS as Hex, input: "0x01" }),
+    ]);
+
+    const results = await decodeBlockArkivOperations(block, client);
+
+    expect(results[0]?.operations[0]?.entityKey).toBeNull();
   });
 });
