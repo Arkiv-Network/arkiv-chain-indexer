@@ -991,6 +991,73 @@ if (!hasPostgresForTests()) {
       expect(await storage.getOperationsByHash("0xother")).toEqual([]);
     });
 
+    test("reads an entity's operation history across blocks in chain order", async () => {
+      const storage = await withStorage();
+      const entityKey = `0x${"ab".repeat(32)}`;
+      // Block 10 holds the create (fixture op 0 uses this entity key, op 1 a
+      // different one); block 11 holds a delete of the same entity.
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 10n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xfeed" })],
+        undefined,
+        arkivOperationsFixture("0xfeed", 0),
+      );
+      const deleteOperations: TransactionArkivOperations[] = [
+        {
+          position: 0,
+          hash: "0xdead" as `0x${string}`,
+          operations: [
+            {
+              opIndex: 0,
+              operationType: 5,
+              operation: "delete",
+              entityKey,
+              contentType: null,
+              payloadSizeBytes: 0,
+              attributes: [],
+              expiresAtBlocks: 0,
+              newOwner: null,
+              isReference: false,
+              payloadReference: null,
+              referenceVerification: null,
+              referenceError: null,
+            },
+          ],
+        },
+      ];
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 11n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xdead" })],
+        undefined,
+        deleteOperations,
+      );
+
+      // Uppercase input is normalized; history spans blocks in chain order and
+      // carries each operation's transaction context.
+      const history = await storage.getOperationsByEntityKey(`0x${"AB".repeat(32)}`);
+      expect(history).toHaveLength(2);
+      expect(history[0]).toMatchObject({
+        blockNumber: 10,
+        blockNumberDecimal: "10",
+        position: 0,
+        hash: "0xfeed",
+        operation: "create",
+        entityKey,
+      });
+      expect(history[1]).toMatchObject({
+        blockNumber: 11,
+        blockNumberDecimal: "11",
+        hash: "0xdead",
+        operation: "delete",
+        entityKey,
+      });
+      expect(typeof history[0]?.blockDate).toBe("string");
+
+      expect(await storage.getOperationsByEntityKey(`0x${"99".repeat(32)}`)).toEqual([]);
+    });
+
     test("aggregates operation summaries per transaction ordered by operation type", async () => {
       const storage = await withStorage();
       const deleteOperation: ArkivOperation = {

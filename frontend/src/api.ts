@@ -279,6 +279,21 @@ export interface ArkivOperation {
   referenceError?: string | null; // set when a reference payload failed to parse
 }
 
+/** One stored operation joined with its transaction context, for entity history. */
+export interface StoredEntityOperation extends ArkivOperation {
+  blockNumber: number;
+  blockNumberDecimal: string;
+  blockDate: string;
+  position: number;
+  hash: string;
+}
+
+export interface EntityByKeyResponse {
+  entityKey: string;
+  count: number;
+  operations: StoredEntityOperation[];
+}
+
 export interface ArkivOperationSummaryEntry {
   operation: string;
   operationType: number;
@@ -1251,6 +1266,16 @@ export async function fetchTransactionByHash(hash: string): Promise<StoredTransa
   }
   const body = (await response.json()) as TransactionByHashResponse;
   return body.transaction;
+}
+
+export async function fetchEntityByKey(entityKey: string): Promise<EntityByKeyResponse | null> {
+  const response = await fetch(`/api/entity/${encodeURIComponent(entityKey)}`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<EntityByKeyResponse>;
 }
 
 export function fetchTransactionRecords(params: URLSearchParams): Promise<TransactionRecordsResponse> {

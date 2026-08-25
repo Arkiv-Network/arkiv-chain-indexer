@@ -11,6 +11,7 @@ export const ALL_NAV_ITEMS: readonly NavItem[] = [
   { view: "home", label: "Home" },
   { view: "blocks", label: "Blocks" },
   { view: "block", label: "Block", requiresTransactionData: true },
+  { view: "entity", label: "Entity", requiresTransactionData: true },
   { view: "transactions", label: "Address", requiresTransactionData: true },
   { view: "senders", label: "Senders", requiresTransactionData: true },
   { view: "transaction-records", label: "Records" },

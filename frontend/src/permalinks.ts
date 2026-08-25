@@ -4,6 +4,7 @@ export type View =
   | "block"
   | "transactions"
   | "transaction"
+  | "entity"
   | "address"
   | "transaction-records"
   | "senders"
@@ -23,6 +24,7 @@ const VIEW_PATHS: Record<View, string> = {
   block: "/block",
   transactions: "/transactions",
   transaction: "/tx",
+  entity: "/entity",
   address: "/address",
   "transaction-records": "/records",
   senders: "/senders",
@@ -42,6 +44,7 @@ const VIEW_PATH_ALIASES: Record<string, View> = {
   "/block": "block",
   "/transactions": "transactions",
   "/tx": "transaction",
+  "/entity": "entity",
   "/address": "address",
   "/transaction-records": "transaction-records",
   "/records": "transaction-records",
@@ -100,6 +103,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "block") return "block";
   if (value === "transactions") return "transactions";
   if (value === "transaction") return "transaction";
+  if (value === "entity") return "entity";
   if (value === "address") return "address";
   if (value === "transaction-records") return "transaction-records";
   if (value === "senders") return "senders";
@@ -123,6 +127,9 @@ export function readViewFromLocation(location: ClientLocation): View {
 
   // Detail route with a dynamic hash segment: /tx/<hash>
   if (pathname === "/tx" || pathname.startsWith("/tx/")) return "transaction";
+
+  // Detail route with a dynamic entity key segment: /entity/<0x…>
+  if (pathname === "/entity" || pathname.startsWith("/entity/")) return "entity";
 
   // Detail route with a dynamic address segment: /address/<0x…>
   if (pathname === "/address" || pathname.startsWith("/address/")) return "address";
@@ -148,6 +155,39 @@ export function readTransactionHashFromLocation(location: ClientLocation): strin
 /** Build a client-side href for the transaction detail panel (`/tx/<hash>`). */
 export function transactionDetailHref(hash: string): string {
   return `${routePathForView("transaction")}/${encodeURIComponent(hash.trim())}`;
+}
+
+/** Extract the entity key from an `/entity/<0x…>` path, or null if absent. */
+export function readEntityKeyFromLocation(location: ClientLocation): string | null {
+  const pathname = normalizePathname(location.pathname);
+  const match = pathname.match(/^\/entity\/(.+)$/);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]).trim() || null;
+  } catch {
+    return match[1].trim() || null;
+  }
+}
+
+/** Build a client-side href for the entity detail page (`/entity/<0x…>`). */
+export function entityDetailHref(entityKey: string): string {
+  return `${routePathForView("entity")}/${encodeURIComponent(entityKey.trim())}`;
+}
+
+/** Navigate to the entity detail page via history.pushState. */
+export function writeEntityPermalink(entityKey: string): boolean {
+  if (typeof window === "undefined") return false;
+
+  const url = new URL(window.location.href);
+  url.pathname = entityDetailHref(entityKey);
+  url.search = "";
+  url.hash = "";
+
+  const href = url.toString();
+  if (href === window.location.href) return false;
+
+  window.history.pushState(null, "", href);
+  return true;
 }
 
 /** Extract the address from an `/address/<0x…>` path, or null if absent. */

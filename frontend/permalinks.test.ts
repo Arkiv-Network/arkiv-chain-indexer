@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildRouteHref,
+  entityDetailHref,
+  readEntityKeyFromLocation,
   readViewFromLocation,
   shouldHandleClientNavigation,
   type ClientNavigationClick,
@@ -61,6 +63,15 @@ describe("frontend permalink helpers", () => {
   test("reads compatibility aliases", () => {
     expect(readViewFromLocation({ pathname: "/transaction-records", search: "" })).toBe("transaction-records");
     expect(readViewFromLocation({ pathname: "/guzzlers", search: "" })).toBe("guzzlers");
+  });
+
+  test("reads the entity route with and without a key segment", () => {
+    const key = `0x${"ab".repeat(32)}`;
+    expect(readViewFromLocation({ pathname: "/entity", search: "" })).toBe("entity");
+    expect(readViewFromLocation({ pathname: `/entity/${key}`, search: "" })).toBe("entity");
+    expect(readEntityKeyFromLocation({ pathname: `/entity/${key}`, search: "" })).toBe(key);
+    expect(readEntityKeyFromLocation({ pathname: "/entity", search: "" })).toBeNull();
+    expect(entityDetailHref(` ${key} `)).toBe(`/entity/${key}`);
   });
 
   test("reads the chart fullscreen route", () => {

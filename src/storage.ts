@@ -32,6 +32,7 @@ export const MAX_TRANSACTIONS_PER_QUERY = 1_000;
 export const MAX_TRANSACTION_RECORDS_PER_CATEGORY = 100;
 export const DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY = 20;
 export const MAX_SENDERS_PER_QUERY = 10_000;
+export const MAX_ENTITY_OPERATIONS_PER_QUERY = 1_000;
 
 export type QueryOrder = "asc" | "desc";
 export type TransactionRecordCategory = "gas_used" | "transaction_fee" | "effective_fee";
@@ -128,6 +129,15 @@ export interface StoredTransaction extends InspectedTransaction {
   baseBlockFeeWei: string;
   operations?: ArkivOperation[];
   operationsSummary?: ArkivOperationSummaryEntry[];
+}
+
+/** One stored operation joined with its transaction context, for entity history. */
+export interface StoredEntityOperation extends ArkivOperation {
+  blockNumber: number;
+  blockNumberDecimal: string;
+  blockDate: string;
+  position: number;
+  hash: string;
 }
 
 export interface StoredTransactionRecord extends StoredTransaction {
@@ -1471,6 +1481,48 @@ export class ScannerStorage {
       [hash.toLowerCase()],
     );
     return result.rows.map(mapTransactionOperationRow);
+  }
+
+  /**
+   * Chronological history of every stored operation on one entity key (create,
+   * update, extend, transfer, delete, expire). Served by the entity_key index
+   * and capped at {@link MAX_ENTITY_OPERATIONS_PER_QUERY} rows in chain order,
+   * each joined with its transaction context (block, position, hash, date).
+   */
+  async getOperationsByEntityKey(entityKey: string): Promise<StoredEntityOperation[]> {
+    const result = await this.db.query<EntityOperationRow>(
+      `SELECT
+        block_number,
+        position,
+        op_index,
+        hash,
+        block_date,
+        operation_type,
+        operation,
+        entity_key,
+        content_type,
+        payload_size_bytes,
+        attributes,
+        expires_at_blocks,
+        new_owner,
+        is_reference,
+        payload_reference,
+        reference_verification,
+        reference_error
+      FROM ${this.qTransactionOperations}
+      WHERE entity_key = $1
+      ORDER BY block_number ASC, position ASC, op_index ASC
+      LIMIT $2`,
+      [entityKey.toLowerCase(), MAX_ENTITY_OPERATIONS_PER_QUERY],
+    );
+    return result.rows.map((row) => ({
+      ...mapTransactionOperationRow(row),
+      blockNumber: Number(row.block_number),
+      blockNumberDecimal: row.block_number,
+      blockDate: row.block_date,
+      position: row.position,
+      hash: row.hash,
+    }));
   }
 
   /**
@@ -2826,6 +2878,13 @@ interface TransactionOperationRow {
   reference_verification: ArkivReferenceVerification | string | null;
   reference_error: string | null;
 }
+
+type EntityOperationRow = TransactionOperationRow & {
+  block_number: string;
+  position: number;
+  hash: string;
+  block_date: string;
+};
 
 interface TransactionRow {
   block_number: string;

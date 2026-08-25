@@ -21,7 +21,12 @@ import {
   fmtTokenAmount,
 } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
-import { transactionDetailHref, writeTransactionPermalink } from "./permalinks";
+import {
+  entityDetailHref,
+  transactionDetailHref,
+  writeEntityPermalink,
+  writeTransactionPermalink,
+} from "./permalinks";
 import { payloadInfoHref, transactionDecoderHref } from "./transactionLinks";
 
 interface TransactionViewProps {
@@ -257,7 +262,12 @@ function TransactionDetail({
             />
           ) : null}
           {operations.map((operation) => (
-            <OperationCard key={operation.opIndex} operation={operation} blockTimeMs={blockTimeMs} />
+            <OperationCard
+              key={operation.opIndex}
+              operation={operation}
+              blockTimeMs={blockTimeMs}
+              onLocationChange={onLocationChange}
+            />
           ))}
         </section>
       ) : null}
@@ -344,7 +354,15 @@ function PayloadProviderPaymentsPanel({
   );
 }
 
-function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; blockTimeMs: number }) {
+function OperationCard({
+  operation,
+  blockTimeMs,
+  onLocationChange,
+}: {
+  operation: ArkivOperation;
+  blockTimeMs: number;
+  onLocationChange?: () => void;
+}) {
   const entityKey =
     operation.entityKey && !isAllZeroBytes32(operation.entityKey) ? operation.entityKey : null;
   const expirySeconds = (operation.expiresAtBlocks * blockTimeMs) / 1000;
@@ -364,7 +382,18 @@ function OperationCard({ operation, blockTimeMs }: { operation: ArkivOperation; 
         <Row label="Entity key">
           {entityKey ? (
             <span className="tx-inline">
-              <span className="mono">{entityKey}</span>
+              <a
+                className="mono block-link"
+                href={entityDetailHref(entityKey)}
+                onClick={(event) => {
+                  if (!onLocationChange) return;
+                  event.preventDefault();
+                  if (writeEntityPermalink(entityKey)) onLocationChange();
+                }}
+                title="View entity history"
+              >
+                {entityKey}
+              </a>
               <CopyButton value={entityKey} label="entity key" />
             </span>
           ) : (
@@ -524,7 +553,7 @@ function txTypeLabel(type: string | null): string {
   }
 }
 
-function CopyButton({ value, label }: { value: string; label: string }) {
+export function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {

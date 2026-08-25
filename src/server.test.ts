@@ -13,6 +13,7 @@ import {
   parseTransactionRecordsFilterFromQuery,
   type BlockInspectResponseBody,
   type BlockResponseRow,
+  type EntityByKeyResponseBody,
   type BlocksResponseBody,
   type HealthResponseBody,
   type RangesResponseBody,
@@ -25,7 +26,7 @@ import {
 import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperations";
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
-import type { ScannerStorage, StoredTransactionRecord } from "./storage";
+import type { ScannerStorage, StoredEntityOperation, StoredTransactionRecord } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import {
@@ -1070,6 +1071,104 @@ describe("GET /transaction/:hash", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+});
+
+describe("GET /entity/:entityKey", () => {
+  const entityKey = `0x${"11".repeat(32)}`;
+
+  function entityOperationFixture(overrides: Partial<StoredEntityOperation> = {}): StoredEntityOperation {
+    return {
+      blockNumber: 42,
+      blockNumberDecimal: "42",
+      blockDate: "2026-01-01T00:00:00.000Z",
+      position: 0,
+      hash: `0x${"ab".repeat(32)}`,
+      opIndex: 0,
+      operationType: 1,
+      operation: "create",
+      entityKey,
+      contentType: "text/plain",
+      payloadSizeBytes: 64,
+      attributes: [],
+      expiresAtBlocks: 100,
+      newOwner: null,
+      isReference: false,
+      payloadReference: null,
+      referenceVerification: null,
+      referenceError: null,
+      ...overrides,
+    };
+  }
+
+  test("returns the stored operation history for the entity key, lowercased", async () => {
+    const requestedKeys: string[] = [];
+    const operations = [
+      entityOperationFixture(),
+      entityOperationFixture({
+        blockNumber: 43,
+        blockNumberDecimal: "43",
+        hash: `0x${"cd".repeat(32)}`,
+        operationType: 5,
+        operation: "delete",
+        contentType: null,
+        payloadSizeBytes: 0,
+        expiresAtBlocks: 0,
+      }),
+    ];
+    const storage = {
+      getOperationsByEntityKey: async (requested: string) => {
+        requestedKeys.push(requested);
+        return operations;
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request(`http://example.test/entity/0x${"11".repeat(16)}${"AB".repeat(16)}`),
+      storage,
+    );
+    const body = (await response.json()) as EntityByKeyResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(requestedKeys).toEqual([`0x${"11".repeat(16)}${"ab".repeat(16)}`]);
+    expect(body.entityKey).toBe(`0x${"11".repeat(16)}${"ab".repeat(16)}`);
+    expect(body.count).toBe(2);
+    expect(body.operations).toEqual(operations);
+  });
+
+  test("returns 404 when no operations exist for the entity key", async () => {
+    const storage = {
+      getOperationsByEntityKey: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request(`http://example.test/entity/${entityKey}`),
+      storage,
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  test("rejects malformed entity keys with 404", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/entity/0x1234"),
+      {} as ScannerStorage,
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  test("returns 404 when transaction data is disabled", async () => {
+    const response = await handleRequest(
+      new Request(`http://example.test/entity/${entityKey}`),
+      {} as ScannerStorage,
+      { transactionDataEnabled: false },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Transaction data is disabled",
+    });
   });
 });
 

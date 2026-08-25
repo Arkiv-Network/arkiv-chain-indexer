@@ -667,6 +667,16 @@ key, content type, attributes, expiry, new owner, and `payloadSizeBytes`, plus t
 `isReference`, `payloadReference`, `referenceVerification`, and `referenceError` for v1 reference operations.
 Payload bytes are never stored or returned. Returns `404` when the hash is unknown or transaction data is disabled.
 
+### `GET /entity/:entityKey`
+
+Returns the chronological history of every stored operation on one Arkiv entity key (create, update, extend,
+transfer, delete, expire) as `{ "entityKey", "count", "operations" }`. The key must be `0x` plus 64 hex
+characters and is normalized to lowercase. Operations are ordered by block number, transaction position, and
+operation index ascending, capped at **1,000 rows**, and each carries its transaction context (`blockNumber`,
+`blockNumberDecimal`, `blockDate`, `position`, `hash`) alongside the same operation fields as
+`/transaction/:hash`. Returns `404` when no operations are stored for the key or transaction data is disabled.
+The frontend serves this history at `/entity/<key>`, linked from every entity key on a transaction page.
+
 ### `GET /senders`
 
 Returns precomputed sender-address stats ordered from most active to least active by default. When transaction

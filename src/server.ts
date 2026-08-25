@@ -42,6 +42,7 @@ import {
   type StoredBlockRange,
   type StoredBaseloadConfig,
   type StoredBaseloadConfigSummary,
+  type StoredEntityOperation,
   type StoredSenderStats,
   type StoredTransaction,
   type StoredTransactionRecordsByCategory,
@@ -115,6 +116,12 @@ export interface TransactionByHashResponseBody {
   transaction: StoredTransaction & {
     payloadProviderPayments?: PayloadProviderPaymentBreakdown;
   };
+}
+
+export interface EntityByKeyResponseBody {
+  entityKey: string;
+  count: number;
+  operations: StoredEntityOperation[];
 }
 
 export interface TransactionRecordsResponseBody {
@@ -436,6 +443,14 @@ export async function handleRequest(
       storage,
       options.payloadProviderPaymentResolver,
     );
+  }
+
+  const entityByKeyMatch = url.pathname.match(/^\/entity\/(0x[0-9a-fA-F]{64})$/);
+  if (entityByKeyMatch?.[1]) {
+    if (!transactionDataEnabled) {
+      return jsonError(404, "Transaction data is disabled");
+    }
+    return handleGetEntityByKey(entityByKeyMatch[1], storage);
   }
 
   if (url.pathname === "/transaction-records") {
@@ -887,6 +902,19 @@ async function handleGetTransactionByHash(
       ...(payloadProviderPayments ? { payloadProviderPayments } : {}),
     },
   } satisfies TransactionByHashResponseBody);
+}
+
+async function handleGetEntityByKey(entityKey: string, storage: ScannerStorage): Promise<Response> {
+  const normalized = entityKey.toLowerCase();
+  const operations = await storage.getOperationsByEntityKey(normalized);
+  if (operations.length === 0) {
+    return jsonError(404, `No operations for entity ${normalized} were found in storage`);
+  }
+  return jsonResponse({
+    entityKey: normalized,
+    count: operations.length,
+    operations,
+  } satisfies EntityByKeyResponseBody);
 }
 
 async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): Promise<Response> {

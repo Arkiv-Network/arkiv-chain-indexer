@@ -24,6 +24,7 @@ import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
+import { EntityView } from "./EntityView";
 import { ChartsView } from "./ChartsView";
 import { CedricView } from "./CedricView";
 import { GuzzlersView } from "./GuzzlersView";
@@ -42,6 +43,7 @@ import {
 import {
   getCurrentLocation,
   readAddressFromLocation,
+  readEntityKeyFromLocation,
   readTransactionHashFromLocation,
   readViewFromLocation,
   writePermalink,
@@ -106,12 +108,14 @@ export function App() {
   const locationSearch = clientLocation.search;
   const view = readViewFromLocation(clientLocation);
   const transactionHash = readTransactionHashFromLocation(clientLocation);
+  const entityKeyParam = readEntityKeyFromLocation(clientLocation);
   const addressParam = readAddressFromLocation(clientLocation);
   const activeView =
     transactionDataEnabled !== true &&
     (view === "block" ||
       view === "transactions" ||
       view === "transaction" ||
+      view === "entity" ||
       view === "address" ||
       view === "senders")
       ? "blocks"
@@ -214,6 +218,7 @@ export function App() {
       (view === "block" ||
         view === "transactions" ||
         view === "transaction" ||
+        view === "entity" ||
         view === "address" ||
         view === "senders") &&
       writePermalink("blocks", {})
@@ -586,6 +591,13 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
+            blockTimeMs={pageSettings.blockTimeMs}
+          />
+        ) : activeView === "entity" ? (
+          <EntityView
+            entityKey={entityKeyParam}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
             blockTimeMs={pageSettings.blockTimeMs}
           />
         ) : activeView === "address" ? (
