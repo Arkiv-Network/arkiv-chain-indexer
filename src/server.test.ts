@@ -2,9 +2,14 @@ import { readFile } from "node:fs/promises";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   BLOCK_RESPONSE_NAMES,
+  ENTITY_OPERATION_RESPONSE_NAMES,
   RANGE_RESPONSE_NAMES,
+  SENDER_STATS_RESPONSE_NAMES,
+  TRANSACTION_RECORD_RESPONSE_NAMES,
+  TRANSACTION_RESPONSE_NAMES,
   buildSyncStatusResponse,
   createBlockServer,
+  entityOperationToResponseRow,
   handleRequest,
   parseFilterFromQuery,
   parseRangeFilterFromQuery,
@@ -15,13 +20,17 @@ import {
   type BlockInspectResponseBody,
   type BlockResponseRow,
   type EntityByKeyResponseBody,
+  type EntityOperationResponseRow,
   type BlocksResponseBody,
   type HealthResponseBody,
   type RangesResponseBody,
   type SendersResponseBody,
+  type SenderStatsResponseRow,
   type SyncStatusResponseBody,
   type TransactionByHashResponseBody,
+  type TransactionRecordResponseRow,
   type TransactionRecordsResponseBody,
+  type TransactionResponseRow,
   type TransactionsResponseBody,
 } from "./server";
 import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperations";
@@ -54,6 +63,34 @@ function rangeValue(
   name: (typeof RANGE_RESPONSE_NAMES)[number],
 ): number | string | null {
   return row[RANGE_RESPONSE_NAMES.indexOf(name)] ?? null;
+}
+
+function transactionValue(
+  row: TransactionResponseRow | undefined,
+  name: (typeof TRANSACTION_RESPONSE_NAMES)[number],
+): TransactionResponseRow[number] {
+  return row?.[TRANSACTION_RESPONSE_NAMES.indexOf(name)] ?? null;
+}
+
+function recordValue(
+  row: TransactionRecordResponseRow | undefined,
+  name: (typeof TRANSACTION_RECORD_RESPONSE_NAMES)[number],
+): TransactionRecordResponseRow[number] {
+  return row?.[TRANSACTION_RECORD_RESPONSE_NAMES.indexOf(name)] ?? null;
+}
+
+function senderValue(
+  row: SenderStatsResponseRow | undefined,
+  name: (typeof SENDER_STATS_RESPONSE_NAMES)[number],
+): SenderStatsResponseRow[number] {
+  return row?.[SENDER_STATS_RESPONSE_NAMES.indexOf(name)] ?? null;
+}
+
+function entityOperationValue(
+  row: EntityOperationResponseRow | undefined,
+  name: (typeof ENTITY_OPERATION_RESPONSE_NAMES)[number],
+): EntityOperationResponseRow[number] {
+  return row?.[ENTITY_OPERATION_RESPONSE_NAMES.indexOf(name)] ?? null;
 }
 
 async function readZstdJson<T>(response: Response): Promise<T> {
@@ -866,9 +903,10 @@ describe("GET /transactions", () => {
     expect(body.filters.address).toBe("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(body.filters.nonceGt).toBe("0");
     expect(body.filters.nonceLt).toBe("5");
-    expect(body.transactions[0]?.blockNumber).toBe(42);
-    expect(body.transactions[0]?.position).toBe(0);
-    expect(body.transactions[0]?.operationsSummary).toBeUndefined();
+    expect(body.names).toEqual(TRANSACTION_RESPONSE_NAMES);
+    expect(transactionValue(body.transactions[0], "blockNumber")).toBe(42);
+    expect(transactionValue(body.transactions[0], "position")).toBe(0);
+    expect(transactionValue(body.transactions[0], "operationsSummary")).toBeNull();
     expect(queryFilter).toMatchObject({ order: "desc" });
   });
 
@@ -901,9 +939,10 @@ describe("GET /transactions", () => {
       { blockNumber: "42", position: 0 },
       { blockNumber: "42", position: 1 },
     ]);
-    expect(body.transactions[0]?.operationsSummary).toEqual(summary);
-    expect(body.transactions[1]?.operationsSummary).toBeUndefined();
-    expect(body.transactions[0]?.operations).toBeUndefined();
+    expect(transactionValue(body.transactions[0], "operationsSummary")).toEqual(summary);
+    expect(transactionValue(body.transactions[1], "operationsSummary")).toBeNull();
+    // Full decoded operations are never part of list rows.
+    expect(body.names).not.toContain("operations");
   });
 
   test("rejects invalid transaction filters", async () => {
@@ -1138,7 +1177,8 @@ describe("GET /entity/:entityKey", () => {
     expect(body.totalOperations).toBe(2);
     expect(body.truncated).toBe(false);
     expect(body.firstOperation).toBeUndefined();
-    expect(body.operations).toEqual(operations);
+    expect(body.names).toEqual(ENTITY_OPERATION_RESPONSE_NAMES);
+    expect(body.operations).toEqual(operations.map(entityOperationToResponseRow));
   });
 
   test("marks truncated histories and carries the earliest stored operation", async () => {
@@ -1169,8 +1209,8 @@ describe("GET /entity/:entityKey", () => {
     expect(body.count).toBe(1);
     expect(body.totalOperations).toBe(5);
     expect(body.truncated).toBe(true);
-    expect(body.operations).toEqual([newest]);
-    expect(body.firstOperation).toEqual(first);
+    expect(body.operations).toEqual([entityOperationToResponseRow(newest)]);
+    expect(body.firstOperation).toEqual(entityOperationToResponseRow(first));
   });
 
   test("serves repeat lookups from the cache until the key is invalidated", async () => {
@@ -1200,7 +1240,7 @@ describe("GET /entity/:entityKey", () => {
     cache.invalidate(entityKey);
     const thirdBody = (await (await request()).json()) as EntityByKeyResponseBody;
     expect(storageCalls).toBe(2);
-    expect(thirdBody.operations[0]?.payloadSizeBytes).toBe(2);
+    expect(entityOperationValue(thirdBody.operations[0], "payloadSizeBytes")).toBe(2);
   });
 
   test("caches not-found responses", async () => {
@@ -1317,9 +1357,10 @@ describe("GET /transaction-records", () => {
     expect(response.status).toBe(200);
     expect(queryFilter).toEqual({ limit: 10 });
     expect(body.limit).toBe(10);
-    expect(body.records.gas_used[0]?.recordValue).toBe("30000");
-    expect(body.records.transaction_fee[0]?.recordValue).toBe("9000000");
-    expect(body.records.effective_fee[0]?.recordValue).toBe("300");
+    expect(body.names).toEqual(TRANSACTION_RECORD_RESPONSE_NAMES);
+    expect(recordValue(body.records.gas_used[0], "recordValue")).toBe("30000");
+    expect(recordValue(body.records.transaction_fee[0], "recordValue")).toBe("9000000");
+    expect(recordValue(body.records.effective_fee[0], "recordValue")).toBe("300");
   });
 
   test("rejects invalid record limits", async () => {
@@ -1371,8 +1412,11 @@ describe("GET /senders", () => {
     expect(body.limit).toBe(25);
     expect(body.truncated).toBe(false);
     expect(body.filters.order).toBe("desc");
-    expect(body.senders[0]?.address).toBe("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    expect(body.senders[0]?.transactionCount).toBe("2");
+    expect(body.names).toEqual(SENDER_STATS_RESPONSE_NAMES);
+    expect(senderValue(body.senders[0], "address")).toBe(
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    expect(senderValue(body.senders[0], "transactionCount")).toBe("2");
     expect(queryFilter).toEqual({ limit: 25, order: "desc" });
   });
 

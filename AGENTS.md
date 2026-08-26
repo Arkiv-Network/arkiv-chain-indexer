@@ -68,7 +68,11 @@ docker compose up --build
 - `src/server.ts` exposes `GET /blocks` and `GET /ranges` (built on `Bun.serve`) plus a `GET /health` probe.
   CORS headers are returned on every response so the static frontend can fetch from a different origin. All
   filters combine additively; results are always capped at the smallest 10,000 matching rows. Entry point:
-  `src/serve.ts` (`bun run serve`).
+  `src/serve.ts` (`bun run serve`). List endpoints (`/blocks`, `/ranges`, `/transactions`,
+  `/transaction-records`, `/senders`, `/guzzlers`, and `/entity/:entityKey` operations) send compact rows —
+  one `names` array plus per-row value arrays, so keys are not repeated per row — and negotiate
+  `Content-Encoding: zstd`; `frontend/src/api.ts` expands rows back into objects, so the compact wire format
+  stays invisible to view components.
 - `GET /entity/:entityKey` returns the most recent `ENTITY_HISTORY_LIMIT` (default 100) operations plus
   `totalOperations`/`truncated`, and `firstOperation` when the create fell outside the slice. Responses
   (including 404s) are cached in a `ResponseCache` (`src/responseCache.ts`) — bounded by entries (default

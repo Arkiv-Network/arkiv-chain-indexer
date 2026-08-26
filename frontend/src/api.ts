@@ -302,6 +302,47 @@ export interface EntityByKeyResponse {
   firstOperation?: StoredEntityOperation;
 }
 
+export const ENTITY_OPERATION_RESPONSE_NAMES = [
+  "blockNumber",
+  "blockNumberDecimal",
+  "blockDate",
+  "position",
+  "hash",
+  "opIndex",
+  "operationType",
+  "operation",
+  "entityKey",
+  "contentType",
+  "payloadSizeBytes",
+  "attributes",
+  "expiresAtBlocks",
+  "newOwner",
+  "isReference",
+  "payloadReference",
+  "referenceVerification",
+  "referenceError",
+] as const satisfies readonly (keyof StoredEntityOperation)[];
+
+export type EntityOperationResponseValue =
+  | number
+  | string
+  | boolean
+  | null
+  | ArkivOperationAttribute[]
+  | ArkivPayloadReference
+  | ArkivReferenceVerification;
+export type EntityOperationResponseRow = EntityOperationResponseValue[];
+
+interface CompactEntityByKeyResponse {
+  entityKey: string;
+  count: number;
+  totalOperations?: number;
+  truncated?: boolean;
+  names: string[];
+  operations: EntityOperationResponseRow[];
+  firstOperation?: EntityOperationResponseRow;
+}
+
 export interface ArkivOperationSummaryEntry {
   operation: string;
   operationType: number;
@@ -417,6 +458,42 @@ export type StoredTransaction = InspectedTransaction &
     Pick<InspectedTransaction, "blockNumber" | "blockNumberDecimal" | "blockDate" | "baseBlockFeeWei">
   >;
 
+/** Flat stored-transaction fields shared by /transactions and /transaction-records rows. */
+const TRANSACTION_RESPONSE_BASE_NAMES = [
+  "blockNumber",
+  "blockNumberDecimal",
+  "blockDate",
+  "baseBlockFeeWei",
+  "position",
+  "hash",
+  "from",
+  "to",
+  "type",
+  "nonce",
+  "valueWei",
+  "gasLimit",
+  "gasUsed",
+  "inputDataSizeBytes",
+  "inputDataCompressedSizeBytes",
+  "cumulativeGasUsed",
+  "gasPriceWei",
+  "maxFeePerGasWei",
+  "maxPriorityFeePerGasWei",
+  "effectiveGasPriceWei",
+  "priorityFeeWei",
+  "transactionFeeWei",
+  "status",
+  "contractAddress",
+] as const satisfies readonly (keyof StoredTransaction)[];
+
+export const TRANSACTION_RESPONSE_NAMES = [
+  ...TRANSACTION_RESPONSE_BASE_NAMES,
+  "operationsSummary",
+] as const satisfies readonly (keyof StoredTransaction)[];
+
+export type TransactionResponseValue = number | string | null | ArkivOperationSummaryEntry[];
+export type TransactionResponseRow = TransactionResponseValue[];
+
 export type TransactionRecordCategory = "gas_used" | "transaction_fee" | "effective_fee";
 
 export interface StoredTransactionRecord extends StoredTransaction {
@@ -431,6 +508,22 @@ export type TransactionRecordsByCategory = Record<TransactionRecordCategory, Sto
 export interface TransactionRecordsResponse {
   limit: number;
   records: TransactionRecordsByCategory;
+}
+
+export const TRANSACTION_RECORD_RESPONSE_NAMES = [
+  ...TRANSACTION_RESPONSE_BASE_NAMES,
+  "category",
+  "recordValue",
+  "rank",
+  "recordedAt",
+] as const satisfies readonly (keyof StoredTransactionRecord)[];
+
+export type TransactionRecordResponseRow = TransactionResponseValue[];
+
+interface CompactTransactionRecordsResponse {
+  limit: number;
+  names: string[];
+  records: Record<TransactionRecordCategory, TransactionRecordResponseRow[]>;
 }
 
 export interface TransactionsResponse {
@@ -454,6 +547,11 @@ export interface TransactionsResponse {
     dateLt: string | null;
   };
   transactions: StoredTransaction[];
+}
+
+interface CompactTransactionsResponse extends Omit<TransactionsResponse, "transactions"> {
+  names: string[];
+  transactions: TransactionResponseRow[];
 }
 
 export interface StoredSenderStats {
@@ -482,6 +580,32 @@ export interface SendersResponse {
     order: "asc" | "desc";
   };
   senders: StoredSenderStats[];
+}
+
+export const SENDER_STATS_RESPONSE_NAMES = [
+  "address",
+  "latestNonce",
+  "transactionCount",
+  "totalGasUsed",
+  "totalTransactionFeeWei",
+  "totalValueWei",
+  "averageGasUsed",
+  "averageTransactionFeeWei",
+  "firstBlockNumber",
+  "firstBlockNumberDecimal",
+  "lastBlockNumber",
+  "lastBlockNumberDecimal",
+  "firstBlockDate",
+  "lastBlockDate",
+  "aggregatedAt",
+] as const satisfies readonly (keyof StoredSenderStats)[];
+
+export type SenderStatsResponseValue = number | string | null;
+export type SenderStatsResponseRow = SenderStatsResponseValue[];
+
+interface CompactSendersResponse extends Omit<SendersResponse, "senders"> {
+  names: string[];
+  senders: SenderStatsResponseRow[];
 }
 
 export interface GuzzlerStat {
@@ -913,6 +1037,52 @@ function expandRangesResponse(response: CompactRangesResponse): RangesResponse {
   };
 }
 
+function expandTransactionsResponse(response: CompactTransactionsResponse): TransactionsResponse {
+  const names = response.names?.length ? response.names : TRANSACTION_RESPONSE_NAMES;
+  return {
+    ...response,
+    transactions: response.transactions.map((row) => decodeTransactionResponseRow(row, names)),
+  };
+}
+
+function expandTransactionRecordsResponse(
+  response: CompactTransactionRecordsResponse,
+): TransactionRecordsResponse {
+  const names = response.names?.length ? response.names : TRANSACTION_RECORD_RESPONSE_NAMES;
+  const decodeAll = (rows: TransactionRecordResponseRow[] | undefined) =>
+    (rows ?? []).map((row) => decodeTransactionRecordResponseRow(row, names));
+  return {
+    limit: response.limit,
+    records: {
+      gas_used: decodeAll(response.records.gas_used),
+      transaction_fee: decodeAll(response.records.transaction_fee),
+      effective_fee: decodeAll(response.records.effective_fee),
+    },
+  };
+}
+
+function expandSendersResponse(response: CompactSendersResponse): SendersResponse {
+  const names = response.names?.length ? response.names : SENDER_STATS_RESPONSE_NAMES;
+  return {
+    ...response,
+    senders: response.senders.map((row) => decodeSenderStatsResponseRow(row, names)),
+  };
+}
+
+function expandEntityByKeyResponse(response: CompactEntityByKeyResponse): EntityByKeyResponse {
+  const names = response.names?.length ? response.names : ENTITY_OPERATION_RESPONSE_NAMES;
+  return {
+    entityKey: response.entityKey,
+    count: response.count,
+    ...(response.totalOperations !== undefined ? { totalOperations: response.totalOperations } : {}),
+    ...(response.truncated !== undefined ? { truncated: response.truncated } : {}),
+    operations: response.operations.map((row) => decodeEntityOperationResponseRow(row, names)),
+    ...(response.firstOperation
+      ? { firstOperation: decodeEntityOperationResponseRow(response.firstOperation, names) }
+      : {}),
+  };
+}
+
 function expandGuzzlerHistoryResponse(
   response: CompactGuzzlerHistoryResponse,
 ): GuzzlerHistoryResponse {
@@ -1089,6 +1259,123 @@ function decodeGuzzlerHistoryPointResponseRow(
   };
 }
 
+function decodeTransactionResponseRow(
+  row: TransactionResponseRow,
+  names: readonly string[] = TRANSACTION_RESPONSE_NAMES,
+): StoredTransaction {
+  const values = valuesByName(names, row);
+
+  const transaction: StoredTransaction = {
+    blockNumber: numberValue(values.get("blockNumber") ?? null),
+    blockNumberDecimal: stringValue(values.get("blockNumberDecimal") ?? null),
+    blockDate: stringValue(values.get("blockDate") ?? null),
+    baseBlockFeeWei: stringValue(values.get("baseBlockFeeWei") ?? null),
+    position: numberValue(values.get("position") ?? null),
+    hash: stringValue(values.get("hash") ?? null),
+    from: nullableString(values.get("from") ?? null),
+    to: nullableString(values.get("to") ?? null),
+    type: nullableString(values.get("type") ?? null),
+    nonce: nullableString(values.get("nonce") ?? null),
+    valueWei: stringValue(values.get("valueWei") ?? null),
+    gasLimit: stringValue(values.get("gasLimit") ?? null),
+    gasUsed: stringValue(values.get("gasUsed") ?? null),
+    inputDataSizeBytes: stringValue(values.get("inputDataSizeBytes") ?? null),
+    inputDataCompressedSizeBytes: stringValue(values.get("inputDataCompressedSizeBytes") ?? null),
+    cumulativeGasUsed: nullableString(values.get("cumulativeGasUsed") ?? null),
+    gasPriceWei: nullableString(values.get("gasPriceWei") ?? null),
+    maxFeePerGasWei: nullableString(values.get("maxFeePerGasWei") ?? null),
+    maxPriorityFeePerGasWei: nullableString(values.get("maxPriorityFeePerGasWei") ?? null),
+    effectiveGasPriceWei: stringValue(values.get("effectiveGasPriceWei") ?? null),
+    priorityFeeWei: stringValue(values.get("priorityFeeWei") ?? null),
+    transactionFeeWei: stringValue(values.get("transactionFeeWei") ?? null),
+    status: nullableString(values.get("status") ?? null),
+    contractAddress: nullableString(values.get("contractAddress") ?? null),
+  };
+
+  const operationsSummary = values.get("operationsSummary");
+  if (Array.isArray(operationsSummary)) {
+    transaction.operationsSummary = operationsSummary as ArkivOperationSummaryEntry[];
+  }
+
+  return transaction;
+}
+
+function decodeTransactionRecordResponseRow(
+  row: TransactionRecordResponseRow,
+  names: readonly string[] = TRANSACTION_RECORD_RESPONSE_NAMES,
+): StoredTransactionRecord {
+  const values = valuesByName(names, row);
+  return {
+    ...decodeTransactionResponseRow(row, names),
+    category: stringValue(values.get("category") ?? null) as TransactionRecordCategory,
+    recordValue: stringValue(values.get("recordValue") ?? null),
+    rank: numberValue(values.get("rank") ?? null),
+    recordedAt: stringValue(values.get("recordedAt") ?? null),
+  };
+}
+
+function decodeSenderStatsResponseRow(
+  row: SenderStatsResponseRow,
+  names: readonly string[] = SENDER_STATS_RESPONSE_NAMES,
+): StoredSenderStats {
+  const values = valuesByName(names, row);
+  return {
+    address: stringValue(values.get("address") ?? null),
+    latestNonce: nullableString(values.get("latestNonce") ?? null),
+    transactionCount: stringValue(values.get("transactionCount") ?? null),
+    totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
+    totalTransactionFeeWei: stringValue(values.get("totalTransactionFeeWei") ?? null),
+    totalValueWei: stringValue(values.get("totalValueWei") ?? null),
+    averageGasUsed: stringValue(values.get("averageGasUsed") ?? null),
+    averageTransactionFeeWei: stringValue(values.get("averageTransactionFeeWei") ?? null),
+    firstBlockNumber: numberValue(values.get("firstBlockNumber") ?? null),
+    firstBlockNumberDecimal: stringValue(values.get("firstBlockNumberDecimal") ?? null),
+    lastBlockNumber: numberValue(values.get("lastBlockNumber") ?? null),
+    lastBlockNumberDecimal: stringValue(values.get("lastBlockNumberDecimal") ?? null),
+    firstBlockDate: stringValue(values.get("firstBlockDate") ?? null),
+    lastBlockDate: stringValue(values.get("lastBlockDate") ?? null),
+    aggregatedAt: stringValue(values.get("aggregatedAt") ?? null),
+  };
+}
+
+function decodeEntityOperationResponseRow(
+  row: EntityOperationResponseRow,
+  names: readonly string[] = ENTITY_OPERATION_RESPONSE_NAMES,
+): StoredEntityOperation {
+  const values = valuesByName(names, row);
+  const attributes = values.get("attributes");
+  const payloadReference = values.get("payloadReference");
+  const referenceVerification = values.get("referenceVerification");
+  return {
+    blockNumber: numberValue(values.get("blockNumber") ?? null),
+    blockNumberDecimal: stringValue(values.get("blockNumberDecimal") ?? null),
+    blockDate: stringValue(values.get("blockDate") ?? null),
+    position: numberValue(values.get("position") ?? null),
+    hash: stringValue(values.get("hash") ?? null),
+    opIndex: numberValue(values.get("opIndex") ?? null),
+    operationType: numberValue(values.get("operationType") ?? null),
+    operation: stringValue(values.get("operation") ?? null),
+    entityKey: nullableString(values.get("entityKey") ?? null),
+    contentType: nullableString(values.get("contentType") ?? null),
+    payloadSizeBytes: numberValue(values.get("payloadSizeBytes") ?? null),
+    attributes: Array.isArray(attributes) ? (attributes as ArkivOperationAttribute[]) : [],
+    expiresAtBlocks: numberValue(values.get("expiresAtBlocks") ?? null),
+    newOwner: nullableString(values.get("newOwner") ?? null),
+    isReference: values.get("isReference") === true,
+    payloadReference:
+      payloadReference && typeof payloadReference === "object" && !Array.isArray(payloadReference)
+        ? (payloadReference as ArkivPayloadReference)
+        : null,
+    referenceVerification:
+      referenceVerification &&
+      typeof referenceVerification === "object" &&
+      !Array.isArray(referenceVerification)
+        ? (referenceVerification as ArkivReferenceVerification)
+        : null,
+    referenceError: nullableString(values.get("referenceError") ?? null),
+  };
+}
+
 function decodeGuzzlerStatResponseRow(
   row: GuzzlerStatResponseRow,
   names: readonly string[] = GUZZLER_STAT_RESPONSE_NAMES,
@@ -1104,10 +1391,7 @@ function decodeGuzzlerStatResponseRow(
   };
 }
 
-function valuesByName<T extends number | string | null>(
-  names: readonly string[],
-  row: readonly T[],
-): Map<string, T | null> {
+function valuesByName<T>(names: readonly string[], row: readonly T[]): Map<string, T | null> {
   const values = new Map<string, T | null>();
   names.forEach((name, index) => values.set(name, row[index] ?? null));
   return values;
@@ -1132,16 +1416,16 @@ function assignOptionalString(
   }
 }
 
-function numberValue(value: BlockResponseValue): number {
+function numberValue(value: unknown): number {
   return typeof value === "number" ? value : Number(value ?? 0);
 }
 
-function stringValue(value: BlockResponseValue): string {
-  return value === null ? "" : String(value);
+function stringValue(value: unknown): string {
+  return value == null ? "" : String(value);
 }
 
-function nullableString(value: BlockResponseValue): string | null {
-  return value === null ? null : String(value);
+function nullableString(value: unknown): string | null {
+  return value == null ? null : String(value);
 }
 
 async function fetchJsonWithDebug<T>(
@@ -1258,7 +1542,9 @@ async function inspectStoredBlock(block: StoredBlock, blockNumber: string): Prom
 }
 
 export function fetchTransactions(params: URLSearchParams): Promise<TransactionsResponse> {
-  return getJson<TransactionsResponse>("/transactions", params);
+  return getJson<CompactTransactionsResponse>("/transactions", params).then(
+    expandTransactionsResponse,
+  );
 }
 
 export interface TransactionByHashResponse {
@@ -1283,15 +1569,18 @@ export async function fetchEntityByKey(entityKey: string): Promise<EntityByKeyRe
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
   }
-  return response.json() as Promise<EntityByKeyResponse>;
+  const body = (await response.json()) as CompactEntityByKeyResponse;
+  return expandEntityByKeyResponse(body);
 }
 
 export function fetchTransactionRecords(params: URLSearchParams): Promise<TransactionRecordsResponse> {
-  return getJson<TransactionRecordsResponse>("/transaction-records", params);
+  return getJson<CompactTransactionRecordsResponse>("/transaction-records", params).then(
+    expandTransactionRecordsResponse,
+  );
 }
 
 export function fetchSenders(params: URLSearchParams): Promise<SendersResponse> {
-  return getJson<SendersResponse>("/senders", params);
+  return getJson<CompactSendersResponse>("/senders", params).then(expandSendersResponse);
 }
 
 export function fetchHealth(): Promise<HealthResponse> {

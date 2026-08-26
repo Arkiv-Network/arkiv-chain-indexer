@@ -67,8 +67,11 @@ Related scanner and worker settings:
 - Dates are ISO-8601 UTC strings.
 - `order` parameters accept `asc` or `desc`; invalid values return `400`.
 - Integer query parameters must be non-negative or positive as required by the route.
-- `/blocks`, `/ranges`, and `/guzzlers` return `Content-Encoding: zstd` when the request
-  `Accept-Encoding` header allows `zstd`; otherwise they return normal JSON.
+- `/blocks`, `/ranges`, `/transactions`, `/transaction-records`, `/senders`, and `/guzzlers`
+  return `Content-Encoding: zstd` when the request `Accept-Encoding` header allows `zstd`;
+  otherwise they return normal JSON.
+- List endpoints return compact rows: a `names` array states the field order once and every row is
+  a JSON array of values in that order, so field names are not repeated per row.
 - `/blocks` and `/ranges` responses are cached in memory per query string and encoding
   (`LIST_CACHE_MAX_ENTRIES`, default 200; `LIST_CACHE_MAX_BYTES`, default 64 MiB;
   `LIST_CACHE_TTL_MS`, default 5 s; any set to 0 disables caching). The cache is cleared the moment
@@ -187,7 +190,7 @@ Response shape:
 `names` field order:
 
 ```txt
-blockNumber, blockDate, baseBlockFeeWei, totalGasUsed, totalInputDataSizeBytes,
+blockNumber, blockDate, blockTimeSeconds, baseBlockFeeWei, totalGasUsed, totalInputDataSizeBytes,
 totalInputDataCompressedSizeBytes, maxGasInBlock, transactionCount, blockRewardWei,
 burntFeesWei, totalTransactionFeeWei, feePriceSumWei, priorityFeeSumWei,
 priorityFeeWeightedNumeratorWei, priorityFeeGasWeightedNumeratorWei, averageFeePriceWei,
@@ -298,15 +301,24 @@ Response shape:
     "dateGt": null,
     "dateLt": null
   },
+  "names": ["blockNumber"],
   "transactions": []
 }
 ```
 
-Transaction rows include the transaction fields listed under `/block/:blockNumber` plus block context:
-`blockNumber`, `blockNumberDecimal`, `blockDate`, and `baseBlockFeeWei`.
+Each transaction row is a compact JSON array of values in `names` order.
 
-If decoded Arkiv operations were stored for a transaction, that row may also include
-`operationsSummary`, an array of `{ operation, operationType, count }` entries.
+`names` field order:
+
+```txt
+blockNumber, blockNumberDecimal, blockDate, baseBlockFeeWei, position, hash, from, to, type,
+nonce, valueWei, gasLimit, gasUsed, inputDataSizeBytes, inputDataCompressedSizeBytes,
+cumulativeGasUsed, gasPriceWei, maxFeePerGasWei, maxPriorityFeePerGasWei, effectiveGasPriceWei,
+priorityFeeWei, transactionFeeWei, status, contractAddress, operationsSummary
+```
+
+The final `operationsSummary` value is an array of `{ operation, operationType, count }` entries
+when decoded Arkiv operations are stored for the transaction, and `null` otherwise.
 
 ## `GET /transaction/:hash`
 
@@ -353,13 +365,22 @@ Response shape:
   "count": 0,
   "totalOperations": 0,
   "truncated": false,
+  "names": ["blockNumber"],
   "operations": []
 }
 ```
 
-`count` is the number of returned operations. Each operation has the fields listed under
-`/transaction/:hash` plus its transaction context: `blockNumber`, `blockNumberDecimal`,
-`blockDate`, `position`, and `hash`.
+`count` is the number of returned operations. Each operation (and `firstOperation`, when present)
+is a compact JSON array of values in `names` order; the `attributes`, `payloadReference`, and
+`referenceVerification` values stay nested JSON inside the row.
+
+`names` field order:
+
+```txt
+blockNumber, blockNumberDecimal, blockDate, position, hash, opIndex, operationType, operation,
+entityKey, contentType, payloadSizeBytes, attributes, expiresAtBlocks, newOwner, isReference,
+payloadReference, referenceVerification, referenceError
+```
 
 ## `GET /transaction-records`
 
@@ -377,6 +398,7 @@ Response shape:
 ```json
 {
   "limit": 20,
+  "names": ["blockNumber"],
   "records": {
     "gas_used": [],
     "transaction_fee": [],
@@ -385,7 +407,8 @@ Response shape:
 }
 ```
 
-Each record is a transaction row plus `category`, `recordValue`, `rank`, and `recordedAt`.
+Each record is a compact JSON array of values in `names` order: the `/transactions` fields
+(without `operationsSummary`) plus `category`, `recordValue`, `rank`, and `recordedAt`.
 
 ## `GET /senders`
 
@@ -399,7 +422,8 @@ Query parameters:
 | `limit` | Positive integer, maximum 10,000. |
 | `order` | `desc` default for most active first, or `asc`. |
 
-Each sender row includes:
+The response includes `count`, `limit`, `truncated`, `filters`, `names`, and `senders`. Each
+sender row is a compact JSON array of values in `names` order:
 
 ```txt
 address, latestNonce, transactionCount, totalGasUsed, totalTransactionFeeWei,

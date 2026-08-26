@@ -47,6 +47,7 @@ import {
   type StoredEntityOperation,
   type StoredSenderStats,
   type StoredTransaction,
+  type StoredTransactionRecord,
   type StoredTransactionRecordsByCategory,
   type TransactionQueryFilter,
   type TransactionRecordsQueryFilter,
@@ -131,7 +132,8 @@ export interface TransactionsResponseBody {
     dateGt: string | null;
     dateLt: string | null;
   };
-  transactions: StoredTransaction[];
+  names: typeof TRANSACTION_RESPONSE_NAMES;
+  transactions: TransactionResponseRow[];
 }
 
 export interface TransactionByHashResponseBody {
@@ -148,15 +150,20 @@ export interface EntityByKeyResponseBody {
   totalOperations: number;
   /** True when older operations were cut off by the history limit. */
   truncated: boolean;
+  /** Field order for the compact `operations` / `firstOperation` rows. */
+  names: typeof ENTITY_OPERATION_RESPONSE_NAMES;
   /** Most recent operations in chain order, capped at the history limit. */
-  operations: StoredEntityOperation[];
+  operations: EntityOperationResponseRow[];
   /** Earliest stored operation; present only when `truncated`. */
-  firstOperation?: StoredEntityOperation;
+  firstOperation?: EntityOperationResponseRow;
 }
 
 export interface TransactionRecordsResponseBody {
   limit: number;
-  records: StoredTransactionRecordsByCategory;
+  names: typeof TRANSACTION_RECORD_RESPONSE_NAMES;
+  records: {
+    [Category in keyof StoredTransactionRecordsByCategory]: TransactionRecordResponseRow[];
+  };
 }
 
 export interface SendersResponseBody {
@@ -166,7 +173,8 @@ export interface SendersResponseBody {
   filters: {
     order: QueryOrder;
   };
-  senders: StoredSenderStats[];
+  names: typeof SENDER_STATS_RESPONSE_NAMES;
+  senders: SenderStatsResponseRow[];
 }
 
 export interface GuzzlersResponseBody {
@@ -349,6 +357,128 @@ export const GUZZLER_HISTORY_POINT_RESPONSE_NAMES = [
 export type GuzzlerHistoryPointResponseValue = number | string | null;
 export type GuzzlerHistoryPointResponseRow = GuzzlerHistoryPointResponseValue[];
 
+/** Flat stored-transaction fields shared by /transactions and /transaction-records rows. */
+const TRANSACTION_RESPONSE_BASE_NAMES = [
+  "blockNumber",
+  "blockNumberDecimal",
+  "blockDate",
+  "baseBlockFeeWei",
+  "position",
+  "hash",
+  "from",
+  "to",
+  "type",
+  "nonce",
+  "valueWei",
+  "gasLimit",
+  "gasUsed",
+  "inputDataSizeBytes",
+  "inputDataCompressedSizeBytes",
+  "cumulativeGasUsed",
+  "gasPriceWei",
+  "maxFeePerGasWei",
+  "maxPriorityFeePerGasWei",
+  "effectiveGasPriceWei",
+  "priorityFeeWei",
+  "transactionFeeWei",
+  "status",
+  "contractAddress",
+] as const satisfies readonly (keyof StoredTransaction)[];
+
+export const TRANSACTION_RESPONSE_NAMES = [
+  ...TRANSACTION_RESPONSE_BASE_NAMES,
+  "operationsSummary",
+] as const satisfies readonly (keyof StoredTransaction)[];
+
+export type TransactionResponseName = (typeof TRANSACTION_RESPONSE_NAMES)[number];
+export type TransactionResponseValue =
+  | Exclude<StoredTransaction[TransactionResponseName], undefined>
+  | null;
+export type TransactionResponseRow = TransactionResponseValue[];
+
+export function transactionToResponseRow(transaction: StoredTransaction): TransactionResponseRow {
+  return TRANSACTION_RESPONSE_NAMES.map((name) => transaction[name] ?? null);
+}
+
+export const TRANSACTION_RECORD_RESPONSE_NAMES = [
+  ...TRANSACTION_RESPONSE_BASE_NAMES,
+  "category",
+  "recordValue",
+  "rank",
+  "recordedAt",
+] as const satisfies readonly (keyof StoredTransactionRecord)[];
+
+export type TransactionRecordResponseName = (typeof TRANSACTION_RECORD_RESPONSE_NAMES)[number];
+export type TransactionRecordResponseValue =
+  | Exclude<StoredTransactionRecord[TransactionRecordResponseName], undefined>
+  | null;
+export type TransactionRecordResponseRow = TransactionRecordResponseValue[];
+
+export function transactionRecordToResponseRow(
+  record: StoredTransactionRecord,
+): TransactionRecordResponseRow {
+  return TRANSACTION_RECORD_RESPONSE_NAMES.map((name) => record[name] ?? null);
+}
+
+export const SENDER_STATS_RESPONSE_NAMES = [
+  "address",
+  "latestNonce",
+  "transactionCount",
+  "totalGasUsed",
+  "totalTransactionFeeWei",
+  "totalValueWei",
+  "averageGasUsed",
+  "averageTransactionFeeWei",
+  "firstBlockNumber",
+  "firstBlockNumberDecimal",
+  "lastBlockNumber",
+  "lastBlockNumberDecimal",
+  "firstBlockDate",
+  "lastBlockDate",
+  "aggregatedAt",
+] as const satisfies readonly (keyof StoredSenderStats)[];
+
+export type SenderStatsResponseName = (typeof SENDER_STATS_RESPONSE_NAMES)[number];
+export type SenderStatsResponseValue = number | string | null;
+export type SenderStatsResponseRow = SenderStatsResponseValue[];
+
+export function senderStatsToResponseRow(sender: StoredSenderStats): SenderStatsResponseRow {
+  return SENDER_STATS_RESPONSE_NAMES.map((name) => sender[name] ?? null);
+}
+
+export const ENTITY_OPERATION_RESPONSE_NAMES = [
+  "blockNumber",
+  "blockNumberDecimal",
+  "blockDate",
+  "position",
+  "hash",
+  "opIndex",
+  "operationType",
+  "operation",
+  "entityKey",
+  "contentType",
+  "payloadSizeBytes",
+  "attributes",
+  "expiresAtBlocks",
+  "newOwner",
+  "isReference",
+  "payloadReference",
+  "referenceVerification",
+  "referenceError",
+] as const satisfies readonly (keyof StoredEntityOperation)[];
+
+export type EntityOperationResponseName = (typeof ENTITY_OPERATION_RESPONSE_NAMES)[number];
+export type EntityOperationResponseValue =
+  | Exclude<StoredEntityOperation[EntityOperationResponseName], undefined>
+  | null;
+export type EntityOperationResponseRow = EntityOperationResponseValue[];
+
+export function entityOperationToResponseRow(
+  operation: StoredEntityOperation,
+): EntityOperationResponseRow {
+  return ENTITY_OPERATION_RESPONSE_NAMES.map((name) => operation[name] ?? null);
+}
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
@@ -466,7 +596,7 @@ export async function handleRequest(
     if (!transactionDataEnabled) {
       return jsonError(404, "Transaction data is disabled");
     }
-    return handleGetTransactions(url, storage);
+    return handleGetTransactions(request, url, storage);
   }
 
   const transactionByHashMatch = url.pathname.match(/^\/transaction\/(0x[0-9a-fA-F]{64})$/);
@@ -490,14 +620,14 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/transaction-records") {
-    return handleGetTransactionRecords(url, storage);
+    return handleGetTransactionRecords(request, url, storage);
   }
 
   if (url.pathname === "/senders") {
     if (!transactionDataEnabled) {
       return jsonError(404, "Transaction data is disabled");
     }
-    return handleGetSenders(url, storage);
+    return handleGetSenders(request, url, storage);
   }
 
   return jsonError(404, `Not found: ${url.pathname}`);
@@ -853,7 +983,11 @@ export function rangeToResponseRow(range: StoredBlockRange): RangeResponseRow {
   return RANGE_RESPONSE_NAMES.map((name) => range[name] ?? null);
 }
 
-async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise<Response> {
+async function handleGetTransactions(
+  request: Request,
+  url: URL,
+  storage: ScannerStorage,
+): Promise<Response> {
   let filter: TransactionQueryFilter;
   try {
     filter = parseTransactionFilterFromQuery(url.searchParams);
@@ -905,15 +1039,18 @@ async function handleGetTransactions(url: URL, storage: ScannerStorage): Promise
       dateGt: filter.dateGt ?? null,
       dateLt: filter.dateLt ?? null,
     },
+    names: TRANSACTION_RESPONSE_NAMES,
     transactions: transactions.map((transaction) => {
       const operationsSummary = operationsSummaries.get(
         `${transaction.blockNumberDecimal}:${transaction.position}`,
       );
-      return operationsSummary ? { ...transaction, operationsSummary } : transaction;
+      return transactionToResponseRow(
+        operationsSummary ? { ...transaction, operationsSummary } : transaction,
+      );
     }),
   };
 
-  return jsonResponse(body);
+  return compressedJsonResponse(request, body);
 }
 
 async function handleGetTransactionByHash(
@@ -989,13 +1126,20 @@ async function buildEntityByKeyResponse(
     count: history.operations.length,
     totalOperations: history.totalOperations,
     truncated: history.totalOperations > history.operations.length,
-    operations: history.operations,
-    ...(history.firstOperation ? { firstOperation: history.firstOperation } : {}),
+    names: ENTITY_OPERATION_RESPONSE_NAMES,
+    operations: history.operations.map(entityOperationToResponseRow),
+    ...(history.firstOperation
+      ? { firstOperation: entityOperationToResponseRow(history.firstOperation) }
+      : {}),
   };
   return { status: 200, body: JSON.stringify(responseBody) };
 }
 
-async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): Promise<Response> {
+async function handleGetTransactionRecords(
+  request: Request,
+  url: URL,
+  storage: ScannerStorage,
+): Promise<Response> {
   let filter: TransactionRecordsQueryFilter;
   try {
     filter = parseTransactionRecordsFilterFromQuery(url.searchParams);
@@ -1008,12 +1152,18 @@ async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): P
     DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY,
   );
 
+  const records = await storage.queryTransactionRecords({ limit });
   const body: TransactionRecordsResponseBody = {
     limit,
-    records: await storage.queryTransactionRecords({ limit }),
+    names: TRANSACTION_RECORD_RESPONSE_NAMES,
+    records: {
+      gas_used: records.gas_used.map(transactionRecordToResponseRow),
+      transaction_fee: records.transaction_fee.map(transactionRecordToResponseRow),
+      effective_fee: records.effective_fee.map(transactionRecordToResponseRow),
+    },
   };
 
-  return jsonResponse(body);
+  return compressedJsonResponse(request, body);
 }
 
 export interface SyncStatusResponseBody {
@@ -1231,7 +1381,11 @@ export function guzzlerHistoryPointToResponseRow(
   return GUZZLER_HISTORY_POINT_RESPONSE_NAMES.map((name) => point[name] ?? null);
 }
 
-async function handleGetSenders(url: URL, storage: ScannerStorage): Promise<Response> {
+async function handleGetSenders(
+  request: Request,
+  url: URL,
+  storage: ScannerStorage,
+): Promise<Response> {
   let filter: SenderStatsQueryFilter;
   try {
     filter = parseSenderStatsFilterFromQuery(url.searchParams);
@@ -1248,10 +1402,11 @@ async function handleGetSenders(url: URL, storage: ScannerStorage): Promise<Resp
     limit: effectiveLimit,
     truncated: senders.length >= effectiveLimit,
     filters: { order },
-    senders,
+    names: SENDER_STATS_RESPONSE_NAMES,
+    senders: senders.map(senderStatsToResponseRow),
   };
 
-  return jsonResponse(body);
+  return compressedJsonResponse(request, body);
 }
 
 export function parseFilterFromQuery(params: URLSearchParams): BlockQueryFilter {
