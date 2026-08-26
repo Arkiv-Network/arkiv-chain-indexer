@@ -14,8 +14,10 @@ let server: ReturnType<typeof Bun.spawn> | undefined;
 beforeAll(async () => {
   const staticDir = mkdtempSync(path.join(tmpdir(), "arkiv-static-"));
   mkdirSync(path.join(staticDir, "assets"));
+  mkdirSync(path.join(staticDir, "fonts"));
   writeFileSync(path.join(staticDir, "index.html"), "<!doctype html><title>t</title>");
   writeFileSync(path.join(staticDir, "assets", "index-abc123.js"), "console.log('bundle');");
+  writeFileSync(path.join(staticDir, "fonts", "face-v1-latin.woff2"), "not-a-real-font");
   writeFileSync(path.join(staticDir, "llms.txt"), "docs");
 
   server = Bun.spawn(["node", path.join(import.meta.dir, "server.js")], {
@@ -78,6 +80,14 @@ describe("static server caching", () => {
     });
     expect(revalidated.status).toBe(304);
     expect(await revalidated.text()).toBe("");
+  });
+
+  test("version-named fonts are immutable like hashed assets", async () => {
+    const response = await fetch(`${base}/fonts/face-v1-latin.woff2`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(response.headers.get("content-type")).toBe("font/woff2");
   });
 
   test("SPA routes serve index.html with its no-cache policy", async () => {

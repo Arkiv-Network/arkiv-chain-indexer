@@ -62,10 +62,12 @@ function mimeFor(filePath) {
 }
 
 function cacheHeadersFor(filePath) {
-  // Vite content-hashes every file under assets/, so those can be cached
-  // forever; a new build changes the URL instead of the content.
+  // Vite content-hashes every file under assets/, and the self-hosted fonts
+  // carry an upstream version in their filename, so both can be cached
+  // forever; a new build or font release changes the URL instead of the
+  // content.
   const relative = path.relative(STATIC_DIR, filePath);
-  if (relative.startsWith(`assets${path.sep}`)) {
+  if (relative.startsWith(`assets${path.sep}`) || relative.startsWith(`fonts${path.sep}`)) {
     return { "cache-control": `public, max-age=${ONE_YEAR_SECONDS}, immutable` };
   }
 
