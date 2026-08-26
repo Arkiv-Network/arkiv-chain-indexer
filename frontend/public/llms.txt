@@ -127,7 +127,9 @@ Returns:
   `lastBlockAgeSeconds`, `backfillNextBlock`, `latestObservedBlock`, `safeHeadBlock`,
   `latestObservedAtUtc`, `latestObservationAgeSeconds`, `headLagBlocks`, `safeHeadLagBlocks`.
 - `database`: `totalSizeBytes` plus per-table `tableName`, `rowCount`, `tableSizeBytes`,
-  `indexesSizeBytes`, `totalSizeBytes`.
+  `indexesSizeBytes`, `totalSizeBytes`. `rowCount` is the Postgres planner estimate
+  (exact counts would scan every table on each call), so it can trail the true count
+  slightly between autovacuum analyzes.
 - `features`: booleans for `transactionData` and `guzzlers`.
 - `guzzlers`: Redis cache health: `enabled`, `entryCount`, `bucketCount`, `oldestBucket`,
   `newestBucket`, `totalSizeBytes`.

@@ -144,7 +144,7 @@ export function HealthView({ timeZone }: HealthViewProps) {
               <thead>
                 <tr>
                   <th>Table</th>
-                  <th>Rows</th>
+                  <th>Rows (est.)</th>
                   <th>Table</th>
                   <th>Indexes</th>
                   <th>Total</th>

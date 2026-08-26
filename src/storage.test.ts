@@ -198,6 +198,17 @@ if (!hasPostgresForTests()) {
         expect(BigInt(table.indexesSizeBytes)).toBeGreaterThanOrEqual(0n);
         expect(BigInt(table.totalSizeBytes)).toBeGreaterThanOrEqual(BigInt(table.tableSizeBytes));
       }
+
+      // Fresh tables are counted exactly (reltuples is -1 until the first
+      // ANALYZE); afterwards the count comes from the planner statistics.
+      const internals = storage as unknown as {
+        db: { query(sql: string): Promise<unknown> };
+        qBlocks: string;
+      };
+      await internals.db.query(`ANALYZE ${internals.qBlocks}`);
+      const analyzed = await storage.getDatabaseStats();
+      const analyzedBlocks = analyzed.tables.find((table) => table.tableName === "blocks");
+      expect(analyzedBlocks?.rowCount).toBe("2");
     });
 
     test("persists named baseload configs as JSON documents", async () => {

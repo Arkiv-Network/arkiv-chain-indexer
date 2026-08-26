@@ -251,6 +251,7 @@ export interface ScannerProgress {
 
 export interface DatabaseTableStats {
   tableName: string;
+  /** Planner estimate (pg_class.reltuples); exact only until the first ANALYZE. */
   rowCount: string;
   tableSizeBytes: string;
   indexesSizeBytes: string;
@@ -919,24 +920,38 @@ export class ScannerStorage {
       ),
       Promise.all(
         appTables.map(async (table) => {
+          // Row counts come from the planner statistics (reltuples), not
+          // COUNT(*): exact counts scan the whole table, which put hundreds of
+          // milliseconds of transactions/transaction_operations scans on every
+          // /health call. reltuples is -1 until the first VACUUM/ANALYZE, so
+          // only such fresh (and therefore small) tables are counted exactly.
           const result = await this.db.query<{
-            row_count: string;
+            estimated_row_count: string | null;
             table_size_bytes: string;
             indexes_size_bytes: string;
             total_size_bytes: string;
           }>(
             `SELECT
-               COUNT(*)::text AS row_count,
-               pg_relation_size($1::regclass)::text AS table_size_bytes,
-               pg_indexes_size($1::regclass)::text AS indexes_size_bytes,
-               pg_total_relation_size($1::regclass)::text AS total_size_bytes
-             FROM ${table.qualifiedName}`,
+               CASE WHEN c.reltuples >= 0 THEN trunc(c.reltuples)::bigint::text END
+                 AS estimated_row_count,
+               pg_relation_size(c.oid)::text AS table_size_bytes,
+               pg_indexes_size(c.oid)::text AS indexes_size_bytes,
+               pg_total_relation_size(c.oid)::text AS total_size_bytes
+             FROM pg_class c
+             WHERE c.oid = $1::regclass`,
             [table.regclassName],
           );
           const row = result.rows[0];
+          let rowCount = row?.estimated_row_count ?? null;
+          if (rowCount === null) {
+            const exact = await this.db.query<{ row_count: string }>(
+              `SELECT COUNT(*)::text AS row_count FROM ${table.qualifiedName}`,
+            );
+            rowCount = exact.rows[0]?.row_count ?? "0";
+          }
           return {
             tableName: table.name,
-            rowCount: row?.row_count ?? "0",
+            rowCount,
             tableSizeBytes: row?.table_size_bytes ?? "0",
             indexesSizeBytes: row?.indexes_size_bytes ?? "0",
             totalSizeBytes: row?.total_size_bytes ?? "0",
