@@ -26,7 +26,7 @@ import {
   PayloadProviderPaymentResolver,
   type PayloadProviderPaymentBreakdown,
 } from "./payloadProviderPayments";
-import { EntityHistoryCache, type CachedEntityResponse } from "./entityHistoryCache";
+import { ResponseCache, type CachedResponse } from "./responseCache";
 import {
   DEFAULT_ENTITY_HISTORY_LIMIT,
   MAX_BLOCKS_PER_QUERY,
@@ -65,9 +65,21 @@ export interface BlockServerOptions {
    * tests) the endpoint hits storage on every request; serve.ts always
    * provides one, wired to storage's entity-operation invalidation channel.
    */
-  entityHistoryCache?: EntityHistoryCache;
+  entityHistoryCache?: ResponseCache;
   /** Most-recent operations returned per entity; defaults to 100. */
   entityHistoryLimit?: number;
+  /**
+   * Bounded cache for /blocks and /ranges responses, keyed by query string
+   * and encoding. serve.ts clears it whenever a block-stored notification
+   * arrives; a short TTL backstops missed notifications.
+   */
+  listCache?: ResponseCache;
+  /**
+   * Actively precomputed /sync response (recomputed on every stored block
+   * plus a periodic refresh). When it has a value, /sync serves it with zero
+   * storage work; otherwise the handler computes on demand.
+   */
+  syncStatusProvider?: { get(): CachedResponse | null };
 }
 
 export interface BlocksResponseBody {
@@ -364,6 +376,8 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.entityHistoryLimit !== undefined
           ? { entityHistoryLimit: options.entityHistoryLimit }
           : {}),
+        ...(options.listCache ? { listCache: options.listCache } : {}),
+        ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -415,7 +429,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/sync") {
-    return handleGetSyncStatus(storage);
+    return handleGetSyncStatus(storage, options);
   }
 
   if (url.pathname === "/guzzlers") {
@@ -428,7 +442,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/blocks") {
-    return handleGetBlocks(request, url, storage);
+    return handleGetBlocks(request, url, storage, options);
   }
 
   const singleBlockMatch = url.pathname.match(/^\/blocks\/(\d+)$/);
@@ -445,7 +459,7 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/ranges") {
-    return handleGetRanges(request, url, storage);
+    return handleGetRanges(request, url, storage, options);
   }
 
   if (url.pathname === "/transactions") {
@@ -761,7 +775,12 @@ async function handleGetBlockInspect(
   }
 }
 
-async function handleGetBlocks(request: Request, url: URL, storage: ScannerStorage): Promise<Response> {
+async function handleGetBlocks(
+  request: Request,
+  url: URL,
+  storage: ScannerStorage,
+  options: BlockServerOptions,
+): Promise<Response> {
   let filter: BlockQueryFilter;
   try {
     filter = parseFilterFromQuery(url.searchParams);
@@ -769,31 +788,37 @@ async function handleGetBlocks(request: Request, url: URL, storage: ScannerStora
     return jsonError(400, error instanceof Error ? error.message : String(error));
   }
 
-  const blocks = await storage.queryBlocks(filter);
-  const effectiveLimit = Math.min(filter.limit ?? MAX_BLOCKS_PER_QUERY, MAX_BLOCKS_PER_QUERY);
+  return cachedListResponse(request, url, options.listCache, async () => {
+    const blocks = await storage.queryBlocks(filter);
+    const effectiveLimit = Math.min(filter.limit ?? MAX_BLOCKS_PER_QUERY, MAX_BLOCKS_PER_QUERY);
 
-  const body: BlocksResponseBody = {
-    count: blocks.length,
-    limit: effectiveLimit,
-    truncated: blocks.length >= effectiveLimit,
-    filters: {
-      blockGt: filter.blockGt !== undefined ? filter.blockGt.toString() : null,
-      blockLt: filter.blockLt !== undefined ? filter.blockLt.toString() : null,
-      dateGt: filter.dateGt ?? null,
-      dateLt: filter.dateLt ?? null,
-    },
-    names: BLOCK_RESPONSE_NAMES,
-    blocks: blocks.map(blockToResponseRow),
-  };
-
-  return compressedJsonResponse(request, body);
+    const body: BlocksResponseBody = {
+      count: blocks.length,
+      limit: effectiveLimit,
+      truncated: blocks.length >= effectiveLimit,
+      filters: {
+        blockGt: filter.blockGt !== undefined ? filter.blockGt.toString() : null,
+        blockLt: filter.blockLt !== undefined ? filter.blockLt.toString() : null,
+        dateGt: filter.dateGt ?? null,
+        dateLt: filter.dateLt ?? null,
+      },
+      names: BLOCK_RESPONSE_NAMES,
+      blocks: blocks.map(blockToResponseRow),
+    };
+    return JSON.stringify(body);
+  });
 }
 
 export function blockToResponseRow(block: StoredBlock): BlockResponseRow {
   return BLOCK_RESPONSE_NAMES.map((name) => block[name] ?? null);
 }
 
-async function handleGetRanges(request: Request, url: URL, storage: ScannerStorage): Promise<Response> {
+async function handleGetRanges(
+  request: Request,
+  url: URL,
+  storage: ScannerStorage,
+  options: BlockServerOptions,
+): Promise<Response> {
   let filter: BlockRangeQueryFilter;
   try {
     filter = parseRangeFilterFromQuery(url.searchParams);
@@ -801,26 +826,27 @@ async function handleGetRanges(request: Request, url: URL, storage: ScannerStora
     return jsonError(400, error instanceof Error ? error.message : String(error));
   }
 
-  const ranges = await storage.queryBlockRanges(filter);
-  const effectiveLimit = Math.min(filter.limit ?? MAX_RANGES_PER_QUERY, MAX_RANGES_PER_QUERY);
+  return cachedListResponse(request, url, options.listCache, async () => {
+    const ranges = await storage.queryBlockRanges(filter);
+    const effectiveLimit = Math.min(filter.limit ?? MAX_RANGES_PER_QUERY, MAX_RANGES_PER_QUERY);
 
-  const rangeSize = filter.rangeSize ?? DEFAULT_RANGE_SIZE;
-  const body: RangesResponseBody = {
-    count: ranges.length,
-    limit: effectiveLimit,
-    truncated: ranges.length >= effectiveLimit,
-    filters: {
-      rangeSize: rangeSize.toString(),
-      rangeStartGt: filter.rangeStartGt !== undefined ? filter.rangeStartGt.toString() : null,
-      rangeStartLt: filter.rangeStartLt !== undefined ? filter.rangeStartLt.toString() : null,
-      dateGt: filter.dateGt ?? null,
-      dateLt: filter.dateLt ?? null,
-    },
-    names: RANGE_RESPONSE_NAMES,
-    ranges: ranges.map(rangeToResponseRow),
-  };
-
-  return compressedJsonResponse(request, body);
+    const rangeSize = filter.rangeSize ?? DEFAULT_RANGE_SIZE;
+    const body: RangesResponseBody = {
+      count: ranges.length,
+      limit: effectiveLimit,
+      truncated: ranges.length >= effectiveLimit,
+      filters: {
+        rangeSize: rangeSize.toString(),
+        rangeStartGt: filter.rangeStartGt !== undefined ? filter.rangeStartGt.toString() : null,
+        rangeStartLt: filter.rangeStartLt !== undefined ? filter.rangeStartLt.toString() : null,
+        dateGt: filter.dateGt ?? null,
+        dateLt: filter.dateLt ?? null,
+      },
+      names: RANGE_RESPONSE_NAMES,
+      ranges: ranges.map(rangeToResponseRow),
+    };
+    return JSON.stringify(body);
+  });
 }
 
 export function rangeToResponseRow(range: StoredBlockRange): RangeResponseRow {
@@ -931,25 +957,24 @@ async function handleGetEntityByKey(
   storage: ScannerStorage,
   options: BlockServerOptions,
 ): Promise<Response> {
+  // Cache keys must be pre-normalized: the cache stores keys verbatim, and
+  // the storage NOTIFY payloads that drive invalidation are lowercase.
   const normalized = entityKey.toLowerCase();
   const limit = options.entityHistoryLimit ?? DEFAULT_ENTITY_HISTORY_LIMIT;
   const loader = () => buildEntityByKeyResponse(normalized, storage, limit);
   // Not-found responses are cached too: the create NOTIFY evicts them the
   // moment the entity appears in storage.
-  const { status, body } = options.entityHistoryCache
+  const cached = options.entityHistoryCache
     ? await options.entityHistoryCache.load(normalized, loader)
     : await loader();
-  return new Response(body, {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
+  return responseFromCached(cached);
 }
 
 async function buildEntityByKeyResponse(
   normalizedEntityKey: string,
   storage: ScannerStorage,
   limit: number,
-): Promise<CachedEntityResponse> {
+): Promise<CachedResponse> {
   const history = await storage.getEntityOperationHistory(normalizedEntityKey, limit);
   if (history.totalOperations === 0) {
     return {
@@ -1002,7 +1027,24 @@ export interface SyncStatusResponseBody {
  * but also walks the per-table database statistics, which is too heavy for the
  * frontend banner to poll every few seconds.
  */
-async function handleGetSyncStatus(storage: ScannerStorage): Promise<Response> {
+async function handleGetSyncStatus(
+  storage: ScannerStorage,
+  options: BlockServerOptions,
+): Promise<Response> {
+  // Serve the actively precomputed body when available (recomputed on every
+  // stored block plus a periodic refresh) — zero storage work per request.
+  const precomputed = options.syncStatusProvider?.get();
+  if (precomputed) {
+    return responseFromCached(precomputed);
+  }
+  return responseFromCached(await buildSyncStatusResponse(storage));
+}
+
+/**
+ * Compute the /sync response body. Exported so serve.ts can feed it to the
+ * PrecomputedResponse that recomputes on block-stored notifications.
+ */
+export async function buildSyncStatusResponse(storage: ScannerStorage): Promise<CachedResponse> {
   const now = new Date();
   const [progress, samples] = await Promise.all([
     storage.getScannerProgress(),
@@ -1013,7 +1055,7 @@ async function handleGetSyncStatus(storage: ScannerStorage): Promise<Response> {
     serverTimeUtc: now.toISOString(),
     sync: computeSyncStatus({ now, ...progress, samples }),
   };
-  return jsonResponse(body);
+  return { status: 200, body: JSON.stringify(body) };
 }
 
 async function readGuzzlerCacheHealth(
@@ -1466,6 +1508,66 @@ function clampLag(value: bigint): string {
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return Response.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init.headers ?? {}) } });
+}
+
+/** Build an HTTP response from a cached/precomputed serialized body. */
+function responseFromCached(cached: CachedResponse): Response {
+  // Slice byte bodies to a plain ArrayBuffer: BodyInit rejects views over
+  // ArrayBufferLike (same dance as compressedJsonResponse).
+  const body =
+    typeof cached.body === "string"
+      ? cached.body
+      : (cached.body.buffer.slice(
+          cached.body.byteOffset,
+          cached.body.byteOffset + cached.body.byteLength,
+        ) as ArrayBuffer);
+  return new Response(body, {
+    status: cached.status,
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json;charset=utf-8",
+      ...(cached.headers ?? {}),
+    },
+  });
+}
+
+/**
+ * Serve a list endpoint (/blocks, /ranges) through the list cache, keyed by
+ * path + query string + negotiated encoding. The zstd variant is derived from
+ * the cached plain JSON, so the storage query runs at most once per key per
+ * cache lifetime no matter which encodings clients ask for.
+ */
+async function cachedListResponse(
+  request: Request,
+  url: URL,
+  cache: ResponseCache | undefined,
+  buildJson: () => Promise<string>,
+): Promise<Response> {
+  const key = `${url.pathname}${url.search}`;
+  const plainLoader = async (): Promise<CachedResponse> => ({
+    status: 200,
+    body: await buildJson(),
+    headers: { Vary: "Accept-Encoding" },
+  });
+  const loadPlain = () => (cache ? cache.load(`plain|${key}`, plainLoader) : plainLoader());
+
+  if (!acceptsEncoding(request, "zstd")) {
+    return responseFromCached(await loadPlain());
+  }
+
+  const zstdLoader = async (): Promise<CachedResponse> => {
+    const plain = await loadPlain();
+    const compressed = await Bun.zstdCompress(new TextEncoder().encode(plain.body as string), {
+      level: 1,
+    });
+    return {
+      status: 200,
+      body: compressed,
+      headers: { "Content-Encoding": "zstd", Vary: "Accept-Encoding" },
+    };
+  };
+  const zstd = cache ? await cache.load(`zstd|${key}`, zstdLoader) : await zstdLoader();
+  return responseFromCached(zstd);
 }
 
 async function compressedJsonResponse(request: Request, body: unknown): Promise<Response> {

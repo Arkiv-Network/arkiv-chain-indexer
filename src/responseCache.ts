@@ -1,14 +1,16 @@
 /**
- * Bounded in-memory cache for serialized `/entity/:entityKey` responses.
+ * Bounded in-memory cache for serialized HTTP responses, keyed by caller-chosen
+ * strings (an entity key, a query string + encoding, …). Callers normalize keys
+ * before use — the cache stores them verbatim.
  *
  * Bounded three ways so it can never grow past its configured memory budget:
- * an entry-count cap, a total-bytes cap over the cached body strings, and a
- * TTL. Recency is tracked LRU-style (a Map ordered by last touch); inserting
- * past either cap evicts the least recently used entries first.
+ * an entry-count cap, a total-bytes cap over the cached bodies, and a TTL.
+ * Recency is tracked LRU-style (a Map ordered by last touch); inserting past
+ * either cap evicts the least recently used entries first.
  *
  * The TTL is a correctness backstop, not the primary freshness mechanism:
- * the server evicts entries the moment a scanner commits new operations for
- * a key (Postgres LISTEN/NOTIFY), so entries only age out when that push
+ * the server evicts entries the moment a writer commits data that affects
+ * them (Postgres LISTEN/NOTIFY), so entries only age out when that push
  * channel is unavailable or a notification was missed.
  *
  * `load()` is single-flight per key: concurrent misses for the same key share
@@ -17,7 +19,7 @@
  * waiting requests but never cached.
  */
 
-export interface EntityHistoryCacheOptions {
+export interface ResponseCacheOptions {
   /** Maximum number of cached entries; 0 disables caching. */
   maxEntries?: number;
   /** Maximum total size of cached bodies in bytes; 0 disables caching. */
@@ -28,18 +30,24 @@ export interface EntityHistoryCacheOptions {
   now?: () => number;
 }
 
-/** A cacheable HTTP result: the status plus the serialized JSON body. */
-export interface CachedEntityResponse {
+/**
+ * A cacheable HTTP result: the status, the serialized body (JSON text or
+ * pre-compressed bytes), and any extra headers the body requires (e.g.
+ * Content-Encoding for compressed variants).
+ */
+export interface CachedResponse {
   status: number;
-  body: string;
+  body: string | Uint8Array;
+  headers?: Record<string, string>;
 }
 
-interface CacheEntry extends CachedEntityResponse {
+interface CacheEntry {
+  response: CachedResponse;
   bytes: number;
   expiresAt: number;
 }
 
-export interface EntityHistoryCacheStats {
+export interface ResponseCacheStats {
   entries: number;
   bytes: number;
   hits: number;
@@ -50,11 +58,16 @@ export interface EntityHistoryCacheStats {
   expirations: number;
 }
 
-export const DEFAULT_ENTITY_CACHE_MAX_ENTRIES = 10_000;
-export const DEFAULT_ENTITY_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-export const DEFAULT_ENTITY_CACHE_TTL_MS = 5 * 60 * 1000;
+export const DEFAULT_RESPONSE_CACHE_MAX_ENTRIES = 10_000;
+export const DEFAULT_RESPONSE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_RESPONSE_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export class EntityHistoryCache {
+/** Body size in bytes; cached JSON strings are ASCII, so length ≈ bytes. */
+function bodyBytes(body: string | Uint8Array): number {
+  return typeof body === "string" ? body.length : body.byteLength;
+}
+
+export class ResponseCache {
   private readonly maxEntries: number;
   private readonly maxBytes: number;
   private readonly ttlMs: number;
@@ -62,10 +75,7 @@ export class EntityHistoryCache {
 
   /** Insertion order doubles as recency order: reads re-insert their entry. */
   private readonly entries = new Map<string, CacheEntry>();
-  private readonly inflight = new Map<
-    string,
-    { promise: Promise<CachedEntityResponse>; stale: boolean }
-  >();
+  private readonly inflight = new Map<string, { promise: Promise<CachedResponse>; stale: boolean }>();
   private totalBytes = 0;
 
   private hits = 0;
@@ -75,10 +85,10 @@ export class EntityHistoryCache {
   private evictions = 0;
   private expirations = 0;
 
-  constructor(options: EntityHistoryCacheOptions = {}) {
-    this.maxEntries = options.maxEntries ?? DEFAULT_ENTITY_CACHE_MAX_ENTRIES;
-    this.maxBytes = options.maxBytes ?? DEFAULT_ENTITY_CACHE_MAX_BYTES;
-    this.ttlMs = options.ttlMs ?? DEFAULT_ENTITY_CACHE_TTL_MS;
+  constructor(options: ResponseCacheOptions = {}) {
+    this.maxEntries = options.maxEntries ?? DEFAULT_RESPONSE_CACHE_MAX_ENTRIES;
+    this.maxBytes = options.maxBytes ?? DEFAULT_RESPONSE_CACHE_MAX_BYTES;
+    this.ttlMs = options.ttlMs ?? DEFAULT_RESPONSE_CACHE_TTL_MS;
     this.now = options.now ?? Date.now;
   }
 
@@ -87,85 +97,85 @@ export class EntityHistoryCache {
   }
 
   /** Cached response for the key, or null on a miss/expiry. Refreshes recency. */
-  get(key: string): CachedEntityResponse | null {
-    const normalized = key.toLowerCase();
-    const entry = this.entries.get(normalized);
+  get(key: string): CachedResponse | null {
+    const entry = this.entries.get(key);
     if (!entry) return null;
     if (entry.expiresAt <= this.now()) {
-      this.entries.delete(normalized);
+      this.entries.delete(key);
       this.totalBytes -= entry.bytes;
       this.expirations += 1;
       return null;
     }
-    this.entries.delete(normalized);
-    this.entries.set(normalized, entry);
-    return { status: entry.status, body: entry.body };
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.response;
   }
 
   /**
    * Serve the key from cache, or run `loader` once (shared by concurrent
    * callers) and cache its result — unless an invalidation raced the load.
    */
-  async load(
-    key: string,
-    loader: () => Promise<CachedEntityResponse>,
-  ): Promise<CachedEntityResponse> {
-    const normalized = key.toLowerCase();
-    const cached = this.get(normalized);
+  async load(key: string, loader: () => Promise<CachedResponse>): Promise<CachedResponse> {
+    const cached = this.get(key);
     if (cached) {
       this.hits += 1;
       return cached;
     }
 
-    const running = this.inflight.get(normalized);
+    const running = this.inflight.get(key);
     if (running) {
       this.coalesced += 1;
       return running.promise;
     }
 
     this.misses += 1;
-    const marker = { stale: false } as { promise: Promise<CachedEntityResponse>; stale: boolean };
+    const marker = { stale: false } as { promise: Promise<CachedResponse>; stale: boolean };
     marker.promise = (async () => {
       try {
         const result = await loader();
         if (!marker.stale) {
-          this.set(normalized, result);
+          this.set(key, result);
         }
         return result;
       } finally {
-        this.inflight.delete(normalized);
+        this.inflight.delete(key);
       }
     })();
-    this.inflight.set(normalized, marker);
+    this.inflight.set(key, marker);
     return marker.promise;
   }
 
   /**
-   * Drop the key (new operations were stored for it) and poison any load in
+   * Drop the key (fresh data was committed for it) and poison any load in
    * flight so a read started before the write cannot re-fill the cache with
    * pre-write data.
    */
   invalidate(key: string): void {
-    const normalized = key.toLowerCase();
     this.invalidations += 1;
-    const entry = this.entries.get(normalized);
+    const entry = this.entries.get(key);
     if (entry) {
-      this.entries.delete(normalized);
+      this.entries.delete(key);
       this.totalBytes -= entry.bytes;
     }
-    const running = this.inflight.get(normalized);
+    const running = this.inflight.get(key);
     if (running) {
       running.stale = true;
     }
   }
 
-  /** Drop everything (e.g. the invalidation listener had to reconnect). */
+  /**
+   * Drop every entry and poison every load in flight — for events that make
+   * all keys stale at once (a new block landed, the listener reconnected).
+   */
   clear(): void {
     this.entries.clear();
     this.totalBytes = 0;
+    for (const running of this.inflight.values()) {
+      running.stale = true;
+    }
   }
 
-  stats(): EntityHistoryCacheStats {
+  stats(): ResponseCacheStats {
     return {
       entries: this.entries.size,
       bytes: this.totalBytes,
@@ -178,10 +188,9 @@ export class EntityHistoryCache {
     };
   }
 
-  private set(key: string, response: CachedEntityResponse): void {
+  private set(key: string, response: CachedResponse): void {
     if (!this.enabled) return;
-    // Body strings are ASCII JSON, so string length equals byte length.
-    const bytes = response.body.length;
+    const bytes = bodyBytes(response.body);
     if (bytes > this.maxBytes) return;
 
     const existing = this.entries.get(key);
@@ -200,8 +209,7 @@ export class EntityHistoryCache {
       this.evictions += 1;
     }
     this.entries.set(key, {
-      status: response.status,
-      body: response.body,
+      response,
       bytes,
       expiresAt: this.now() + this.ttlMs,
     });

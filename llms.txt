@@ -69,6 +69,10 @@ Related scanner and worker settings:
 - Integer query parameters must be non-negative or positive as required by the route.
 - `/blocks`, `/ranges`, and `/guzzlers` return `Content-Encoding: zstd` when the request
   `Accept-Encoding` header allows `zstd`; otherwise they return normal JSON.
+- `/blocks` and `/ranges` responses are cached in memory per query string and encoding
+  (`LIST_CACHE_MAX_ENTRIES`, default 200; `LIST_CACHE_MAX_BYTES`, default 64 MiB;
+  `LIST_CACHE_TTL_MS`, default 5 s; any set to 0 disables caching). The cache is cleared the moment
+  a block is committed, so responses can trail a new block only briefly if that notification drops.
 
 ## Feature Gates
 
@@ -129,7 +133,9 @@ Returns:
 ## `GET /sync`
 
 Reports how far the forward scanner is behind the chain head and whether it is closing the gap.
-Cheaper than `/health` (no database size statistics), so it is safe to poll every few seconds.
+Served from an actively precomputed in-memory body — recomputed immediately after every stored
+block and on a periodic refresh (`SYNC_REFRESH_MS`, default 5 s) — so polling it costs the backend
+no database work. `serverTimeUtc` is the time of the last recompute, at most a few seconds old.
 
 Returns `ok`, `serverTimeUtc`, and `sync` with:
 

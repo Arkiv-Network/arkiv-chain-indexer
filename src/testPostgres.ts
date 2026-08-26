@@ -6,9 +6,16 @@ export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DA
 export const hasPostgresForTests = (): boolean => Boolean(TEST_DATABASE_URL);
 
 const adminDbs: Db[] = [];
+// One shared admin pool per database URL: a pool per isolated schema piles up
+// held connections across a test file and can exhaust the server's
+// max_connections before afterAll closes them.
+const adminDbsByUrl = new Map<string, Db>();
 
 function adminDb(url: string): Db {
+  const existing = adminDbsByUrl.get(url);
+  if (existing) return existing;
   const db = openDb(url, { max: 2 });
+  adminDbsByUrl.set(url, db);
   adminDbs.push(db);
   return db;
 }
@@ -45,6 +52,7 @@ export async function createIsolatedStorage(prefix = "test"): Promise<{
 }
 
 export async function closeTestPools(): Promise<void> {
+  adminDbsByUrl.clear();
   while (adminDbs.length > 0) {
     const db = adminDbs.pop();
     if (db) {

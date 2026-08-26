@@ -260,6 +260,12 @@ services:
       ENTITY_CACHE_MAX_ENTRIES: ${ENTITY_CACHE_MAX_ENTRIES:-}
       ENTITY_CACHE_MAX_BYTES: ${ENTITY_CACHE_MAX_BYTES:-}
       ENTITY_CACHE_TTL_MS: ${ENTITY_CACHE_TTL_MS:-}
+      # Precomputed /sync + blocks/ranges response cache; empty values fall
+      # back to the backend defaults (5s refresh / 200 entries / 64 MiB / 5s TTL).
+      SYNC_REFRESH_MS: ${SYNC_REFRESH_MS:-}
+      LIST_CACHE_MAX_ENTRIES: ${LIST_CACHE_MAX_ENTRIES:-}
+      LIST_CACHE_MAX_BYTES: ${LIST_CACHE_MAX_BYTES:-}
+      LIST_CACHE_TTL_MS: ${LIST_CACHE_TTL_MS:-}
       BASELOAD_RPC_NODE: ${BASELOAD_RPC_NODE:-}
       BASELOAD_MNEMONIC: ${BASELOAD_MNEMONIC:-}
       BASELOAD_ADMIN_BEARER_TOKEN: ${BASELOAD_ADMIN_BEARER_TOKEN:-}

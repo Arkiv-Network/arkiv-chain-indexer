@@ -1,10 +1,11 @@
 import { parseServerConfig, ServerHelpRequested } from "./serverConfig";
-import { createBlockServer } from "./server";
+import { buildSyncStatusResponse, createBlockServer } from "./server";
 import { ScannerStorage } from "./storage";
 import { RedisGuzzlerStore } from "./guzzlerStore";
 import { parseBaseloadRuntimeConfig, readBaseloadConfigFile } from "./baseloadConfig";
 import { BaseloadRuntime } from "./baseloadRuntime";
-import { EntityHistoryCache } from "./entityHistoryCache";
+import { PrecomputedResponse } from "./precomputedResponse";
+import { ResponseCache } from "./responseCache";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import type { GuzzlerStore } from "./guzzlers";
 
@@ -13,6 +14,8 @@ async function main(): Promise<void> {
   let guzzlerStore: GuzzlerStore | undefined;
   let baseloadRuntime: BaseloadRuntime | undefined;
   let stopEntityInvalidationListener: (() => Promise<void>) | undefined;
+  let stopStoredBlockListener: (() => Promise<void>) | undefined;
+  let syncPrecomputer: PrecomputedResponse | undefined;
 
   try {
     const config = parseServerConfig(process.argv.slice(2));
@@ -20,7 +23,7 @@ async function main(): Promise<void> {
     if (config.redisUrl) {
       guzzlerStore = await RedisGuzzlerStore.open(config.redisUrl);
     }
-    const entityHistoryCache = new EntityHistoryCache({
+    const entityHistoryCache = new ResponseCache({
       maxEntries: config.entityCacheMaxEntries,
       maxBytes: config.entityCacheMaxBytes,
       ttlMs: config.entityCacheTtlMs,
@@ -37,6 +40,40 @@ async function main(): Promise<void> {
       } catch (error) {
         console.warn(
           `Entity cache invalidation listener failed to start; relying on the ${config.entityCacheTtlMs}ms TTL only:`,
+          error,
+        );
+      }
+    }
+
+    // /sync is served from an actively precomputed body: recomputed right
+    // after every stored-block notification (bursts coalesced) and on a
+    // periodic refresh so lag keeps growing when the scanner stalls.
+    const storageForSync = storage;
+    if (config.syncRefreshMs > 0) {
+      syncPrecomputer = new PrecomputedResponse(() => buildSyncStatusResponse(storageForSync), {
+        refreshIntervalMs: config.syncRefreshMs,
+        onError: (error) => console.warn("Precomputed /sync refresh failed:", error),
+      });
+      await syncPrecomputer.start();
+    }
+    // /blocks and /ranges responses (plain and zstd variants) are cached per
+    // query string and dropped the moment a block lands; the TTL backstops
+    // missed notifications and aggregator writes to block_ranges.
+    const listCache = new ResponseCache({
+      maxEntries: config.listCacheMaxEntries,
+      maxBytes: config.listCacheMaxBytes,
+      ttlMs: config.listCacheTtlMs,
+    });
+    if (syncPrecomputer || listCache.enabled) {
+      const precomputer = syncPrecomputer;
+      try {
+        stopStoredBlockListener = await storage.listenForStoredBlocks(() => {
+          precomputer?.markDirty();
+          listCache.clear();
+        });
+      } catch (error) {
+        console.warn(
+          "Stored-block listener failed to start; /sync falls back to its periodic refresh and the list cache to its TTL:",
           error,
         );
       }
@@ -78,6 +115,8 @@ async function main(): Promise<void> {
       ...(payloadProviderPaymentResolver ? { payloadProviderPaymentResolver } : {}),
       entityHistoryCache,
       entityHistoryLimit: config.entityHistoryLimit,
+      listCache,
+      ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);
@@ -89,11 +128,26 @@ async function main(): Promise<void> {
             `history limit ${config.entityHistoryLimit} operations`
         : `Entity history cache: disabled; history limit ${config.entityHistoryLimit} operations`,
     );
+    console.log(
+      syncPrecomputer
+        ? `Precomputed /sync: refresh every ${config.syncRefreshMs}ms, ` +
+            `block-driven recompute ${stopStoredBlockListener ? "via NOTIFY" : "unavailable"}`
+        : "Precomputed /sync: disabled (computed per request)",
+    );
+    console.log(
+      listCache.enabled
+        ? `Blocks/ranges cache: up to ${config.listCacheMaxEntries} entries / ` +
+            `${config.listCacheMaxBytes} bytes, TTL ${config.listCacheTtlMs}ms, ` +
+            `cleared ${stopStoredBlockListener ? "on stored-block NOTIFY" : "by TTL only"}`
+        : "Blocks/ranges cache: disabled",
+    );
 
     const shutdown = async () => {
       baseloadRuntime?.stop();
+      syncPrecomputer?.stop();
       await server.stop();
       await stopEntityInvalidationListener?.();
+      await stopStoredBlockListener?.();
       await guzzlerStore?.close();
       await storage?.close();
       process.exit(0);
@@ -109,7 +163,9 @@ async function main(): Promise<void> {
 
     console.error(error);
     baseloadRuntime?.stop();
+    syncPrecomputer?.stop();
     await stopEntityInvalidationListener?.();
+    await stopStoredBlockListener?.();
     await guzzlerStore?.close();
     await storage?.close();
     process.exitCode = 1;

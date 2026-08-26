@@ -71,11 +71,18 @@ docker compose up --build
   `src/serve.ts` (`bun run serve`).
 - `GET /entity/:entityKey` returns the most recent `ENTITY_HISTORY_LIMIT` (default 100) operations plus
   `totalOperations`/`truncated`, and `firstOperation` when the create fell outside the slice. Responses
-  (including 404s) are cached in `src/entityHistoryCache.ts` — bounded by entries (default 10,000), bytes
-  (default 64 MiB), and a TTL backstop (default 5 min); any set to 0 disables caching. Writers queue one
-  Postgres `pg_notify` per changed entity key inside the block-write transaction (schema-scoped channel,
-  `ScannerStorage.entityOperationsChannel()`); `serve.ts` LISTENs and evicts on delivery, so cached entries
-  go stale only if the LISTEN connection drops, and then at most for the TTL.
+  (including 404s) are cached in a `ResponseCache` (`src/responseCache.ts`) — bounded by entries (default
+  10,000), bytes (default 64 MiB), and a TTL backstop (default 5 min); any set to 0 disables caching.
+  Writers queue one Postgres `pg_notify` per changed entity key inside the block-write transaction
+  (schema-scoped channel, `ScannerStorage.entityOperationsChannel()`); `serve.ts` LISTENs and evicts on
+  delivery, so cached entries go stale only if the LISTEN connection drops, and then at most for the TTL.
+- Every committed block write also notifies `ScannerStorage.storedBlocksChannel()`. `serve.ts` uses it two
+  ways: `GET /sync` is served from an actively precomputed body (`src/precomputedResponse.ts`) that
+  recomputes right after each stored block (bursts coalesced to one recompute per 500ms) plus a
+  `SYNC_REFRESH_MS` (default 5s) periodic refresh so lag keeps growing when the scanner stalls; and a
+  second `ResponseCache` holds `GET /blocks` / `GET /ranges` bodies keyed by query string + encoding (the
+  zstd variant is derived from the cached plain JSON, so the row query and compression run once per key),
+  cleared on every stored-block notification with a `LIST_CACHE_TTL_MS` (default 5s) backstop.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

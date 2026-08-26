@@ -3,6 +3,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   BLOCK_RESPONSE_NAMES,
   RANGE_RESPONSE_NAMES,
+  buildSyncStatusResponse,
   createBlockServer,
   handleRequest,
   parseFilterFromQuery,
@@ -26,7 +27,7 @@ import {
 import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperations";
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
-import { EntityHistoryCache } from "./entityHistoryCache";
+import { ResponseCache } from "./responseCache";
 import type { ScannerStorage, StoredEntityOperation, StoredTransactionRecord } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
@@ -1184,7 +1185,7 @@ describe("GET /entity/:entityKey", () => {
         };
       },
     } as unknown as ScannerStorage;
-    const cache = new EntityHistoryCache();
+    const cache = new ResponseCache();
     const options = { entityHistoryCache: cache };
     const request = () =>
       handleRequest(new Request(`http://example.test/entity/${entityKey}`), storage, options);
@@ -1210,7 +1211,7 @@ describe("GET /entity/:entityKey", () => {
         return { operations: [], totalOperations: 0, firstOperation: null };
       },
     } as unknown as ScannerStorage;
-    const options = { entityHistoryCache: new EntityHistoryCache() };
+    const options = { entityHistoryCache: new ResponseCache() };
 
     const first = await handleRequest(
       new Request(`http://example.test/entity/${entityKey}`),
@@ -1530,6 +1531,127 @@ describe("GET /sync", () => {
 
     expect(body.sync.state).toBe("unknown");
     expect(body.sync.lagBlocks).toBeNull();
+  });
+
+  test("serves the precomputed body without touching storage", async () => {
+    const storage = {
+      getScannerProgress: async () => {
+        throw new Error("storage must not be hit");
+      },
+      getForwardScanSamples: async () => {
+        throw new Error("storage must not be hit");
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(new Request("http://example.test/sync"), storage, {
+      syncStatusProvider: { get: () => ({ status: 200, body: '{"ok":true,"precomputed":true}' }) },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, precomputed: true });
+  });
+
+  test("falls back to on-demand computation while the precomputed body is empty", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/sync"),
+      catchingUpStorage(new Date()),
+      { syncStatusProvider: { get: () => null } },
+    );
+    const body = (await response.json()) as SyncStatusResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(body.sync.state).toBe("catching-up");
+  });
+
+  test("buildSyncStatusResponse serializes the body the handler would serve", async () => {
+    const cached = await buildSyncStatusResponse(catchingUpStorage(new Date()));
+
+    expect(cached.status).toBe(200);
+    const body = JSON.parse(cached.body as string) as SyncStatusResponseBody;
+    expect(body.ok).toBe(true);
+    expect(body.sync.lagBlocks).toBe("50");
+  });
+});
+
+describe("blocks/ranges list cache", () => {
+  function countingListStorage() {
+    let queries = 0;
+    const storage = {
+      queryBlocks: async () => {
+        queries += 1;
+        return [];
+      },
+      queryBlockRanges: async () => {
+        queries += 1;
+        return [];
+      },
+    } as unknown as ScannerStorage;
+    return { storage, queries: () => queries };
+  }
+
+  test("repeat /blocks lookups with the same query are served from the cache", async () => {
+    const { storage, queries } = countingListStorage();
+    const options = { listCache: new ResponseCache() };
+    const request = () =>
+      handleRequest(new Request("http://example.test/blocks?limit=5"), storage, options);
+
+    const first = await (await request()).json();
+    const second = await (await request()).json();
+    expect(queries()).toBe(1);
+    expect(second).toEqual(first);
+
+    // A different query string is a different cache key.
+    await handleRequest(new Request("http://example.test/blocks?limit=6"), storage, options);
+    expect(queries()).toBe(2);
+  });
+
+  test("the zstd variant reuses the cached plain JSON instead of re-querying", async () => {
+    const { storage, queries } = countingListStorage();
+    const options = { listCache: new ResponseCache() };
+
+    const plain = await handleRequest(
+      new Request("http://example.test/blocks?limit=5"),
+      storage,
+      options,
+    );
+    const compressed = await handleRequest(
+      new Request("http://example.test/blocks?limit=5", {
+        headers: { "accept-encoding": "zstd" },
+      }),
+      storage,
+      options,
+    );
+
+    expect(queries()).toBe(1);
+    expect(compressed.headers.get("content-encoding")).toBe("zstd");
+    const plainBody = await plain.json();
+    await expect(readZstdJson(compressed)).resolves.toEqual(plainBody);
+
+    // The compressed variant is itself cached now.
+    const again = await handleRequest(
+      new Request("http://example.test/blocks?limit=5", {
+        headers: { "accept-encoding": "zstd" },
+      }),
+      storage,
+      options,
+    );
+    expect(queries()).toBe(1);
+    expect(again.headers.get("content-encoding")).toBe("zstd");
+  });
+
+  test("clear() forces the next lookup back to storage", async () => {
+    const { storage, queries } = countingListStorage();
+    const cache = new ResponseCache();
+    const options = { listCache: cache };
+
+    await handleRequest(new Request("http://example.test/ranges?limit=3"), storage, options);
+    await handleRequest(new Request("http://example.test/ranges?limit=3"), storage, options);
+    expect(queries()).toBe(1);
+
+    // What serve.ts does when a stored-block notification arrives.
+    cache.clear();
+    await handleRequest(new Request("http://example.test/ranges?limit=3"), storage, options);
+    expect(queries()).toBe(2);
   });
 });
 

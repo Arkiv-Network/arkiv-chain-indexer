@@ -1191,6 +1191,28 @@ if (!hasPostgresForTests()) {
       }
     });
 
+    test("notifies stored-block listeners with the block number on commit", async () => {
+      const storage = await withStorage();
+      const received: string[] = [];
+      const stop = await storage.listenForStoredBlocks((blockNumber) => {
+        received.push(blockNumber);
+      });
+
+      try {
+        // Metrics-only writes (no transaction payload) notify too — every
+        // committed block invalidates cached block lists and sync status.
+        await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 40n }));
+
+        const deadline = Date.now() + 5_000;
+        while (received.length === 0 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(received).toEqual(["40"]);
+      } finally {
+        await stop();
+      }
+    });
+
     test("aggregates operation summaries per transaction ordered by operation type", async () => {
       const storage = await withStorage();
       const deleteOperation: ArkivOperation = {

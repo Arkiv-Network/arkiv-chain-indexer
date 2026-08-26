@@ -7,10 +7,10 @@ import {
   type CliSpec,
 } from "./cli";
 import {
-  DEFAULT_ENTITY_CACHE_MAX_BYTES,
-  DEFAULT_ENTITY_CACHE_MAX_ENTRIES,
-  DEFAULT_ENTITY_CACHE_TTL_MS,
-} from "./entityHistoryCache";
+  DEFAULT_RESPONSE_CACHE_MAX_BYTES,
+  DEFAULT_RESPONSE_CACHE_MAX_ENTRIES,
+  DEFAULT_RESPONSE_CACHE_TTL_MS,
+} from "./responseCache";
 import { DEFAULT_ENTITY_HISTORY_LIMIT } from "./storage";
 
 export interface ServerConfig {
@@ -28,9 +28,17 @@ export interface ServerConfig {
   entityCacheMaxEntries: number;
   entityCacheMaxBytes: number;
   entityCacheTtlMs: number;
+  syncRefreshMs: number;
+  listCacheMaxEntries: number;
+  listCacheMaxBytes: number;
+  listCacheTtlMs: number;
 }
 
 const DEFAULT_PORT = 3000;
+const DEFAULT_SYNC_REFRESH_MS = 5_000;
+const DEFAULT_LIST_CACHE_MAX_ENTRIES = 200;
+const DEFAULT_LIST_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const DEFAULT_LIST_CACHE_TTL_MS = 5_000;
 
 /** Help text raised when the server is invoked with `--help`. */
 export class ServerHelpRequested extends CliHelpRequested {}
@@ -111,21 +119,49 @@ const SPEC: CliSpec = {
       description:
         "Entity-history cache entry cap; 0 disables the cache. Defaults to 10000 (or ENTITY_CACHE_MAX_ENTRIES).",
       env: ["ENTITY_CACHE_MAX_ENTRIES", "SERVER_ENTITY_CACHE_MAX_ENTRIES"],
-      default: DEFAULT_ENTITY_CACHE_MAX_ENTRIES.toString(),
+      default: DEFAULT_RESPONSE_CACHE_MAX_ENTRIES.toString(),
     },
     {
       flags: "--entity-cache-max-bytes <bytes>",
       description:
         "Entity-history cache total body-size cap in bytes; 0 disables the cache. Defaults to 67108864 (or ENTITY_CACHE_MAX_BYTES).",
       env: ["ENTITY_CACHE_MAX_BYTES", "SERVER_ENTITY_CACHE_MAX_BYTES"],
-      default: DEFAULT_ENTITY_CACHE_MAX_BYTES.toString(),
+      default: DEFAULT_RESPONSE_CACHE_MAX_BYTES.toString(),
     },
     {
       flags: "--entity-cache-ttl-ms <ms>",
       description:
         "Entity-history cache entry lifetime in milliseconds — a staleness backstop behind NOTIFY invalidation; 0 disables the cache. Defaults to 300000 (or ENTITY_CACHE_TTL_MS).",
       env: ["ENTITY_CACHE_TTL_MS", "SERVER_ENTITY_CACHE_TTL_MS"],
-      default: DEFAULT_ENTITY_CACHE_TTL_MS.toString(),
+      default: DEFAULT_RESPONSE_CACHE_TTL_MS.toString(),
+    },
+    {
+      flags: "--sync-refresh-ms <ms>",
+      description:
+        "Periodic refresh for the precomputed /sync response, which also recomputes on every stored-block notification; 0 disables precomputing (each request hits storage). Defaults to 5000 (or SYNC_REFRESH_MS).",
+      env: ["SYNC_REFRESH_MS", "SERVER_SYNC_REFRESH_MS"],
+      default: DEFAULT_SYNC_REFRESH_MS.toString(),
+    },
+    {
+      flags: "--list-cache-max-entries <count>",
+      description:
+        "Blocks/ranges response cache entry cap; 0 disables the cache. Defaults to 200 (or LIST_CACHE_MAX_ENTRIES).",
+      env: ["LIST_CACHE_MAX_ENTRIES", "SERVER_LIST_CACHE_MAX_ENTRIES"],
+      default: DEFAULT_LIST_CACHE_MAX_ENTRIES.toString(),
+    },
+    {
+      flags: "--list-cache-max-bytes <bytes>",
+      description:
+        "Blocks/ranges response cache total body-size cap in bytes; 0 disables the cache. Defaults to 67108864 (or LIST_CACHE_MAX_BYTES).",
+      env: ["LIST_CACHE_MAX_BYTES", "SERVER_LIST_CACHE_MAX_BYTES"],
+      default: DEFAULT_LIST_CACHE_MAX_BYTES.toString(),
+    },
+    {
+      flags: "--list-cache-ttl-ms <ms>",
+      description:
+        "Blocks/ranges response cache entry lifetime in milliseconds — a backstop behind the stored-block notification that clears the cache; 0 disables the cache. Defaults to 5000 (or LIST_CACHE_TTL_MS).",
+      env: ["LIST_CACHE_TTL_MS", "SERVER_LIST_CACHE_TTL_MS"],
+      default: DEFAULT_LIST_CACHE_TTL_MS.toString(),
     },
   ],
 };
@@ -178,17 +214,37 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   const entityCacheMaxEntries = intOrDefault(
     "--entity-cache-max-entries",
     cli.value("entity-cache-max-entries"),
-    DEFAULT_ENTITY_CACHE_MAX_ENTRIES,
+    DEFAULT_RESPONSE_CACHE_MAX_ENTRIES,
   );
   const entityCacheMaxBytes = intOrDefault(
     "--entity-cache-max-bytes",
     cli.value("entity-cache-max-bytes"),
-    DEFAULT_ENTITY_CACHE_MAX_BYTES,
+    DEFAULT_RESPONSE_CACHE_MAX_BYTES,
   );
   const entityCacheTtlMs = intOrDefault(
     "--entity-cache-ttl-ms",
     cli.value("entity-cache-ttl-ms"),
-    DEFAULT_ENTITY_CACHE_TTL_MS,
+    DEFAULT_RESPONSE_CACHE_TTL_MS,
+  );
+  const syncRefreshMs = intOrDefault(
+    "--sync-refresh-ms",
+    cli.value("sync-refresh-ms"),
+    DEFAULT_SYNC_REFRESH_MS,
+  );
+  const listCacheMaxEntries = intOrDefault(
+    "--list-cache-max-entries",
+    cli.value("list-cache-max-entries"),
+    DEFAULT_LIST_CACHE_MAX_ENTRIES,
+  );
+  const listCacheMaxBytes = intOrDefault(
+    "--list-cache-max-bytes",
+    cli.value("list-cache-max-bytes"),
+    DEFAULT_LIST_CACHE_MAX_BYTES,
+  );
+  const listCacheTtlMs = intOrDefault(
+    "--list-cache-ttl-ms",
+    cli.value("list-cache-ttl-ms"),
+    DEFAULT_LIST_CACHE_TTL_MS,
   );
 
   return {
@@ -206,5 +262,9 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     entityCacheMaxEntries,
     entityCacheMaxBytes,
     entityCacheTtlMs,
+    syncRefreshMs,
+    listCacheMaxEntries,
+    listCacheMaxBytes,
+    listCacheTtlMs,
   };
 }

@@ -1114,6 +1114,13 @@ export class ScannerStorage {
       await this.deleteTransactionRecordsForBlock(client, metrics.blockNumber);
       await this.upsertTransactionRecords(client, metrics, recordCandidates);
       await this.applyProgressUpdate(client, metrics, progressUpdate);
+      // Tell serving processes a block landed (delivered on commit): they
+      // recompute the precomputed /sync response and drop cached block/range
+      // lists immediately instead of waiting for a TTL.
+      await client.query(`SELECT pg_notify($1, $2)`, [
+        this.storedBlocksChannel(),
+        metrics.blockNumber.toString(),
+      ]);
     });
   }
 
@@ -1522,6 +1529,29 @@ export class ScannerStorage {
     handler: (entityKey: string) => void,
   ): Promise<() => Promise<void>> {
     const subscription = await this.db.listen(this.entityOperationsChannel(), (payload) => {
+      if (payload) handler(payload);
+    });
+    return () => subscription.unlisten();
+  }
+
+  /**
+   * Postgres NOTIFY channel carrying the block number of every committed
+   * block write (forward scan, gap fill, backfill, re-scan). Schema-scoped
+   * like {@link entityOperationsChannel}.
+   */
+  storedBlocksChannel(): string {
+    return `blocks_stored_${this.schema}`.replace(/[^a-zA-Z0-9_]/g, "_");
+  }
+
+  /**
+   * Invoke `handler` with the decimal block number of each committed block
+   * write, from any writer process on this database. Returns an unsubscribe
+   * function.
+   */
+  async listenForStoredBlocks(
+    handler: (blockNumberDecimal: string) => void,
+  ): Promise<() => Promise<void>> {
+    const subscription = await this.db.listen(this.storedBlocksChannel(), (payload) => {
       if (payload) handler(payload);
     });
     return () => subscription.unlisten();
