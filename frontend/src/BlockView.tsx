@@ -34,7 +34,10 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   const [appliedBlockNumber, setAppliedBlockNumber] = useState(blockNumber);
   const [data, setData] = useState<BlockInspectResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // The mount effect always starts a load, so the very first paint must
+  // already show the loading layout: painting the idle state for one frame
+  // and then swapping in the pill and skeleton was a guaranteed layout shift.
+  const [loading, setLoading] = useState(true);
   const [copyStatus, setCopyStatus] = useState("");
   const loadRequestId = useRef(0);
 
