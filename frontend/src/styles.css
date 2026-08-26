@@ -3584,7 +3584,10 @@ button.secondary.guzzler-refresh {
 /* Block lookup panel — search field + status + copy link, unified */
 .block-lookup {
   display: flex;
-  flex-wrap: wrap;
+  /* Stacking is decided by viewport width alone (media query below), never
+     by content width: a content-driven wrap here flipped when data or fonts
+     arrived, jumping the whole panel (the page's main layout shift). */
+  flex-wrap: nowrap;
   align-items: flex-end;
   gap: 1rem 1.5rem;
   margin: 0 0 1.1rem;
@@ -3596,6 +3599,7 @@ button.secondary.guzzler-refresh {
 
 .block-lookup-form {
   display: flex;
+  flex-shrink: 0;
   align-items: flex-end;
   gap: 0.6rem;
   margin: 0;
@@ -3680,12 +3684,23 @@ button.secondary.guzzler-refresh {
 
 .block-lookup-meta {
   display: flex;
-  flex: 1 1 16rem;
+  flex: 1 1 auto;
+  min-width: 0;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.6rem 1rem;
   padding-bottom: 0.15rem;
+}
+
+@media (max-width: 860px) {
+  .block-lookup {
+    flex-wrap: wrap;
+  }
+
+  .block-lookup-meta {
+    flex-basis: 100%;
+  }
 }
 
 .block-lookup-status {
@@ -3739,7 +3754,9 @@ button.secondary.guzzler-refresh {
   align-items: center;
   justify-content: center;
   gap: 0.25rem;
-  min-width: 4.8rem;
+  /* Wide enough for 7-digit block numbers, so the label swap from the
+     Prev/Next placeholders never changes the button width. */
+  min-width: 5.5rem;
   min-height: 2.15rem;
   padding: 0.35rem 0.55rem;
   border: 1px solid var(--line-strong);

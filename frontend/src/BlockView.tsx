@@ -97,7 +97,10 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   const block = data?.block;
-  const displayedBlockNumber = block?.blockNumberDecimal ?? (!loading ? appliedBlockNumber : "");
+  // Show the requested number already while loading: the status label and the
+  // adjacent-block buttons then keep the exact same width when the response
+  // lands, instead of shifting the lookup panel.
+  const displayedBlockNumber = block?.blockNumberDecimal ?? appliedBlockNumber;
   const adjacentBlocks = useMemo(() => adjacentBlockNumbers(displayedBlockNumber), [displayedBlockNumber]);
   const columns = useMemo(
     () => transactionColumns(tokenSymbol, onLocationChange),
@@ -156,7 +159,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
               Block <strong>{displayedBlockNumber.trim() || "—"}</strong>
             </span>
             {loading ? (
-              <span className="block-lookup-txcount">Loading block…</span>
+              <span className="block-lookup-txcount">Loading…</span>
             ) : error ? (
               <span className="block-lookup-txcount">Failed to load block: {error}</span>
             ) : block ? (
@@ -280,8 +283,37 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
             </table>
           </div>
         </>
+      ) : loading ? (
+        <BlockDetailSkeleton rows={noBatcher ? 18 : 24} />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Placeholder matching the loaded layout (summary grid plus transactions
+ * table) so the first data render replaces it in place instead of pushing
+ * everything below the lookup panel down.
+ */
+function BlockDetailSkeleton({ rows }: { rows: number }) {
+  return (
+    <div role="status" aria-label="Loading block details">
+      <dl className="block-summary" aria-hidden="true">
+        {Array.from({ length: rows }, (_, index) => (
+          <div key={index}>
+            <dt>
+              <span className="skeleton-bar skeleton-label" />
+            </dt>
+            <dd>
+              <span className="skeleton-bar skeleton-value" />
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="table-wrap" aria-hidden="true">
+        <div className="skeleton-table" />
+      </div>
+    </div>
   );
 }
 
