@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { fetchEntityByKey, type StoredEntityOperation } from "./api";
+import { fetchEntityByKey, type EntityByKeyResponse, type StoredEntityOperation } from "./api";
 import { BlockNumberLink } from "./blockLinks";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtInteger } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
@@ -21,7 +21,7 @@ type LoadStatus = "idle" | "loading" | "loaded" | "notfound" | "error";
 export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs }: EntityViewProps) {
   const [query, setQuery] = useState(entityKey ?? "");
   const [formError, setFormError] = useState<string | null>(null);
-  const [operations, setOperations] = useState<StoredEntityOperation[]>([]);
+  const [history, setHistory] = useState<EntityByKeyResponse | null>(null);
   const [status, setStatus] = useState<LoadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +32,7 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
 
   useEffect(() => {
     if (!entityKey) {
-      setOperations([]);
+      setHistory(null);
       setStatus("idle");
       setError(null);
       return;
@@ -41,7 +41,7 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
     let cancelled = false;
     setStatus("loading");
     setError(null);
-    setOperations([]);
+    setHistory(null);
     fetchEntityByKey(entityKey)
       .then((body) => {
         if (cancelled) return;
@@ -49,7 +49,7 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
           setStatus("notfound");
           return;
         }
-        setOperations(body.operations);
+        setHistory(body);
         setStatus("loaded");
       })
       .catch((err: Error) => {
@@ -115,10 +115,10 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
           No operations for entity <span className="mono">{entityKey}</span> were found in storage.
           Blocks scanned before entity keys were indexed may not be linked to their entity yet.
         </p>
-      ) : operations.length > 0 ? (
+      ) : history && history.operations.length > 0 ? (
         <EntityDetail
           entityKey={entityKey}
-          operations={operations}
+          history={history}
           timeZone={timeZone}
           blockTimeMs={blockTimeMs}
           onLocationChange={onLocationChange}
@@ -130,19 +130,29 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
 
 function EntityDetail({
   entityKey,
-  operations,
+  history,
   timeZone,
   blockTimeMs,
   onLocationChange,
 }: {
   entityKey: string;
-  operations: StoredEntityOperation[];
+  history: EntityByKeyResponse;
   timeZone: string;
   blockTimeMs: number;
   onLocationChange: () => void;
 }) {
-  // Operations arrive in chain order (block, position, op index ascending).
-  const created = operations.find((operation) => operation.operation === "create") ?? null;
+  // Operations arrive in chain order (block, position, op index ascending) and
+  // hold the newest slice of the history; older backends omit the total.
+  const operations = history.operations;
+  const totalOperations = history.totalOperations ?? operations.length;
+  const truncated = history.truncated ?? totalOperations > operations.length;
+  const hiddenOperations = Math.max(totalOperations - operations.length, 0);
+  // The create may sit outside a truncated slice; the server then sends the
+  // earliest stored operation separately so the Created panel stays accurate.
+  const firstOperation = history.firstOperation ?? null;
+  const created =
+    operations.find((operation) => operation.operation === "create") ??
+    (firstOperation?.operation === "create" ? firstOperation : null);
   const latest = operations[operations.length - 1]!;
   const lifecycle = lifecycleInfo(latest);
   const newestFirst = [...operations].reverse();
@@ -165,7 +175,16 @@ function EntityDetail({
             <Row label="Status">
               <span className={`tx-status-badge ${lifecycle.tone}`}>{lifecycle.label}</span>
             </Row>
-            <Row label="Operations">{fmtInteger(operations.length)}</Row>
+            <Row
+              label="Operations"
+              title={
+                truncated
+                  ? `Only the ${fmtInteger(operations.length)} most recent operations are listed below.`
+                  : undefined
+              }
+            >
+              {fmtInteger(totalOperations)}
+            </Row>
             {latestContent?.contentType ? (
               <Row label="Content type">{latestContent.contentType}</Row>
             ) : null}
@@ -248,7 +267,20 @@ function EntityDetail({
       </div>
 
       <section className="tx-detail-group tx-detail-operations">
-        <h3>Operation history ({operations.length})</h3>
+        <h3>
+          Operation history (
+          {truncated
+            ? `last ${fmtInteger(operations.length)} of ${fmtInteger(totalOperations)}`
+            : fmtInteger(operations.length)}
+          )
+        </h3>
+        {truncated ? (
+          <p className="tx-detail-note">
+            Only the {fmtInteger(operations.length)} most recent operations are listed —{" "}
+            {fmtInteger(hiddenOperations)} older{" "}
+            {hiddenOperations === 1 ? "operation is" : "operations are"} not shown.
+          </p>
+        ) : null}
         <div className="table-wrap">
           <table className="data-table">
             <thead>

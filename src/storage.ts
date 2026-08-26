@@ -32,7 +32,8 @@ export const MAX_TRANSACTIONS_PER_QUERY = 1_000;
 export const MAX_TRANSACTION_RECORDS_PER_CATEGORY = 100;
 export const DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY = 20;
 export const MAX_SENDERS_PER_QUERY = 10_000;
-export const MAX_ENTITY_OPERATIONS_PER_QUERY = 1_000;
+/** Default number of most-recent operations returned for one entity key. */
+export const DEFAULT_ENTITY_HISTORY_LIMIT = 100;
 
 export type QueryOrder = "asc" | "desc";
 export type TransactionRecordCategory = "gas_used" | "transaction_fee" | "effective_fee";
@@ -138,6 +139,19 @@ export interface StoredEntityOperation extends ArkivOperation {
   blockDate: string;
   position: number;
   hash: string;
+}
+
+/** The most recent slice of one entity's stored operation history. */
+export interface EntityOperationHistory {
+  /** Last `limit` stored operations in chain order (oldest of the slice first). */
+  operations: StoredEntityOperation[];
+  /** Total stored operations for the key, including ones outside the slice. */
+  totalOperations: number;
+  /**
+   * Earliest stored operation for the key when the slice is truncated (so the
+   * create stays reachable); null when `operations` already starts with it.
+   */
+  firstOperation: StoredEntityOperation | null;
 }
 
 export interface StoredTransactionRecord extends StoredTransaction {
@@ -1372,14 +1386,29 @@ export class ScannerStorage {
     metrics: BlockMetrics,
     transactionOperations: TransactionArkivOperations[] | undefined,
   ): Promise<void> {
-    await client.query(`DELETE FROM ${this.qTransactionOperations} WHERE block_number = $1`, [
-      metrics.blockNumber.toString(),
-    ]);
+    const deleted = await client.query<{ entity_key: string | null }>(
+      `DELETE FROM ${this.qTransactionOperations} WHERE block_number = $1 RETURNING entity_key`,
+      [metrics.blockNumber.toString()],
+    );
+
+    // Entity keys whose stored history changes in this transaction: rows being
+    // replaced away plus rows being written. Each key is NOTIFYed (delivered
+    // on commit only, deduplicated per transaction by Postgres) so serving
+    // processes can evict their cached history for that key.
+    const changedEntityKeys = new Set<string>();
+    for (const row of deleted.rows) {
+      if (row.entity_key) changedEntityKeys.add(row.entity_key.toLowerCase());
+    }
 
     const rows = (transactionOperations ?? []).flatMap((transaction) =>
       transaction.operations.map((operation) => ({ transaction, operation })),
     );
+    for (const { operation } of rows) {
+      if (operation.entityKey) changedEntityKeys.add(operation.entityKey.toLowerCase());
+    }
+
     if (rows.length === 0) {
+      await this.notifyEntityOperationChanges(client, changedEntityKeys);
       return;
     }
 
@@ -1457,6 +1486,45 @@ export class ScannerStorage {
         params,
       );
     }
+
+    await this.notifyEntityOperationChanges(client, changedEntityKeys);
+  }
+
+  /** Queue one NOTIFY per changed entity key inside the current transaction. */
+  private async notifyEntityOperationChanges(
+    client: DbQueryable,
+    entityKeys: ReadonlySet<string>,
+  ): Promise<void> {
+    if (entityKeys.size === 0) {
+      return;
+    }
+    await client.query(`SELECT pg_notify($1, key) FROM unnest($2::text[]) AS key`, [
+      this.entityOperationsChannel(),
+      textArrayLiteral([...entityKeys]),
+    ]);
+  }
+
+  /**
+   * Postgres NOTIFY channel carrying entity keys whose stored operations
+   * changed. Scoped by schema so isolated test schemas (and parallel
+   * deployments sharing one database) do not cross-invalidate.
+   */
+  entityOperationsChannel(): string {
+    return `entity_ops_${this.schema}`.replace(/[^a-zA-Z0-9_]/g, "_");
+  }
+
+  /**
+   * Invoke `handler` with each entity key whose stored operations changed
+   * (committed inserts or replacements), from any writer process on this
+   * database. Returns an unsubscribe function.
+   */
+  async listenForEntityOperationChanges(
+    handler: (entityKey: string) => void,
+  ): Promise<() => Promise<void>> {
+    const subscription = await this.db.listen(this.entityOperationsChannel(), (payload) => {
+      if (payload) handler(payload);
+    });
+    return () => subscription.unlisten();
   }
 
   async getOperationsByHash(hash: string): Promise<ArkivOperation[]> {
@@ -1483,16 +1551,8 @@ export class ScannerStorage {
     return result.rows.map(mapTransactionOperationRow);
   }
 
-  /**
-   * Chronological history of every stored operation on one entity key (create,
-   * update, extend, transfer, delete, expire). Served by the entity_key index
-   * and capped at {@link MAX_ENTITY_OPERATIONS_PER_QUERY} rows in chain order,
-   * each joined with its transaction context (block, position, hash, date).
-   */
-  async getOperationsByEntityKey(entityKey: string): Promise<StoredEntityOperation[]> {
-    const result = await this.db.query<EntityOperationRow>(
-      `SELECT
-        block_number,
+  /** Column list shared by the entity-history queries. */
+  private static readonly ENTITY_OPERATION_COLUMNS = `block_number,
         position,
         op_index,
         hash,
@@ -1508,21 +1568,48 @@ export class ScannerStorage {
         is_reference,
         payload_reference,
         reference_verification,
-        reference_error
+        reference_error`;
+
+  /**
+   * The most recent `limit` stored operations on one entity key (create,
+   * update, extend, transfer, delete, expire) in chain order, each joined with
+   * its transaction context (block, position, hash, date), plus the total
+   * stored count. Served by the entity_key index. When older operations fall
+   * outside the slice, the earliest stored one is fetched separately so the
+   * create stays reachable.
+   */
+  async getEntityOperationHistory(
+    entityKey: string,
+    limit = DEFAULT_ENTITY_HISTORY_LIMIT,
+  ): Promise<EntityOperationHistory> {
+    const key = entityKey.toLowerCase();
+    const result = await this.db.query<EntityOperationRow & { total_operations: string }>(
+      `SELECT
+        ${ScannerStorage.ENTITY_OPERATION_COLUMNS},
+        COUNT(*) OVER () AS total_operations
       FROM ${this.qTransactionOperations}
       WHERE entity_key = $1
-      ORDER BY block_number ASC, position ASC, op_index ASC
+      ORDER BY block_number DESC, position DESC, op_index DESC
       LIMIT $2`,
-      [entityKey.toLowerCase(), MAX_ENTITY_OPERATIONS_PER_QUERY],
+      [key, limit],
     );
-    return result.rows.map((row) => ({
-      ...mapTransactionOperationRow(row),
-      blockNumber: Number(row.block_number),
-      blockNumberDecimal: row.block_number,
-      blockDate: row.block_date,
-      position: row.position,
-      hash: row.hash,
-    }));
+    const operations = result.rows.map(mapEntityOperationRow).reverse();
+    const totalOperations = result.rows.length > 0 ? Number(result.rows[0]!.total_operations) : 0;
+
+    let firstOperation: StoredEntityOperation | null = null;
+    if (totalOperations > operations.length) {
+      const first = await this.db.query<EntityOperationRow>(
+        `SELECT ${ScannerStorage.ENTITY_OPERATION_COLUMNS}
+        FROM ${this.qTransactionOperations}
+        WHERE entity_key = $1
+        ORDER BY block_number ASC, position ASC, op_index ASC
+        LIMIT 1`,
+        [key],
+      );
+      firstOperation = first.rows[0] ? mapEntityOperationRow(first.rows[0]) : null;
+    }
+
+    return { operations, totalOperations, firstOperation };
   }
 
   /**
@@ -3021,6 +3108,17 @@ function mapTransactionOperationRow(row: TransactionOperationRow): ArkivOperatio
     payloadReference: parseJsonbColumn<ArkivPayloadReference>(row.payload_reference),
     referenceVerification: parseJsonbColumn<ArkivReferenceVerification>(row.reference_verification),
     referenceError: row.reference_error,
+  };
+}
+
+function mapEntityOperationRow(row: EntityOperationRow): StoredEntityOperation {
+  return {
+    ...mapTransactionOperationRow(row),
+    blockNumber: Number(row.block_number),
+    blockNumberDecimal: row.block_number,
+    blockDate: row.block_date,
+    position: row.position,
+    hash: row.hash,
   };
 }
 

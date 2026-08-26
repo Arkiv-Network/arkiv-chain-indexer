@@ -290,8 +290,16 @@ export interface StoredEntityOperation extends ArkivOperation {
 
 export interface EntityByKeyResponse {
   entityKey: string;
+  /** Number of operations in `operations` (the returned slice). */
   count: number;
+  /** Total stored operations; older backends omit it (fall back to count). */
+  totalOperations?: number;
+  /** True when older operations were cut off by the server's history limit. */
+  truncated?: boolean;
+  /** Most recent operations in chain order, capped at the server's limit. */
   operations: StoredEntityOperation[];
+  /** Earliest stored operation; present only on truncated histories. */
+  firstOperation?: StoredEntityOperation;
 }
 
 export interface ArkivOperationSummaryEntry {

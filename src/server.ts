@@ -26,7 +26,9 @@ import {
   PayloadProviderPaymentResolver,
   type PayloadProviderPaymentBreakdown,
 } from "./payloadProviderPayments";
+import { EntityHistoryCache, type CachedEntityResponse } from "./entityHistoryCache";
 import {
+  DEFAULT_ENTITY_HISTORY_LIMIT,
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
   MAX_SENDERS_PER_QUERY,
@@ -58,6 +60,14 @@ export interface BlockServerOptions {
   baseloadAdminBearerToken?: string;
   guzzlerStore?: GuzzlerStore;
   payloadProviderPaymentResolver?: PayloadProviderPaymentResolver;
+  /**
+   * Bounded cache for /entity/:entityKey responses. Omitted (e.g. in most
+   * tests) the endpoint hits storage on every request; serve.ts always
+   * provides one, wired to storage's entity-operation invalidation channel.
+   */
+  entityHistoryCache?: EntityHistoryCache;
+  /** Most-recent operations returned per entity; defaults to 100. */
+  entityHistoryLimit?: number;
 }
 
 export interface BlocksResponseBody {
@@ -120,8 +130,16 @@ export interface TransactionByHashResponseBody {
 
 export interface EntityByKeyResponseBody {
   entityKey: string;
+  /** Number of operations in `operations` (the returned slice). */
   count: number;
+  /** Total stored operations for the key, including ones outside the slice. */
+  totalOperations: number;
+  /** True when older operations were cut off by the history limit. */
+  truncated: boolean;
+  /** Most recent operations in chain order, capped at the history limit. */
   operations: StoredEntityOperation[];
+  /** Earliest stored operation; present only when `truncated`. */
+  firstOperation?: StoredEntityOperation;
 }
 
 export interface TransactionRecordsResponseBody {
@@ -342,6 +360,10 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.payloadProviderPaymentResolver
           ? { payloadProviderPaymentResolver: options.payloadProviderPaymentResolver }
           : {}),
+        ...(options.entityHistoryCache ? { entityHistoryCache: options.entityHistoryCache } : {}),
+        ...(options.entityHistoryLimit !== undefined
+          ? { entityHistoryLimit: options.entityHistoryLimit }
+          : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -450,7 +472,7 @@ export async function handleRequest(
     if (!transactionDataEnabled) {
       return jsonError(404, "Transaction data is disabled");
     }
-    return handleGetEntityByKey(entityByKeyMatch[1], storage);
+    return handleGetEntityByKey(entityByKeyMatch[1], storage, options);
   }
 
   if (url.pathname === "/transaction-records") {
@@ -904,17 +926,48 @@ async function handleGetTransactionByHash(
   } satisfies TransactionByHashResponseBody);
 }
 
-async function handleGetEntityByKey(entityKey: string, storage: ScannerStorage): Promise<Response> {
+async function handleGetEntityByKey(
+  entityKey: string,
+  storage: ScannerStorage,
+  options: BlockServerOptions,
+): Promise<Response> {
   const normalized = entityKey.toLowerCase();
-  const operations = await storage.getOperationsByEntityKey(normalized);
-  if (operations.length === 0) {
-    return jsonError(404, `No operations for entity ${normalized} were found in storage`);
+  const limit = options.entityHistoryLimit ?? DEFAULT_ENTITY_HISTORY_LIMIT;
+  const loader = () => buildEntityByKeyResponse(normalized, storage, limit);
+  // Not-found responses are cached too: the create NOTIFY evicts them the
+  // moment the entity appears in storage.
+  const { status, body } = options.entityHistoryCache
+    ? await options.entityHistoryCache.load(normalized, loader)
+    : await loader();
+  return new Response(body, {
+    status,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+}
+
+async function buildEntityByKeyResponse(
+  normalizedEntityKey: string,
+  storage: ScannerStorage,
+  limit: number,
+): Promise<CachedEntityResponse> {
+  const history = await storage.getEntityOperationHistory(normalizedEntityKey, limit);
+  if (history.totalOperations === 0) {
+    return {
+      status: 404,
+      body: JSON.stringify({
+        error: `No operations for entity ${normalizedEntityKey} were found in storage`,
+      }),
+    };
   }
-  return jsonResponse({
-    entityKey: normalized,
-    count: operations.length,
-    operations,
-  } satisfies EntityByKeyResponseBody);
+  const responseBody: EntityByKeyResponseBody = {
+    entityKey: normalizedEntityKey,
+    count: history.operations.length,
+    totalOperations: history.totalOperations,
+    truncated: history.totalOperations > history.operations.length,
+    operations: history.operations,
+    ...(history.firstOperation ? { firstOperation: history.firstOperation } : {}),
+  };
+  return { status: 200, body: JSON.stringify(responseBody) };
 }
 
 async function handleGetTransactionRecords(url: URL, storage: ScannerStorage): Promise<Response> {

@@ -26,6 +26,7 @@ import {
 import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperations";
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
+import { EntityHistoryCache } from "./entityHistoryCache";
 import type { ScannerStorage, StoredEntityOperation, StoredTransactionRecord } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
@@ -1117,9 +1118,9 @@ describe("GET /entity/:entityKey", () => {
       }),
     ];
     const storage = {
-      getOperationsByEntityKey: async (requested: string) => {
+      getEntityOperationHistory: async (requested: string) => {
         requestedKeys.push(requested);
-        return operations;
+        return { operations, totalOperations: operations.length, firstOperation: null };
       },
     } as unknown as ScannerStorage;
 
@@ -1133,12 +1134,110 @@ describe("GET /entity/:entityKey", () => {
     expect(requestedKeys).toEqual([`0x${"11".repeat(16)}${"ab".repeat(16)}`]);
     expect(body.entityKey).toBe(`0x${"11".repeat(16)}${"ab".repeat(16)}`);
     expect(body.count).toBe(2);
+    expect(body.totalOperations).toBe(2);
+    expect(body.truncated).toBe(false);
+    expect(body.firstOperation).toBeUndefined();
     expect(body.operations).toEqual(operations);
+  });
+
+  test("marks truncated histories and carries the earliest stored operation", async () => {
+    const requestedLimits: number[] = [];
+    const newest = entityOperationFixture({
+      blockNumber: 43,
+      blockNumberDecimal: "43",
+      operationType: 2,
+      operation: "update",
+    });
+    const first = entityOperationFixture({ blockNumber: 7, blockNumberDecimal: "7" });
+    const storage = {
+      getEntityOperationHistory: async (_requested: string, limit: number) => {
+        requestedLimits.push(limit);
+        return { operations: [newest], totalOperations: 5, firstOperation: first };
+      },
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request(`http://example.test/entity/${entityKey}`),
+      storage,
+      { entityHistoryLimit: 1 },
+    );
+    const body = (await response.json()) as EntityByKeyResponseBody;
+
+    expect(response.status).toBe(200);
+    expect(requestedLimits).toEqual([1]);
+    expect(body.count).toBe(1);
+    expect(body.totalOperations).toBe(5);
+    expect(body.truncated).toBe(true);
+    expect(body.operations).toEqual([newest]);
+    expect(body.firstOperation).toEqual(first);
+  });
+
+  test("serves repeat lookups from the cache until the key is invalidated", async () => {
+    let storageCalls = 0;
+    const storage = {
+      getEntityOperationHistory: async () => {
+        storageCalls += 1;
+        return {
+          operations: [entityOperationFixture({ payloadSizeBytes: storageCalls })],
+          totalOperations: 1,
+          firstOperation: null,
+        };
+      },
+    } as unknown as ScannerStorage;
+    const cache = new EntityHistoryCache();
+    const options = { entityHistoryCache: cache };
+    const request = () =>
+      handleRequest(new Request(`http://example.test/entity/${entityKey}`), storage, options);
+
+    const firstBody = (await (await request()).json()) as EntityByKeyResponseBody;
+    const secondBody = (await (await request()).json()) as EntityByKeyResponseBody;
+    expect(storageCalls).toBe(1);
+    expect(secondBody).toEqual(firstBody);
+
+    // Invalidation (normally driven by the storage NOTIFY channel) forces the
+    // next lookup back to storage.
+    cache.invalidate(entityKey);
+    const thirdBody = (await (await request()).json()) as EntityByKeyResponseBody;
+    expect(storageCalls).toBe(2);
+    expect(thirdBody.operations[0]?.payloadSizeBytes).toBe(2);
+  });
+
+  test("caches not-found responses", async () => {
+    let storageCalls = 0;
+    const storage = {
+      getEntityOperationHistory: async () => {
+        storageCalls += 1;
+        return { operations: [], totalOperations: 0, firstOperation: null };
+      },
+    } as unknown as ScannerStorage;
+    const options = { entityHistoryCache: new EntityHistoryCache() };
+
+    const first = await handleRequest(
+      new Request(`http://example.test/entity/${entityKey}`),
+      storage,
+      options,
+    );
+    const second = await handleRequest(
+      new Request(`http://example.test/entity/${entityKey}`),
+      storage,
+      options,
+    );
+
+    expect(first.status).toBe(404);
+    expect(second.status).toBe(404);
+    await expect(second.json()).resolves.toEqual({
+      error: `No operations for entity ${entityKey} were found in storage`,
+    });
+    expect(storageCalls).toBe(1);
   });
 
   test("returns 404 when no operations exist for the entity key", async () => {
     const storage = {
-      getOperationsByEntityKey: async () => [],
+      getEntityOperationHistory: async () => ({
+        operations: [],
+        totalOperations: 0,
+        firstOperation: null,
+      }),
     } as unknown as ScannerStorage;
 
     const response = await handleRequest(

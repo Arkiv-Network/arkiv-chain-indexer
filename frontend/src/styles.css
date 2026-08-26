@@ -4281,6 +4281,12 @@ th:not(.num) .sort-header {
   color: var(--muted);
 }
 
+/* When the note precedes the operations table (truncated-history notice),
+   give it breathing room before the table starts. */
+.tx-detail-operations > .tx-detail-note {
+  margin: -0.2rem 0 0.6rem;
+}
+
 /* ---- Detail-card loading skeleton ----
    Mirrors the loaded card's silhouette (topline, three groups, table) so the
    page keeps its shape while data loads instead of collapsing and jumping. */

@@ -6,6 +6,12 @@ import {
   parseCli,
   type CliSpec,
 } from "./cli";
+import {
+  DEFAULT_ENTITY_CACHE_MAX_BYTES,
+  DEFAULT_ENTITY_CACHE_MAX_ENTRIES,
+  DEFAULT_ENTITY_CACHE_TTL_MS,
+} from "./entityHistoryCache";
+import { DEFAULT_ENTITY_HISTORY_LIMIT } from "./storage";
 
 export interface ServerConfig {
   databaseUrl: string;
@@ -18,6 +24,10 @@ export interface ServerConfig {
   protocolScheduleUrl?: string;
   protocolSchedulePath?: string;
   payloadProviderPaymentShareBps?: number;
+  entityHistoryLimit: number;
+  entityCacheMaxEntries: number;
+  entityCacheMaxBytes: number;
+  entityCacheTtlMs: number;
 }
 
 const DEFAULT_PORT = 3000;
@@ -89,6 +99,34 @@ const SPEC: CliSpec = {
         "Optional provider-share basis points override used when no protocol schedule is configured.",
       env: ["PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS", "SERVER_PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS"],
     },
+    {
+      flags: "--entity-history-limit <count>",
+      description:
+        "Most-recent operations returned per /entity/:entityKey response. Defaults to 100 (or ENTITY_HISTORY_LIMIT).",
+      env: ["ENTITY_HISTORY_LIMIT", "SERVER_ENTITY_HISTORY_LIMIT"],
+      default: DEFAULT_ENTITY_HISTORY_LIMIT.toString(),
+    },
+    {
+      flags: "--entity-cache-max-entries <count>",
+      description:
+        "Entity-history cache entry cap; 0 disables the cache. Defaults to 10000 (or ENTITY_CACHE_MAX_ENTRIES).",
+      env: ["ENTITY_CACHE_MAX_ENTRIES", "SERVER_ENTITY_CACHE_MAX_ENTRIES"],
+      default: DEFAULT_ENTITY_CACHE_MAX_ENTRIES.toString(),
+    },
+    {
+      flags: "--entity-cache-max-bytes <bytes>",
+      description:
+        "Entity-history cache total body-size cap in bytes; 0 disables the cache. Defaults to 67108864 (or ENTITY_CACHE_MAX_BYTES).",
+      env: ["ENTITY_CACHE_MAX_BYTES", "SERVER_ENTITY_CACHE_MAX_BYTES"],
+      default: DEFAULT_ENTITY_CACHE_MAX_BYTES.toString(),
+    },
+    {
+      flags: "--entity-cache-ttl-ms <ms>",
+      description:
+        "Entity-history cache entry lifetime in milliseconds — a staleness backstop behind NOTIFY invalidation; 0 disables the cache. Defaults to 300000 (or ENTITY_CACHE_TTL_MS).",
+      env: ["ENTITY_CACHE_TTL_MS", "SERVER_ENTITY_CACHE_TTL_MS"],
+      default: DEFAULT_ENTITY_CACHE_TTL_MS.toString(),
+    },
   ],
 };
 
@@ -125,6 +163,33 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   ) {
     throw new Error("--payload-provider-payment-share-bps must be between 0 and 10000");
   }
+  // Compose-style `${VAR:-}` interpolation hands empty strings to unset env
+  // vars; treat those as "use the default" instead of failing coercion.
+  const intOrDefault = (flag: string, raw: string | undefined, fallback: number) =>
+    raw ? coerceInt(flag, raw) : fallback;
+  const entityHistoryLimit = intOrDefault(
+    "--entity-history-limit",
+    cli.value("entity-history-limit"),
+    DEFAULT_ENTITY_HISTORY_LIMIT,
+  );
+  if (entityHistoryLimit < 1) {
+    throw new Error("--entity-history-limit must be at least 1");
+  }
+  const entityCacheMaxEntries = intOrDefault(
+    "--entity-cache-max-entries",
+    cli.value("entity-cache-max-entries"),
+    DEFAULT_ENTITY_CACHE_MAX_ENTRIES,
+  );
+  const entityCacheMaxBytes = intOrDefault(
+    "--entity-cache-max-bytes",
+    cli.value("entity-cache-max-bytes"),
+    DEFAULT_ENTITY_CACHE_MAX_BYTES,
+  );
+  const entityCacheTtlMs = intOrDefault(
+    "--entity-cache-ttl-ms",
+    cli.value("entity-cache-ttl-ms"),
+    DEFAULT_ENTITY_CACHE_TTL_MS,
+  );
 
   return {
     databaseUrl,
@@ -137,5 +202,9 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     ...(protocolScheduleUrl ? { protocolScheduleUrl } : {}),
     ...(protocolSchedulePath ? { protocolSchedulePath } : {}),
     ...(payloadProviderPaymentShareBps !== undefined ? { payloadProviderPaymentShareBps } : {}),
+    entityHistoryLimit,
+    entityCacheMaxEntries,
+    entityCacheMaxBytes,
+    entityCacheTtlMs,
   };
 }

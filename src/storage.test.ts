@@ -1036,9 +1036,11 @@ if (!hasPostgresForTests()) {
 
       // Uppercase input is normalized; history spans blocks in chain order and
       // carries each operation's transaction context.
-      const history = await storage.getOperationsByEntityKey(`0x${"AB".repeat(32)}`);
-      expect(history).toHaveLength(2);
-      expect(history[0]).toMatchObject({
+      const history = await storage.getEntityOperationHistory(`0x${"AB".repeat(32)}`);
+      expect(history.totalOperations).toBe(2);
+      expect(history.firstOperation).toBeNull();
+      expect(history.operations).toHaveLength(2);
+      expect(history.operations[0]).toMatchObject({
         blockNumber: 10,
         blockNumberDecimal: "10",
         position: 0,
@@ -1046,16 +1048,147 @@ if (!hasPostgresForTests()) {
         operation: "create",
         entityKey,
       });
-      expect(history[1]).toMatchObject({
+      expect(history.operations[1]).toMatchObject({
         blockNumber: 11,
         blockNumberDecimal: "11",
         hash: "0xdead",
         operation: "delete",
         entityKey,
       });
-      expect(typeof history[0]?.blockDate).toBe("string");
+      expect(typeof history.operations[0]?.blockDate).toBe("string");
 
-      expect(await storage.getOperationsByEntityKey(`0x${"99".repeat(32)}`)).toEqual([]);
+      expect(await storage.getEntityOperationHistory(`0x${"99".repeat(32)}`)).toEqual({
+        operations: [],
+        totalOperations: 0,
+        firstOperation: null,
+      });
+    });
+
+    test("truncates entity history to the newest operations and keeps the create reachable", async () => {
+      const storage = await withStorage();
+      const entityKey = `0x${"77".repeat(32)}`;
+      const operationFor = (blockNumber: bigint, operation: string, operationType: number) => ({
+        position: 0,
+        hash: `0x${blockNumber.toString(16).padStart(4, "0")}` as `0x${string}`,
+        operations: [
+          {
+            opIndex: 0,
+            operationType,
+            operation,
+            entityKey,
+            contentType: operation === "create" ? "text/plain" : null,
+            payloadSizeBytes: 0,
+            attributes: [],
+            expiresAtBlocks: 0,
+            newOwner: null,
+            isReference: false,
+            payloadReference: null,
+            referenceVerification: null,
+            referenceError: null,
+          },
+        ],
+      });
+      const blocks: Array<[bigint, string, number]> = [
+        [20n, "create", 1],
+        [21n, "update", 2],
+        [22n, "update", 2],
+        [23n, "delete", 5],
+      ];
+      for (const [blockNumber, operation, operationType] of blocks) {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber, transactionCount: 1 }),
+          { kind: "lastSuccessfulBlock" },
+          [transactionFixture({ position: 0, hash: `0x${blockNumber.toString(16).padStart(4, "0")}` })],
+          undefined,
+          [operationFor(blockNumber, operation, operationType)],
+        );
+      }
+
+      const history = await storage.getEntityOperationHistory(entityKey, 2);
+      expect(history.totalOperations).toBe(4);
+      // The slice holds the newest two operations in chain order…
+      expect(history.operations.map((operation) => operation.operation)).toEqual([
+        "update",
+        "delete",
+      ]);
+      expect(history.operations.map((operation) => operation.blockNumber)).toEqual([22, 23]);
+      // …and the earliest stored operation (the create) rides along separately.
+      expect(history.firstOperation).toMatchObject({
+        operation: "create",
+        blockNumber: 20,
+        entityKey,
+      });
+
+      // A limit covering everything returns no separate first operation.
+      const full = await storage.getEntityOperationHistory(entityKey, 10);
+      expect(full.totalOperations).toBe(4);
+      expect(full.operations).toHaveLength(4);
+      expect(full.firstOperation).toBeNull();
+    });
+
+    test("notifies the schema-scoped channel with changed entity keys on commit", async () => {
+      const storage = await withStorage();
+      const entityKey = `0x${"5a".repeat(32)}`;
+      const received: string[] = [];
+      const stop = await storage.listenForEntityOperationChanges((key) => {
+        received.push(key);
+      });
+
+      try {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber: 30n, transactionCount: 1 }),
+          { kind: "lastSuccessfulBlock" },
+          [transactionFixture({ position: 0, hash: "0xfeed" })],
+          undefined,
+          [
+            {
+              position: 0,
+              hash: "0xfeed" as `0x${string}`,
+              operations: [
+                {
+                  opIndex: 0,
+                  operationType: 1,
+                  operation: "create",
+                  entityKey,
+                  contentType: "text/plain",
+                  payloadSizeBytes: 3,
+                  attributes: [],
+                  expiresAtBlocks: 0,
+                  newOwner: null,
+                  isReference: false,
+                  payloadReference: null,
+                  referenceVerification: null,
+                  referenceError: null,
+                },
+              ],
+            },
+          ],
+        );
+
+        const deadline = Date.now() + 5_000;
+        while (received.length === 0 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(received).toEqual([entityKey]);
+
+        // Re-scanning the block (replacing its rows) notifies again, covering
+        // keys from the deleted rows as well as the inserted ones.
+        received.length = 0;
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber: 30n, transactionCount: 1 }),
+          { kind: "lastSuccessfulBlock" },
+          [transactionFixture({ position: 0, hash: "0xfeed" })],
+          undefined,
+          [],
+        );
+        const replaceDeadline = Date.now() + 5_000;
+        while (received.length === 0 && Date.now() < replaceDeadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(received).toEqual([entityKey]);
+      } finally {
+        await stop();
+      }
     });
 
     test("aggregates operation summaries per transaction ordered by operation type", async () => {

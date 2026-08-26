@@ -94,7 +94,7 @@ Related scanner and worker settings:
 | `GET` | `/ranges` | Compact rows for precomputed fixed-size block ranges. |
 | `GET` | `/transactions` | Stored transaction rows with pagination and filters. |
 | `GET` | `/transaction/:hash` | One stored transaction plus decoded Arkiv operations. |
-| `GET` | `/entity/:entityKey` | Full stored operation history for one Arkiv entity key. |
+| `GET` | `/entity/:entityKey` | Most recent stored operations for one Arkiv entity key, with the total count. |
 | `GET` | `/transaction-records` | Top stored transaction records by gas, fee, and effective fee. |
 | `GET` | `/senders` | Precomputed sender-address activity stats. |
 | `GET` | `/guzzlers` | Redis-cached active sender leaderboards over recent windows. |
@@ -324,11 +324,20 @@ Each operation attribute includes `key`, `valueType`, `valueTypeName`, and `valu
 Requires transaction data to be enabled. The entity key must match `0x` plus 64 hex characters; it
 is normalized to lowercase.
 
-Returns the chronological history of every stored operation on that entity key (create, update,
-extend, transfer, delete, expire), ordered by block number, transaction position, and operation
-index ascending and capped at 1,000 rows. Returns `404` when no operations are stored for the key.
+Returns the most recent stored operations on that entity key (create, update, extend, transfer,
+delete, expire) in chain order — ordered by block number, transaction position, and operation index
+ascending — capped at the configured history limit (`ENTITY_HISTORY_LIMIT`, default 100).
+`totalOperations` always carries the full stored count; `truncated` is true when older operations
+were cut off, and `firstOperation` (present only then) carries the earliest stored operation so the
+create stays reachable. Returns `404` when no operations are stored for the key.
 Creates are linked to their entity key from the EntityCreated receipt log, so rows scanned before
 that link existed may be missing from a key's history until their blocks are re-scanned.
+
+Responses are served from a bounded in-memory cache (`ENTITY_CACHE_MAX_ENTRIES`, default 10,000
+entries; `ENTITY_CACHE_MAX_BYTES`, default 64 MiB; `ENTITY_CACHE_TTL_MS`, default 5 minutes; any
+set to 0 disables caching). Cached entries — including not-found results — are evicted the moment
+a scanner commits new operations for the key (Postgres NOTIFY), with the TTL as a staleness
+backstop, so responses can briefly trail the chain by at most the TTL if the push channel drops.
 
 Response shape:
 
@@ -336,12 +345,15 @@ Response shape:
 {
   "entityKey": "0x…",
   "count": 0,
+  "totalOperations": 0,
+  "truncated": false,
   "operations": []
 }
 ```
 
-Each operation has the fields listed under `/transaction/:hash` plus its transaction context:
-`blockNumber`, `blockNumberDecimal`, `blockDate`, `position`, and `hash`.
+`count` is the number of returned operations. Each operation has the fields listed under
+`/transaction/:hash` plus its transaction context: `blockNumber`, `blockNumberDecimal`,
+`blockDate`, `position`, and `hash`.
 
 ## `GET /transaction-records`
 

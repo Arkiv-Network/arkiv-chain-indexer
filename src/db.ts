@@ -24,8 +24,18 @@ export interface DbQueryable {
   query<R = unknown>(text: string, params?: unknown[]): Promise<DbResult<R>>;
 }
 
+export interface DbListenSubscription {
+  unlisten(): Promise<void>;
+}
+
 export interface Db extends DbQueryable {
   transaction<T>(fn: (tx: DbQueryable) => Promise<T>): Promise<T>;
+  /**
+   * Subscribe to a Postgres NOTIFY channel. The handler receives each
+   * notification's payload string. Bun manages the LISTEN connection
+   * internally, outside the query pool.
+   */
+  listen(channel: string, handler: (payload: string) => void): Promise<DbListenSubscription>;
   close(): Promise<void>;
 }
 
@@ -54,6 +64,20 @@ export function openDb(connectionString: string, options: OpenDbOptions = {}): D
     query: base.query,
     transaction<T>(fn: (tx: DbQueryable) => Promise<T>): Promise<T> {
       return sql.begin((tx) => fn(queryableFrom(tx))) as Promise<T>;
+    },
+    async listen(
+      channel: string,
+      handler: (payload: string) => void,
+    ): Promise<DbListenSubscription> {
+      // Bun 1.4+ SQL exposes listen()/unlisten(); @types/bun lags behind.
+      const listenCapable = sql as unknown as {
+        listen(
+          channel: string,
+          handler: (payload: string) => void,
+        ): Promise<{ unlisten(): Promise<void> }>;
+      };
+      const subscription = await listenCapable.listen(channel, handler);
+      return { unlisten: () => subscription.unlisten() };
     },
     async close(): Promise<void> {
       await sql.end();

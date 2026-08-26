@@ -69,6 +69,13 @@ docker compose up --build
   CORS headers are returned on every response so the static frontend can fetch from a different origin. All
   filters combine additively; results are always capped at the smallest 10,000 matching rows. Entry point:
   `src/serve.ts` (`bun run serve`).
+- `GET /entity/:entityKey` returns the most recent `ENTITY_HISTORY_LIMIT` (default 100) operations plus
+  `totalOperations`/`truncated`, and `firstOperation` when the create fell outside the slice. Responses
+  (including 404s) are cached in `src/entityHistoryCache.ts` — bounded by entries (default 10,000), bytes
+  (default 64 MiB), and a TTL backstop (default 5 min); any set to 0 disables caching. Writers queue one
+  Postgres `pg_notify` per changed entity key inside the block-write transaction (schema-scoped channel,
+  `ScannerStorage.entityOperationsChannel()`); `serve.ts` LISTENs and evicts on delivery, so cached entries
+  go stale only if the LISTEN connection drops, and then at most for the TTL.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator
