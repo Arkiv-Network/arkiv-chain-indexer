@@ -110,8 +110,13 @@ export function App() {
   const transactionHash = readTransactionHashFromLocation(clientLocation);
   const entityKeyParam = readEntityKeyFromLocation(clientLocation);
   const addressParam = readAddressFromLocation(clientLocation);
+  // Fall back to the blocks view only once /api/health has *confirmed* that
+  // transaction data is disabled. While the probe is still in flight
+  // (transactionDataEnabled === null) keep the requested view mounted —
+  // otherwise a direct load of /tx/… or /entity/… first flashes the blocks
+  // view (and fires its /api/blocks fetch) before swapping to the real page.
   const activeView =
-    transactionDataEnabled !== true &&
+    transactionDataEnabled === false &&
     (view === "block" ||
       view === "transactions" ||
       view === "transaction" ||

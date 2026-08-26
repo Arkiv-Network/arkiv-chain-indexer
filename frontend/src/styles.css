@@ -4272,6 +4272,99 @@ th:not(.num) .sort-header {
   border-top: 1px solid var(--border);
 }
 
+/* Muted explainer inside a detail group, replacing the label/value rows when
+   there is nothing concrete to show (e.g. the create op is not in storage). */
+.tx-detail-note {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* ---- Detail-card loading skeleton ----
+   Mirrors the loaded card's silhouette (topline, three groups, table) so the
+   page keeps its shape while data loads instead of collapsing and jumping. */
+
+.skeleton-bar {
+  display: inline-block;
+  vertical-align: middle;
+  height: 0.7rem;
+  border-radius: 4px;
+  background: linear-gradient(100deg, var(--stone) 35%, var(--stone-2) 50%, var(--stone) 65%);
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -90% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar {
+    animation: none;
+  }
+}
+
+.skeleton-badge {
+  width: 4.6rem;
+  height: 1.35rem;
+  border-radius: 999px;
+}
+
+.skeleton-hash {
+  flex: 1 1 16rem;
+  max-width: 36rem;
+  height: 0.8rem;
+}
+
+.skeleton-title {
+  width: 5.5rem;
+  height: 0.66rem;
+}
+
+.skeleton-label {
+  width: 72%;
+  max-width: 5.5rem;
+}
+
+.skeleton-value {
+  width: 58%;
+  max-width: 12rem;
+}
+
+/* Vary the value-bar widths so the placeholder doesn't read as a barcode. */
+.detail-skeleton .tx-detail-row:nth-child(2n) .skeleton-value {
+  width: 74%;
+}
+
+.detail-skeleton .tx-detail-row:nth-child(3n) .skeleton-value {
+  width: 42%;
+}
+
+/* The bars are shorter than real text; pad the rows back to the loaded
+   height so the card swaps in without a vertical jump. */
+.detail-skeleton .tx-detail-row {
+  padding: 0.5rem 0;
+  align-items: center;
+}
+
+/* Header band plus alternating data-row stripes, echoing .data-table. */
+.skeleton-table {
+  height: 10rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--stone) 55%, var(--sand)) 0 2.5rem,
+    var(--sand) 2.5rem 5rem
+  );
+}
+
 .payload-payment-panel {
   margin: 0 0 0.75rem;
   padding: 0.75rem;

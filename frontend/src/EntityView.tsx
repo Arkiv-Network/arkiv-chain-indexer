@@ -107,7 +107,7 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
           Enter an entity key above to view the entity and its operation history.
         </p>
       ) : status === "loading" ? (
-        <p className="summary">Loading entity history…</p>
+        <EntityDetailSkeleton />
       ) : status === "error" ? (
         <p className="summary error">Failed to load entity history: {error}</p>
       ) : status === "notfound" ? (
@@ -145,12 +145,10 @@ function EntityDetail({
   const created = operations.find((operation) => operation.operation === "create") ?? null;
   const latest = operations[operations.length - 1]!;
   const lifecycle = lifecycleInfo(latest);
-  const latestContent =
-    [...operations].reverse().find((operation) => operation.contentType !== null) ?? null;
-  const latestExpiry =
-    [...operations].reverse().find((operation) => operation.expiresAtBlocks > 0) ?? null;
-  const lastTransfer =
-    [...operations].reverse().find((operation) => operation.newOwner !== null) ?? null;
+  const newestFirst = [...operations].reverse();
+  const latestContent = newestFirst.find((operation) => operation.contentType !== null) ?? null;
+  const latestExpiry = newestFirst.find((operation) => operation.expiresAtBlocks > 0) ?? null;
+  const lastTransfer = newestFirst.find((operation) => operation.newOwner !== null) ?? null;
 
   return (
     <div className="tx-detail-card">
@@ -168,50 +166,81 @@ function EntityDetail({
               <span className={`tx-status-badge ${lifecycle.tone}`}>{lifecycle.label}</span>
             </Row>
             <Row label="Operations">{fmtInteger(operations.length)}</Row>
-            {created ? (
-              <>
-                <Row label="Created in block">
-                  <BlockNumberLink
-                    blockNumber={created.blockNumberDecimal}
-                    onLocationChange={onLocationChange}
-                  />
-                </Row>
-                <Row label="Created at" title={created.blockDate}>
-                  {fmtDate(created.blockDate, timeZone)}
-                </Row>
-                <Row label="Creating transaction">
-                  <TransactionHashLink hash={created.hash} onLocationChange={onLocationChange} />
-                </Row>
-              </>
-            ) : (
-              <Row label="Created">
-                <span title="The create operation is outside the stored history (older than the scanned range or not yet linked to this key).">
-                  not in stored history
-                </span>
-              </Row>
-            )}
-            <Row label="Last activity" title={latest.blockDate}>
-              <span className="tx-inline">
-                <span className={`op-badge op-${latest.operation}`}>{latest.operation}</span>
-                <span>{fmtDate(latest.blockDate, timeZone)}</span>
-              </span>
-            </Row>
             {latestContent?.contentType ? (
               <Row label="Content type">{latestContent.contentType}</Row>
             ) : null}
-            {latestExpiry ? (
+            {latestContent && latestContent.payloadSizeBytes > 0 ? (
               <Row
-                label="Expiration (latest)"
-                title={`Set by the ${latestExpiry.operation} in block ${latestExpiry.blockNumberDecimal}`}
+                label="Payload"
+                title={`${fmtInteger(latestContent.payloadSizeBytes)} bytes, from the ${latestContent.operation} in block ${latestContent.blockNumberDecimal}`}
               >
-                {fmtInteger(latestExpiry.expiresAtBlocks)} blocks (~
-                {fmtDurationSeconds((latestExpiry.expiresAtBlocks * blockTimeMs) / 1000)}) from block{" "}
-                {latestExpiry.blockNumberDecimal}
+                {fmtBytes(latestContent.payloadSizeBytes)}
               </Row>
             ) : null}
             {lastTransfer?.newOwner ? (
               <Row label="Owner (last transfer)">
                 <AddressCell address={lastTransfer.newOwner} />
+              </Row>
+            ) : null}
+          </dl>
+        </section>
+
+        <section className="tx-detail-group">
+          <h3>Created</h3>
+          {created ? (
+            <dl className="tx-detail-grid">
+              <Row label="Block">
+                <BlockNumberLink
+                  blockNumber={created.blockNumberDecimal}
+                  onLocationChange={onLocationChange}
+                />
+              </Row>
+              <Row label="Date" title={created.blockDate}>
+                {fmtDate(created.blockDate, timeZone)}
+              </Row>
+              <Row label="Transaction">
+                <TransactionHashLink hash={created.hash} onLocationChange={onLocationChange} />
+              </Row>
+            </dl>
+          ) : (
+            <p className="tx-detail-note">
+              The create operation is outside the stored history — older than the scanned range or
+              not yet linked to this key.
+            </p>
+          )}
+        </section>
+
+        <section className="tx-detail-group">
+          <h3>Last activity</h3>
+          <dl className="tx-detail-grid">
+            <Row label="Operation">
+              <span className="op-badge-list">
+                <span className={`op-badge op-${latest.operation}`}>{latest.operation}</span>
+                {latest.isReference ? (
+                  <span className="op-badge op-reference">reference</span>
+                ) : null}
+              </span>
+            </Row>
+            <Row label="Date" title={latest.blockDate}>
+              {fmtDate(latest.blockDate, timeZone)}
+            </Row>
+            <Row label="Block">
+              <BlockNumberLink
+                blockNumber={latest.blockNumberDecimal}
+                onLocationChange={onLocationChange}
+              />
+            </Row>
+            <Row label="Transaction">
+              <TransactionHashLink hash={latest.hash} onLocationChange={onLocationChange} />
+            </Row>
+            {latestExpiry ? (
+              <Row
+                label="Expires"
+                title={`Set by the ${latestExpiry.operation} in block ${latestExpiry.blockNumberDecimal}`}
+              >
+                {fmtInteger(latestExpiry.expiresAtBlocks)} blocks (~
+                {fmtDurationSeconds((latestExpiry.expiresAtBlocks * blockTimeMs) / 1000)}) from block{" "}
+                {latestExpiry.blockNumberDecimal}
               </Row>
             ) : null}
           </dl>
@@ -296,6 +325,52 @@ function Row({ label, children, title }: { label: string; children: ReactNode; t
       <dd className="tx-detail-value" title={title}>
         {children}
       </dd>
+    </div>
+  );
+}
+
+/**
+ * Placeholder with the same card silhouette as EntityDetail so the page keeps
+ * its shape while the history loads, instead of collapsing to a one-line
+ * message and jumping when the data arrives.
+ */
+function EntityDetailSkeleton() {
+  return (
+    <div className="tx-detail-card detail-skeleton" role="status" aria-label="Loading entity history">
+      <span className="visually-hidden">Loading entity history…</span>
+      <div aria-hidden="true">
+        <div className="tx-detail-topline">
+          <span className="skeleton-bar skeleton-badge" />
+          <span className="skeleton-bar skeleton-hash" />
+        </div>
+        <div className="tx-detail-groups">
+          {[4, 3, 4].map((rows, group) => (
+            <section key={group} className="tx-detail-group">
+              <h3>
+                <span className="skeleton-bar skeleton-title" />
+              </h3>
+              <div className="tx-detail-grid">
+                {Array.from({ length: rows }, (_, row) => (
+                  <div key={row} className="tx-detail-row">
+                    <span className="tx-detail-label">
+                      <span className="skeleton-bar skeleton-label" />
+                    </span>
+                    <span className="tx-detail-value">
+                      <span className="skeleton-bar skeleton-value" />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+        <section className="tx-detail-group tx-detail-operations">
+          <h3>
+            <span className="skeleton-bar skeleton-title" />
+          </h3>
+          <div className="skeleton-table" />
+        </section>
+      </div>
     </div>
   );
 }
