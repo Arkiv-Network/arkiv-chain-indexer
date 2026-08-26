@@ -981,6 +981,10 @@ export class ScannerStorage {
    * blocks. Ordered by the primary key, so it stays cheap on a large table.
    */
   async getForwardScanSamples(limit = DEFAULT_SCAN_SAMPLE_LIMIT): Promise<ScanSample[]> {
+    // ORDER BY must reference the qualified BIGINT column: a bare
+    // `block_number` would bind to the ::text output alias, which both
+    // defeats the primary-key index (seq scan + sort of the whole table) and
+    // sorts numbers as strings ("999999" > "1000000").
     const result = await this.db.query<{
       block_number: string;
       block_date: string;
@@ -991,7 +995,7 @@ export class ScannerStorage {
          block_date,
          to_char(scanned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS scanned_at_utc
        FROM ${this.qBlocks}
-       ORDER BY block_number DESC
+       ORDER BY ${this.qBlocks}.block_number DESC
        LIMIT $1`,
       [Math.max(2, Math.trunc(limit))],
     );

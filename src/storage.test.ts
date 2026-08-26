@@ -95,6 +95,24 @@ if (!hasPostgresForTests()) {
       expect(samples[1]?.scannedAtUtc).toMatch(/Z$/);
     });
 
+    test("orders scan samples numerically across a digit boundary", async () => {
+      const storage = await withStorage();
+
+      // "999999" > "1000000" as text: a sort on the ::text output alias
+      // would pick the wrong tip block here.
+      for (const blockNumber of [999_999n, 1_000_000n]) {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({
+            blockNumber,
+            blockDate: new Date(Number(blockNumber)).toISOString(),
+          }),
+        );
+      }
+
+      const samples = await storage.getForwardScanSamples(2);
+      expect(samples.map((sample) => sample.blockNumber)).toEqual([999_999n, 1_000_000n]);
+    });
+
     test("saves backfill cursor separately from forward progress", async () => {
       const storage = await withStorage();
 
