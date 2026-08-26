@@ -1443,6 +1443,90 @@ describe("GET /senders", () => {
   });
 });
 
+describe("conditional GET (ETag / 304)", () => {
+  const sendersStorage = () =>
+    ({
+      querySenderStats: async () => [
+        {
+          address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          latestNonce: "8",
+          transactionCount: "2",
+          totalGasUsed: "63000",
+          totalTransactionFeeWei: "6930000",
+          totalValueWei: "3000",
+          averageGasUsed: "31500",
+          averageTransactionFeeWei: "3465000",
+          firstBlockNumber: 100,
+          firstBlockNumberDecimal: "100",
+          lastBlockNumber: 101,
+          lastBlockNumberDecimal: "101",
+          firstBlockDate: "2024-01-01T00:00:00.000Z",
+          lastBlockDate: "2024-01-02T00:00:00.000Z",
+          aggregatedAt: "2024-01-02T00:00:01.000Z",
+        },
+      ],
+    }) as unknown as ScannerStorage;
+
+  test("200 responses carry an ETag and revalidate to an empty 304", async () => {
+    const storage = sendersStorage();
+    const first = await handleRequest(new Request("http://example.test/senders"), storage);
+    const etag = first.headers.get("ETag");
+
+    expect(first.status).toBe(200);
+    expect(etag).toMatch(/^"[0-9a-f]+"$/);
+    expect(first.headers.get("Cache-Control")).toBe("no-cache");
+
+    const revalidated = await handleRequest(
+      new Request("http://example.test/senders", { headers: { "If-None-Match": etag ?? "" } }),
+      storage,
+    );
+
+    expect(revalidated.status).toBe(304);
+    expect(await revalidated.text()).toBe("");
+    expect(revalidated.headers.get("ETag")).toBe(etag);
+    expect(revalidated.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+
+  test("a stale If-None-Match still gets the full 200", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/senders", { headers: { "If-None-Match": '"deadbeef"' } }),
+      sendersStorage(),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.text()).length).toBeGreaterThan(0);
+  });
+
+  test("plain and zstd representations get distinct ETags", async () => {
+    const storage = {
+      queryTransactions: async () => [storedTransactionFixture()],
+      countTransactions: async () => 1,
+      getOperationsSummaryForTransactions: async () => new Map(),
+    } as unknown as ScannerStorage;
+
+    const plain = await handleRequest(new Request("http://example.test/transactions?block=42"), storage);
+    const zstd = await handleRequest(
+      new Request("http://example.test/transactions?block=42", {
+        headers: { "Accept-Encoding": "zstd" },
+      }),
+      storage,
+    );
+    const zstdEtag = zstd.headers.get("ETag");
+
+    expect(plain.headers.get("ETag")).toMatch(/^"[0-9a-f]+"$/);
+    expect(zstdEtag).toMatch(/^"[0-9a-f]+"$/);
+    expect(zstdEtag).not.toBe(plain.headers.get("ETag"));
+
+    const revalidated = await handleRequest(
+      new Request("http://example.test/transactions?block=42", {
+        headers: { "Accept-Encoding": "zstd", "If-None-Match": zstdEtag ?? "" },
+      }),
+      storage,
+    );
+    expect(revalidated.status).toBe(304);
+  });
+});
+
 describe("GET /health", () => {
   test("returns scanner progress and build metadata", async () => {
     const storage = {

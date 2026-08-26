@@ -521,6 +521,46 @@ export async function handleRequest(
   storage: ScannerStorage,
   options: BlockServerOptions = {},
 ): Promise<Response> {
+  return applyConditionalGet(request, await routeRequest(request, storage, options));
+}
+
+/**
+ * Answer a conditional GET with an empty 304 when the client already holds
+ * the current representation. Every 200 JSON body carries an ETag, so a
+ * browser refresh revalidates instead of re-downloading unchanged responses.
+ */
+function applyConditionalGet(request: Request, response: Response): Response {
+  if (request.method !== "GET" || response.status !== 200) {
+    return response;
+  }
+  const etag = response.headers.get("ETag");
+  const ifNoneMatch = request.headers.get("If-None-Match");
+  if (!etag || !ifNoneMatch) {
+    return response;
+  }
+  const matches = ifNoneMatch
+    .split(",")
+    .map((tag) => tag.trim())
+    .some((tag) => tag === "*" || tag === etag || tag === `W/${etag}`);
+  if (!matches) {
+    return response;
+  }
+
+  const headers = new Headers();
+  for (const name of ["ETag", "Cache-Control", "Vary", ...Object.keys(CORS_HEADERS)]) {
+    const value = response.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  return new Response(null, { status: 304, headers });
+}
+
+async function routeRequest(
+  request: Request,
+  storage: ScannerStorage,
+  options: BlockServerOptions = {},
+): Promise<Response> {
   const url = new URL(request.url);
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
 
@@ -1132,7 +1172,7 @@ async function buildEntityByKeyResponse(
       ? { firstOperation: entityOperationToResponseRow(history.firstOperation) }
       : {}),
   };
-  return { status: 200, body: JSON.stringify(responseBody) };
+  return withValidators({ status: 200, body: JSON.stringify(responseBody) });
 }
 
 async function handleGetTransactionRecords(
@@ -1205,7 +1245,7 @@ export async function buildSyncStatusResponse(storage: ScannerStorage): Promise<
     serverTimeUtc: now.toISOString(),
     sync: computeSyncStatus({ now, ...progress, samples }),
   };
-  return { status: 200, body: JSON.stringify(body) };
+  return withValidators({ status: 200, body: JSON.stringify(body) });
 }
 
 async function readGuzzlerCacheHealth(
@@ -1661,8 +1701,43 @@ function clampLag(value: bigint): string {
   return value > 0n ? value.toString() : "0";
 }
 
+/** Strong ETag for a response body. Bun.hash (wyhash) is plenty for cache validation. */
+function etagForBody(body: string | Uint8Array): string {
+  return `"${Bun.hash(body).toString(16)}"`;
+}
+
+/**
+ * Attach cache validators to a serialized body: the ETag lets a browser
+ * refresh revalidate to an empty 304, and no-cache makes that revalidation
+ * mandatory so clients never serve stale JSON without asking.
+ */
+function withValidators(cached: CachedResponse): CachedResponse {
+  if (cached.status !== 200) {
+    return cached;
+  }
+  return {
+    ...cached,
+    headers: {
+      ...(cached.headers ?? {}),
+      ETag: etagForBody(cached.body),
+      "Cache-Control": "no-cache",
+    },
+  };
+}
+
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
-  return Response.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init.headers ?? {}) } });
+  const status = init.status ?? 200;
+  const payload = JSON.stringify(body);
+  const headers: Record<string, string> = {
+    ...CORS_HEADERS,
+    "Content-Type": "application/json;charset=utf-8",
+    ...((init.headers as Record<string, string> | undefined) ?? {}),
+  };
+  if (status === 200) {
+    headers.ETag = etagForBody(payload);
+    headers["Cache-Control"] = "no-cache";
+  }
+  return new Response(payload, { ...init, headers });
 }
 
 /** Build an HTTP response from a cached/precomputed serialized body. */
@@ -1699,11 +1774,12 @@ async function cachedListResponse(
   buildJson: () => Promise<string>,
 ): Promise<Response> {
   const key = `${url.pathname}${url.search}`;
-  const plainLoader = async (): Promise<CachedResponse> => ({
-    status: 200,
-    body: await buildJson(),
-    headers: { Vary: "Accept-Encoding" },
-  });
+  const plainLoader = async (): Promise<CachedResponse> =>
+    withValidators({
+      status: 200,
+      body: await buildJson(),
+      headers: { Vary: "Accept-Encoding" },
+    });
   const loadPlain = () => (cache ? cache.load(`plain|${key}`, plainLoader) : plainLoader());
 
   if (!acceptsEncoding(request, "zstd")) {
@@ -1715,11 +1791,11 @@ async function cachedListResponse(
     const compressed = await Bun.zstdCompress(new TextEncoder().encode(plain.body as string), {
       level: 1,
     });
-    return {
+    return withValidators({
       status: 200,
       body: compressed,
       headers: { "Content-Encoding": "zstd", Vary: "Accept-Encoding" },
-    };
+    });
   };
   const zstd = cache ? await cache.load(`zstd|${key}`, zstdLoader) : await zstdLoader();
   return responseFromCached(zstd);
@@ -1743,6 +1819,8 @@ async function compressedJsonResponse(request: Request, body: unknown): Promise<
       "Content-Encoding": "zstd",
       "Content-Length": String(compressed.byteLength),
       Vary: "Accept-Encoding",
+      ETag: etagForBody(compressed),
+      "Cache-Control": "no-cache",
     },
   });
 }

@@ -10,10 +10,12 @@ const PORT = Number.parseInt(process.env.PORT ?? "23560", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
 const BACKEND_HOST = process.env.BACKEND_HOST ?? "backend";
 const BACKEND_PORT = Number.parseInt(process.env.BACKEND_PORT ?? "3000", 10);
-const STATIC_DIR = path.resolve(__dirname, "dist");
+const STATIC_DIR = process.env.STATIC_DIR
+  ? path.resolve(process.env.STATIC_DIR)
+  : path.resolve(__dirname, "dist");
 const INDEX_FILE = path.join(STATIC_DIR, "index.html");
-const ONE_WEEK_SECONDS = 60 * 60 * 24 * 7;
-const CACHEABLE_INDEX_ASSET_RE = /^index-[^/]+\.(?:js|css)$/;
+const ONE_HOUR_SECONDS = 60 * 60;
+const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 const ENABLE_BROTLI = process.env.NODE_ENV === "production";
 const RUNTIME_CONFIG_ENV_NAMES = [
   "VITE_CHAIN_NAME",
@@ -60,13 +62,47 @@ function mimeFor(filePath) {
 }
 
 function cacheHeadersFor(filePath) {
-  if (!CACHEABLE_INDEX_ASSET_RE.test(path.basename(filePath))) {
-    return {};
+  // Vite content-hashes every file under assets/, so those can be cached
+  // forever; a new build changes the URL instead of the content.
+  const relative = path.relative(STATIC_DIR, filePath);
+  if (relative.startsWith(`assets${path.sep}`)) {
+    return { "cache-control": `public, max-age=${ONE_YEAR_SECONDS}, immutable` };
   }
 
-  return {
-    "cache-control": `public, max-age=${ONE_WEEK_SECONDS}`,
-  };
+  // index.html must be revalidated on every load so deploys are picked up
+  // immediately; the ETag/Last-Modified pair below turns that into a 304.
+  if (path.basename(filePath) === "index.html") {
+    return { "cache-control": "no-cache" };
+  }
+
+  return { "cache-control": `public, max-age=${ONE_HOUR_SECONDS}` };
+}
+
+function etagFor(stats) {
+  return `"${stats.size.toString(16)}-${Math.floor(stats.mtimeMs).toString(16)}"`;
+}
+
+function matchesIfNoneMatch(header, etag) {
+  return header
+    .split(",")
+    .map((tag) => tag.trim())
+    .some((tag) => tag === "*" || tag === etag || tag === `W/${etag}`);
+}
+
+function isNotModified(req, stats, etag) {
+  const ifNoneMatch = req.headers["if-none-match"];
+  if (ifNoneMatch && !Array.isArray(ifNoneMatch)) {
+    return matchesIfNoneMatch(ifNoneMatch, etag);
+  }
+
+  const ifModifiedSince = req.headers["if-modified-since"];
+  if (ifModifiedSince && !Array.isArray(ifModifiedSince)) {
+    const since = Date.parse(ifModifiedSince);
+    // HTTP dates have whole-second precision; truncate mtime to match.
+    return Number.isFinite(since) && Math.floor(stats.mtimeMs / 1000) * 1000 <= since;
+  }
+
+  return false;
 }
 
 function acceptsBrotli(req) {
@@ -100,23 +136,37 @@ async function getBrotliAsset(filePath, req) {
     return null;
   }
 
-  return { filePath: brotliPath, size: stats.size };
+  return { filePath: brotliPath, size: stats.size, mtimeMs: stats.mtimeMs };
 }
 
 async function sendFile(filePath, req, res, { status = 200 } = {}) {
   const brotliAsset = await getBrotliAsset(filePath, req);
   const responsePath = brotliAsset?.filePath ?? filePath;
-  const headers = {
-    "content-type": mimeFor(filePath),
+  // Validators describe the representation actually served, so the brotli
+  // variant gets its own ETag and a client can never revalidate one encoding
+  // against the other.
+  const stats = brotliAsset ?? (await stat(responsePath));
+  const etag = etagFor(stats);
+  const validatorHeaders = {
     ...cacheHeadersFor(filePath),
+    etag,
+    "last-modified": new Date(stats.mtimeMs).toUTCString(),
+    ...(ENABLE_BROTLI ? { vary: "Accept-Encoding" } : {}),
   };
 
+  if (status === 200 && isNotModified(req, stats, etag)) {
+    res.writeHead(304, validatorHeaders);
+    res.end();
+    return;
+  }
+
+  const headers = {
+    ...validatorHeaders,
+    "content-type": mimeFor(filePath),
+    "content-length": stats.size,
+  };
   if (brotliAsset) {
     headers["content-encoding"] = "br";
-    headers["content-length"] = brotliAsset.size;
-    headers.vary = "Accept-Encoding";
-  } else if (ENABLE_BROTLI) {
-    headers.vary = "Accept-Encoding";
   }
 
   res.writeHead(status, headers);
