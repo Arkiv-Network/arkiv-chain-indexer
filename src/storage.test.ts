@@ -918,6 +918,54 @@ if (!hasPostgresForTests()) {
       expect(newestOutgoing.map((row) => row.nonce)).toEqual(["10", "3"]);
     });
 
+    test("paged reads partition the result set exactly", async () => {
+      // Pages past the first are served by a deferred join that skips rows in
+      // the index and joins only the returned page back to the full rows. It
+      // must return exactly what one unpaged read returns, in the same order —
+      // a rewrite here is the easiest place to introduce a duplicated or
+      // skipped row at a page seam.
+      const storage = await withStorage();
+      const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      let nonce = 0;
+      for (let blockNumber = 200n; blockNumber < 215n; blockNumber += 1n) {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber, transactionCount: 3 }),
+          { kind: "lastSuccessfulBlock" },
+          [0, 1, 2].map((position) =>
+            transactionFixture({
+              position,
+              hash: `0x${blockNumber.toString()}-${position}`,
+              from: address,
+              nonce: String(nonce++),
+            }),
+          ),
+        );
+      }
+
+      for (const order of ["asc", "desc"] as const) {
+        for (const filter of [{}, { fromAddress: address }]) {
+          const whole = await storage.queryTransactions({ ...filter, limit: 100, order });
+          expect(whole.length).toBe(45);
+
+          const paged: string[] = [];
+          for (let page = 1; page <= 9; page += 1) {
+            const rows = await storage.queryTransactions({ ...filter, limit: 5, page, order });
+            expect(rows.length).toBe(5);
+            paged.push(...rows.map((row) => row.hash));
+          }
+
+          const label = `${order}${filter.fromAddress ? " by address" : ""}`;
+          expect(`${label}: ${paged.join(",")}`).toBe(
+            `${label}: ${whole.map((row) => row.hash).join(",")}`,
+          );
+          expect(new Set(paged).size).toBe(45);
+
+          const past = await storage.queryTransactions({ ...filter, limit: 5, page: 10, order });
+          expect(past).toEqual([]);
+        }
+      }
+    });
+
     test("aggregates and isolates rows for multiple range sizes", async () => {
       const storage = await withStorage();
       for (let blockNumber = 0n; blockNumber < 200n; blockNumber += 1n) {

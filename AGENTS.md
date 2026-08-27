@@ -89,6 +89,13 @@ docker compose up --build
   second `ResponseCache` holds `GET /blocks` / `GET /ranges` bodies keyed by query string + encoding (each
   compressed variant is derived from the cached plain JSON, so the row query and compression run once per
   key), cleared on every stored-block notification with a `LIST_CACHE_TTL_MS` (default 5s) backstop.
+- `GET /transactions` is the only paged endpoint (`page` + `limit`, max 1,000/page; `/blocks`, `/ranges` and
+  `/senders` instead cap at 10,000 and are walked with `blockLt`/`blockGt`). Both orderings it uses —
+  `(block_number, position)` and, for an address, `(nonce, block_number, position)` — end in the primary key,
+  so they are total orders and pages cannot overlap. Any page past the first is served by a deferred join:
+  a subquery selects only the key columns (an index-only scan, so skipped rows cost no heap access) and the
+  returned page is joined back to the full rows, ~6x faster by the deepest page. Keep the outer `ORDER BY`
+  — a join does not preserve the subquery's order — and keep page 1 on the simple plan.
 - The same notification clears a `ValueCache` (`src/valueCache.ts`, the scalar sibling of `ResponseCache`)
   holding `GET /transactions` pagination totals keyed by filter only, so all pages of one query share one
   count. This matters more than it looks: an unfiltered `COUNT(*)` scans every transaction row, and load

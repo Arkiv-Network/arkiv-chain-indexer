@@ -740,6 +740,14 @@ button.secondary {
   font-weight: 600;
 }
 
+/* Sorting only reorders the loaded page; this says so next to the results. */
+.sort-scope-note {
+  margin: -0.5rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
 .senders-view {
   display: flex;
   flex-direction: column;

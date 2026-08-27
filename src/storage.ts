@@ -29,6 +29,33 @@ const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
 export const MAX_BLOCKS_PER_QUERY = 10_000;
 export const MAX_RANGES_PER_QUERY = 10_000;
 export const MAX_TRANSACTIONS_PER_QUERY = 1_000;
+
+/** Stored transaction columns, in the order mapTransactionRow expects. */
+const TRANSACTION_SELECT_COLUMNS = [
+  "block_number",
+  "block_date",
+  "base_block_fee_wei",
+  "position",
+  "hash",
+  "from_address",
+  "to_address",
+  "transaction_type",
+  "nonce",
+  "value_wei",
+  "gas_limit",
+  "gas_used",
+  "input_data_size_bytes",
+  "input_data_compressed_size_bytes",
+  "cumulative_gas_used",
+  "gas_price_wei",
+  "max_fee_per_gas_wei",
+  "max_priority_fee_per_gas_wei",
+  "effective_gas_price_wei",
+  "priority_fee_wei",
+  "transaction_fee_wei",
+  "status",
+  "contract_address",
+] as const;
 export const MAX_TRANSACTION_RECORDS_PER_CATEGORY = 100;
 export const DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY = 20;
 export const MAX_SENDERS_PER_QUERY = 10_000;
@@ -1919,41 +1946,54 @@ export class ScannerStorage {
     params.push(offset);
     const offsetParam = params.length;
     const order = resolveQueryOrder(filter.order);
-    const primaryOrder = filter.fromAddress === undefined ? "block_number" : "nonce::numeric";
-    const secondaryOrder =
-      filter.fromAddress === undefined
-        ? `position ${order}`
-        : `block_number ${order}, position ${order}`;
-    const sql = `
-      SELECT
-        block_number,
-        block_date,
-        base_block_fee_wei,
-        position,
-        hash,
-        from_address,
-        to_address,
-        transaction_type,
-        nonce,
-        value_wei,
-        gas_limit,
-        gas_used,
-        input_data_size_bytes,
-        input_data_compressed_size_bytes,
-        cumulative_gas_used,
-        gas_price_wei,
-        max_fee_per_gas_wei,
-        max_priority_fee_per_gas_wei,
-        effective_gas_price_wei,
-        priority_fee_wei,
-        transaction_fee_wei,
-        status,
-        contract_address
+    // Address queries walk transactions_from_address_nonce_idx, everything else
+    // walks the (block_number, position) primary key. Both orderings end in the
+    // primary key, so they are total orders and pages never overlap.
+    const orderBy = (alias: string) => {
+      const c = alias ? `${alias}.` : "";
+      return filter.fromAddress === undefined
+        ? `${c}block_number ${order}, ${c}position ${order}`
+        : `${c}nonce::numeric ${order}, ${c}block_number ${order}, ${c}position ${order}`;
+    };
+    const columns = TRANSACTION_SELECT_COLUMNS;
+
+    // Deep pages: skip rows in the index, not in the heap.
+    //
+    // A plain LIMIT/OFFSET over the wide row makes Postgres fetch and discard
+    // every skipped row's heap tuple — at offset 1.2M that is ~317k buffers and
+    // ~280ms. Selecting only the key columns in a subquery lets the same walk
+    // run as an index-only scan, and just the returned page is joined back to
+    // the full rows: ~6x faster by the deepest page, row-for-row identical
+    // because (block_number, position) is the primary key, so the join is 1:1.
+    //
+    // At offset 0 there is nothing to skip and the extra join costs a little,
+    // so page 1 — by far the most requested — keeps the simple plan.
+    //
+    // The index-only scan needs a current visibility map to avoid falling back
+    // to heap fetches, so the speedup depends on autovacuum keeping up with
+    // this table; on a stale map the plan is still correct, just no faster.
+    const sql =
+      offset === 0
+        ? `
+      SELECT ${columns.join(", ")}
       FROM ${this.qTransactions}
       ${where}
-      ORDER BY ${primaryOrder} ${order}, ${secondaryOrder}
+      ORDER BY ${orderBy("")}
       LIMIT $${limitParam}
       OFFSET $${offsetParam}
+    `
+        : `
+      SELECT ${columns.map((column) => `t.${column}`).join(", ")}
+      FROM ${this.qTransactions} t
+      JOIN (
+        SELECT block_number, position
+        FROM ${this.qTransactions}
+        ${where}
+        ORDER BY ${orderBy("")}
+        LIMIT $${limitParam}
+        OFFSET $${offsetParam}
+      ) k ON t.block_number = k.block_number AND t.position = k.position
+      ORDER BY ${orderBy("t")}
     `;
 
     const result = await this.db.query<{

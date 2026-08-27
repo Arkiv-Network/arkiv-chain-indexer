@@ -326,6 +326,11 @@ export function TransactionsView({
     if (sort === null) return transactions;
     return transactions.slice().sort((a, b) => compareRows(a, b, sort));
   }, [data, sort]);
+  // Column sorting reorders the rows already loaded, not the whole result set:
+  // the server orders by block (or by nonce for an address) and pages from
+  // there. Say so whenever the result spans more than one page, so a sorted
+  // first page is not mistaken for the overall top.
+  const sortIsPageLocal = sort !== null && (data?.totalPages ?? 0) > 1;
   const addressSelected = applied.address.trim() !== "";
   const columns = useMemo(
     () => transactionColumns(timeZone, onLocationChange, tokenSymbol, addressSelected),
@@ -480,6 +485,13 @@ export function TransactionsView({
               : "Enter an address, block, or date range to query stored transactions."}
       </p>
 
+      {sortIsPageLocal ? (
+        <p className="sort-scope-note" role="status">
+          Sorting reorders the {data?.count ?? 0} rows on this page, not all {data?.totalCount ?? 0}{" "}
+          matching transactions.
+        </p>
+      ) : null}
+
       <div className="permalink-row transactions-actions">
         <button type="button" className="secondary" onClick={copyPermalink} disabled={!hasAppliedFilters}>
           Copy link
@@ -514,7 +526,16 @@ export function TransactionsView({
             <tr>
               {columns.map((column) => (
                 <th key={column.key} scope="col" className={column.className}>
-                  <button type="button" className="sort-header" onClick={() => setSortKey(column.key)}>
+                  <button
+                    type="button"
+                    className="sort-header"
+                    onClick={() => setSortKey(column.key)}
+                    title={
+                      sortIsPageLocal
+                        ? `Sort the rows on this page by ${column.label}`
+                        : `Sort by ${column.label}`
+                    }
+                  >
                     <span>{renderTableHeader(column.label)}</span>
                     <span aria-hidden="true">{sort?.key === column.key ? sortIcon(sort.direction) : ""}</span>
                   </button>
