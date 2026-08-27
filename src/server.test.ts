@@ -38,7 +38,12 @@ import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
 import { ResponseCache } from "./responseCache";
 import { ValueCache } from "./valueCache";
-import type { ScannerStorage, StoredEntityOperation, StoredTransactionRecord } from "./storage";
+import type {
+  ScannerStorage,
+  StoredEntityOperation,
+  StoredTransactionRecord,
+  TransactionQueryFilter,
+} from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import {
@@ -511,6 +516,67 @@ describe("transaction count cache", () => {
     await request();
 
     expect(counts()).toBe(2);
+  });
+
+  test("every filter field that narrows the count is part of the cache key", async () => {
+    // The count key must cover exactly the fields the COUNT(*) WHERE clause
+    // reads. This Record is keyed by the filter type minus the fields that
+    // cannot change a count, so adding a new filter to TransactionQueryFilter
+    // fails to compile until it is listed here — and the assertion then proves
+    // it actually produces a distinct key rather than silently reusing another
+    // filter's cached total.
+    const distinguishing: Record<
+      Exclude<keyof TransactionQueryFilter, "limit" | "page" | "order">,
+      string
+    > = {
+      blockNumber: "block=5",
+      blockGt: "blockGt=5",
+      blockLt: "blockLt=5",
+      fromAddress: `address=0x${"ab".repeat(20)}`,
+      nonceGt: "nonceGt=5",
+      nonceLt: "nonceLt=5",
+      dateGt: "dateGt=2026-01-01T00:00:00.000Z",
+      dateLt: "dateLt=2026-02-01T00:00:00.000Z",
+    };
+
+    const { storage, counts } = countingStorage();
+    const transactionCountCache = new ValueCache<number>();
+
+    await handleRequest(new Request("http://example.test/transactions?limit=10"), storage, {
+      transactionCountCache,
+    });
+    for (const query of Object.values(distinguishing)) {
+      const response = await handleRequest(
+        new Request(`http://example.test/transactions?limit=10&${query}`),
+        storage,
+        { transactionCountCache },
+      );
+      expect(response.status).toBe(200);
+    }
+
+    expect(counts()).toBe(1 + Object.keys(distinguishing).length);
+  });
+
+  test("normalizes keys so equivalent filters share one count", async () => {
+    const { storage, counts } = countingStorage();
+    const transactionCountCache = new ValueCache<number>();
+    const address = `0x${"AB".repeat(20)}`;
+
+    // Same address in different case, and the same block bound written twice:
+    // both normalize before the key is built, so one count serves all of them.
+    for (const query of [
+      `address=${address}`,
+      `address=${address.toLowerCase()}`,
+      `address=${address.toUpperCase()}`,
+    ]) {
+      await handleRequest(
+        new Request(`http://example.test/transactions?limit=10&${query}`),
+        storage,
+        { transactionCountCache },
+      );
+    }
+
+    expect(counts()).toBe(1);
   });
 
   test("still answers correctly with no cache configured", async () => {
