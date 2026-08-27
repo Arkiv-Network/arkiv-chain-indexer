@@ -37,6 +37,7 @@ import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperatio
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
 import { ResponseCache } from "./responseCache";
+import { ValueCache } from "./valueCache";
 import type { ScannerStorage, StoredEntityOperation, StoredTransactionRecord } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
@@ -95,6 +96,11 @@ function entityOperationValue(
 
 async function readZstdJson<T>(response: Response): Promise<T> {
   const decompressed = Bun.zstdDecompressSync(Buffer.from(await response.arrayBuffer()));
+  return JSON.parse(Buffer.from(decompressed).toString("utf8")) as T;
+}
+
+async function readGzipJson<T>(response: Response): Promise<T> {
+  const decompressed = Bun.gunzipSync(Buffer.from(await response.arrayBuffer()));
   return JSON.parse(Buffer.from(decompressed).toString("utf8")) as T;
 }
 
@@ -333,7 +339,7 @@ describe("zstd JSON compression", () => {
     expect(body.names).toEqual(RANGE_RESPONSE_NAMES);
   });
 
-  test("does not compress when zstd is explicitly refused", async () => {
+  test("falls back to gzip when zstd is refused", async () => {
     const storage = {
       queryBlocks: async () => [],
     } as unknown as ScannerStorage;
@@ -346,9 +352,177 @@ describe("zstd JSON compression", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    const body = await readGzipJson<BlocksResponseBody>(response);
+    expect(body.blocks).toEqual([]);
+  });
+
+  test("prefers zstd over gzip when the client accepts both", async () => {
+    const storage = {
+      queryBlocks: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/blocks?limit=1", {
+        headers: { "accept-encoding": "gzip, deflate, br, zstd" },
+      }),
+      storage,
+    );
+
+    expect(response.headers.get("content-encoding")).toBe("zstd");
+  });
+
+  test("gzips uncached endpoints too, and tags the encoding it served", async () => {
+    const storage = {
+      queryTransactions: async () => [],
+      countTransactions: async () => 0,
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/transactions?limit=1", {
+        headers: { "accept-encoding": "gzip" },
+      }),
+      storage,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    expect(response.headers.get("vary")).toBe("Accept-Encoding");
+    const body = await readGzipJson<{ transactions: unknown[] }>(response);
+    expect(body.transactions).toEqual([]);
+  });
+
+  test("sends plain JSON when no supported encoding is accepted", async () => {
+    const storage = {
+      queryBlocks: async () => [],
+    } as unknown as ScannerStorage;
+
+    const response = await handleRequest(
+      new Request("http://example.test/blocks?limit=1", {
+        headers: { "accept-encoding": "zstd;q=0, gzip;q=0, br" },
+      }),
+      storage,
+    );
+
+    expect(response.status).toBe(200);
     expect(response.headers.get("content-encoding")).toBeNull();
     const body = (await response.json()) as BlocksResponseBody;
     expect(body.blocks).toEqual([]);
+  });
+
+  test("gzip and zstd variants of one response carry distinct ETags", async () => {
+    const storage = {
+      queryBlocks: async () => [],
+    } as unknown as ScannerStorage;
+    const listCache = new ResponseCache();
+
+    const zstd = await handleRequest(
+      new Request("http://example.test/blocks?limit=1", {
+        headers: { "accept-encoding": "zstd" },
+      }),
+      storage,
+      { listCache },
+    );
+    const gzip = await handleRequest(
+      new Request("http://example.test/blocks?limit=1", {
+        headers: { "accept-encoding": "gzip" },
+      }),
+      storage,
+      { listCache },
+    );
+
+    expect(zstd.headers.get("etag")).toBeTruthy();
+    expect(gzip.headers.get("etag")).toBeTruthy();
+    expect(gzip.headers.get("etag")).not.toBe(zstd.headers.get("etag"));
+  });
+});
+
+describe("transaction count cache", () => {
+  function countingStorage() {
+    let counts = 0;
+    const storage = {
+      queryTransactions: async () => [],
+      countTransactions: async () => {
+        counts += 1;
+        return 1234;
+      },
+    } as unknown as ScannerStorage;
+    return { storage, counts: () => counts };
+  }
+
+  async function totalCountOf(response: Response): Promise<number> {
+    return ((await response.json()) as { totalCount: number }).totalCount;
+  }
+
+  test("counts once for repeated requests with the same filter", async () => {
+    const { storage, counts } = countingStorage();
+    const transactionCountCache = new ValueCache<number>();
+
+    for (let i = 0; i < 3; i += 1) {
+      const response = await handleRequest(
+        new Request("http://example.test/transactions?limit=10"),
+        storage,
+        { transactionCountCache },
+      );
+      expect(await totalCountOf(response)).toBe(1234);
+    }
+
+    expect(counts()).toBe(1);
+  });
+
+  test("shares one count across pages of the same query", async () => {
+    const { storage, counts } = countingStorage();
+    const transactionCountCache = new ValueCache<number>();
+
+    for (const page of [1, 2, 7]) {
+      await handleRequest(
+        new Request(`http://example.test/transactions?limit=10&page=${page}`),
+        storage,
+        { transactionCountCache },
+      );
+    }
+
+    expect(counts()).toBe(1);
+  });
+
+  test("counts separately for different filters", async () => {
+    const { storage, counts } = countingStorage();
+    const transactionCountCache = new ValueCache<number>();
+
+    for (const query of ["limit=10", "limit=10&blockGt=5", "limit=10&address=0x" + "ab".repeat(20)]) {
+      await handleRequest(new Request(`http://example.test/transactions?${query}`), storage, {
+        transactionCountCache,
+      });
+    }
+
+    expect(counts()).toBe(3);
+  });
+
+  test("recounts after the cache is cleared by a new block", async () => {
+    const { storage, counts } = countingStorage();
+    const transactionCountCache = new ValueCache<number>();
+    const request = () =>
+      handleRequest(new Request("http://example.test/transactions?limit=10"), storage, {
+        transactionCountCache,
+      });
+
+    await request();
+    transactionCountCache.clear();
+    await request();
+
+    expect(counts()).toBe(2);
+  });
+
+  test("still answers correctly with no cache configured", async () => {
+    const { storage, counts } = countingStorage();
+
+    const response = await handleRequest(
+      new Request("http://example.test/transactions?limit=10"),
+      storage,
+    );
+
+    expect(await totalCountOf(response)).toBe(1234);
+    expect(counts()).toBe(1);
   });
 });
 

@@ -71,7 +71,9 @@ docker compose up --build
   `src/serve.ts` (`bun run serve`). List endpoints (`/blocks`, `/ranges`, `/transactions`,
   `/transaction-records`, `/senders`, `/guzzlers`, and `/entity/:entityKey` operations) send compact rows —
   one `names` array plus per-row value arrays, so keys are not repeated per row — and negotiate
-  `Content-Encoding: zstd`; `frontend/src/api.ts` expands rows back into objects, so the compact wire format
+  `Content-Encoding`, preferring `zstd` and falling back to `gzip` (a CDN in front of the origin typically
+  asks for gzip only, so without that fallback list bodies leave the process uncompressed);
+  `frontend/src/api.ts` expands rows back into objects, so the compact wire format
   stays invisible to view components.
 - `GET /entity/:entityKey` returns the most recent `ENTITY_HISTORY_LIMIT` (default 100) operations plus
   `totalOperations`/`truncated`, and `firstOperation` when the create fell outside the slice. Responses
@@ -84,9 +86,14 @@ docker compose up --build
   ways: `GET /sync` is served from an actively precomputed body (`src/precomputedResponse.ts`) that
   recomputes right after each stored block (bursts coalesced to one recompute per 500ms) plus a
   `SYNC_REFRESH_MS` (default 5s) periodic refresh so lag keeps growing when the scanner stalls; and a
-  second `ResponseCache` holds `GET /blocks` / `GET /ranges` bodies keyed by query string + encoding (the
-  zstd variant is derived from the cached plain JSON, so the row query and compression run once per key),
-  cleared on every stored-block notification with a `LIST_CACHE_TTL_MS` (default 5s) backstop.
+  second `ResponseCache` holds `GET /blocks` / `GET /ranges` bodies keyed by query string + encoding (each
+  compressed variant is derived from the cached plain JSON, so the row query and compression run once per
+  key), cleared on every stored-block notification with a `LIST_CACHE_TTL_MS` (default 5s) backstop.
+- The same notification clears a `ValueCache` (`src/valueCache.ts`, the scalar sibling of `ResponseCache`)
+  holding `GET /transactions` pagination totals keyed by filter only, so all pages of one query share one
+  count. This matters more than it looks: an unfiltered `COUNT(*)` scans every transaction row, and load
+  testing showed it single-handedly capping the whole backend — every other Postgres-backed endpoint queues
+  behind it. Keep the key free of `limit`/`page`/`order`, and prefer fixing the count over adding indexes.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

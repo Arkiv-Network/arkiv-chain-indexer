@@ -6,6 +6,7 @@ import { parseBaseloadRuntimeConfig, readBaseloadConfigFile } from "./baseloadCo
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { PrecomputedResponse } from "./precomputedResponse";
 import { ResponseCache } from "./responseCache";
+import { ValueCache } from "./valueCache";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import type { GuzzlerStore } from "./guzzlers";
 
@@ -64,12 +65,22 @@ async function main(): Promise<void> {
       maxBytes: config.listCacheMaxBytes,
       ttlMs: config.listCacheTtlMs,
     });
-    if (syncPrecomputer || listCache.enabled) {
+    // /transactions pagination totals, keyed by filter. An unfiltered COUNT(*)
+    // scans every transaction row, so without this the endpoint re-counts the
+    // whole table per request and starves every other query on the pool. The
+    // totals only change when new transactions land, so this is cleared by the
+    // same stored-block notification as the list cache.
+    const transactionCountCache = new ValueCache<number>({
+      maxEntries: config.transactionCountCacheMaxEntries,
+      ttlMs: config.transactionCountCacheTtlMs,
+    });
+    if (syncPrecomputer || listCache.enabled || transactionCountCache.enabled) {
       const precomputer = syncPrecomputer;
       try {
         stopStoredBlockListener = await storage.listenForStoredBlocks(() => {
           precomputer?.markDirty();
           listCache.clear();
+          transactionCountCache.clear();
         });
       } catch (error) {
         console.warn(
@@ -116,6 +127,7 @@ async function main(): Promise<void> {
       entityHistoryCache,
       entityHistoryLimit: config.entityHistoryLimit,
       listCache,
+      transactionCountCache,
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
@@ -140,6 +152,13 @@ async function main(): Promise<void> {
             `${config.listCacheMaxBytes} bytes, TTL ${config.listCacheTtlMs}ms, ` +
             `cleared ${stopStoredBlockListener ? "on stored-block NOTIFY" : "by TTL only"}`
         : "Blocks/ranges cache: disabled",
+    );
+    console.log(
+      transactionCountCache.enabled
+        ? `Transaction count cache: up to ${config.transactionCountCacheMaxEntries} filters, ` +
+            `TTL ${config.transactionCountCacheTtlMs}ms, ` +
+            `cleared ${stopStoredBlockListener ? "on stored-block NOTIFY" : "by TTL only"}`
+        : "Transaction count cache: disabled",
     );
 
     const shutdown = async () => {

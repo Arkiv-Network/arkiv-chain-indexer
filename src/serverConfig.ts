@@ -32,6 +32,8 @@ export interface ServerConfig {
   listCacheMaxEntries: number;
   listCacheMaxBytes: number;
   listCacheTtlMs: number;
+  transactionCountCacheMaxEntries: number;
+  transactionCountCacheTtlMs: number;
 }
 
 const DEFAULT_PORT = 3000;
@@ -39,6 +41,8 @@ const DEFAULT_SYNC_REFRESH_MS = 5_000;
 const DEFAULT_LIST_CACHE_MAX_ENTRIES = 200;
 const DEFAULT_LIST_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const DEFAULT_LIST_CACHE_TTL_MS = 5_000;
+const DEFAULT_TRANSACTION_COUNT_CACHE_MAX_ENTRIES = 500;
+const DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS = 5_000;
 
 /** Help text raised when the server is invoked with `--help`. */
 export class ServerHelpRequested extends CliHelpRequested {}
@@ -163,6 +167,20 @@ const SPEC: CliSpec = {
       env: ["LIST_CACHE_TTL_MS", "SERVER_LIST_CACHE_TTL_MS"],
       default: DEFAULT_LIST_CACHE_TTL_MS.toString(),
     },
+    {
+      flags: "--transaction-count-cache-max-entries <count>",
+      description:
+        "Cache entry cap for /transactions pagination totals, keyed by filter; 0 disables the cache. Defaults to 500 (or TRANSACTION_COUNT_CACHE_MAX_ENTRIES).",
+      env: ["TRANSACTION_COUNT_CACHE_MAX_ENTRIES", "SERVER_TRANSACTION_COUNT_CACHE_MAX_ENTRIES"],
+      default: DEFAULT_TRANSACTION_COUNT_CACHE_MAX_ENTRIES.toString(),
+    },
+    {
+      flags: "--transaction-count-cache-ttl-ms <ms>",
+      description:
+        "Lifetime of a cached /transactions total in milliseconds — a backstop behind the stored-block notification that clears the cache; 0 disables the cache. Defaults to 5000 (or TRANSACTION_COUNT_CACHE_TTL_MS).",
+      env: ["TRANSACTION_COUNT_CACHE_TTL_MS", "SERVER_TRANSACTION_COUNT_CACHE_TTL_MS"],
+      default: DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS.toString(),
+    },
   ],
 };
 
@@ -246,6 +264,16 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     cli.value("list-cache-ttl-ms"),
     DEFAULT_LIST_CACHE_TTL_MS,
   );
+  const transactionCountCacheMaxEntries = intOrDefault(
+    "--transaction-count-cache-max-entries",
+    cli.value("transaction-count-cache-max-entries"),
+    DEFAULT_TRANSACTION_COUNT_CACHE_MAX_ENTRIES,
+  );
+  const transactionCountCacheTtlMs = intOrDefault(
+    "--transaction-count-cache-ttl-ms",
+    cli.value("transaction-count-cache-ttl-ms"),
+    DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS,
+  );
 
   return {
     databaseUrl,
@@ -266,5 +294,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     listCacheMaxEntries,
     listCacheMaxBytes,
     listCacheTtlMs,
+    transactionCountCacheMaxEntries,
+    transactionCountCacheTtlMs,
   };
 }

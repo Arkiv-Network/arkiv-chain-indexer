@@ -68,14 +68,20 @@ Related scanner and worker settings:
 - `order` parameters accept `asc` or `desc`; invalid values return `400`.
 - Integer query parameters must be non-negative or positive as required by the route.
 - `/blocks`, `/ranges`, `/transactions`, `/transaction-records`, `/senders`, and `/guzzlers`
-  return `Content-Encoding: zstd` when the request `Accept-Encoding` header allows `zstd`;
-  otherwise they return normal JSON.
+  compress their JSON when the request `Accept-Encoding` header allows it: `zstd` is preferred and
+  `gzip` is the fallback, reported in `Content-Encoding` with `Vary: Accept-Encoding`. Clients that
+  accept neither get normal JSON. gzip matters behind a CDN or reverse proxy, which commonly asks
+  the origin for gzip only and re-encodes for the browser.
 - List endpoints return compact rows: a `names` array states the field order once and every row is
   a JSON array of values in that order, so field names are not repeated per row.
 - `/blocks` and `/ranges` responses are cached in memory per query string and encoding
   (`LIST_CACHE_MAX_ENTRIES`, default 200; `LIST_CACHE_MAX_BYTES`, default 64 MiB;
   `LIST_CACHE_TTL_MS`, default 5 s; any set to 0 disables caching). The cache is cleared the moment
   a block is committed, so responses can trail a new block only briefly if that notification drops.
+- `/transactions` caches its `totalCount`/`totalPages` total per filter, so every page of one query
+  shares a single `COUNT(*)` (`TRANSACTION_COUNT_CACHE_MAX_ENTRIES`, default 500;
+  `TRANSACTION_COUNT_CACHE_TTL_MS`, default 5 s; either set to 0 disables caching). It is cleared on
+  block commit alongside the list cache, so a total can trail a new block only briefly.
 
 ## Feature Gates
 

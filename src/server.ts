@@ -27,6 +27,7 @@ import {
   type PayloadProviderPaymentBreakdown,
 } from "./payloadProviderPayments";
 import { ResponseCache, type CachedResponse } from "./responseCache";
+import { ValueCache } from "./valueCache";
 import {
   DEFAULT_ENTITY_HISTORY_LIMIT,
   MAX_BLOCKS_PER_QUERY,
@@ -75,6 +76,15 @@ export interface BlockServerOptions {
    * arrives; a short TTL backstops missed notifications.
    */
   listCache?: ResponseCache;
+  /**
+   * Bounded cache for the /transactions pagination total, keyed by the filter
+   * alone so every page of one query shares a single count. Without it each
+   * request re-runs a COUNT(*) that, unfiltered, scans the whole transactions
+   * table — the dominant cost of the endpoint and, under concurrency, of the
+   * whole backend. serve.ts clears it on the same stored-block notification
+   * that clears the list cache.
+   */
+  transactionCountCache?: ValueCache<number>;
   /**
    * Actively precomputed /sync response (recomputed on every stored block
    * plus a periodic refresh). When it has a value, /sync serves it with zero
@@ -507,6 +517,9 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
           ? { entityHistoryLimit: options.entityHistoryLimit }
           : {}),
         ...(options.listCache ? { listCache: options.listCache } : {}),
+        ...(options.transactionCountCache
+          ? { transactionCountCache: options.transactionCountCache }
+          : {}),
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
       }),
   };
@@ -636,7 +649,7 @@ async function routeRequest(
     if (!transactionDataEnabled) {
       return jsonError(404, "Transaction data is disabled");
     }
-    return handleGetTransactions(request, url, storage);
+    return handleGetTransactions(request, url, storage, options.transactionCountCache);
   }
 
   const transactionByHashMatch = url.pathname.match(/^\/transaction\/(0x[0-9a-fA-F]{64})$/);
@@ -1023,10 +1036,30 @@ export function rangeToResponseRow(range: StoredBlockRange): RangeResponseRow {
   return RANGE_RESPONSE_NAMES.map((name) => range[name] ?? null);
 }
 
+/**
+ * Cache key for a transactions total: every field the COUNT(*) WHERE clause
+ * reads, and nothing else. Deliberately excludes limit/page/order so that
+ * paging through one query reuses a single count instead of recomputing it
+ * per page. The address is lowercased to match the filter normalization.
+ */
+function transactionCountKey(filter: TransactionQueryFilter): string {
+  return JSON.stringify([
+    filter.blockNumber?.toString() ?? null,
+    filter.blockGt?.toString() ?? null,
+    filter.blockLt?.toString() ?? null,
+    filter.fromAddress?.toLowerCase() ?? null,
+    filter.nonceGt?.toString() ?? null,
+    filter.nonceLt?.toString() ?? null,
+    filter.dateGt ?? null,
+    filter.dateLt ?? null,
+  ]);
+}
+
 async function handleGetTransactions(
   request: Request,
   url: URL,
   storage: ScannerStorage,
+  countCache?: ValueCache<number>,
 ): Promise<Response> {
   let filter: TransactionQueryFilter;
   try {
@@ -1044,9 +1077,10 @@ async function handleGetTransactions(
     return jsonError(400, "page is too large");
   }
 
+  const countTotal = () => storage.countTransactions(filter);
   const [transactions, totalCount] = await Promise.all([
     storage.queryTransactions(filter),
-    storage.countTransactions(filter),
+    countCache ? countCache.load(transactionCountKey(filter), countTotal) : countTotal(),
   ]);
   const totalPages = Math.ceil(totalCount / effectiveLimit);
   const operationsSummaries: Map<string, ArkivOperationSummaryEntry[]> =
@@ -1782,32 +1816,37 @@ async function cachedListResponse(
     });
   const loadPlain = () => (cache ? cache.load(`plain|${key}`, plainLoader) : plainLoader());
 
-  if (!acceptsEncoding(request, "zstd")) {
+  const encoding = negotiateEncoding(request);
+  if (encoding === "identity") {
     return responseFromCached(await loadPlain());
   }
 
-  const zstdLoader = async (): Promise<CachedResponse> => {
+  const compressedLoader = async (): Promise<CachedResponse> => {
     const plain = await loadPlain();
-    const compressed = await Bun.zstdCompress(new TextEncoder().encode(plain.body as string), {
-      level: 1,
-    });
+    const compressed = await compressBody(
+      new TextEncoder().encode(plain.body as string),
+      encoding,
+    );
     return withValidators({
       status: 200,
       body: compressed,
-      headers: { "Content-Encoding": "zstd", Vary: "Accept-Encoding" },
+      headers: { "Content-Encoding": encoding, Vary: "Accept-Encoding" },
     });
   };
-  const zstd = cache ? await cache.load(`zstd|${key}`, zstdLoader) : await zstdLoader();
-  return responseFromCached(zstd);
+  const compressed = cache
+    ? await cache.load(`${encoding}|${key}`, compressedLoader)
+    : await compressedLoader();
+  return responseFromCached(compressed);
 }
 
 async function compressedJsonResponse(request: Request, body: unknown): Promise<Response> {
-  if (!acceptsEncoding(request, "zstd")) {
+  const encoding = negotiateEncoding(request);
+  if (encoding === "identity") {
     return jsonResponse(body);
   }
 
   const bytes = new TextEncoder().encode(JSON.stringify(body));
-  const compressed = await Bun.zstdCompress(bytes, { level: 1 });
+  const compressed = await compressBody(bytes, encoding);
   const responseBody = compressed.buffer.slice(
     compressed.byteOffset,
     compressed.byteOffset + compressed.byteLength,
@@ -1816,13 +1855,49 @@ async function compressedJsonResponse(request: Request, body: unknown): Promise<
     headers: {
       ...CORS_HEADERS,
       "Content-Type": "application/json;charset=utf-8",
-      "Content-Encoding": "zstd",
+      "Content-Encoding": encoding,
       "Content-Length": String(compressed.byteLength),
       Vary: "Accept-Encoding",
       ETag: etagForBody(compressed),
       "Cache-Control": "no-cache",
     },
   });
+}
+
+/** Response encodings this server can produce, best ratio first. */
+type ResponseEncoding = "zstd" | "gzip";
+
+/**
+ * Pick the best encoding the client accepts. gzip matters in production even
+ * though zstd compresses better and faster: CDNs and reverse proxies commonly
+ * request only gzip from the origin and re-encode for the client, so without
+ * it every list response leaves this process uncompressed.
+ */
+function negotiateEncoding(request: Request): ResponseEncoding | "identity" {
+  if (acceptsEncoding(request, "zstd")) return "zstd";
+  if (acceptsEncoding(request, "gzip")) return "gzip";
+  return "identity";
+}
+
+/**
+ * gzip runs at level 4, not the level 1 used for zstd: zlib level 1 gives up
+ * far more ratio than zstd level 1 does (on a 367 KB list response, 90 KB vs
+ * 56 KB) for barely any time saved, and this is the one encoding whose output
+ * usually crosses a network hop rather than being re-compressed in place.
+ */
+async function compressBody(
+  bytes: Uint8Array<ArrayBuffer>,
+  encoding: ResponseEncoding,
+): Promise<Uint8Array> {
+  if (encoding === "zstd") {
+    return await Bun.zstdCompress(bytes, { level: 1 });
+  }
+  // Bun.gzipSync answers with a Node Buffer, which can be a view into a shared
+  // pool; copy out exactly this response's bytes so the body owns its memory.
+  const gzipped = Bun.gzipSync(bytes, { level: 4 });
+  return new Uint8Array(
+    gzipped.buffer.slice(gzipped.byteOffset, gzipped.byteOffset + gzipped.byteLength) as ArrayBuffer,
+  );
 }
 
 function acceptsEncoding(request: Request, encoding: string): boolean {
