@@ -94,6 +94,7 @@ Related scanner and worker settings:
 | Baseload admin protection | `BASELOAD_ADMIN_BEARER_TOKEN` | Mutating `/baseload`, all `/baseload/configs...`, and `/admin/verify`. |
 | Guzzlers | `REDIS_URL` or `SERVER_REDIS_URL` | `/guzzlers` and `/guzzler/:address`; disabled routes return `503`. |
 | JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
+| JSON-RPC passthrough | `SHADOW_RPC_UPSTREAM`; forwarded methods listed in `features.jsonRpcPassthrough` in `/health` | Relays only the listed methods (`eth_sendRawTransaction`, `eth_sendTransaction` by default) to a real node. Unset, they answer `-32601`. |
 
 ## Endpoint Index
 
@@ -102,7 +103,7 @@ Related scanner and worker settings:
 | `OPTIONS` | any | CORS preflight. |
 | `GET` | `/health` | Backend, scanner, database, feature, and guzzler cache health. |
 | `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
-| `POST` | `/shadow-rpc` | Read-only Ethereum JSON-RPC 2.0 served from stored data (no node behind it). |
+| `POST` | `/shadow-rpc` | Ethereum JSON-RPC 2.0 served from stored data, plus any methods the optional passthrough relays to a real node. |
 | `GET` | `/blocks` | Compact rows for stored per-block metrics. |
 | `GET` | `/blocks/:blockNumber` | One compact stored block row. |
 | `GET` | `/block/:blockNumber` | Stored block plus stored transaction rows for inspection. |
@@ -165,8 +166,9 @@ Returns `ok`, `serverTimeUtc`, and `sync` with:
 
 ## `POST /shadow-rpc`
 
-A read-only Ethereum JSON-RPC 2.0 endpoint answered entirely from stored scanner data — the backend never
-forwards to a node. Single requests and batches (up to 100 entries, 1 MiB body) are accepted; every reply is
+An Ethereum JSON-RPC 2.0 endpoint answered from stored scanner data. No read ever reaches a node; the one
+exception is the optional passthrough below, which relays transaction submission to a real one because no
+index can accept a transaction. Single requests and batches (up to 100 entries, 1 MiB body) are accepted; every reply is
 HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, `ethers`, `cast`) can point at
 `/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
 under `features.jsonRpc`.
@@ -209,8 +211,40 @@ lower than a node reports on blocks that carry it; `transactionIndex` keeps the 
 | `eth_getUncle*` | No uncles: counts are `0x0`, lookups `null`. |
 
 Transaction-backed methods return `-32000` when transaction data is disabled. Unknown methods return
-`-32601`, so state methods (`eth_call`, `eth_getBalance`, `eth_sendRawTransaction`, …) fail fast instead of
-silently hitting a node.
+`-32601`, so state methods (`eth_call`, `eth_getBalance`, …) fail fast instead of silently hitting a node —
+unless the passthrough below is configured to forward them.
+
+### Passthrough to a real node
+
+Everything above is answered from PostgreSQL, which works for reads and cannot work for writes: a transaction
+has to reach a node's mempool, and no amount of stored history puts it there. Setting `SHADOW_RPC_UPSTREAM`
+opens one narrow hole — the methods in `SHADOW_RPC_UPSTREAM_METHODS`, and only those, are relayed to that node
+and their answers returned unchanged. It is never an open proxy. Unset (the default) nothing is forwarded and
+the endpoint talks to nothing but PostgreSQL. `GET /health` lists what is forwarded under
+`features.jsonRpcPassthrough`, or `false` when nothing is.
+
+| Environment variable | Default | Description |
+| --- | --- | --- |
+| `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset disables the passthrough. In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
+| `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
+| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,eth_sendTransaction` | Methods to forward. Each overrides the locally answered one. |
+| `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
+| `SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE` | `600` | Forwarded calls per minute across all callers; `0` removes the cap. |
+
+Worth knowing before pointing a wallet at it:
+
+- **`eth_sendRawTransaction` is the one that works.** `eth_sendTransaction` needs an unlocked account on the
+  node and will normally fail there — but it fails with the node's own error rather than a confusing `-32601`.
+- **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
+  codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
+  node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
+  because the upstream URL can carry a key.
+- **The list is a general escape hatch.** Anything on it is answered by the node whether or not the index
+  could have answered it. Adding `eth_call` and `eth_estimateGas` makes the endpoint usable by a wallet;
+  adding `eth_getTransactionCount` swaps the indexed nonce — which lags the chain by the scanner's lag — for
+  the node's live one, which matters when a sender has transactions the scanner has not reached yet.
+- **Forwarded calls are capped as a whole.** A public endpoint fronting a metered node is a way to spend
+  someone else's quota, so the rate limit is on by default. It applies across all callers, not per IP.
 
 Example:
 

@@ -1,8 +1,10 @@
 /**
  * Read-only Ethereum JSON-RPC served from the indexer's own PostgreSQL data.
  *
- * The backend never talks to a node, so every method here is answered from
- * stored blocks, transactions and scanner state. That shapes the surface:
+ * Except through an explicitly allowlisted passthrough (`jsonRpcPassthrough.ts`,
+ * off unless a deployment configures it), the backend never talks to a node:
+ * every method here is answered from stored blocks, transactions and scanner
+ * state. That shapes the surface:
  *
  * - "Tier 1" methods have exact node semantics over the indexed range:
  *   chain/network identity, block height, sync status, nonces, fee history
@@ -19,6 +21,10 @@
  * - Receipt logs are stored the same way (`transaction_logs`, no backfill):
  *   receipts of older transactions report `logs: null`, newer ones the real
  *   list, and `eth_getLogs` only sees what is stored.
+ * - Writes have no answer in an index at all: a transaction has to reach a
+ *   node's mempool. A configured passthrough relays the methods it lists
+ *   (`eth_sendRawTransaction`, `eth_sendTransaction` by default) to a real node
+ *   and takes precedence over every handler here.
  *
  * `eth_blockNumber` and the `latest` tag mean the *indexed* head
  * (`scanner_state.last_successful_block`), not the chain head; `eth_syncing`
@@ -62,6 +68,18 @@ export interface JsonRpcDataSource {
   ): Promise<Array<{ blockNumber: bigint; minPriorityFeeWei: bigint }>>;
 }
 
+/**
+ * A source of answers that is not the index. Implemented by `JsonRpcPassthrough`,
+ * which relays to a real node; declared here so this module stays free of any
+ * dependency on it.
+ */
+export interface JsonRpcForwarder {
+  /** Methods this forwarder answers. They win over the local handlers. */
+  readonly methods: ReadonlySet<string>;
+  /** Answer one call, or throw a `JsonRpcError` carrying the failure. */
+  forward(method: string, params: unknown[]): Promise<unknown>;
+}
+
 export interface JsonRpcOptions {
   /** Gate for transaction/receipt/block-body methods (mirrors the REST feature flag). */
   transactionDataEnabled?: boolean;
@@ -69,6 +87,12 @@ export interface JsonRpcOptions {
   clientVersion?: string;
   /** Upper bound on requests per batch; defaults to 100. */
   maxBatchSize?: number;
+  /**
+   * Methods answered by a real node instead of the index — transaction
+   * submission, and anything else a deployment chooses to hand off. Absent
+   * (the default) the endpoint is read-only and node-free.
+   */
+  passthrough?: JsonRpcForwarder | null;
 }
 
 export type JsonRpcId = string | number | null;
@@ -127,7 +151,10 @@ interface MethodContext {
   options: Required<JsonRpcOptions>;
 }
 
-/** Every method the endpoint answers, in the order the docs list them. */
+/**
+ * Every method the endpoint answers from the index, in the order the docs list
+ * them. A configured `JsonRpcForwarder` adds to this and overrides it.
+ */
 export const JSON_RPC_METHODS = [
   "web3_clientVersion",
   "net_version",
@@ -254,14 +281,21 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
   }
   const params: unknown[] = omittedParams ? [] : (rawParams as unknown[]);
 
-  const handler = METHODS[method];
+  // A configured passthrough outranks the local table: listing a method there
+  // means "let the node answer this one", whether or not we could have.
+  const passthrough = context.options.passthrough;
+  const forwarder = passthrough && passthrough.methods.has(method) ? passthrough : null;
+  const handler: MethodHandler | undefined = forwarder
+    ? (forwardedParams) => forwarder.forward(method, forwardedParams)
+    : METHODS[method];
   if (!handler) {
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`),
     );
   }
-  if (!context.options.transactionDataEnabled && TRANSACTION_DATA_METHODS.has(method)) {
+  // The gate protects stored transaction rows; a forwarded call never reads them.
+  if (!forwarder && !context.options.transactionDataEnabled && TRANSACTION_DATA_METHODS.has(method)) {
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_SERVER_ERROR, `${method} is unavailable: transaction data is disabled`),
@@ -285,6 +319,7 @@ function resolveOptions(options: JsonRpcOptions): Required<JsonRpcOptions> {
     transactionDataEnabled: options.transactionDataEnabled ?? true,
     clientVersion: options.clientVersion ?? DEFAULT_CLIENT_VERSION,
     maxBatchSize: options.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE,
+    passthrough: options.passthrough ?? null,
   };
 }
 

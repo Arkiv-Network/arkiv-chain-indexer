@@ -12,6 +12,23 @@ import {
   DEFAULT_RESPONSE_CACHE_TTL_MS,
 } from "./responseCache";
 import { DEFAULT_ENTITY_HISTORY_LIMIT } from "./storage";
+import {
+  DEFAULT_PASSTHROUGH_METHODS,
+  DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE,
+  DEFAULT_PASSTHROUGH_TIMEOUT_MS,
+} from "./jsonRpcPassthrough";
+
+/**
+ * Settings for the one hole in the otherwise node-free `/shadow-rpc` surface.
+ * Present only when an upstream URL is configured; absent, nothing is forwarded.
+ */
+export interface JsonRpcPassthroughConfig {
+  url: string;
+  apiKey?: string;
+  methods: string[];
+  timeoutMs: number;
+  rateLimitPerMinute: number;
+}
 
 export interface ServerConfig {
   databaseUrl: string;
@@ -34,6 +51,7 @@ export interface ServerConfig {
   listCacheTtlMs: number;
   transactionCountCacheMaxEntries: number;
   transactionCountCacheTtlMs: number;
+  jsonRpcPassthrough?: JsonRpcPassthroughConfig;
 }
 
 const DEFAULT_PORT = 3000;
@@ -181,8 +199,60 @@ const SPEC: CliSpec = {
       env: ["TRANSACTION_COUNT_CACHE_TTL_MS", "SERVER_TRANSACTION_COUNT_CACHE_TTL_MS"],
       default: DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS.toString(),
     },
+    {
+      flags: "--shadow-rpc-upstream <url>",
+      description:
+        "Real JSON-RPC node that POST /shadow-rpc forwards submission methods to. Unset (the default) keeps the endpoint node-free and those methods answer -32601.",
+      env: ["SHADOW_RPC_UPSTREAM"],
+    },
+    {
+      flags: "--shadow-rpc-upstream-api-key <key>",
+      description:
+        "Optional key sent as x-api-key on forwarded requests, for an upstream that wants a header rather than a key baked into the URL. Defaults to SHADOW_RPC_UPSTREAM_API_KEY.",
+      env: ["SHADOW_RPC_UPSTREAM_API_KEY"],
+    },
+    {
+      flags: "--shadow-rpc-upstream-methods <list>",
+      description:
+        "Comma-separated methods to forward; each overrides the locally answered one. Defaults to eth_sendRawTransaction,eth_sendTransaction (or SHADOW_RPC_UPSTREAM_METHODS).",
+      env: ["SHADOW_RPC_UPSTREAM_METHODS"],
+      default: DEFAULT_PASSTHROUGH_METHODS.join(","),
+    },
+    {
+      flags: "--shadow-rpc-upstream-timeout-ms <ms>",
+      description:
+        "How long a forwarded request may take before it fails. Defaults to 10000 (or SHADOW_RPC_UPSTREAM_TIMEOUT_MS).",
+      env: ["SHADOW_RPC_UPSTREAM_TIMEOUT_MS"],
+      default: DEFAULT_PASSTHROUGH_TIMEOUT_MS.toString(),
+    },
+    {
+      flags: "--shadow-rpc-upstream-rate-limit <per-minute>",
+      description:
+        "Forwarded requests allowed per minute across all callers, capping how fast a public endpoint can spend the upstream's quota; 0 removes the cap. Defaults to 600 (or SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE).",
+      env: ["SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE"],
+      default: DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE.toString(),
+    },
   ],
 };
+
+/** Method names are relayed verbatim, so keep them to what a node could name. */
+const RPC_METHOD_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+function parsePassthroughMethods(raw: string): string[] {
+  const methods = raw
+    .split(",")
+    .map((method) => method.trim())
+    .filter((method) => method.length > 0);
+  if (methods.length === 0) {
+    throw new Error("--shadow-rpc-upstream-methods must name at least one method");
+  }
+  for (const method of methods) {
+    if (!RPC_METHOD_PATTERN.test(method)) {
+      throw new Error(`--shadow-rpc-upstream-methods contains an invalid method name: ${method}`);
+    }
+  }
+  return methods;
+}
 
 export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const cli = parseCli(SPEC, args, env);
@@ -275,6 +345,47 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS,
   );
 
+  // The upstream URL is the switch: no URL, no passthrough, and the rest of
+  // these settings never come into play.
+  const passthroughUrl = cli.value("shadow-rpc-upstream")?.trim();
+  let jsonRpcPassthrough: JsonRpcPassthroughConfig | undefined;
+  if (passthroughUrl) {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(passthroughUrl);
+    } catch {
+      throw new Error(`--shadow-rpc-upstream must be a URL: ${passthroughUrl}`);
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new Error("--shadow-rpc-upstream must be an http(s) URL");
+    }
+    const methods = parsePassthroughMethods(
+      cli.value("shadow-rpc-upstream-methods")?.trim() || DEFAULT_PASSTHROUGH_METHODS.join(","),
+    );
+    const timeoutMs = intOrDefault(
+      "--shadow-rpc-upstream-timeout-ms",
+      cli.value("shadow-rpc-upstream-timeout-ms"),
+      DEFAULT_PASSTHROUGH_TIMEOUT_MS,
+    );
+    if (timeoutMs < 1) {
+      throw new Error("--shadow-rpc-upstream-timeout-ms must be at least 1");
+    }
+    // coerceInt already refuses negatives; 0 is the documented "no cap".
+    const rateLimitPerMinute = intOrDefault(
+      "--shadow-rpc-upstream-rate-limit",
+      cli.value("shadow-rpc-upstream-rate-limit"),
+      DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE,
+    );
+    const apiKey = cli.value("shadow-rpc-upstream-api-key")?.trim();
+    jsonRpcPassthrough = {
+      url: passthroughUrl,
+      ...(apiKey ? { apiKey } : {}),
+      methods,
+      timeoutMs,
+      rateLimitPerMinute,
+    };
+  }
+
   return {
     databaseUrl,
     port,
@@ -296,5 +407,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     listCacheTtlMs,
     transactionCountCacheMaxEntries,
     transactionCountCacheTtlMs,
+    ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
   };
 }

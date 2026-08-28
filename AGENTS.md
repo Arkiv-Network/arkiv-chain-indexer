@@ -102,8 +102,8 @@ docker compose up --build
   testing showed it single-handedly capping the whole backend — every other Postgres-backed endpoint queues
   behind it. Keep the key free of `limit`/`page`/`order`, and prefer fixing the count over adding indexes.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
-  once nginx and the frontend proxy strip `/api`), a read-only Ethereum JSON-RPC 2.0 surface answered purely from stored
-  data (it never proxies to a node). `latest` means the indexed head (`scanner_state.last_successful_block`);
+  once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
+  data — the only path to a node is the opt-in passthrough below. `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
   calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns
@@ -121,6 +121,17 @@ docker compose up --build
   that work against one; **outputs stay canonical** (`quantity()` emits minimal hex). `eth_getLogs` resolves
   the block hash of every returned log through one `getBlockHashesByNumber` call: doing it per block cost a
   round trip per distinct block in the result (~420ms for a 1,000-block query, versus ~10ms batched).
+- `src/jsonRpcPassthrough.ts` is the one hole in that: a transaction has to reach a node's mempool, so
+  `SHADOW_RPC_UPSTREAM` (see `serverConfig.ts`) relays an allowlist — `eth_sendRawTransaction`,
+  `eth_sendTransaction` by default — to a real node and returns its answers unchanged. Unset, nothing is
+  forwarded and those methods stay `-32601`. Three rules hold: **allowlist only**, never an open proxy; a
+  listed method **outranks the local handler and the transaction-data gate**, which makes the list a general
+  escape hatch (list `eth_getTransactionCount` to serve the node's live nonce instead of the indexed one);
+  and **nothing about the upstream leaks** — the URL may embed a key, so only the node's own JSON-RPC `error`
+  object is relayed, while transport failures answer a fixed `-32000` and log the cause. Forwarded calls are
+  rate limited endpoint-wide (`600/min`) because a public endpoint fronting a metered node is a way to spend
+  someone else's quota. `jsonRpc.ts` declares the `JsonRpcForwarder` interface so the dependency points one
+  way; `/health` lists the forwarded methods under `features.jsonRpcPassthrough`.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

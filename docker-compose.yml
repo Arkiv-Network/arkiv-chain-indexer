@@ -316,6 +316,16 @@ services:
       BASELOAD_RPC_KEY_STORE: ${BASELOAD_RPC_KEY_STORE:-/app/baseload-keys/rpc-keys.json}
       BASELOAD_RPC_KEY_TIMEOUT_SECONDS: ${BASELOAD_RPC_KEY_TIMEOUT_SECONDS:-}
       RPC_KEY_POOL_FILE: ${RPC_KEY_POOL_FILE:-}
+      # The one hole in the read-only /shadow-rpc surface: with an upstream set,
+      # the listed methods are relayed to a real node instead of being answered
+      # from the index. Transaction submission cannot come from stored data.
+      # Point it at http://rpc-proxy:8788 to inherit the pooled key. Empty (the
+      # default) forwards nothing and those methods stay -32601.
+      SHADOW_RPC_UPSTREAM: ${SHADOW_RPC_UPSTREAM:-}
+      SHADOW_RPC_UPSTREAM_API_KEY: ${SHADOW_RPC_UPSTREAM_API_KEY:-}
+      SHADOW_RPC_UPSTREAM_METHODS: ${SHADOW_RPC_UPSTREAM_METHODS:-}
+      SHADOW_RPC_UPSTREAM_TIMEOUT_MS: ${SHADOW_RPC_UPSTREAM_TIMEOUT_MS:-}
+      SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE: ${SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE:-}
       ARKIV_PROTOCOL_SCHEDULE_URL: ${ARKIV_PROTOCOL_SCHEDULE_URL:-}
       ARKIV_PROTOCOL_SCHEDULE_PATH: ${ARKIV_PROTOCOL_SCHEDULE_PATH:-}
       PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: ${PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS:-}

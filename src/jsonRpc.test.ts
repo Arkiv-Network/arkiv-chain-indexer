@@ -4,15 +4,19 @@ import {
   JSON_RPC_INVALID_REQUEST,
   JSON_RPC_METHODS,
   JSON_RPC_METHOD_NOT_FOUND,
+  JSON_RPC_INTERNAL_ERROR,
   JSON_RPC_PARSE_ERROR,
   JSON_RPC_SERVER_ERROR,
+  JsonRpcError,
   handleJsonRpcBody,
   handleJsonRpcText,
   quantity,
   type JsonRpcDataSource,
+  type JsonRpcForwarder,
   type JsonRpcResponse,
 } from "./jsonRpc";
 import { createBlockServer, type HealthResponseBody } from "./server";
+import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import type {
   BlockQueryFilter,
   PriorityFeeSample,
@@ -884,6 +888,101 @@ function txHash(seed: number): `0x${string}` {
 
 const BLOCK_1_HASH = `0x${"ab".repeat(32)}`;
 
+// ---------------------------------------------------------------------------
+
+describe("passthrough", () => {
+  const source = fakeSource({
+    chainId: 1337n,
+    blocks: [fakeBlock({ blockNumber: 7 })],
+  });
+
+  /** Records what it was asked to answer so tests can assert the hand-off. */
+  function fakeForwarder(
+    methods: string[],
+    answer: (method: string, params: unknown[]) => unknown = () => "0xforwarded",
+  ): JsonRpcForwarder & { calls: Array<{ method: string; params: unknown[] }> } {
+    const calls: Array<{ method: string; params: unknown[] }> = [];
+    return {
+      calls,
+      methods: new Set(methods),
+      forward: async (method, params) => {
+        calls.push({ method, params });
+        return answer(method, params);
+      },
+    };
+  }
+
+  test("a listed method is answered by the forwarder, with its params intact", async () => {
+    const passthrough = fakeForwarder(["eth_sendRawTransaction"]);
+    const response = await call(source, "eth_sendRawTransaction", ["0xdeadbeef"], { passthrough });
+    expect(response.result).toBe("0xforwarded");
+    expect(passthrough.calls).toEqual([{ method: "eth_sendRawTransaction", params: ["0xdeadbeef"] }]);
+  });
+
+  test("a listed method outranks the local handler", async () => {
+    const passthrough = fakeForwarder(["eth_blockNumber"], () => "0xdeadbeef");
+    expect((await call(source, "eth_blockNumber", [], { passthrough })).result).toBe("0xdeadbeef");
+    // ... and the same source without the passthrough still answers from the index.
+    expect(await result(source, "eth_blockNumber")).toBe("0x7");
+  });
+
+  test("unlisted methods keep their usual answers", async () => {
+    const passthrough = fakeForwarder(["eth_sendRawTransaction"]);
+    expect((await call(source, "eth_chainId", [], { passthrough })).result).toBe("0x539");
+    expect((await call(source, "eth_call", [], { passthrough })).error?.code).toBe(
+      JSON_RPC_METHOD_NOT_FOUND,
+    );
+    expect(passthrough.calls).toEqual([]);
+  });
+
+  test("the transaction-data gate does not apply to a forwarded method", async () => {
+    const passthrough = fakeForwarder(["eth_getTransactionCount"], () => "0x2a");
+    const options = { transactionDataEnabled: false, passthrough };
+    expect((await call(source, "eth_getTransactionCount", ["0x0", "latest"], options)).result).toBe("0x2a");
+    // Its unforwarded neighbour is still gated.
+    expect((await call(source, "eth_getLogs", [{}], options)).error?.code).toBe(JSON_RPC_SERVER_ERROR);
+  });
+
+  test("the node's verdict reaches the caller; an unexpected throw does not", async () => {
+    const rejecting = fakeForwarder(["eth_sendRawTransaction"], () => {
+      throw new JsonRpcError(-32000, "already known");
+    });
+    const rejected = await call(source, "eth_sendRawTransaction", ["0x01"], { passthrough: rejecting });
+    expect(rejected.error).toEqual({ code: -32000, message: "already known" });
+
+    const broken = fakeForwarder(["eth_sendRawTransaction"], () => {
+      throw new TypeError("undefined is not a function");
+    });
+    const failed = await call(source, "eth_sendRawTransaction", ["0x01"], { passthrough: broken });
+    expect(failed.error?.code).toBe(JSON_RPC_INTERNAL_ERROR);
+  });
+
+  test("a batch mixes indexed and forwarded answers", async () => {
+    const passthrough = fakeForwarder(["eth_sendRawTransaction"], () => `0x${"11".repeat(32)}`);
+    const batch = (await handleJsonRpcBody(
+      [
+        { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] },
+        { jsonrpc: "2.0", id: 2, method: "eth_sendRawTransaction", params: ["0x02f8"] },
+        { jsonrpc: "2.0", id: 3, method: "eth_chainId" },
+      ],
+      source,
+      { passthrough },
+    )) as JsonRpcResponse[];
+    expect(batch.map((entry) => entry.result)).toEqual(["0x7", `0x${"11".repeat(32)}`, "0x539"]);
+  });
+
+  test("an explicit null params forwards as an empty list", async () => {
+    const passthrough = fakeForwarder(["eth_sendTransaction"]);
+    const response = (await handleJsonRpcBody(
+      { jsonrpc: "2.0", id: 1, method: "eth_sendTransaction", params: null },
+      source,
+      { passthrough },
+    )) as JsonRpcResponse;
+    expect(response.result).toBe("0xforwarded");
+    expect(passthrough.calls[0]!.params).toEqual([]);
+  });
+});
+
 describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
   async function seededStorage(): Promise<ScannerStorage> {
     const { storage, cleanup } = await createIsolatedStorage("jsonrpc");
@@ -1054,8 +1153,76 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
 
       const health = (await (await fetch(`${base}/health`)).json()) as HealthResponseBody;
       expect(health.features.jsonRpc).toBe(true);
+      // No upstream configured: the endpoint forwards nothing, and says so.
+      expect(health.features.jsonRpcPassthrough).toBe(false);
     } finally {
       server.stop(true);
+    }
+  });
+
+  test("POST /shadow-rpc forwards submissions to the configured node", async () => {
+    const seen: Array<{ method: string; params: unknown[]; apiKey: string | null }> = [];
+    // Stands in for the real node: it knows one transaction and rejects the other.
+    const node = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (request) => {
+        const body = (await request.json()) as { id: number; method: string; params: unknown[] };
+        seen.push({ method: body.method, params: body.params, apiKey: request.headers.get("x-api-key") });
+        const error =
+          body.params[0] === "0xbad" ? { code: -32000, message: "nonce too low" } : undefined;
+        return Response.json({
+          jsonrpc: "2.0",
+          id: body.id,
+          ...(error ? { error } : { result: `0x${"cd".repeat(32)}` }),
+        });
+      },
+    });
+    const storage = await seededStorage();
+    const server = createBlockServer(storage, {
+      port: 0,
+      hostname: "127.0.0.1",
+      jsonRpcPassthrough: new JsonRpcPassthrough({
+        url: `http://${node.hostname}:${node.port}`,
+        apiKey: "hub-key",
+      }),
+    });
+    const post = (body: unknown) =>
+      fetch(`http://${server.hostname}:${server.port}/shadow-rpc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    try {
+      const batch = (await (
+        await post([
+          { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] },
+          { jsonrpc: "2.0", id: 2, method: "eth_sendRawTransaction", params: ["0x02f8"] },
+          { jsonrpc: "2.0", id: 3, method: "eth_sendRawTransaction", params: ["0xbad"] },
+          { jsonrpc: "2.0", id: 4, method: "eth_call", params: [{}, "latest"] },
+        ])
+      ).json()) as JsonRpcResponse[];
+      // Indexed reads and forwarded writes share one batch.
+      expect(batch[0]!.result).toBe("0x3");
+      expect(batch[1]!.result).toBe(`0x${"cd".repeat(32)}`);
+      // The node's rejection is the answer, not a generic failure.
+      expect(batch[2]!.error).toEqual({ code: -32000, message: "nonce too low" });
+      // Nothing else leaked through the hole.
+      expect(batch[3]!.error?.code).toBe(JSON_RPC_METHOD_NOT_FOUND);
+      expect(seen.map((call) => call.method)).toEqual([
+        "eth_sendRawTransaction",
+        "eth_sendRawTransaction",
+      ]);
+      expect(seen[0]!.apiKey).toBe("hub-key");
+
+      const health = (await (await fetch(`http://${server.hostname}:${server.port}/health`)).json()) as HealthResponseBody;
+      expect(health.features.jsonRpcPassthrough).toEqual([
+        "eth_sendRawTransaction",
+        "eth_sendTransaction",
+      ]);
+    } finally {
+      server.stop(true);
+      node.stop(true);
     }
   });
 

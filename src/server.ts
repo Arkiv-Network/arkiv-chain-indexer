@@ -20,7 +20,7 @@ import {
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
-import { handleJsonRpcText } from "./jsonRpc";
+import { handleJsonRpcText, type JsonRpcForwarder } from "./jsonRpc";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
 import {
   buildPayloadProviderPaymentBreakdown,
@@ -92,6 +92,12 @@ export interface BlockServerOptions {
    * storage work; otherwise the handler computes on demand.
    */
   syncStatusProvider?: { get(): CachedResponse | null };
+  /**
+   * Relays the methods it lists to a real node instead of answering them from
+   * the index — transaction submission above all, which no index can answer.
+   * Omitted (the default) POST /shadow-rpc talks to nothing but PostgreSQL.
+   */
+  jsonRpcPassthrough?: JsonRpcForwarder;
 }
 
 export interface BlocksResponseBody {
@@ -243,6 +249,12 @@ export interface HealthResponseBody {
     guzzlers: boolean;
     /** `POST /shadow-rpc` — read-only Ethereum JSON-RPC over stored data. */
     jsonRpc: boolean;
+    /**
+     * Methods `POST /shadow-rpc` forwards to a real node rather than answering
+     * from the index, sorted; `false` when nothing is forwarded. Listing them
+     * is the only way a caller can tell which writes the endpoint accepts.
+     */
+    jsonRpcPassthrough: string[] | false;
   };
   guzzlers: {
     enabled: boolean;
@@ -535,6 +547,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
           ? { transactionCountCache: options.transactionCountCache }
           : {}),
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
+        ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -614,7 +627,7 @@ async function routeRequest(
   }
 
   if (url.pathname === JSON_RPC_PATH) {
-    return handleJsonRpcRequest(request, storage, transactionDataEnabled);
+    return handleJsonRpcRequest(request, storage, transactionDataEnabled, options.jsonRpcPassthrough);
   }
 
   if (request.method !== "GET") {
@@ -626,7 +639,12 @@ async function routeRequest(
   }
 
   if (url.pathname === "/health") {
-    return handleGetHealth(storage, transactionDataEnabled, options.guzzlerStore);
+    return handleGetHealth(
+      storage,
+      transactionDataEnabled,
+      options.guzzlerStore,
+      options.jsonRpcPassthrough,
+    );
   }
 
   if (url.pathname === "/sync") {
@@ -865,6 +883,7 @@ async function handleGetHealth(
   storage: ScannerStorage,
   transactionDataEnabled: boolean,
   guzzlerStore: GuzzlerStore | undefined,
+  jsonRpcPassthrough: JsonRpcForwarder | undefined,
 ): Promise<Response> {
   const guzzlers = await readGuzzlerCacheHealth(guzzlerStore);
   const now = new Date();
@@ -908,6 +927,9 @@ async function handleGetHealth(
       transactionData: transactionDataEnabled,
       guzzlers: guzzlerStore !== undefined,
       jsonRpc: true,
+      jsonRpcPassthrough: jsonRpcPassthrough
+        ? [...jsonRpcPassthrough.methods].sort()
+        : false,
     },
     guzzlers,
   };
@@ -934,15 +956,17 @@ function readClientVersion(): Promise<string> {
 }
 
 /**
- * `POST /shadow-rpc`: read-only Ethereum JSON-RPC served from stored data. Always
- * answers 200 with a JSON-RPC body (errors included) the way nodes do, so
- * standard clients can parse every reply; only transport-level problems
- * (wrong verb, oversized body) use HTTP status codes.
+ * `POST /shadow-rpc`: Ethereum JSON-RPC served from stored data, plus whatever
+ * methods the optional passthrough relays to a real node. Always answers 200
+ * with a JSON-RPC body (errors included) the way nodes do, so standard clients
+ * can parse every reply; only transport-level problems (wrong verb, oversized
+ * body) use HTTP status codes.
  */
 async function handleJsonRpcRequest(
   request: Request,
   storage: ScannerStorage,
   transactionDataEnabled: boolean,
+  passthrough: JsonRpcForwarder | undefined,
 ): Promise<Response> {
   if (request.method !== "POST") {
     return jsonError(405, `JSON-RPC requests must be POSTed to ${JSON_RPC_PATH}`);
@@ -958,6 +982,7 @@ async function handleJsonRpcRequest(
   const body = await handleJsonRpcText(text, storage, {
     transactionDataEnabled,
     clientVersion: await readClientVersion(),
+    ...(passthrough ? { passthrough } : {}),
   });
   return new Response(JSON.stringify(body), {
     status: 200,

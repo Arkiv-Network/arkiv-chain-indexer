@@ -119,6 +119,88 @@ describe("parseServerConfig", () => {
     ).toThrow("--payload-provider-payment-share-bps must be between 0 and 10000");
   });
 
+  test("no upstream means no JSON-RPC passthrough", () => {
+    expect(parseServerConfig([], BASE_ENV).jsonRpcPassthrough).toBeUndefined();
+    // Settings without an upstream are inert rather than an error, so a
+    // deployment can keep them in .env while the passthrough is switched off.
+    expect(
+      parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM_METHODS: "eth_call" })
+        .jsonRpcPassthrough,
+    ).toBeUndefined();
+  });
+
+  test("an upstream URL enables the passthrough with submission defaults", () => {
+    const config = parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM: "http://rpc-proxy:8788" });
+    expect(config.jsonRpcPassthrough).toEqual({
+      url: "http://rpc-proxy:8788",
+      methods: ["eth_sendRawTransaction", "eth_sendTransaction"],
+      timeoutMs: 10_000,
+      rateLimitPerMinute: 600,
+    });
+  });
+
+  test("reads the passthrough settings from the environment", () => {
+    const config = parseServerConfig([], {
+      ...BASE_ENV,
+      SHADOW_RPC_UPSTREAM: "https://node.example.test/rpc",
+      SHADOW_RPC_UPSTREAM_API_KEY: "hub-key",
+      SHADOW_RPC_UPSTREAM_METHODS: "eth_sendRawTransaction, eth_estimateGas ,",
+      SHADOW_RPC_UPSTREAM_TIMEOUT_MS: "2500",
+      SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE: "0",
+    });
+    expect(config.jsonRpcPassthrough).toEqual({
+      url: "https://node.example.test/rpc",
+      apiKey: "hub-key",
+      methods: ["eth_sendRawTransaction", "eth_estimateGas"],
+      timeoutMs: 2500,
+      rateLimitPerMinute: 0,
+    });
+  });
+
+  test("empty compose-style passthrough values fall back to the defaults", () => {
+    const config = parseServerConfig([], {
+      ...BASE_ENV,
+      SHADOW_RPC_UPSTREAM: "http://rpc-proxy:8788",
+      SHADOW_RPC_UPSTREAM_API_KEY: "",
+      SHADOW_RPC_UPSTREAM_METHODS: "",
+      SHADOW_RPC_UPSTREAM_TIMEOUT_MS: "",
+      SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE: "",
+    });
+    expect(config.jsonRpcPassthrough).toEqual({
+      url: "http://rpc-proxy:8788",
+      methods: ["eth_sendRawTransaction", "eth_sendTransaction"],
+      timeoutMs: 10_000,
+      rateLimitPerMinute: 600,
+    });
+  });
+
+  test("rejects an unusable passthrough configuration", () => {
+    const withUpstream = (env: NodeJS.ProcessEnv) =>
+      parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM: "http://rpc-proxy:8788", ...env });
+    expect(() => parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM: "not-a-url" })).toThrow(
+      "--shadow-rpc-upstream must be a URL",
+    );
+    // `rpc-proxy:8788` parses — as a URL with the scheme `rpc-proxy:` — so the
+    // scheme check, not the parse, is what catches a host:port typo.
+    for (const upstream of ["ws://rpc-proxy:8788", "rpc-proxy:8788"]) {
+      expect(() => parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM: upstream })).toThrow(
+        "--shadow-rpc-upstream must be an http(s) URL",
+      );
+    }
+    expect(() => withUpstream({ SHADOW_RPC_UPSTREAM_METHODS: " , " })).toThrow(
+      "must name at least one method",
+    );
+    expect(() => withUpstream({ SHADOW_RPC_UPSTREAM_METHODS: "eth_send;rm -rf" })).toThrow(
+      "invalid method name",
+    );
+    expect(() => withUpstream({ SHADOW_RPC_UPSTREAM_TIMEOUT_MS: "0" })).toThrow(
+      "--shadow-rpc-upstream-timeout-ms must be at least 1",
+    );
+    expect(() => withUpstream({ SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE: "-1" })).toThrow(
+      "--shadow-rpc-upstream-rate-limit must be a non-negative integer",
+    );
+  });
+
   test("--help raises ServerHelpRequested", () => {
     expect(() => parseServerConfig(["--help"], BASE_ENV)).toThrow(ServerHelpRequested);
   });

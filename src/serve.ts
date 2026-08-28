@@ -8,6 +8,7 @@ import { PrecomputedResponse } from "./precomputedResponse";
 import { ResponseCache } from "./responseCache";
 import { ValueCache } from "./valueCache";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
+import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import type { GuzzlerStore } from "./guzzlers";
 
 async function main(): Promise<void> {
@@ -114,6 +115,17 @@ async function main(): Promise<void> {
               : {}),
           })
         : undefined;
+    // The only path from /shadow-rpc to a real node. Without an upstream URL
+    // the endpoint stays what its name promises: an index, not a node.
+    const jsonRpcPassthrough = config.jsonRpcPassthrough
+      ? new JsonRpcPassthrough({
+          url: config.jsonRpcPassthrough.url,
+          ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
+          methods: config.jsonRpcPassthrough.methods,
+          timeoutMs: config.jsonRpcPassthrough.timeoutMs,
+          rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
+        })
+      : undefined;
     const server = createBlockServer(storage, {
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
@@ -129,6 +141,7 @@ async function main(): Promise<void> {
       listCache,
       transactionCountCache,
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
+      ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);
@@ -152,6 +165,11 @@ async function main(): Promise<void> {
             `${config.listCacheMaxBytes} bytes, TTL ${config.listCacheTtlMs}ms, ` +
             `cleared ${stopStoredBlockListener ? "on stored-block NOTIFY" : "by TTL only"}`
         : "Blocks/ranges cache: disabled",
+    );
+    console.log(
+      jsonRpcPassthrough
+        ? `JSON-RPC passthrough: forwarding ${jsonRpcPassthrough.describe()}`
+        : "JSON-RPC passthrough: disabled (/shadow-rpc answers from stored data only)",
     );
     console.log(
       transactionCountCache.enabled
