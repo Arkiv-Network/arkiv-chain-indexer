@@ -791,15 +791,18 @@ Notes on how the numbers are derived:
   measured block time, and `lagBlocks` is measured against that estimate; `observedLagBlocks` uses the raw
   observation.
 
-### `POST /rpc`
+### `POST /shadow-rpc`
 
 A read-only Ethereum JSON-RPC 2.0 endpoint answered entirely from stored scanner data — the backend never
 forwards to a node. Single requests and batches (up to 100 entries, 1 MiB body) are accepted; every reply is
 HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, `ethers`, `cast`) can point at
-`/rpc` (or `/api/rpc` through the frontend proxy) directly. `GET /health` advertises it under
-`features.jsonRpc`.
+`/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
+under `features.jsonRpc`.
 
-Two things differ from a node and are deliberate:
+The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
+answers from what the scanner happened to store, so treat it as a fast read cache for indexed history rather
+than a source of truth — anything you would trust for consensus, settlement or proofs belongs on a real node.
+Two differences in particular are deliberate:
 
 - **`latest` means the indexed head.** `eth_blockNumber` and the `latest` / `pending` / `safe` / `finalized`
   tags all resolve to `scanner_state.last_successful_block`, not the chain head. `eth_syncing` reports the gap
@@ -840,7 +843,7 @@ silently hitting a node.
 Example:
 
 ```sh
-curl -s http://localhost:3000/rpc -H 'Content-Type: application/json' \
+curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 

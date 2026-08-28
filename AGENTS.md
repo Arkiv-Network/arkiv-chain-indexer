@@ -101,7 +101,8 @@ docker compose up --build
   count. This matters more than it looks: an unfiltered `COUNT(*)` scans every transaction row, and load
   testing showed it single-handedly capping the whole backend — every other Postgres-backed endpoint queues
   behind it. Keep the key free of `limit`/`page`/`order`, and prefer fixing the count over adding indexes.
-- `src/jsonRpc.ts` serves `POST /rpc`, a read-only Ethereum JSON-RPC 2.0 surface answered purely from stored
+- `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
+  once nginx and the frontend proxy strip `/api`), a read-only Ethereum JSON-RPC 2.0 surface answered purely from stored
   data (it never proxies to a node). `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the

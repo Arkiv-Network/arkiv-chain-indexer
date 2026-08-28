@@ -991,12 +991,12 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
     expect(await storage.queryLogs({ fromBlock: 1n, toBlock: 1n })).toEqual([]);
   });
 
-  test("POST /rpc serves batches from storage; other verbs are rejected", async () => {
+  test("POST /shadow-rpc serves batches from storage; other verbs are rejected", async () => {
     const storage = await seededStorage();
     const server = createBlockServer(storage, { port: 0, hostname: "127.0.0.1" });
     try {
       const base = `http://${server.hostname}:${server.port}`;
-      const response = await fetch(`${base}/rpc`, {
+      const response = await fetch(`${base}/shadow-rpc`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify([
@@ -1036,12 +1036,21 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       expect(((batch[8]!.result as { logs: Array<{ logIndex: string; blockHash: string }> }).logs).map((l) => [l.logIndex, l.blockHash])).toEqual([["0x0", BLOCK_1_HASH], ["0x1", BLOCK_1_HASH]]);
       expect((batch[9]!.result as unknown[]).length).toBe(2);
 
-      const parseError = await fetch(`${base}/rpc`, { method: "POST", body: "nope" });
+      const parseError = await fetch(`${base}/shadow-rpc`, { method: "POST", body: "nope" });
       expect(parseError.status).toBe(200);
       expect(((await parseError.json()) as JsonRpcResponse).error?.code).toBe(JSON_RPC_PARSE_ERROR);
 
-      const get = await fetch(`${base}/rpc`);
+      const get = await fetch(`${base}/shadow-rpc`);
       expect(get.status).toBe(405);
+
+      // `/rpc` was renamed, not aliased: the old path must not quietly keep
+      // serving, or the name that hides what this endpoint is stays alive.
+      const renamed = await fetch(`${base}/rpc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+      });
+      expect(renamed.status).toBe(405);
 
       const health = (await (await fetch(`${base}/health`)).json()) as HealthResponseBody;
       expect(health.features.jsonRpc).toBe(true);
@@ -1054,7 +1063,7 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
     const storage = await seededStorage();
     const server = createBlockServer(storage, { port: 0, hostname: "127.0.0.1", transactionDataEnabled: false });
     try {
-      const response = await fetch(`http://${server.hostname}:${server.port}/rpc`, {
+      const response = await fetch(`http://${server.hostname}:${server.port}/shadow-rpc`, {
         method: "POST",
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [txHash(1)] }),
       });

@@ -241,7 +241,7 @@ export interface HealthResponseBody {
   features: {
     transactionData: boolean;
     guzzlers: boolean;
-    /** `POST /rpc` — read-only Ethereum JSON-RPC over stored data. */
+    /** `POST /shadow-rpc` — read-only Ethereum JSON-RPC over stored data. */
     jsonRpc: boolean;
   };
   guzzlers: {
@@ -500,6 +500,14 @@ const CORS_HEADERS: Record<string, string> = {
 };
 const LLMS_TXT_FILE = new URL("../llms.txt", import.meta.url);
 const PACKAGE_JSON_FILE = new URL("../package.json", import.meta.url);
+/**
+ * Where the JSON-RPC surface lives — `/api/shadow-rpc` once nginx and the
+ * frontend proxy have stripped their `/api` prefix. Deliberately not `/rpc`:
+ * this is a shadow of the chain cast by the index, not a node, and the name is
+ * the first warning a caller gets that `latest` means the *indexed* head and
+ * that unindexed fields come back null.
+ */
+const JSON_RPC_PATH = "/shadow-rpc";
 /** Largest JSON-RPC request body accepted, in bytes; batches are capped separately. */
 const JSON_RPC_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -605,7 +613,7 @@ async function routeRequest(
     );
   }
 
-  if (url.pathname === "/rpc") {
+  if (url.pathname === JSON_RPC_PATH) {
     return handleJsonRpcRequest(request, storage, transactionDataEnabled);
   }
 
@@ -926,7 +934,7 @@ function readClientVersion(): Promise<string> {
 }
 
 /**
- * `POST /rpc`: read-only Ethereum JSON-RPC served from stored data. Always
+ * `POST /shadow-rpc`: read-only Ethereum JSON-RPC served from stored data. Always
  * answers 200 with a JSON-RPC body (errors included) the way nodes do, so
  * standard clients can parse every reply; only transport-level problems
  * (wrong verb, oversized body) use HTTP status codes.
@@ -937,7 +945,7 @@ async function handleJsonRpcRequest(
   transactionDataEnabled: boolean,
 ): Promise<Response> {
   if (request.method !== "POST") {
-    return jsonError(405, "JSON-RPC requests must be POSTed to /rpc");
+    return jsonError(405, `JSON-RPC requests must be POSTed to ${JSON_RPC_PATH}`);
   }
   const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
   if (declaredLength > JSON_RPC_MAX_BODY_BYTES) {
