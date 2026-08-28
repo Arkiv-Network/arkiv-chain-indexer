@@ -7,7 +7,7 @@ import {
   type BlockRangeMetrics,
 } from "./ranges";
 import type { BlockMetrics, Hex } from "./types";
-import type { InspectedBlock, InspectedTransaction } from "./blockInspector";
+import type { InspectedBlock, InspectedLog, InspectedTransaction } from "./blockInspector";
 import type {
   ArkivOperation,
   ArkivOperationAttribute,
@@ -59,7 +59,11 @@ const TRANSACTION_SELECT_COLUMNS = [
   "transaction_fee_wei",
   "status",
   "contract_address",
+  "log_count",
 ] as const;
+/** Upper bounds for one eth_getLogs-style query. */
+export const MAX_LOG_QUERY_BLOCKS = 10_000;
+export const MAX_LOGS_PER_QUERY = 10_000;
 export const MAX_TRANSACTION_RECORDS_PER_CATEGORY = 100;
 export const DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY = 20;
 export const MAX_SENDERS_PER_QUERY = 10_000;
@@ -111,6 +115,28 @@ export interface TransactionQueryFilter {
   limit?: number;
   page?: number;
   order?: QueryOrder;
+}
+
+/** A stored event log (see `transaction_logs`). */
+export interface StoredLog {
+  blockNumber: bigint;
+  position: number;
+  logIndex: number;
+  hash: string;
+  address: string;
+  topics: string[];
+  data: string;
+}
+
+export interface LogQueryFilter {
+  fromBlock: bigint;
+  toBlock: bigint;
+  /** Lowercase addresses; empty/undefined matches every address. */
+  addresses?: string[];
+  /** Per topic position: undefined/empty matches anything, otherwise any of the listed values. */
+  topics?: Array<string[] | undefined>;
+  /** Result cap; exceeding it throws. Defaults to MAX_LOGS_PER_QUERY. */
+  limit?: number;
 }
 
 /** One transaction's contribution to an eth_feeHistory reward percentile. */
@@ -169,6 +195,8 @@ export interface StoredTransaction extends InspectedTransaction {
   blockNumberDecimal: string;
   blockDate: string;
   baseBlockFeeWei: string;
+  /** Number of stored event logs; null for rows scanned before logs were kept. */
+  logCount: number | null;
   operations?: ArkivOperation[];
   operationsSummary?: ArkivOperationSummaryEntry[];
 }
@@ -356,6 +384,7 @@ export class ScannerStorage {
   private readonly qBlockRanges: string;
   private readonly qTransactions: string;
   private readonly qTransactionOperations: string;
+  private readonly qTransactionLogs: string;
   private readonly qTransactionRecords: string;
   private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
@@ -370,6 +399,7 @@ export class ScannerStorage {
     this.qBlockRanges = `${quoteIdent(this.schema)}.block_ranges`;
     this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
     this.qTransactionOperations = `${quoteIdent(this.schema)}.transaction_operations`;
+    this.qTransactionLogs = `${quoteIdent(this.schema)}.transaction_logs`;
     this.qTransactionRecords = `${quoteIdent(this.schema)}.transaction_records`;
     this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
@@ -567,6 +597,31 @@ export class ScannerStorage {
     await this.db.query(
       `ALTER TABLE ${this.qTransactions}
        ADD COLUMN IF NOT EXISTS input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
+    );
+    // Null on rows written before logs were stored; 0 means "no events".
+    await this.db.query(
+      `ALTER TABLE ${this.qTransactions} ADD COLUMN IF NOT EXISTS log_count INTEGER`,
+    );
+    // Receipt event logs: address, up to four topics and the ABI data — never
+    // calldata. One row per log, keyed like the transaction it belongs to.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qTransactionLogs} (
+        block_number BIGINT NOT NULL,
+        position INTEGER NOT NULL,
+        log_index INTEGER NOT NULL,
+        hash TEXT NOT NULL,
+        address TEXT NOT NULL,
+        topic0 TEXT,
+        topic1 TEXT,
+        topic2 TEXT,
+        topic3 TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (block_number, position, log_index)
+      )
+    `);
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_logs_hash_idx")}
+       ON ${this.qTransactionLogs} (hash)`,
     );
     // Decoded Arkiv operation metadata per transaction. Payloads/calldata are
     // never stored — only payload_size_bytes. Under reference mode we also keep
@@ -1396,12 +1451,14 @@ export class ScannerStorage {
     await client.query(`DELETE FROM ${this.qTransactions} WHERE block_number = $1`, [
       metrics.blockNumber.toString(),
     ]);
+    // Logs live and die with their block's transaction rows.
+    await this.replaceLogsForBlock(client, metrics.blockNumber, transactions);
 
     if (transactions.length === 0) {
       return;
     }
 
-    const columnsPerRow = 23;
+    const columnsPerRow = 24;
     const params: Array<string | number | null> = [];
     const values = transactions.map((transaction, rowIndex) => {
       const offset = rowIndex * columnsPerRow;
@@ -1429,6 +1486,7 @@ export class ScannerStorage {
         transaction.transactionFeeWei,
         transaction.status,
         transaction.contractAddress,
+        transaction.logs === undefined ? null : transaction.logs.length,
       );
       const placeholders = Array.from(
         { length: columnsPerRow },
@@ -1461,10 +1519,60 @@ export class ScannerStorage {
         priority_fee_wei,
         transaction_fee_wei,
         status,
-        contract_address
+        contract_address,
+        log_count
       ) VALUES ${values.join(", ")}`,
       params,
     );
+  }
+
+  private async replaceLogsForBlock(
+    client: DbQueryable,
+    blockNumber: bigint,
+    transactions: InspectedTransaction[],
+  ): Promise<void> {
+    await client.query(`DELETE FROM ${this.qTransactionLogs} WHERE block_number = $1`, [
+      blockNumber.toString(),
+    ]);
+    const rows: Array<{ transaction: InspectedTransaction; log: InspectedLog }> = [];
+    for (const transaction of transactions) {
+      for (const log of transaction.logs ?? []) {
+        rows.push({ transaction, log });
+      }
+    }
+    const columnsPerRow = 10;
+    // Stay well under Postgres' 65535 bind-parameter ceiling per statement.
+    const chunkSize = 5_000;
+    for (let start = 0; start < rows.length; start += chunkSize) {
+      const chunk = rows.slice(start, start + chunkSize);
+      const params: Array<string | number | null> = [];
+      const values = chunk.map(({ transaction, log }, rowIndex) => {
+        const offset = rowIndex * columnsPerRow;
+        params.push(
+          blockNumber.toString(),
+          transaction.position,
+          log.logIndex,
+          transaction.hash.toLowerCase(),
+          log.address.toLowerCase(),
+          log.topics[0]?.toLowerCase() ?? null,
+          log.topics[1]?.toLowerCase() ?? null,
+          log.topics[2]?.toLowerCase() ?? null,
+          log.topics[3]?.toLowerCase() ?? null,
+          log.data.toLowerCase(),
+        );
+        const placeholders = Array.from(
+          { length: columnsPerRow },
+          (_unused, columnIndex) => `$${offset + columnIndex + 1}`,
+        );
+        return `(${placeholders.join(", ")})`;
+      });
+      await client.query(
+        `INSERT INTO ${this.qTransactionLogs} (
+          block_number, position, log_index, hash, address, topic0, topic1, topic2, topic3, data
+        ) VALUES ${values.join(", ")}`,
+        params,
+      );
+    }
   }
 
   /**
@@ -2064,6 +2172,7 @@ export class ScannerStorage {
       transaction_fee_wei: string;
       status: string | null;
       contract_address: string | null;
+      log_count: number | null;
     }>(sql, params);
 
     return result.rows.map(mapTransactionRow);
@@ -2211,30 +2320,7 @@ export class ScannerStorage {
 
   async getTransactionByHash(hash: string): Promise<StoredTransaction | null> {
     const result = await this.db.query<TransactionRow>(
-      `SELECT
-        block_number,
-        block_date,
-        base_block_fee_wei,
-        position,
-        hash,
-        from_address,
-        to_address,
-        transaction_type,
-        nonce,
-        value_wei,
-        gas_limit,
-        gas_used,
-        input_data_size_bytes,
-        input_data_compressed_size_bytes,
-        cumulative_gas_used,
-        gas_price_wei,
-        max_fee_per_gas_wei,
-        max_priority_fee_per_gas_wei,
-        effective_gas_price_wei,
-        priority_fee_wei,
-        transaction_fee_wei,
-        status,
-        contract_address
+      `SELECT ${TRANSACTION_SELECT_COLUMNS.join(", ")}
       FROM ${this.qTransactions}
       WHERE hash = $1
       LIMIT 1`,
@@ -2242,6 +2328,56 @@ export class ScannerStorage {
     );
     const row = result.rows[0];
     return row ? mapTransactionRow(row) : null;
+  }
+
+  /** Stored event logs of one transaction, in log-index order. */
+  async getLogsForTransaction(hash: string): Promise<StoredLog[]> {
+    const result = await this.db.query<LogRow>(
+      `SELECT ${LOG_SELECT_COLUMNS}
+       FROM ${this.qTransactionLogs}
+       WHERE hash = $1
+       ORDER BY log_index ASC`,
+      [hash.toLowerCase()],
+    );
+    return result.rows.map(mapLogRow);
+  }
+
+  /**
+   * eth_getLogs over stored data: an inclusive block range (capped at
+   * MAX_LOG_QUERY_BLOCKS) filtered by address and per-position topics. Throws
+   * when more than `limit` logs match so callers narrow the filter instead of
+   * receiving a silently truncated list.
+   */
+  async queryLogs(filter: LogQueryFilter): Promise<StoredLog[]> {
+    if (filter.toBlock < filter.fromBlock) return [];
+    if (filter.toBlock - filter.fromBlock + 1n > BigInt(MAX_LOG_QUERY_BLOCKS)) {
+      throw new Error(`Log queries are limited to ${MAX_LOG_QUERY_BLOCKS} blocks`);
+    }
+    const limit = resolveLimit(filter.limit, MAX_LOGS_PER_QUERY);
+    const params: Array<string | number> = [filter.fromBlock.toString(), filter.toBlock.toString()];
+    const clauses = [`block_number >= $1`, `block_number <= $2`];
+    if (filter.addresses && filter.addresses.length > 0) {
+      params.push(textArrayLiteral(filter.addresses.map((address) => address.toLowerCase())));
+      clauses.push(`address = ANY($${params.length}::text[])`);
+    }
+    (filter.topics ?? []).forEach((options, index) => {
+      if (index > 3 || !options || options.length === 0) return;
+      params.push(textArrayLiteral(options.map((topic) => topic.toLowerCase())));
+      clauses.push(`topic${index} = ANY($${params.length}::text[])`);
+    });
+    params.push(limit + 1);
+    const result = await this.db.query<LogRow>(
+      `SELECT ${LOG_SELECT_COLUMNS}
+       FROM ${this.qTransactionLogs}
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY block_number ASC, position ASC, log_index ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    if (result.rows.length > limit) {
+      throw new Error(`Query returned more than ${limit} logs; narrow the block range or filter`);
+    }
+    return result.rows.map(mapLogRow);
   }
 
   async queryTransactionRecords(
@@ -3259,6 +3395,38 @@ interface TransactionRow {
   transaction_fee_wei: string;
   status: string | null;
   contract_address: string | null;
+  /** Absent on transaction_records rows, which never carry logs. */
+  log_count?: number | null;
+}
+
+const LOG_SELECT_COLUMNS =
+  "block_number::text AS block_number, position, log_index, hash, address, topic0, topic1, topic2, topic3, data";
+
+interface LogRow {
+  block_number: string;
+  position: number;
+  log_index: number;
+  hash: string;
+  address: string;
+  topic0: string | null;
+  topic1: string | null;
+  topic2: string | null;
+  topic3: string | null;
+  data: string;
+}
+
+function mapLogRow(row: LogRow): StoredLog {
+  return {
+    blockNumber: BigInt(row.block_number),
+    position: row.position,
+    logIndex: row.log_index,
+    hash: row.hash,
+    address: row.address,
+    topics: [row.topic0, row.topic1, row.topic2, row.topic3].filter(
+      (topic): topic is string => topic !== null,
+    ),
+    data: row.data,
+  };
 }
 
 function emptyTransactionRecordsByCategory(): StoredTransactionRecordsByCategory {
@@ -3420,6 +3588,7 @@ function mapTransactionRow(row: TransactionRow): StoredTransaction {
     transactionFeeWei: row.transaction_fee_wei,
     status: row.status,
     contractAddress: row.contract_address as Hex | null,
+    logCount: row.log_count ?? null,
   };
 }
 

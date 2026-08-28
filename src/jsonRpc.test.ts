@@ -19,6 +19,7 @@ import type {
   ScannerProgress,
   ScannerStorage,
   StoredBlock,
+  StoredLog,
   StoredTransaction,
 } from "./storage";
 import type { InspectedTransaction } from "./blockInspector";
@@ -33,6 +34,7 @@ interface FakeChain {
   progress?: ScannerProgress;
   blocks?: StoredBlock[];
   transactions?: StoredTransaction[];
+  logs?: StoredLog[];
 }
 
 function fakeBlock(overrides: Partial<StoredBlock> & { blockNumber: number }): StoredBlock {
@@ -79,6 +81,7 @@ function fakeTransaction(
     transactionFeeWei: "21210000",
     status: "1",
     contractAddress: null,
+    logCount: null,
     ...overrides,
   };
 }
@@ -86,6 +89,7 @@ function fakeTransaction(
 function fakeSource(chain: FakeChain): JsonRpcDataSource {
   const blocks = [...(chain.blocks ?? [])].sort((a, b) => a.blockNumber - b.blockNumber);
   const transactions = chain.transactions ?? [];
+  const logs = chain.logs ?? [];
   const progress: ScannerProgress = chain.progress ?? {
     ...(blocks.length > 0 ? { lastSuccessfulBlock: BigInt(blocks[blocks.length - 1]!.blockNumber) } : {}),
   };
@@ -113,6 +117,22 @@ function fakeSource(chain: FakeChain): JsonRpcDataSource {
       transactions.find((tx) => tx.hash.toLowerCase() === hash.toLowerCase()) ?? null,
     getTransactionByBlockAndPosition: async (blockNumber, position) =>
       transactions.find((tx) => BigInt(tx.blockNumber) === blockNumber && tx.position === position) ?? null,
+    getLogsForTransaction: async (hash) =>
+      logs.filter((log) => log.hash === hash.toLowerCase()).sort((a, b) => a.logIndex - b.logIndex),
+    queryLogs: async (filter) => {
+      if (filter.toBlock - filter.fromBlock + 1n > 10_000n) throw new Error("Log queries are limited to 10000 blocks");
+      const matched = logs
+        .filter(
+          (log) =>
+            log.blockNumber >= filter.fromBlock &&
+            log.blockNumber <= filter.toBlock &&
+            (!filter.addresses?.length || filter.addresses.includes(log.address)) &&
+            (filter.topics ?? []).every((options, index) => !options?.length || (log.topics[index] !== undefined && options.includes(log.topics[index]!))),
+        )
+        .sort((a, b) => Number(a.blockNumber - b.blockNumber) || a.position - b.position || a.logIndex - b.logIndex);
+      if (matched.length > (filter.limit ?? 10_000)) throw new Error("Query returned more than 10000 logs; narrow the block range or filter");
+      return matched;
+    },
     getSentTransactionCount: async (address, upToBlock) => {
       const nonces = transactions
         .filter(
@@ -398,7 +418,16 @@ describe("blocks, transactions and receipts", () => {
     position: 0,
     hash: `0x${"a".repeat(64)}`,
     contractAddress: "0xCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCc",
+    logCount: 2,
   });
+  const REGISTRY = "0x4400000000000000000000000000000000000044";
+  const CREATED = `0x${"b2".repeat(32)}`;
+  const EXTENDED = `0x${"40".repeat(32)}`;
+  const ENTITY = `0x${"e1".repeat(32)}`;
+  const OWNER_TOPIC = `0x${"00".repeat(12)}${"aa".repeat(20)}`;
+  const logA0: StoredLog = { blockNumber: 7n, position: 0, logIndex: 0, hash: txA.hash, address: REGISTRY, topics: [CREATED, ENTITY, OWNER_TOPIC], data: "0x01" };
+  const logA1: StoredLog = { blockNumber: 7n, position: 0, logIndex: 1, hash: txA.hash, address: REGISTRY, topics: [EXTENDED, ENTITY, OWNER_TOPIC], data: "0x02" };
+  const logOther: StoredLog = { blockNumber: 8n, position: 0, logIndex: 0, hash: `0x${"9".repeat(64)}`, address: `0x${"55".repeat(20)}`, topics: [CREATED], data: "0x" };
   const txB = fakeTransaction({
     blockNumber: 7,
     position: 2, // position 1 was the filtered system transaction
@@ -425,6 +454,54 @@ describe("blocks, transactions and receipts", () => {
       fakeBlock({ blockNumber: 8, blockHash: null, transactionCount: 0 }),
     ],
     transactions: [txA, txB],
+    logs: [logA0, logA1, logOther],
+  });
+
+  test("eth_getLogs filters by range, address and positional topics", async () => {
+    const all = (await result(source, "eth_getLogs", [{ fromBlock: "0x1", toBlock: "latest" }])) as Array<Record<string, unknown>>;
+    expect(all.map((log) => [log.blockNumber, log.logIndex, log.blockHash])).toEqual([
+      ["0x7", "0x0", BLOCK_7_HASH],
+      ["0x7", "0x1", BLOCK_7_HASH],
+      ["0x8", "0x0", null],
+    ]);
+    expect(all[0]).toEqual({
+      address: REGISTRY,
+      topics: [CREATED, ENTITY, OWNER_TOPIC],
+      data: "0x01",
+      blockNumber: "0x7",
+      transactionHash: txA.hash,
+      transactionIndex: "0x0",
+      blockHash: BLOCK_7_HASH,
+      logIndex: "0x0",
+      removed: false,
+    });
+    // Default range is latest..latest.
+    expect((await result(source, "eth_getLogs", [{}])) as unknown[]).toHaveLength(1);
+    // toBlock beyond the indexed head is clamped, not an error.
+    expect((await result(source, "eth_getLogs", [{ fromBlock: "0x7", toBlock: "0x7fffffff" }])) as unknown[]).toHaveLength(3);
+    // Address (single and list) and topics (single, alternatives, null wildcard).
+    expect((await result(source, "eth_getLogs", [{ fromBlock: "0x0", toBlock: "latest", address: REGISTRY }])) as unknown[]).toHaveLength(2);
+    expect((await result(source, "eth_getLogs", [{ fromBlock: "0x0", toBlock: "latest", address: [REGISTRY, `0x${"55".repeat(20)}`] }])) as unknown[]).toHaveLength(3);
+    expect((await result(source, "eth_getLogs", [{ fromBlock: "0x0", toBlock: "latest", topics: [EXTENDED] }])) as unknown[]).toHaveLength(1);
+    expect((await result(source, "eth_getLogs", [{ fromBlock: "0x0", toBlock: "latest", topics: [[CREATED, EXTENDED], ENTITY] }])) as unknown[]).toHaveLength(2);
+    expect((await result(source, "eth_getLogs", [{ fromBlock: "0x0", toBlock: "latest", topics: [null, ENTITY] }])) as unknown[]).toHaveLength(2);
+    expect((await result(source, "eth_getLogs", [{ fromBlock: "0x0", toBlock: "latest", topics: [null, `0x${"77".repeat(32)}`] }])) as unknown[]).toHaveLength(0);
+    // blockHash addressing.
+    expect((await result(source, "eth_getLogs", [{ blockHash: BLOCK_7_HASH }])) as unknown[]).toHaveLength(2);
+    // Empty and reversed ranges.
+    expect(await result(source, "eth_getLogs", [{ fromBlock: "0x8", toBlock: "0x7" }])).toEqual([]);
+
+    for (const [params, code] of [
+      [[{ blockHash: `0x${"1".repeat(64)}` }], JSON_RPC_SERVER_ERROR],
+      [[{ blockHash: BLOCK_7_HASH, fromBlock: "0x1" }], JSON_RPC_INVALID_PARAMS],
+      [[{ address: "0x12" }], JSON_RPC_INVALID_PARAMS],
+      [[{ topics: "0x12" }], JSON_RPC_INVALID_PARAMS],
+      [[{ topics: [null, null, null, null, null] }], JSON_RPC_INVALID_PARAMS],
+      [["latest"], JSON_RPC_INVALID_PARAMS],
+    ] as const) {
+      const response = await call(source, "eth_getLogs", [...params]);
+      expect(response.error?.code).toBe(code);
+    }
   });
 
   test("hash-addressed lookups resolve through the stored block hash", async () => {
@@ -531,7 +608,7 @@ describe("blocks, transactions and receipts", () => {
     expect(await result(source, "eth_getTransactionByBlockNumberAndIndex", ["0x9", "0x0"])).toBeNull();
   });
 
-  test("eth_getTransactionReceipt maps receipt fields and nulls logs", async () => {
+  test("eth_getTransactionReceipt maps receipt fields and stored logs", async () => {
     const receipt = (await result(source, "eth_getTransactionReceipt", [txA.hash])) as Record<string, unknown>;
     expect(receipt).toEqual({
       transactionHash: txA.hash,
@@ -544,13 +621,41 @@ describe("blocks, transactions and receipts", () => {
       gasUsed: "0x5208",
       effectiveGasPrice: "0x3f2",
       contractAddress: "0xcccccccccccccccccccccccccccccccccccccccc",
-      logs: null,
+      logs: [
+        {
+          address: REGISTRY,
+          topics: [CREATED, ENTITY, OWNER_TOPIC],
+          data: "0x01",
+          blockNumber: "0x7",
+          transactionHash: txA.hash,
+          transactionIndex: "0x0",
+          blockHash: BLOCK_7_HASH,
+          logIndex: "0x0",
+          removed: false,
+        },
+        {
+          address: REGISTRY,
+          topics: [EXTENDED, ENTITY, OWNER_TOPIC],
+          data: "0x02",
+          blockNumber: "0x7",
+          transactionHash: txA.hash,
+          transactionIndex: "0x0",
+          blockHash: BLOCK_7_HASH,
+          logIndex: "0x1",
+          removed: false,
+        },
+      ],
       logsBloom: null,
       status: "0x1",
       type: "0x2",
     });
+    // Stored before logs were kept → null; stored with no events → [].
     const failed = (await result(source, "eth_getTransactionReceipt", [txB.hash])) as Record<string, unknown>;
     expect(failed.status).toBe("0x0");
+    expect(failed.logs).toBeNull();
+    const quiet = fakeSource({ blocks: [fakeBlock({ blockNumber: 1 })], transactions: [fakeTransaction({ blockNumber: 1, position: 0, logCount: 0 })] });
+    const noEvents = (await result(quiet, "eth_getTransactionReceipt", [`0x${"10".padEnd(64, "a")}`])) as Record<string, unknown>;
+    expect(noEvents.logs).toEqual([]);
     expect(await result(source, "eth_getTransactionReceipt", [`0x${"f".repeat(64)}`])).toBeNull();
   });
 
@@ -733,8 +838,17 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       }),
       { kind: "lastSuccessfulBlock" },
       [
-        inspectedTransactionFixture({ position: 0, hash: txHash(1), nonce: "0", priorityFeeWei: "30" }),
-        inspectedTransactionFixture({ position: 2, hash: txHash(2), nonce: "1", priorityFeeWei: "5" }),
+        inspectedTransactionFixture({
+          position: 0,
+          hash: txHash(1),
+          nonce: "0",
+          priorityFeeWei: "30",
+          logs: [
+            { logIndex: 0, address: "0x4400000000000000000000000000000000000044", topics: [`0x${"b2".repeat(32)}`, `0x${"e1".repeat(32)}`], data: "0x01" },
+            { logIndex: 1, address: "0x4400000000000000000000000000000000000044", topics: [`0x${"40".repeat(32)}`, `0x${"e1".repeat(32)}`], data: "0x" },
+          ],
+        }),
+        inspectedTransactionFixture({ position: 2, hash: txHash(2), nonce: "1", priorityFeeWei: "5", logs: [] }),
       ],
     );
     await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 2n }), { kind: "lastSuccessfulBlock" }, []);
@@ -781,9 +895,27 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       { blockNumber: 3n, minPriorityFeeWei: 12n },
     ]);
 
+    // Logs: counted on the transaction row, rows in transaction_logs, null when the receipt had none.
+    expect((await storage.getTransactionByHash(txHash(1)))?.logCount).toBe(2);
+    expect((await storage.getTransactionByHash(txHash(2)))?.logCount).toBe(0);
+    expect((await storage.getTransactionByHash(txHash(3)))?.logCount).toBeNull();
+    expect(await storage.getLogsForTransaction(txHash(1).toUpperCase().replace("0X", "0x"))).toEqual([
+      { blockNumber: 1n, position: 0, logIndex: 0, hash: txHash(1), address: "0x4400000000000000000000000000000000000044", topics: [`0x${"b2".repeat(32)}`, `0x${"e1".repeat(32)}`], data: "0x01" },
+      { blockNumber: 1n, position: 0, logIndex: 1, hash: txHash(1), address: "0x4400000000000000000000000000000000000044", topics: [`0x${"40".repeat(32)}`, `0x${"e1".repeat(32)}`], data: "0x" },
+    ]);
+    expect(await storage.getLogsForTransaction(txHash(2))).toEqual([]);
+    expect((await storage.queryLogs({ fromBlock: 0n, toBlock: 10n })).length).toBe(2);
+    expect((await storage.queryLogs({ fromBlock: 0n, toBlock: 10n, topics: [[`0x${"40".repeat(32)}`]] })).length).toBe(1);
+    expect((await storage.queryLogs({ fromBlock: 0n, toBlock: 10n, topics: [undefined, [`0x${"e1".repeat(32)}`]] })).length).toBe(2);
+    expect((await storage.queryLogs({ fromBlock: 0n, toBlock: 10n, addresses: [`0x${"55".repeat(20)}`] })).length).toBe(0);
+    await expect(storage.queryLogs({ fromBlock: 0n, toBlock: 10n, limit: 1 })).rejects.toThrow("more than 1 logs");
+    await expect(storage.queryLogs({ fromBlock: 0n, toBlock: 20_000n })).rejects.toThrow("limited to 10000 blocks");
+
     // Re-saving a block without a hash keeps the stored one.
     await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 1n, transactionCount: 2 }), { kind: "lastSuccessfulBlock" }, []);
     expect((await storage.getBlockByNumber(1n))?.blockHash).toBe(BLOCK_1_HASH);
+    // Replacing a block's transactions replaces its logs too.
+    expect(await storage.queryLogs({ fromBlock: 1n, toBlock: 1n })).toEqual([]);
   });
 
   test("POST /rpc serves batches from storage; other verbs are rejected", async () => {
@@ -804,12 +936,13 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
           { jsonrpc: "2.0", id: 7, method: "web3_clientVersion", params: [] },
           { jsonrpc: "2.0", id: 8, method: "eth_getBlockByHash", params: [BLOCK_1_HASH, false] },
           { jsonrpc: "2.0", id: 9, method: "eth_getTransactionReceipt", params: [txHash(1)] },
+          { jsonrpc: "2.0", id: 10, method: "eth_getLogs", params: [{ fromBlock: "0x0", toBlock: "latest", topics: [null, `0x${"e1".repeat(32)}`] }] },
         ]),
       });
       expect(response.status).toBe(200);
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
       const batch = (await response.json()) as JsonRpcResponse[];
-      expect(batch.map((entry) => entry.error)).toEqual(Array(9).fill(undefined));
+      expect(batch.map((entry) => entry.error)).toEqual(Array(10).fill(undefined));
       expect(batch[0]!.result).toBe("0x92a1e");
       expect(batch[1]!.result).toBe("0x3");
       expect(batch[2]!.result).toBe("0x2");
@@ -825,7 +958,10 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       expect((batch[3]!.result as { hash: string }).hash).toBe(BLOCK_1_HASH);
       expect((batch[7]!.result as { number: string }).number).toBe("0x1");
       expect((batch[8]!.result as { blockHash: string }).blockHash).toBe(BLOCK_1_HASH);
-      expect((batch[4]!.result as { blockHash: string | null }).blockHash).toBeNull();
+      expect((batch[4]!.result as { blockHash: string | null; logs: unknown }).blockHash).toBeNull();
+      expect((batch[4]!.result as { logs: unknown }).logs).toBeNull();
+      expect(((batch[8]!.result as { logs: Array<{ logIndex: string; blockHash: string }> }).logs).map((l) => [l.logIndex, l.blockHash])).toEqual([["0x0", BLOCK_1_HASH], ["0x1", BLOCK_1_HASH]]);
+      expect((batch[9]!.result as unknown[]).length).toBe(2);
 
       const parseError = await fetch(`${base}/rpc`, { method: "POST", body: "nope" });
       expect(parseError.status).toBe(200);

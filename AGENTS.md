@@ -29,8 +29,8 @@ docker compose up --build
   `COMMIT` / `ROLLBACK`).
 - Preserve wei and gas precision. Store large integer values as decimal strings and use `bigint` for calculations.
 - Fetch transaction receipts sequentially for the current block so the scanner handles transactions one by one.
-- Transaction payloads/calldata are never persisted — only Arkiv operation metadata, the payload size, and the
-  transaction hash. The decoder's `payload.hex` / `payload.text` and the raw `input` field must never reach the
+- Transaction payloads/calldata are never persisted — only Arkiv operation metadata, the payload size, the
+  transaction hash, and receipt event logs (address, topics, ABI data — `transaction_logs`). The decoder's `payload.hex` / `payload.text` and the raw `input` field must never reach the
   database. This holds under reference mode too: we persist the payload reference's receipt metadata
   (`payload_reference`) and the verification verdict (`reference_verification`), but never the referenced entity
   bytes (the bytes live in the payload provider, not on-chain).
@@ -106,7 +106,10 @@ docker compose up --build
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
   calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns
-  were added and deliberately not backfilled (older rows stay null and hash lookups of them return null). The
+  were added and deliberately not backfilled (older rows stay null and hash lookups of them return null).
+  Receipt logs follow the same rule: `transaction_logs` rows are written with the block's transaction rows
+  (`replaceTransactionsForBlock`), `transactions.log_count` is null for pre-logs rows so receipts can answer
+  `logs: null` instead of `[]`, and `eth_getLogs` is capped at 10,000 blocks / 10,000 logs per call. The
   method handlers take a `JsonRpcDataSource` (a structural subset of `ScannerStorage`) so they unit-test
   against an in-memory fake; `eth_feeHistory` reproduces geth's gas-weighted percentile walk and the
   gas-price oracle its 60th-percentile-of-per-block-minimum-tip rule. The scanner persists `chain_id` into

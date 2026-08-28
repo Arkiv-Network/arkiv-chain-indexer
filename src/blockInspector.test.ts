@@ -43,6 +43,32 @@ describe("inspectBlockFromRpc", () => {
     });
   });
 
+  test("keeps receipt logs lowercased with their block log index, and marks receipts without a logs field", () => {
+    const receipts = receiptsFixture();
+    receipts[0]!.logs = [
+      {
+        address: "0x4400000000000000000000000000000000000044",
+        topics: [`0x${"AB".repeat(32)}`, `0x${"CD".repeat(32)}`],
+        data: "0x00FF",
+        logIndex: "0x3",
+      },
+      { address: "0x4400000000000000000000000000000000000044", topics: [], data: "0x" },
+    ];
+    receipts[1]!.logs = [];
+    const inspected = inspectBlockFromRpc(blockFixture(), receipts);
+    expect(inspected.transactions[0]!.logs).toEqual([
+      {
+        logIndex: 3,
+        address: "0x4400000000000000000000000000000000000044",
+        topics: [`0x${"ab".repeat(32)}`, `0x${"cd".repeat(32)}`],
+        data: "0x00ff",
+      },
+      { logIndex: 1, address: "0x4400000000000000000000000000000000000044", topics: [], data: "0x" },
+    ]);
+    expect(inspected.transactions[1]!.logs).toEqual([]);
+    expect(inspectBlockFromRpc(blockFixture(), receiptsFixture()).transactions[0]!.logs).toBeUndefined();
+  });
+
   test("requires one receipt per transaction", () => {
     expect(() => inspectBlockFromRpc(blockFixture(), receiptsFixture().slice(0, 1))).toThrow(
       /Receipt count/,

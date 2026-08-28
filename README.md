@@ -784,11 +784,12 @@ Two things differ from a node and are deliberate:
   tags all resolve to `scanner_state.last_successful_block`, not the chain head. `eth_syncing` reports the gap
   (`false` once the scanner is within a few blocks of the observed head). `earliest` is the oldest stored block.
 - **Fields the scanner does not persist are `null`.** Block, transaction and receipt objects keep the standard
-  shape, but roots, miner, `logsBloom`, signatures (`v`/`r`/`s`) and receipt `logs` come back as `null` until
-  those are indexed. `input` is always `null`: calldata is never stored. Block `hash` / `parentHash` (and the
-  `blockHash` on transactions and receipts) are stored for every block scanned since the columns were added;
-  blocks scanned before that keep `null` (there is no backfill), and hash-addressed lookups of those answer
-  `null` like a node does for an unknown hash.
+  shape, but roots, miner, `logsBloom` and signatures (`v`/`r`/`s`) come back as `null` until those are
+  indexed. `input` is always `null`: calldata is never stored. Block `hash` / `parentHash` (and the `blockHash`
+  on transactions, receipts and logs) plus receipt event logs (`transaction_logs`: address, topics, data) are
+  stored for every block scanned since those columns were added; blocks scanned before that keep `null` (there
+  is no backfill) — hash-addressed lookups of those answer `null` like a node does for an unknown hash, and
+  their receipts report `logs: null` rather than `[]` so "not indexed" is distinguishable from "no events".
 
 Transaction counts and listings only cover stored rows — the scanner drops the chain's system transaction
 (sender `0xDeaD…0001`), so a block's `transactions` array and `eth_getBlockTransactionCountByNumber` are one
@@ -807,12 +808,13 @@ lower than a node reports on blocks that carry it; `transactionIndex` keeps the 
 | `eth_getBlockByNumber(tag, full)`, `eth_getBlockByHash(hash, full)` | Stored block; hashes or full transaction objects. `{ "blockHash": … }` block parameters work too. |
 | `eth_getBlockTransactionCountByNumber(tag)`, `eth_getBlockTransactionCountByHash(hash)` | Stored transaction count. |
 | `eth_getTransactionByHash`, `eth_getTransactionByBlockNumberAndIndex`, `eth_getTransactionByBlockHashAndIndex` | Stored transaction object. |
-| `eth_getTransactionReceipt(hash)` | Stored receipt fields (`status`, `gasUsed`, `cumulativeGasUsed`, `effectiveGasPrice`, `contractAddress`); `logs` is `null`. |
+| `eth_getTransactionReceipt(hash)` | Stored receipt fields (`status`, `gasUsed`, `cumulativeGasUsed`, `effectiveGasPrice`, `contractAddress`) and stored `logs` (`null` for pre-logs rows). |
+| `eth_getLogs(filter)` | Stored logs matching `fromBlock`/`toBlock` (default `latest`, `toBlock` clamped to the indexed head) or `blockHash`, `address` (one or a list) and positional `topics` (value, list of alternatives, or `null`). At most 10,000 blocks per call and 10,000 matching logs, otherwise error `-32000`. |
 | `eth_getUncle*` | No uncles: counts are `0x0`, lookups `null`. |
 
 Transaction-backed methods return `-32000` when transaction data is disabled. Unknown methods return
-`-32601`, so state methods (`eth_call`, `eth_getBalance`, `eth_getLogs`, `eth_sendRawTransaction`, …) fail
-fast instead of silently hitting a node.
+`-32601`, so state methods (`eth_call`, `eth_getBalance`, `eth_sendRawTransaction`, …) fail fast instead of
+silently hitting a node.
 
 Example:
 

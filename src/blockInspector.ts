@@ -1,7 +1,15 @@
 import { hexToBigInt } from "./math";
 import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { BatcherMetrics } from "./batcher";
-import type { Hex, RpcBlock, RpcReceipt, RpcTransaction } from "./types";
+import type { Hex, RpcBlock, RpcLog, RpcReceipt, RpcTransaction } from "./types";
+
+export interface InspectedLog {
+  /** Index of the log within its block (the receipt's `logIndex`). */
+  logIndex: number;
+  address: Hex;
+  topics: Hex[];
+  data: Hex;
+}
 
 export interface InspectedTransaction {
   position: number;
@@ -24,6 +32,12 @@ export interface InspectedTransaction {
   transactionFeeWei: string;
   status: string | null;
   contractAddress: Hex | null;
+  /**
+   * Event logs from the receipt (address, topics, data — never calldata).
+   * Undefined when the receipt carried no `logs` field at all, which storage
+   * records as "not indexed" rather than "no events".
+   */
+  logs?: InspectedLog[];
 }
 
 export interface InspectedBlock extends BatcherMetrics {
@@ -126,7 +140,17 @@ function inspectTransaction(
     transactionFeeWei: transactionFee.toString(),
     status: hexToDecimalString(receipt.status),
     contractAddress: receipt.contractAddress ?? null,
+    ...(receipt.logs === undefined ? {} : { logs: inspectLogs(receipt.logs) }),
   };
+}
+
+function inspectLogs(logs: RpcLog[]): InspectedLog[] {
+  return logs.map((log, index) => ({
+    logIndex: log.logIndex === undefined ? index : Number(hexToBigInt(log.logIndex)),
+    address: log.address.toLowerCase() as Hex,
+    topics: log.topics.map((topic) => topic.toLowerCase() as Hex),
+    data: (log.data ? log.data.toLowerCase() : "0x") as Hex,
+  }));
 }
 
 function hexToDecimalString(value: Hex | undefined | null): string | null {

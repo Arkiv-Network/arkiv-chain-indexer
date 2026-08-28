@@ -16,6 +16,9 @@
  *   added; older rows carry `null`, and hash-addressed lookups of such blocks
  *   answer `null` ("unknown block") like a node would for a hash it has never
  *   seen.
+ * - Receipt logs are stored the same way (`transaction_logs`, no backfill):
+ *   receipts of older transactions report `logs: null`, newer ones the real
+ *   list, and `eth_getLogs` only sees what is stored.
  *
  * `eth_blockNumber` and the `latest` tag mean the *indexed* head
  * (`scanner_state.last_successful_block`), not the chain head; `eth_syncing`
@@ -24,12 +27,14 @@
 import { computeSyncStatus, type ScanSample } from "./syncStatus";
 import type {
   BlockQueryFilter,
+  LogQueryFilter,
   PriorityFeeSample,
   ScannerProgress,
   StoredBlock,
+  StoredLog,
   StoredTransaction,
 } from "./storage";
-import { MAX_FEE_HISTORY_BLOCKS } from "./storage";
+import { MAX_FEE_HISTORY_BLOCKS, MAX_LOG_QUERY_BLOCKS } from "./storage";
 
 /** The storage surface the RPC layer needs; `ScannerStorage` satisfies it. */
 export interface JsonRpcDataSource {
@@ -47,6 +52,8 @@ export interface JsonRpcDataSource {
     position: number,
   ): Promise<StoredTransaction | null>;
   getSentTransactionCount(address: string, upToBlock?: bigint): Promise<bigint>;
+  getLogsForTransaction(hash: string): Promise<StoredLog[]>;
+  queryLogs(filter: LogQueryFilter): Promise<StoredLog[]>;
   getPriorityFeeSamples(fromBlock: bigint, toBlock: bigint): Promise<PriorityFeeSample[]>;
   getMinPriorityFeePerBlock(
     fromBlock: bigint,
@@ -146,6 +153,7 @@ export const JSON_RPC_METHODS = [
   "eth_getTransactionByBlockHashAndIndex",
   "eth_getBlockTransactionCountByHash",
   "eth_getTransactionReceipt",
+  "eth_getLogs",
 ] as const;
 
 export type JsonRpcMethod = (typeof JSON_RPC_METHODS)[number];
@@ -162,6 +170,7 @@ const TRANSACTION_DATA_METHODS: ReadonlySet<string> = new Set<JsonRpcMethod>([
   "eth_getTransactionByBlockNumberAndIndex",
   "eth_getTransactionByBlockHashAndIndex",
   "eth_getTransactionReceipt",
+  "eth_getLogs",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -516,7 +525,73 @@ const METHODS: Record<string, MethodHandler> = {
     const hash = parseHashParam(params[0], "transactionHash");
     const transaction = await storage.getTransactionByHash(hash);
     if (!transaction) return null;
-    return receiptObject(transaction, await blockHashOf(transaction, storage));
+    const blockHash = await blockHashOf(transaction, storage);
+    const logs =
+      transaction.logCount === null
+        ? null
+        : transaction.logCount === 0
+          ? []
+          : (await storage.getLogsForTransaction(hash)).map((log) => logObject(log, blockHash));
+    return receiptObject(transaction, blockHash, logs);
+  },
+
+  eth_getLogs: async (params, { storage }) => {
+    expectParamCount(params, 1);
+    const filter = params[0];
+    if (!isPlainObject(filter)) {
+      throw invalidParams("filter must be an object");
+    }
+    let fromBlock: bigint;
+    let toBlock: bigint;
+    if (filter.blockHash !== undefined) {
+      if (filter.fromBlock !== undefined || filter.toBlock !== undefined) {
+        throw invalidParams("blockHash cannot be combined with fromBlock/toBlock");
+      }
+      const block = await storage.getBlockByHash(parseHashParam(filter.blockHash, "blockHash"));
+      if (!block) {
+        throw new JsonRpcError(JSON_RPC_SERVER_ERROR, "unknown block");
+      }
+      fromBlock = toBlock = BigInt(block.blockNumber);
+    } else {
+      const head = await indexedHead(storage);
+      if (head === undefined) return [];
+      const from = await resolveBlockTag(filter.fromBlock ?? "latest", storage);
+      const to = await resolveBlockTag(filter.toBlock ?? "latest", storage);
+      if (from === undefined || to === undefined) return [];
+      fromBlock = from;
+      toBlock = to > head ? head : to;
+    }
+    if (toBlock < fromBlock) {
+      return [];
+    }
+    if (toBlock - fromBlock + 1n > BigInt(MAX_LOG_QUERY_BLOCKS)) {
+      throw new JsonRpcError(
+        JSON_RPC_SERVER_ERROR,
+        `block range too large: at most ${MAX_LOG_QUERY_BLOCKS} blocks per eth_getLogs call`,
+      );
+    }
+    const query: LogQueryFilter = { fromBlock, toBlock };
+    const addresses = parseAddressFilter(filter.address);
+    if (addresses) query.addresses = addresses;
+    const topics = parseTopicsFilter(filter.topics);
+    if (topics) query.topics = topics;
+    let logs: StoredLog[];
+    try {
+      logs = await storage.queryLogs(query);
+    } catch (error) {
+      throw new JsonRpcError(JSON_RPC_SERVER_ERROR, error instanceof Error ? error.message : String(error));
+    }
+    const blockHashes = new Map<bigint, string | null>();
+    const result: Record<string, unknown>[] = [];
+    for (const log of logs) {
+      let blockHash = blockHashes.get(log.blockNumber);
+      if (blockHash === undefined) {
+        blockHash = (await storage.getBlockByNumber(log.blockNumber))?.blockHash ?? null;
+        blockHashes.set(log.blockNumber, blockHash);
+      }
+      result.push(logObject(log, blockHash));
+    }
+    return result;
   },
 };
 
@@ -761,7 +836,25 @@ function transactionObject(
   };
 }
 
-function receiptObject(transaction: StoredTransaction, blockHash: string | null): Record<string, unknown> {
+function logObject(log: StoredLog, blockHash: string | null): Record<string, unknown> {
+  return {
+    address: log.address,
+    topics: log.topics,
+    data: log.data,
+    blockNumber: quantity(log.blockNumber),
+    transactionHash: log.hash,
+    transactionIndex: quantity(BigInt(log.position)),
+    blockHash,
+    logIndex: quantity(BigInt(log.logIndex)),
+    removed: false,
+  };
+}
+
+function receiptObject(
+  transaction: StoredTransaction,
+  blockHash: string | null,
+  logs: Record<string, unknown>[] | null,
+): Record<string, unknown> {
   return {
     transactionHash: transaction.hash.toLowerCase(),
     transactionIndex: quantity(BigInt(transaction.position)),
@@ -773,9 +866,9 @@ function receiptObject(transaction: StoredTransaction, blockHash: string | null)
     gasUsed: quantity(BigInt(transaction.gasUsed)),
     effectiveGasPrice: quantity(BigInt(transaction.effectiveGasPriceWei)),
     contractAddress: lowerOrNull(transaction.contractAddress),
-    // Event logs are not indexed (yet); null rather than an empty array so a
-    // caller cannot mistake "unknown" for "no events".
-    logs: null,
+    // Null only for transactions stored before logs were kept, so a caller
+    // cannot mistake "unknown" for "no events".
+    logs,
     logsBloom: null,
     status: decimalToQuantity(transaction.status),
     type: decimalToQuantity(transaction.type) ?? "0x0",
@@ -849,6 +942,33 @@ function parseHashParam(value: unknown, name: string): string {
     throw invalidParams(`${name} must be a 32-byte hex hash`);
   }
   return value.toLowerCase();
+}
+
+function parseAddressFilter(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  const list = Array.isArray(value) ? value : [value];
+  return list.map((entry) => parseAddressParam(entry, "address"));
+}
+
+/**
+ * eth_getLogs topics: each position is null (any), a single topic, or a list
+ * of alternatives. Returns undefined when nothing is constrained.
+ */
+function parseTopicsFilter(value: unknown): Array<string[] | undefined> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    throw invalidParams("topics must be an array");
+  }
+  if (value.length > 4) {
+    throw invalidParams("topics supports at most 4 positions");
+  }
+  const topics = value.map((entry): string[] | undefined => {
+    if (entry === null || entry === undefined) return undefined;
+    const list = Array.isArray(entry) ? entry : [entry];
+    if (list.length === 0) return undefined;
+    return list.map((topic) => parseHashParam(topic, "topic"));
+  });
+  return topics.some((entry) => entry !== undefined) ? topics : undefined;
 }
 
 function parseBooleanParam(value: unknown, name: string): boolean {

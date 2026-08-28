@@ -31,6 +31,8 @@ export interface RpcLog {
   address: Hex;
   topics: Hex[];
   data: Hex;
+  /** Position of the log within the block; absent on some fixtures/nodes, then inferred per transaction. */
+  logIndex?: Hex;
 }
 
 export interface RpcReceipt {

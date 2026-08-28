@@ -2330,6 +2330,7 @@ function storedTransactionFixture() {
     transactionFeeWei: "2310000",
     status: "1",
     contractAddress: null,
+    logCount: null,
   };
 }
 
@@ -2341,6 +2342,7 @@ function transactionRecordFixture(
     recordValue: "21000",
     rank: 1,
     recordedAt: "2024-01-01T00:00:01.000Z",
+    logCount: null,
     blockNumber: 42,
     blockNumberDecimal: "42",
     blockDate: "2024-01-01T00:00:00.000Z",
