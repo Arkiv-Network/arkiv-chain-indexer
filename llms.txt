@@ -93,6 +93,7 @@ Related scanner and worker settings:
 | Baseload workers | Backend started with Baseload runtime; `BASELOAD_RPC_NODE` required to actually submit transactions | `/baseload` status is public; runtime-dependent writes fail if runtime is unavailable. |
 | Baseload admin protection | `BASELOAD_ADMIN_BEARER_TOKEN` | Mutating `/baseload`, all `/baseload/configs...`, and `/admin/verify`. |
 | Guzzlers | `REDIS_URL` or `SERVER_REDIS_URL` | `/guzzlers` and `/guzzler/:address`; disabled routes return `503`. |
+| JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
 
 ## Endpoint Index
 
@@ -101,6 +102,7 @@ Related scanner and worker settings:
 | `OPTIONS` | any | CORS preflight. |
 | `GET` | `/health` | Backend, scanner, database, feature, and guzzler cache health. |
 | `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
+| `POST` | `/rpc` | Read-only Ethereum JSON-RPC 2.0 served from stored data (no node behind it). |
 | `GET` | `/blocks` | Compact rows for stored per-block metrics. |
 | `GET` | `/blocks/:blockNumber` | One compact stored block row. |
 | `GET` | `/block/:blockNumber` | Stored block plus stored transaction rows for inspection. |
@@ -136,7 +138,7 @@ Returns:
   `indexesSizeBytes`, `totalSizeBytes`. `rowCount` is the Postgres planner estimate
   (exact counts would scan every table on each call), so it can trail the true count
   slightly between autovacuum analyzes.
-- `features`: booleans for `transactionData` and `guzzlers`.
+- `features`: booleans for `transactionData`, `guzzlers`, and `jsonRpc`.
 - `guzzlers`: Redis cache health: `enabled`, `entryCount`, `bucketCount`, `oldestBucket`,
   `newestBucket`, `totalSizeBytes`.
 - `sync`: the same object served by `GET /sync`.
@@ -160,6 +162,57 @@ Returns `ok`, `serverTimeUtc`, and `sync` with:
   `netCatchUpBlocksPerSecond`: measured throughput and trend.
 - `etaSeconds` / `etaUtc`: projected time to be in sync; `null` unless the state is `catching-up`.
 - `measuredBlocks`, `measuredWindowSeconds`: the sample window the rates were measured over.
+
+## `POST /rpc`
+
+A read-only Ethereum JSON-RPC 2.0 endpoint answered entirely from stored scanner data — the backend never
+forwards to a node. Single requests and batches (up to 100 entries, 1 MiB body) are accepted; every reply is
+HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, `ethers`, `cast`) can point at
+`/rpc` (or `/api/rpc` through the frontend proxy) directly. `GET /health` advertises it under
+`features.jsonRpc`.
+
+Two things differ from a node and are deliberate:
+
+- **`latest` means the indexed head.** `eth_blockNumber` and the `latest` / `pending` / `safe` / `finalized`
+  tags all resolve to `scanner_state.last_successful_block`, not the chain head. `eth_syncing` reports the gap
+  (`false` once the scanner is within a few blocks of the observed head). `earliest` is the oldest stored block.
+- **Fields the scanner does not persist are `null`.** Block, transaction and receipt objects keep the standard
+  shape, but block hashes, parent hashes, roots, miner, `logsBloom`, signatures (`v`/`r`/`s`) and receipt
+  `logs` come back as `null` until those are indexed. `input` is always `null`: calldata is never stored. Block
+  hashes are not indexed at all, so `eth_getBlockByHash`, `eth_getBlockTransactionCountByHash`,
+  `eth_getTransactionByBlockHashAndIndex` and `{ "blockHash": … }` block parameters fail with error `-32000`
+  rather than returning a misleading `null`.
+
+Transaction counts and listings only cover stored rows — the scanner drops the chain's system transaction
+(sender `0xDeaD…0001`), so a block's `transactions` array and `eth_getBlockTransactionCountByNumber` are one
+lower than a node reports on blocks that carry it; `transactionIndex` keeps the original on-chain position.
+
+| Method | Answer |
+| --- | --- |
+| `web3_clientVersion` | `arkiv-chain-indexer/v<version>[-<commit>]/bun-<version>`. |
+| `eth_chainId`, `net_version` | Chain id the scanner persisted at startup (`-32000` until it has). |
+| `net_listening`, `eth_mining`, `eth_hashrate`, `eth_accounts` | `true`, `false`, `0x0`, `[]`. |
+| `eth_blockNumber` | Indexed head. |
+| `eth_syncing` | `false`, or `{ startingBlock, currentBlock, highestBlock }` while behind. |
+| `eth_getTransactionCount(address, tag)` | Highest stored nonce sent by `address` up to `tag`, plus one (exact for EOAs). |
+| `eth_gasPrice`, `eth_maxPriorityFeePerGas` | geth's oracle over stored data: the 60th percentile of each of the last 20 blocks' cheapest tip; `eth_gasPrice` adds the indexed head's base fee. |
+| `eth_feeHistory(count, newest, percentiles?)` | Exact: per-block `baseFeePerGas`, `gasUsedRatio`, and gas-weighted `reward` percentiles from stored transactions (max 1,024 blocks). The closing "next block" base fee repeats the newest one when that block is not stored yet. |
+| `eth_getBlockByNumber(tag, full)` | Stored block; hashes or full transaction objects. |
+| `eth_getBlockTransactionCountByNumber(tag)` | Stored transaction count. |
+| `eth_getTransactionByHash`, `eth_getTransactionByBlockNumberAndIndex` | Stored transaction object. |
+| `eth_getTransactionReceipt(hash)` | Stored receipt fields (`status`, `gasUsed`, `cumulativeGasUsed`, `effectiveGasPrice`, `contractAddress`); `logs` is `null`. |
+| `eth_getUncle*` | No uncles: counts are `0x0`, lookups `null`. |
+
+Transaction-backed methods return `-32000` when transaction data is disabled. Unknown methods return
+`-32601`, so state methods (`eth_call`, `eth_getBalance`, `eth_getLogs`, `eth_sendRawTransaction`, …) fail
+fast instead of silently hitting a node.
+
+Example:
+
+```sh
+curl -s http://localhost:3000/rpc -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
+```
 
 ## `GET /blocks`
 

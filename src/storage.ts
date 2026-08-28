@@ -25,6 +25,10 @@ const BACKFILL_NEXT_BLOCK_KEY = "backfill_next_block";
 const LATEST_OBSERVED_BLOCK_KEY = "latest_observed_block";
 const SAFE_HEAD_BLOCK_KEY = "safe_head_block";
 const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
+const CHAIN_ID_KEY = "chain_id";
+
+/** Upper bound on blocks one eth_feeHistory call may cover (the JSON-RPC spec's own cap). */
+export const MAX_FEE_HISTORY_BLOCKS = 1024;
 
 export const MAX_BLOCKS_PER_QUERY = 10_000;
 export const MAX_RANGES_PER_QUERY = 10_000;
@@ -107,6 +111,13 @@ export interface TransactionQueryFilter {
   limit?: number;
   page?: number;
   order?: QueryOrder;
+}
+
+/** One transaction's contribution to an eth_feeHistory reward percentile. */
+export interface PriorityFeeSample {
+  blockNumber: bigint;
+  priorityFeeWei: bigint;
+  gasUsed: bigint;
 }
 
 export interface SenderStatsQueryFilter {
@@ -848,6 +859,18 @@ export class ScannerStorage {
 
   async getBackfillNextBlock(): Promise<bigint | undefined> {
     return this.getStateBigInt(BACKFILL_NEXT_BLOCK_KEY);
+  }
+
+  /**
+   * The chain id the scanner observed via eth_chainId. Persisted so the HTTP
+   * backend — which never talks to a node — can answer eth_chainId itself.
+   */
+  async getChainId(): Promise<bigint | undefined> {
+    return this.getStateBigInt(CHAIN_ID_KEY);
+  }
+
+  async saveChainId(chainId: bigint): Promise<void> {
+    await this.upsertStateValue(this.db, CHAIN_ID_KEY, chainId.toString());
   }
 
   async saveChainProgress(
@@ -2034,6 +2057,125 @@ export class ScannerStorage {
       params,
     );
     return Number(result.rows[0]?.count ?? "0");
+  }
+
+  /** A single stored block, or undefined when the scanner has not stored it. */
+  async getBlockByNumber(blockNumber: bigint): Promise<StoredBlock | undefined> {
+    const [block] = await this.queryBlocks({
+      blockGt: blockNumber - 1n,
+      blockLt: blockNumber + 1n,
+      limit: 1,
+    });
+    return block;
+  }
+
+  /**
+   * Every stored transaction of one block in position order. Unlike
+   * queryTransactions this is not capped: a JSON-RPC block object has to list
+   * all of the block's transactions or none.
+   */
+  async getTransactionsForBlock(blockNumber: bigint): Promise<StoredTransaction[]> {
+    const result = await this.db.query<TransactionRow>(
+      `SELECT ${TRANSACTION_SELECT_COLUMNS.join(", ")}
+       FROM ${this.qTransactions}
+       WHERE block_number = $1
+       ORDER BY position ASC`,
+      [blockNumber.toString()],
+    );
+    return result.rows.map(mapTransactionRow);
+  }
+
+  async getTransactionByBlockAndPosition(
+    blockNumber: bigint,
+    position: number,
+  ): Promise<StoredTransaction | null> {
+    const result = await this.db.query<TransactionRow>(
+      `SELECT ${TRANSACTION_SELECT_COLUMNS.join(", ")}
+       FROM ${this.qTransactions}
+       WHERE block_number = $1 AND position = $2
+       LIMIT 1`,
+      [blockNumber.toString(), position],
+    );
+    const row = result.rows[0];
+    return row ? mapTransactionRow(row) : null;
+  }
+
+  /**
+   * Number of transactions an address has sent up to and including
+   * `upToBlock` (all stored blocks when omitted): the highest stored nonce plus
+   * one, which is what eth_getTransactionCount reports for an EOA. Served by
+   * the (from_address, nonce) index, so it is one index probe per call.
+   */
+  async getSentTransactionCount(address: string, upToBlock?: bigint): Promise<bigint> {
+    const params: string[] = [address.toLowerCase()];
+    let blockClause = "";
+    if (upToBlock !== undefined) {
+      params.push(upToBlock.toString());
+      blockClause = ` AND block_number <= $${params.length}`;
+    }
+    const result = await this.db.query<{ value: string | null }>(
+      `SELECT MAX(nonce::numeric)::text AS value
+       FROM ${this.qTransactions}
+       WHERE LOWER(from_address) = $1${blockClause}`,
+      params,
+    );
+    const value = result.rows[0]?.value;
+    return value === null || value === undefined ? 0n : BigInt(value) + 1n;
+  }
+
+  /**
+   * Priority fee and gas used of every transaction in [fromBlock, toBlock],
+   * ordered by block then ascending priority fee — exactly the walk order
+   * eth_feeHistory's reward percentiles need. The range is capped at
+   * MAX_FEE_HISTORY_BLOCKS blocks.
+   */
+  async getPriorityFeeSamples(fromBlock: bigint, toBlock: bigint): Promise<PriorityFeeSample[]> {
+    if (toBlock < fromBlock) return [];
+    if (toBlock - fromBlock + 1n > BigInt(MAX_FEE_HISTORY_BLOCKS)) {
+      throw new Error(`Fee history ranges are limited to ${MAX_FEE_HISTORY_BLOCKS} blocks`);
+    }
+    const result = await this.db.query<{
+      block_number: string;
+      priority_fee_wei: string;
+      gas_used: string;
+    }>(
+      `SELECT block_number::text AS block_number, priority_fee_wei, gas_used
+       FROM ${this.qTransactions}
+       WHERE block_number >= $1 AND block_number <= $2
+       ORDER BY block_number ASC, priority_fee_wei::numeric ASC, position ASC`,
+      [fromBlock.toString(), toBlock.toString()],
+    );
+    return result.rows.map((row) => ({
+      blockNumber: BigInt(row.block_number),
+      priorityFeeWei: BigInt(row.priority_fee_wei),
+      gasUsed: BigInt(row.gas_used),
+    }));
+  }
+
+  /**
+   * Lowest priority fee paid in each block of [fromBlock, toBlock] (blocks
+   * without stored transactions are absent). Feeds the eth_maxPriorityFeePerGas
+   * oracle, which mirrors geth's: the cheapest tip that still landed in each
+   * recent block, then a percentile across blocks.
+   */
+  async getMinPriorityFeePerBlock(
+    fromBlock: bigint,
+    toBlock: bigint,
+  ): Promise<Array<{ blockNumber: bigint; minPriorityFeeWei: bigint }>> {
+    if (toBlock < fromBlock) return [];
+    const result = await this.db.query<{ block_number: string; min_priority_fee_wei: string }>(
+      `SELECT block_number::text AS block_number,
+              MIN(priority_fee_wei::numeric)::text AS min_priority_fee_wei
+       FROM ${this.qTransactions}
+       WHERE block_number >= $1 AND block_number <= $2
+       GROUP BY block_number
+       ORDER BY block_number ASC`,
+      [fromBlock.toString(), toBlock.toString()],
+    );
+    return result.rows.map((row) => ({
+      blockNumber: BigInt(row.block_number),
+      minPriorityFeeWei: BigInt(row.min_priority_fee_wei),
+    }));
   }
 
   async getTransactionByHash(hash: string): Promise<StoredTransaction | null> {

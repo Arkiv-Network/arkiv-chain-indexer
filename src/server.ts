@@ -20,6 +20,7 @@ import {
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
+import { handleJsonRpcText } from "./jsonRpc";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
 import {
   buildPayloadProviderPaymentBreakdown,
@@ -240,6 +241,8 @@ export interface HealthResponseBody {
   features: {
     transactionData: boolean;
     guzzlers: boolean;
+    /** `POST /rpc` — read-only Ethereum JSON-RPC over stored data. */
+    jsonRpc: boolean;
   };
   guzzlers: {
     enabled: boolean;
@@ -491,11 +494,14 @@ export function entityOperationToResponseRow(
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Max-Age": "86400",
 };
 const LLMS_TXT_FILE = new URL("../llms.txt", import.meta.url);
+const PACKAGE_JSON_FILE = new URL("../package.json", import.meta.url);
+/** Largest JSON-RPC request body accepted, in bytes; batches are capped separately. */
+const JSON_RPC_MAX_BODY_BYTES = 1024 * 1024;
 
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
@@ -597,6 +603,10 @@ async function routeRequest(
       options.baseloadRuntime,
       options.baseloadAdminBearerToken,
     );
+  }
+
+  if (url.pathname === "/rpc") {
+    return handleJsonRpcRequest(request, storage, transactionDataEnabled);
   }
 
   if (request.method !== "GET") {
@@ -889,11 +899,66 @@ async function handleGetHealth(
     features: {
       transactionData: transactionDataEnabled,
       guzzlers: guzzlerStore !== undefined,
+      jsonRpc: true,
     },
     guzzlers,
   };
 
   return jsonResponse(body);
+}
+
+let clientVersionPromise: Promise<string> | undefined;
+
+/** `web3_clientVersion`: package name/version plus the build commit when known. */
+function readClientVersion(): Promise<string> {
+  clientVersionPromise ??= (async () => {
+    let version = "unknown";
+    try {
+      const pkg = (await Bun.file(PACKAGE_JSON_FILE).json()) as { version?: unknown };
+      if (typeof pkg.version === "string" && pkg.version) version = pkg.version;
+    } catch {
+      // Keep "unknown"; the version string is informational only.
+    }
+    const commit = readBuildInfo().commit;
+    return `arkiv-chain-indexer/v${version}${commit ? `-${commit.slice(0, 12)}` : ""}/bun-${Bun.version}`;
+  })();
+  return clientVersionPromise;
+}
+
+/**
+ * `POST /rpc`: read-only Ethereum JSON-RPC served from stored data. Always
+ * answers 200 with a JSON-RPC body (errors included) the way nodes do, so
+ * standard clients can parse every reply; only transport-level problems
+ * (wrong verb, oversized body) use HTTP status codes.
+ */
+async function handleJsonRpcRequest(
+  request: Request,
+  storage: ScannerStorage,
+  transactionDataEnabled: boolean,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return jsonError(405, "JSON-RPC requests must be POSTed to /rpc");
+  }
+  const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
+  if (declaredLength > JSON_RPC_MAX_BODY_BYTES) {
+    return jsonError(413, `Request body exceeds ${JSON_RPC_MAX_BODY_BYTES} bytes`);
+  }
+  const text = await request.text();
+  if (text.length > JSON_RPC_MAX_BODY_BYTES) {
+    return jsonError(413, `Request body exceeds ${JSON_RPC_MAX_BODY_BYTES} bytes`);
+  }
+  const body = await handleJsonRpcText(text, storage, {
+    transactionDataEnabled,
+    clientVersion: await readClientVersion(),
+  });
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json;charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 async function handleGetLlmsTxt(): Promise<Response> {
