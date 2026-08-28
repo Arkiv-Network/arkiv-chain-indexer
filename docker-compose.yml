@@ -66,6 +66,37 @@ services:
       timeout: 5s
       retries: 6
 
+  # Arkiv-Network/api-key-generator in its pooled-proxy mode: forwards every
+  # JSON-RPC call to RPC_PROXY_UPSTREAM with a pooled Hub key injected, retires
+  # keys that run out of monthly quota and mints replacements itself. Point
+  # SCANNER_RPC_FULL_NODE / BASELOAD_RPC_NODE at http://rpc-proxy:8788 and the
+  # scanner needs neither SCANNER_RPC_API_KEY nor RPC_KEY_POOL_FILE.
+  #
+  # Like arkiv-keys it carries a Chromium, so it only starts with
+  # COMPOSE_PROFILES=rpc-proxy in .env. The pool persists in a volume so a
+  # restart does not re-mint keys that still have quota. Not published on the
+  # host: only the compose network can reach it.
+  rpc-proxy:
+    image: ${ARKIV_KEY_GENERATOR_IMAGE:-ghcr.io/arkiv-network/api-key-generator:latest}
+    profiles: ["rpc-proxy"]
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8788
+      UPSTREAM: ${RPC_PROXY_UPSTREAM:?RPC_PROXY_UPSTREAM is required for the rpc-proxy profile}
+      POOL_SIZE: ${RPC_PROXY_POOL_SIZE:-100}
+      # Minted keys are named <prefix>_<wallet tag> on the Hub.
+      KEY_NAME_PREFIX: ${RPC_PROXY_KEY_NAME_PREFIX:-indexer}
+      KEYS_FILE: /data/pool.json
+    volumes:
+      - rpcproxypool:/data
+    healthcheck:
+      # The image ships no wget/curl; bun is the only HTTP client aboard.
+      test: ["CMD-SHELL", "bun -e \"fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   scanner:
     build:
       context: .
@@ -340,3 +371,4 @@ volumes:
   pgdata:
   redisdata:
   baseloadkeys:
+  rpcproxypool:

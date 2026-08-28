@@ -181,7 +181,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
 | `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict from a decoder that parses references. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
-| n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. |
+| n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. With the compose `rpc-proxy` profile this is `http://rpc-proxy:8788` (see below). |
 
 Backend transaction-detail payment display:
 
@@ -217,6 +217,27 @@ metric columns.
 | `--batcher-collector-url` | `BATCHER_COLLECTOR_URL` or `SCANNER_BATCHER_COLLECTOR_URL` | **required** | Batcher collector base URL for recent block queue/threshold metrics. |
 | `--interval-ms` | `BATCHER_COLLECTOR_INTERVAL_MS` | `10000` | Delay between collector sweeps. |
 | `--once` | n/a | unset | Run one collector sweep and exit. |
+
+### Pooled RPC proxy (`rpc-proxy` profile)
+
+`docker-compose.yml` ships an optional `rpc-proxy` service running
+[api-key-generator](https://github.com/Arkiv-Network/api-key-generator) in pooled-proxy mode: it mints a pool
+of Arkiv Hub keys itself, injects one on every forwarded JSON-RPC call, retires keys that run out of monthly
+quota and re-mints replacements. Fronting the upstream with it means the scanner, backfill scanner, gap filler
+and Baseload workers need neither `SCANNER_RPC_API_KEY` nor an `RPC_KEY_POOL_FILE` ring. In `.env`:
+
+```sh
+COMPOSE_PROFILES=rpc-proxy
+RPC_PROXY_UPSTREAM=https://rpc.cheesecake.db-chain.devnet.gobas.me   # the real node
+RPC_PROXY_POOL_SIZE=100                                              # keys to keep minted (default 100)
+RPC_PROXY_KEY_NAME_PREFIX=pietruszka                                 # Hub key names: <prefix>_<wallet tag>
+SCANNER_RPC_FULL_NODE=http://rpc-proxy:8788
+BASELOAD_RPC_NODE=http://rpc-proxy:8788
+```
+
+The pool persists in the `rpcproxypool` volume, so restarts reuse live quota. Minting is sequential and
+runs in the background; while the pool is still empty the proxy answers `503` and the scanner's normal retry
+covers it. The service is not published on the host — only the compose network reaches it.
 
 ## Baseload Backend Workers
 
