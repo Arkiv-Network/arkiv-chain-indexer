@@ -18,6 +18,8 @@ export interface RpcTransaction {
 
 export interface RpcBlock {
   number: Hex | null;
+  hash?: Hex | null;
+  parentHash?: Hex;
   timestamp: Hex;
   baseFeePerGas?: Hex;
   gasUsed: Hex;
@@ -42,6 +44,9 @@ export interface RpcReceipt {
 }
 
 export interface BlockMetrics extends BatcherMetrics {
+  /** Block header hash, lowercase; null for pending blocks or rows stored before hashes were kept. */
+  blockHash?: string | null;
+  parentHash?: string | null;
   blockDate: string;
   blockNumber: bigint;
   blockTimeSeconds: string;

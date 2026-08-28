@@ -36,6 +36,8 @@ describe("computeBlockMetrics", () => {
     };
 
     expect(computeBlockMetrics(block, receipts, previousBlock)).toEqual({
+      blockHash: null,
+      parentHash: null,
       blockDate: "2024-01-12T04:09:36.000Z",
       blockNumber: 123n,
       blockTimeSeconds: "2",
@@ -140,5 +142,24 @@ describe("computeBlockMetrics", () => {
       averagePriorityFeeWeightedWei: "28",
       averagePriorityFeeWei: "55",
     });
+  });
+});
+
+describe("computeBlockMetrics header hashes", () => {
+  test("keeps the block and parent hashes lowercased when the header carries them", () => {
+    const metrics = computeBlockMetrics(
+      {
+        number: "0x1",
+        hash: `0x${"AB".repeat(32)}`,
+        parentHash: `0x${"CD".repeat(32)}`,
+        timestamp: "0x1",
+        gasUsed: "0x0",
+        gasLimit: "0x1",
+        transactions: [],
+      },
+      [],
+    );
+    expect(metrics.blockHash).toBe(`0x${"ab".repeat(32)}`);
+    expect(metrics.parentHash).toBe(`0x${"cd".repeat(32)}`);
   });
 });

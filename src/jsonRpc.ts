@@ -12,8 +12,10 @@
  *   block hashes, roots, signatures, logs. Callers that only need the fields we
  *   have (viem, raw fetch) work; strict formatters may reject the nulls.
  *   `input` stays null by design: calldata is never stored.
- * - Block-hash addressed lookups cannot be answered at all (no hashes stored)
- *   and fail with a clear server error rather than a silent `null`.
+ * - Block hashes are stored for every block scanned since the column was
+ *   added; older rows carry `null`, and hash-addressed lookups of such blocks
+ *   answer `null` ("unknown block") like a node would for a hash it has never
+ *   seen.
  *
  * `eth_blockNumber` and the `latest` tag mean the *indexed* head
  * (`scanner_state.last_successful_block`), not the chain head; `eth_syncing`
@@ -36,6 +38,7 @@ export interface JsonRpcDataSource {
   getForwardScanSamples(): Promise<ScanSample[]>;
   getMinStoredBlock(): Promise<bigint | undefined>;
   getBlockByNumber(blockNumber: bigint): Promise<StoredBlock | undefined>;
+  getBlockByHash(blockHash: string): Promise<StoredBlock | undefined>;
   queryBlocks(filter: BlockQueryFilter): Promise<StoredBlock[]>;
   getTransactionsForBlock(blockNumber: bigint): Promise<StoredTransaction[]>;
   getTransactionByHash(hash: string): Promise<StoredTransaction | null>;
@@ -154,8 +157,10 @@ const TRANSACTION_DATA_METHODS: ReadonlySet<string> = new Set<JsonRpcMethod>([
   "eth_feeHistory",
   "eth_getTransactionCount",
   "eth_getBlockByNumber",
+  "eth_getBlockByHash",
   "eth_getTransactionByHash",
   "eth_getTransactionByBlockNumberAndIndex",
+  "eth_getTransactionByBlockHashAndIndex",
   "eth_getTransactionReceipt",
 ]);
 
@@ -435,11 +440,11 @@ const METHODS: Record<string, MethodHandler> = {
     return block ? "0x0" : null;
   },
 
-  eth_getUncleCountByBlockHash: async (params) => {
+  eth_getUncleCountByBlockHash: async (params, { storage }) => {
     expectParamCount(params, 1);
-    parseHashParam(params[0], "blockHash");
-    // Post-merge chains have no uncles; the answer does not depend on the block.
-    return "0x0";
+    const block = await storage.getBlockByHash(parseHashParam(params[0], "blockHash"));
+    // Post-merge chains have no uncles; only "unknown block" changes the answer.
+    return block ? "0x0" : null;
   },
 
   eth_getUncleByBlockNumberAndIndex: async (params) => {
@@ -462,10 +467,14 @@ const METHODS: Record<string, MethodHandler> = {
     return blockObject(block, transactions, fullTransactions, chainId);
   },
 
-  eth_getBlockByHash: async (params) => {
+  eth_getBlockByHash: async (params, { storage }) => {
     expectParamCount(params, 1, 2);
-    parseHashParam(params[0], "blockHash");
-    throw blockHashesNotIndexed();
+    const fullTransactions = parseBooleanParam(params[1] ?? false, "fullTransactionObjects");
+    const block = await storage.getBlockByHash(parseHashParam(params[0], "blockHash"));
+    if (!block) return null;
+    const transactions = await storage.getTransactionsForBlock(BigInt(block.blockNumber));
+    const chainId = await storage.getChainId();
+    return blockObject(block, transactions, fullTransactions, chainId);
   },
 
   eth_getTransactionByHash: async (params, { storage }) => {
@@ -473,7 +482,7 @@ const METHODS: Record<string, MethodHandler> = {
     const hash = parseHashParam(params[0], "transactionHash");
     const transaction = await storage.getTransactionByHash(hash);
     if (!transaction) return null;
-    return transactionObject(transaction, await storage.getChainId());
+    return transactionObject(transaction, await storage.getChainId(), await blockHashOf(transaction, storage));
   },
 
   eth_getTransactionByBlockNumberAndIndex: async (params, { storage }) => {
@@ -483,19 +492,23 @@ const METHODS: Record<string, MethodHandler> = {
     if (!block) return null;
     const transaction = await storage.getTransactionByBlockAndPosition(BigInt(block.blockNumber), index);
     if (!transaction) return null;
-    return transactionObject(transaction, await storage.getChainId());
+    return transactionObject(transaction, await storage.getChainId(), block.blockHash ?? null);
   },
 
-  eth_getTransactionByBlockHashAndIndex: async (params) => {
+  eth_getTransactionByBlockHashAndIndex: async (params, { storage }) => {
     expectParamCount(params, 2);
-    parseHashParam(params[0], "blockHash");
-    throw blockHashesNotIndexed();
+    const index = parseIndexParam(params[1], "index");
+    const block = await storage.getBlockByHash(parseHashParam(params[0], "blockHash"));
+    if (!block) return null;
+    const transaction = await storage.getTransactionByBlockAndPosition(BigInt(block.blockNumber), index);
+    if (!transaction) return null;
+    return transactionObject(transaction, await storage.getChainId(), block.blockHash ?? null);
   },
 
-  eth_getBlockTransactionCountByHash: async (params) => {
+  eth_getBlockTransactionCountByHash: async (params, { storage }) => {
     expectParamCount(params, 1);
-    parseHashParam(params[0], "blockHash");
-    throw blockHashesNotIndexed();
+    const block = await storage.getBlockByHash(parseHashParam(params[0], "blockHash"));
+    return block ? quantity(BigInt(block.transactionCount)) : null;
   },
 
   eth_getTransactionReceipt: async (params, { storage }) => {
@@ -503,7 +516,7 @@ const METHODS: Record<string, MethodHandler> = {
     const hash = parseHashParam(params[0], "transactionHash");
     const transaction = await storage.getTransactionByHash(hash);
     if (!transaction) return null;
-    return receiptObject(transaction);
+    return receiptObject(transaction, await blockHashOf(transaction, storage));
   },
 };
 
@@ -537,8 +550,11 @@ async function indexedHead(storage: JsonRpcDataSource): Promise<bigint | undefin
 async function resolveBlockTag(param: unknown, storage: JsonRpcDataSource): Promise<bigint | undefined> {
   if (isPlainObject(param)) {
     if (param.blockHash !== undefined) {
-      parseHashParam(param.blockHash, "blockHash");
-      throw blockHashesNotIndexed();
+      const block = await storage.getBlockByHash(parseHashParam(param.blockHash, "blockHash"));
+      if (!block) {
+        throw new JsonRpcError(JSON_RPC_SERVER_ERROR, "header for hash not found");
+      }
+      return BigInt(block.blockNumber);
     }
     if (param.blockNumber !== undefined) {
       return resolveBlockTag(param.blockNumber, storage);
@@ -568,6 +584,12 @@ async function resolveStoredBlock(
   const blockNumber = await resolveBlockTag(param, storage);
   if (blockNumber === undefined) return undefined;
   return storage.getBlockByNumber(blockNumber);
+}
+
+/** The header hash of the block a stored transaction sits in, when that block row carries one. */
+async function blockHashOf(transaction: StoredTransaction, storage: JsonRpcDataSource): Promise<string | null> {
+  const block = await storage.getBlockByNumber(BigInt(transaction.blockNumberDecimal));
+  return block?.blockHash ?? null;
 }
 
 /**
@@ -676,10 +698,11 @@ function blockObject(
   fullTransactions: boolean,
   chainId: bigint | undefined,
 ): Record<string, unknown> {
+  const blockHash = block.blockHash ?? null;
   return {
     number: quantity(BigInt(block.blockNumber)),
-    hash: null,
-    parentHash: null,
+    hash: blockHash,
+    parentHash: block.parentHash ?? null,
     nonce: null,
     sha3Uncles: null,
     logsBloom: null,
@@ -697,7 +720,7 @@ function blockObject(
     baseFeePerGas: quantity(BigInt(block.baseBlockFeeWei)),
     mixHash: null,
     transactions: fullTransactions
-      ? transactions.map((transaction) => transactionObject(transaction, chainId))
+      ? transactions.map((transaction) => transactionObject(transaction, chainId, blockHash))
       : transactions.map((transaction) => transaction.hash.toLowerCase()),
     uncles: [],
   };
@@ -706,12 +729,13 @@ function blockObject(
 function transactionObject(
   transaction: StoredTransaction,
   chainId: bigint | undefined,
+  blockHash: string | null,
 ): Record<string, unknown> {
   const type = decimalToQuantity(transaction.type) ?? "0x0";
   const isDynamicFee = transaction.maxFeePerGasWei !== null;
   return {
     hash: transaction.hash.toLowerCase(),
-    blockHash: null,
+    blockHash,
     blockNumber: quantity(BigInt(transaction.blockNumberDecimal)),
     transactionIndex: quantity(BigInt(transaction.position)),
     from: lowerOrNull(transaction.from),
@@ -737,11 +761,11 @@ function transactionObject(
   };
 }
 
-function receiptObject(transaction: StoredTransaction): Record<string, unknown> {
+function receiptObject(transaction: StoredTransaction, blockHash: string | null): Record<string, unknown> {
   return {
     transactionHash: transaction.hash.toLowerCase(),
     transactionIndex: quantity(BigInt(transaction.position)),
-    blockHash: null,
+    blockHash,
     blockNumber: quantity(BigInt(transaction.blockNumberDecimal)),
     from: lowerOrNull(transaction.from),
     to: lowerOrNull(transaction.to),
@@ -779,13 +803,6 @@ function lowerOrNull(value: string | null): string | null {
 
 function invalidParams(message: string): JsonRpcError {
   return new JsonRpcError(JSON_RPC_INVALID_PARAMS, `Invalid params: ${message}`);
-}
-
-function blockHashesNotIndexed(): JsonRpcError {
-  return new JsonRpcError(
-    JSON_RPC_SERVER_ERROR,
-    "Block hashes are not indexed; address blocks by number instead",
-  );
 }
 
 function expectParamCount(params: unknown[], min: number, max: number = min): void {

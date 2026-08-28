@@ -330,6 +330,8 @@ if (!hasPostgresForTests()) {
 
       const [row] = await storage.queryBlocks();
       expect(row).toEqual({
+        blockHash: null,
+        parentHash: null,
         blockNumber: 7,
         blockDate: "2024-02-01T00:00:00.000Z",
         blockTimeSeconds: "2",

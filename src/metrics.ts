@@ -78,6 +78,8 @@ export function computeBlockMetrics(
     transactionCount === 0 ? 0n : totalInputDataCompressedSizeBytes / BigInt(transactionCount);
 
   return {
+    blockHash: block.hash ? block.hash.toLowerCase() : null,
+    parentHash: block.parentHash ? block.parentHash.toLowerCase() : null,
     blockDate: new Date(Number(blockTimestampSeconds) * 1000).toISOString(),
     blockNumber,
     blockTimeSeconds: blockTimeSeconds.toString(),

@@ -104,8 +104,9 @@ docker compose up --build
 - `src/jsonRpc.ts` serves `POST /rpc`, a read-only Ethereum JSON-RPC 2.0 surface answered purely from stored
   data (it never proxies to a node). `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
-  field the scanner does not persist to `null` (hashes, roots, signatures, logs; `input` is always null by the
-  calldata invariant). Block-hash addressed methods fail with `-32000` because hashes are not indexed. The
+  field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
+  calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns
+  were added and deliberately not backfilled (older rows stay null and hash lookups of them return null). The
   method handlers take a `JsonRpcDataSource` (a structural subset of `ScannerStorage`) so they unit-test
   against an in-memory fake; `eth_feeHistory` reproduces geth's gas-weighted percentile walk and the
   gas-price oracle its 60th-percentile-of-per-block-minimum-tip rule. The scanner persists `chain_id` into

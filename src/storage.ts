@@ -131,6 +131,9 @@ export interface TransactionRecordsQueryFilter {
 
 export interface StoredBlock {
   blockNumber: number;
+  /** Lowercase header hash; null for rows scanned before hashes were stored. */
+  blockHash?: string | null;
+  parentHash?: string | null;
   blockDate: string;
   blockTimeSeconds: string;
   baseBlockFeeWei: string;
@@ -491,6 +494,12 @@ export class ScannerStorage {
     await this.addNullableTextColumn(this.qBlocks, "batcher_upper_threshold");
     await this.addNullableTextColumn(this.qBlocks, "batcher_max_block_size");
     await this.addNullableTextColumn(this.qBlocks, "batcher_max_tx_size");
+    await this.addNullableTextColumn(this.qBlocks, "block_hash");
+    await this.addNullableTextColumn(this.qBlocks, "parent_hash");
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("blocks_block_hash_idx")}
+       ON ${this.qBlocks} (block_hash)`,
+    );
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qScannerState} (
         key TEXT PRIMARY KEY,
@@ -1112,8 +1121,10 @@ export class ScannerStorage {
           batcher_upper_threshold,
           batcher_max_block_size,
           batcher_max_tx_size,
+          block_hash,
+          parent_hash,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
           block_time_seconds = EXCLUDED.block_time_seconds,
@@ -1143,6 +1154,8 @@ export class ScannerStorage {
           batcher_upper_threshold = COALESCE(EXCLUDED.batcher_upper_threshold, existing.batcher_upper_threshold),
           batcher_max_block_size = COALESCE(EXCLUDED.batcher_max_block_size, existing.batcher_max_block_size),
           batcher_max_tx_size = COALESCE(EXCLUDED.batcher_max_tx_size, existing.batcher_max_tx_size),
+          block_hash = COALESCE(EXCLUDED.block_hash, existing.block_hash),
+          parent_hash = COALESCE(EXCLUDED.parent_hash, existing.parent_hash),
           scanned_at = NOW()`,
         [
           metrics.blockNumber.toString(),
@@ -1174,6 +1187,8 @@ export class ScannerStorage {
           metrics.batcherUpperThreshold ?? null,
           metrics.batcherMaxBlockSize ?? null,
           metrics.batcherMaxTxSize ?? null,
+          metrics.blockHash ?? null,
+          metrics.parentHash ?? null,
         ],
       );
       if (transactions !== undefined) {
@@ -1818,7 +1833,9 @@ export class ScannerStorage {
         batcher_lower_threshold,
         batcher_upper_threshold,
         batcher_max_block_size,
-        batcher_max_tx_size
+        batcher_max_tx_size,
+        block_hash,
+        parent_hash
       FROM ${this.qBlocks}
       ${where}
       ORDER BY block_number ${order}
@@ -1855,10 +1872,14 @@ export class ScannerStorage {
       batcher_upper_threshold: string | null;
       batcher_max_block_size: string | null;
       batcher_max_tx_size: string | null;
+      block_hash: string | null;
+      parent_hash: string | null;
     }>(sql, params);
 
     return result.rows.map((row) => ({
       blockNumber: Number(row.block_number),
+      blockHash: row.block_hash,
+      parentHash: row.parent_hash,
       blockDate: row.block_date,
       blockTimeSeconds: row.block_time_seconds,
       baseBlockFeeWei: row.base_block_fee_wei,
@@ -2067,6 +2088,16 @@ export class ScannerStorage {
       limit: 1,
     });
     return block;
+  }
+
+  /** The stored block carrying this header hash, or undefined when unknown / not yet backfilled. */
+  async getBlockByHash(blockHash: string): Promise<StoredBlock | undefined> {
+    const result = await this.db.query<{ block_number: string }>(
+      `SELECT block_number::text AS block_number FROM ${this.qBlocks} WHERE block_hash = $1 LIMIT 1`,
+      [blockHash.toLowerCase()],
+    );
+    const row = result.rows[0];
+    return row ? this.getBlockByNumber(BigInt(row.block_number)) : undefined;
   }
 
   /**

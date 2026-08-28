@@ -784,11 +784,11 @@ Two things differ from a node and are deliberate:
   tags all resolve to `scanner_state.last_successful_block`, not the chain head. `eth_syncing` reports the gap
   (`false` once the scanner is within a few blocks of the observed head). `earliest` is the oldest stored block.
 - **Fields the scanner does not persist are `null`.** Block, transaction and receipt objects keep the standard
-  shape, but block hashes, parent hashes, roots, miner, `logsBloom`, signatures (`v`/`r`/`s`) and receipt
-  `logs` come back as `null` until those are indexed. `input` is always `null`: calldata is never stored. Block
-  hashes are not indexed at all, so `eth_getBlockByHash`, `eth_getBlockTransactionCountByHash`,
-  `eth_getTransactionByBlockHashAndIndex` and `{ "blockHash": … }` block parameters fail with error `-32000`
-  rather than returning a misleading `null`.
+  shape, but roots, miner, `logsBloom`, signatures (`v`/`r`/`s`) and receipt `logs` come back as `null` until
+  those are indexed. `input` is always `null`: calldata is never stored. Block `hash` / `parentHash` (and the
+  `blockHash` on transactions and receipts) are stored for every block scanned since the columns were added;
+  blocks scanned before that keep `null` (there is no backfill), and hash-addressed lookups of those answer
+  `null` like a node does for an unknown hash.
 
 Transaction counts and listings only cover stored rows — the scanner drops the chain's system transaction
 (sender `0xDeaD…0001`), so a block's `transactions` array and `eth_getBlockTransactionCountByNumber` are one
@@ -804,9 +804,9 @@ lower than a node reports on blocks that carry it; `transactionIndex` keeps the 
 | `eth_getTransactionCount(address, tag)` | Highest stored nonce sent by `address` up to `tag`, plus one (exact for EOAs). |
 | `eth_gasPrice`, `eth_maxPriorityFeePerGas` | geth's oracle over stored data: the 60th percentile of each of the last 20 blocks' cheapest tip; `eth_gasPrice` adds the indexed head's base fee. |
 | `eth_feeHistory(count, newest, percentiles?)` | Exact: per-block `baseFeePerGas`, `gasUsedRatio`, and gas-weighted `reward` percentiles from stored transactions (max 1,024 blocks). The closing "next block" base fee repeats the newest one when that block is not stored yet. |
-| `eth_getBlockByNumber(tag, full)` | Stored block; hashes or full transaction objects. |
-| `eth_getBlockTransactionCountByNumber(tag)` | Stored transaction count. |
-| `eth_getTransactionByHash`, `eth_getTransactionByBlockNumberAndIndex` | Stored transaction object. |
+| `eth_getBlockByNumber(tag, full)`, `eth_getBlockByHash(hash, full)` | Stored block; hashes or full transaction objects. `{ "blockHash": … }` block parameters work too. |
+| `eth_getBlockTransactionCountByNumber(tag)`, `eth_getBlockTransactionCountByHash(hash)` | Stored transaction count. |
+| `eth_getTransactionByHash`, `eth_getTransactionByBlockNumberAndIndex`, `eth_getTransactionByBlockHashAndIndex` | Stored transaction object. |
 | `eth_getTransactionReceipt(hash)` | Stored receipt fields (`status`, `gasUsed`, `cumulativeGasUsed`, `effectiveGasPrice`, `contractAddress`); `logs` is `null`. |
 | `eth_getUncle*` | No uncles: counts are `0x0`, lookups `null`. |
 

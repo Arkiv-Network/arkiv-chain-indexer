@@ -95,6 +95,8 @@ function fakeSource(chain: FakeChain): JsonRpcDataSource {
     getForwardScanSamples: async () => [],
     getMinStoredBlock: async () => (blocks[0] ? BigInt(blocks[0].blockNumber) : undefined),
     getBlockByNumber: async (blockNumber) => blocks.find((block) => BigInt(block.blockNumber) === blockNumber),
+    getBlockByHash: async (blockHash) =>
+      blocks.find((block) => block.blockHash?.toLowerCase() === blockHash.toLowerCase()),
     queryBlocks: async (filter: BlockQueryFilter) =>
       blocks
         .filter(
@@ -342,29 +344,24 @@ describe("block tags", () => {
     }
   });
 
-  test("block-hash addressing is a clear server error", async () => {
+  test("unknown block hashes read as unknown blocks; malformed hashes are invalid params", async () => {
     const hash = `0x${"1".repeat(64)}`;
-    for (const [method, params] of [
-      ["eth_getBlockByHash", [hash, false]],
-      ["eth_getBlockTransactionCountByHash", [hash]],
-      ["eth_getTransactionByBlockHashAndIndex", [hash, "0x0"]],
-      ["eth_getBlockTransactionCountByNumber", [{ blockHash: hash }]],
-    ] as const) {
-      const response = await call(source, method, [...params]);
-      expect(response.error?.code).toBe(JSON_RPC_SERVER_ERROR);
-      expect(response.error?.message).toContain("not indexed");
-    }
+    expect(await result(source, "eth_getBlockByHash", [hash, false])).toBeNull();
+    expect(await result(source, "eth_getBlockTransactionCountByHash", [hash])).toBeNull();
+    expect(await result(source, "eth_getTransactionByBlockHashAndIndex", [hash, "0x0"])).toBeNull();
+    expect(await result(source, "eth_getUncleCountByBlockHash", [hash])).toBeNull();
+    const tagged = await call(source, "eth_getBlockTransactionCountByNumber", [{ blockHash: hash }]);
+    expect(tagged.error?.code).toBe(JSON_RPC_SERVER_ERROR);
+    expect(tagged.error?.message).toContain("header for hash not found");
     const malformed = await call(source, "eth_getBlockByHash", ["0x12", false]);
     expect(malformed.error?.code).toBe(JSON_RPC_INVALID_PARAMS);
   });
 
   test("uncles never exist", async () => {
-    const hash = `0x${"2".repeat(64)}`;
     expect(await result(source, "eth_getUncleCountByBlockNumber", ["latest"])).toBe("0x0");
     expect(await result(source, "eth_getUncleCountByBlockNumber", ["0x5"])).toBeNull();
-    expect(await result(source, "eth_getUncleCountByBlockHash", [hash])).toBe("0x0");
     expect(await result(source, "eth_getUncleByBlockNumberAndIndex", ["latest", "0x0"])).toBeNull();
-    expect(await result(source, "eth_getUncleByBlockHashAndIndex", [hash, "0x0"])).toBeNull();
+    expect(await result(source, "eth_getUncleByBlockHashAndIndex", [`0x${"2".repeat(64)}`, "0x0"])).toBeNull();
   });
 });
 
@@ -395,6 +392,7 @@ describe("eth_getTransactionCount", () => {
 });
 
 describe("blocks, transactions and receipts", () => {
+  const BLOCK_7_HASH = `0x${"7".repeat(64)}`;
   const txA = fakeTransaction({
     blockNumber: 7,
     position: 0,
@@ -416,22 +414,53 @@ describe("blocks, transactions and receipts", () => {
     blocks: [
       fakeBlock({
         blockNumber: 7,
+        blockHash: BLOCK_7_HASH,
+        parentHash: `0x${"6".repeat(64)}`,
         blockDate: "2024-05-01T00:00:00.000Z",
         baseBlockFeeWei: "1000",
         totalGasUsed: "42000",
         maxGasInBlock: "30000000",
         transactionCount: 2,
       }),
+      fakeBlock({ blockNumber: 8, blockHash: null, transactionCount: 0 }),
     ],
     transactions: [txA, txB],
+  });
+
+  test("hash-addressed lookups resolve through the stored block hash", async () => {
+    const block = (await result(source, "eth_getBlockByHash", [BLOCK_7_HASH.toUpperCase().replace("0X", "0x"), true])) as Record<
+      string,
+      unknown
+    >;
+    expect(block.number).toBe("0x7");
+    expect(block.hash).toBe(BLOCK_7_HASH);
+    expect(block.parentHash).toBe(`0x${"6".repeat(64)}`);
+    expect((block.transactions as Array<Record<string, unknown>>).map((tx) => tx.blockHash)).toEqual([
+      BLOCK_7_HASH,
+      BLOCK_7_HASH,
+    ]);
+    expect(await result(source, "eth_getBlockTransactionCountByHash", [BLOCK_7_HASH])).toBe("0x2");
+    expect(await result(source, "eth_getUncleCountByBlockHash", [BLOCK_7_HASH])).toBe("0x0");
+    const byIndex = (await result(source, "eth_getTransactionByBlockHashAndIndex", [BLOCK_7_HASH, "0x2"])) as Record<
+      string,
+      unknown
+    >;
+    expect(byIndex.hash).toBe(txB.hash);
+    expect(byIndex.blockHash).toBe(BLOCK_7_HASH);
+    expect(await result(source, "eth_getTransactionByBlockHashAndIndex", [BLOCK_7_HASH, "0x1"])).toBeNull();
+    // EIP-1898 block parameter objects.
+    expect(await result(source, "eth_getBlockTransactionCountByNumber", [{ blockHash: BLOCK_7_HASH }])).toBe("0x2");
+    // A block stored before hashes were kept still reads fine by number, with hash null.
+    const unhashed = (await result(source, "eth_getBlockByNumber", ["0x8", false])) as Record<string, unknown>;
+    expect(unhashed.hash).toBeNull();
   });
 
   test("eth_getBlockByNumber lists hashes or full objects and nulls unknown header fields", async () => {
     const block = (await result(source, "eth_getBlockByNumber", ["0x7", false])) as Record<string, unknown>;
     expect(block).toMatchObject({
       number: "0x7",
-      hash: null,
-      parentHash: null,
+      hash: BLOCK_7_HASH,
+      parentHash: `0x${"6".repeat(64)}`,
       miner: null,
       stateRoot: null,
       difficulty: "0x0",
@@ -443,13 +472,13 @@ describe("blocks, transactions and receipts", () => {
     });
     expect(block.transactions).toEqual([txA.hash, txB.hash]);
 
-    const full = (await result(source, "eth_getBlockByNumber", ["latest", true])) as Record<string, unknown>;
+    const full = (await result(source, "eth_getBlockByNumber", ["0x7", true])) as Record<string, unknown>;
     const transactions = full.transactions as Array<Record<string, unknown>>;
     expect(transactions.map((tx) => tx.hash)).toEqual([txA.hash, txB.hash]);
     expect(transactions[0]).toMatchObject({ transactionIndex: "0x0", chainId: "0x539" });
     expect(transactions[1]).toMatchObject({ transactionIndex: "0x2" });
 
-    expect(await result(source, "eth_getBlockByNumber", ["0x8", false])).toBeNull();
+    expect(await result(source, "eth_getBlockByNumber", ["0x9", false])).toBeNull();
     const defaulted = (await result(source, "eth_getBlockByNumber", ["0x7"])) as Record<string, unknown>;
     expect(defaulted.transactions).toEqual([txA.hash, txB.hash]);
     const bad = await call(source, "eth_getBlockByNumber", ["0x7", "yes"]);
@@ -460,7 +489,7 @@ describe("blocks, transactions and receipts", () => {
     const tx = (await result(source, "eth_getTransactionByHash", [txA.hash])) as Record<string, unknown>;
     expect(tx).toEqual({
       hash: txA.hash,
-      blockHash: null,
+      blockHash: BLOCK_7_HASH,
       blockNumber: "0x7",
       transactionIndex: "0x0",
       from: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -507,7 +536,7 @@ describe("blocks, transactions and receipts", () => {
     expect(receipt).toEqual({
       transactionHash: txA.hash,
       transactionIndex: "0x0",
-      blockHash: null,
+      blockHash: BLOCK_7_HASH,
       blockNumber: "0x7",
       from: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       to: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -685,6 +714,8 @@ function txHash(seed: number): `0x${string}` {
   return `0x${seed.toString(16).padStart(64, "0")}`;
 }
 
+const BLOCK_1_HASH = `0x${"ab".repeat(32)}`;
+
 describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
   async function seededStorage(): Promise<ScannerStorage> {
     const { storage, cleanup } = await createIsolatedStorage("jsonrpc");
@@ -693,7 +724,13 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
     const sender = "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa";
     const other = "0xDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDdDd";
     await storage.saveBlockMetrics(
-      blockMetricsFixture({ blockNumber: 1n, totalGasUsed: "42000", transactionCount: 2 }),
+      blockMetricsFixture({
+        blockNumber: 1n,
+        blockHash: BLOCK_1_HASH,
+        parentHash: `0x${"0".repeat(64)}`,
+        totalGasUsed: "42000",
+        transactionCount: 2,
+      }),
       { kind: "lastSuccessfulBlock" },
       [
         inspectedTransactionFixture({ position: 0, hash: txHash(1), nonce: "0", priorityFeeWei: "30" }),
@@ -725,6 +762,11 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
     expect(await storage.getTransactionByBlockAndPosition(1n, 1)).toBeNull();
     expect((await storage.getBlockByNumber(3n))?.transactionCount).toBe(1);
     expect(await storage.getBlockByNumber(4n)).toBeUndefined();
+    expect((await storage.getBlockByNumber(1n))?.blockHash).toBe(BLOCK_1_HASH);
+    expect((await storage.getBlockByNumber(1n))?.parentHash).toBe(`0x${"0".repeat(64)}`);
+    expect((await storage.getBlockByNumber(2n))?.blockHash).toBeNull();
+    expect((await storage.getBlockByHash(BLOCK_1_HASH.toUpperCase().replace("0X", "0x")))?.blockNumber).toBe(1);
+    expect(await storage.getBlockByHash(`0x${"cd".repeat(32)}`)).toBeUndefined();
 
     const samples = await storage.getPriorityFeeSamples(1n, 3n);
     expect(samples).toEqual([
@@ -738,6 +780,10 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       { blockNumber: 1n, minPriorityFeeWei: 5n },
       { blockNumber: 3n, minPriorityFeeWei: 12n },
     ]);
+
+    // Re-saving a block without a hash keeps the stored one.
+    await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 1n, transactionCount: 2 }), { kind: "lastSuccessfulBlock" }, []);
+    expect((await storage.getBlockByNumber(1n))?.blockHash).toBe(BLOCK_1_HASH);
   });
 
   test("POST /rpc serves batches from storage; other verbs are rejected", async () => {
@@ -756,12 +802,14 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
           { jsonrpc: "2.0", id: 5, method: "eth_getTransactionReceipt", params: [txHash(3)] },
           { jsonrpc: "2.0", id: 6, method: "eth_feeHistory", params: ["0x3", "latest", [50]] },
           { jsonrpc: "2.0", id: 7, method: "web3_clientVersion", params: [] },
+          { jsonrpc: "2.0", id: 8, method: "eth_getBlockByHash", params: [BLOCK_1_HASH, false] },
+          { jsonrpc: "2.0", id: 9, method: "eth_getTransactionReceipt", params: [txHash(1)] },
         ]),
       });
       expect(response.status).toBe(200);
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
       const batch = (await response.json()) as JsonRpcResponse[];
-      expect(batch.map((entry) => entry.error)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+      expect(batch.map((entry) => entry.error)).toEqual(Array(9).fill(undefined));
       expect(batch[0]!.result).toBe("0x92a1e");
       expect(batch[1]!.result).toBe("0x3");
       expect(batch[2]!.result).toBe("0x2");
@@ -774,6 +822,10 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
         reward: [["0x5"], ["0x0"], ["0xc"]],
       });
       expect(batch[6]!.result).toMatch(/^arkiv-chain-indexer\/v\d+\.\d+\.\d+/);
+      expect((batch[3]!.result as { hash: string }).hash).toBe(BLOCK_1_HASH);
+      expect((batch[7]!.result as { number: string }).number).toBe("0x1");
+      expect((batch[8]!.result as { blockHash: string }).blockHash).toBe(BLOCK_1_HASH);
+      expect((batch[4]!.result as { blockHash: string | null }).blockHash).toBeNull();
 
       const parseError = await fetch(`${base}/rpc`, { method: "POST", body: "nope" });
       expect(parseError.status).toBe(200);
