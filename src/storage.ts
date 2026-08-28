@@ -1002,6 +1002,11 @@ export class ScannerStorage {
         regclassName: regclassName(this.schema, "transaction_operations"),
       },
       {
+        name: "transaction_logs",
+        qualifiedName: this.qTransactionLogs,
+        regclassName: regclassName(this.schema, "transaction_logs"),
+      },
+      {
         name: "transaction_records",
         qualifiedName: this.qTransactionRecords,
         regclassName: regclassName(this.schema, "transaction_records"),
