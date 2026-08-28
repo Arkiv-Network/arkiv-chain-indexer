@@ -115,6 +115,11 @@ docker compose up --build
   gas-price oracle its 60th-percentile-of-per-block-minimum-tip rule. The scanner persists `chain_id` into
   `scanner_state` at startup so `eth_chainId` needs no node. New methods go in `JSON_RPC_METHODS` and, when
   they read transaction rows, in `TRANSACTION_DATA_METHODS` so the transaction-data gate covers them.
+  Inputs are parsed as leniently as a node parses them — `"params": null` counts as no parameters, and
+  quantities may carry leading zeros (`0x01`) — because being stricter than the node only rejects callers
+  that work against one; **outputs stay canonical** (`quantity()` emits minimal hex). `eth_getLogs` resolves
+  the block hash of every returned log through one `getBlockHashesByNumber` call: doing it per block cost a
+  round trip per distinct block in the result (~420ms for a 1,000-block query, versus ~10ms batched).
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

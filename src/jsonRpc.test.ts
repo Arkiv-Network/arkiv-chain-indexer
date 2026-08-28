@@ -101,6 +101,14 @@ function fakeSource(chain: FakeChain): JsonRpcDataSource {
     getBlockByNumber: async (blockNumber) => blocks.find((block) => BigInt(block.blockNumber) === blockNumber),
     getBlockByHash: async (blockHash) =>
       blocks.find((block) => block.blockHash?.toLowerCase() === blockHash.toLowerCase()),
+    getBlockHashesByNumber: async (blockNumbers) => {
+      const hashes = new Map<bigint, string | null>();
+      for (const blockNumber of blockNumbers) {
+        const block = blocks.find((candidate) => BigInt(candidate.blockNumber) === blockNumber);
+        if (block) hashes.set(blockNumber, block.blockHash ?? null);
+      }
+      return hashes;
+    },
     queryBlocks: async (filter: BlockQueryFilter) =>
       blocks
         .filter(
@@ -230,6 +238,14 @@ describe("JSON-RPC envelope", () => {
       source,
     )) as JsonRpcResponse;
     expect(response).toEqual({ jsonrpc: "2.0", id: "abc", result: "0x539" });
+  });
+
+  test("an explicit null params is treated as no parameters, the way nodes do", async () => {
+    const response = (await handleJsonRpcBody(
+      { jsonrpc: "2.0", id: 4, method: "eth_chainId", params: null },
+      source,
+    )) as JsonRpcResponse;
+    expect(response).toEqual({ jsonrpc: "2.0", id: 4, result: "0x539" });
   });
 
   test("batches are answered in order, mixing results and errors", async () => {
@@ -362,6 +378,14 @@ describe("block tags", () => {
       const response = await call(source, "eth_getBlockTransactionCountByNumber", [bad]);
       expect(response.error?.code).toBe(JSON_RPC_INVALID_PARAMS);
     }
+  });
+
+  test("zero-padded quantities are accepted on input, the way nodes decode them", async () => {
+    for (const padded of ["0x03", "0x0003", `0x${"0".repeat(20)}3`]) {
+      expect(await result(source, "eth_getBlockTransactionCountByNumber", [padded])).toBe("0x2");
+    }
+    // Canonical output is unaffected: the answer is still minimal hex.
+    expect(await result(source, "eth_getBlockTransactionCountByNumber", ["0x09"])).toBe("0x4");
   });
 
   test("unknown block hashes read as unknown blocks; malformed hashes are invalid params", async () => {
@@ -502,6 +526,45 @@ describe("blocks, transactions and receipts", () => {
       const response = await call(source, "eth_getLogs", [...params]);
       expect(response.error?.code).toBe(code);
     }
+  });
+
+  test("eth_getLogs resolves every block hash in one batched lookup", async () => {
+    const base = fakeSource({
+      chainId: 1337n,
+      blocks: [
+        fakeBlock({ blockNumber: 7, blockHash: BLOCK_7_HASH, transactionCount: 2 }),
+        fakeBlock({ blockNumber: 8, blockHash: null, transactionCount: 0 }),
+      ],
+      transactions: [txA, txB],
+      logs: [logA0, logA1, logOther],
+    });
+    let batched = 0;
+    let perBlock = 0;
+    const counted: JsonRpcDataSource = {
+      ...base,
+      getBlockByNumber: async (blockNumber) => {
+        perBlock += 1;
+        return base.getBlockByNumber(blockNumber);
+      },
+      getBlockHashesByNumber: async (blockNumbers) => {
+        batched += 1;
+        return base.getBlockHashesByNumber(blockNumbers);
+      },
+    };
+
+    const logs = (await result(counted, "eth_getLogs", [
+      { fromBlock: "0x0", toBlock: "latest" },
+    ])) as Array<Record<string, unknown>>;
+
+    // Logs sit in two distinct blocks; the hashes cost one query, not one each,
+    // and the block with no stored hash still reports null rather than dropping out.
+    expect(logs.map((log) => [log.blockNumber, log.blockHash])).toEqual([
+      ["0x7", BLOCK_7_HASH],
+      ["0x7", BLOCK_7_HASH],
+      ["0x8", null],
+    ]);
+    expect(batched).toBe(1);
+    expect(perBlock).toBe(0);
   });
 
   test("hash-addressed lookups resolve through the stored block hash", async () => {
@@ -881,6 +944,16 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
     expect((await storage.getBlockByNumber(2n))?.blockHash).toBeNull();
     expect((await storage.getBlockByHash(BLOCK_1_HASH.toUpperCase().replace("0X", "0x")))?.blockNumber).toBe(1);
     expect(await storage.getBlockByHash(`0x${"cd".repeat(32)}`)).toBeUndefined();
+
+    // Batched hash lookup: stored-but-unhashed blocks map to null, unknown
+    // numbers are absent, and repeats collapse into one row.
+    expect(await storage.getBlockHashesByNumber([1n, 2n, 4n, 1n])).toEqual(
+      new Map<bigint, string | null>([
+        [1n, BLOCK_1_HASH],
+        [2n, null],
+      ]),
+    );
+    expect(await storage.getBlockHashesByNumber([])).toEqual(new Map());
 
     const samples = await storage.getPriorityFeeSamples(1n, 3n);
     expect(samples).toEqual([

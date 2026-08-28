@@ -44,6 +44,7 @@ export interface JsonRpcDataSource {
   getMinStoredBlock(): Promise<bigint | undefined>;
   getBlockByNumber(blockNumber: bigint): Promise<StoredBlock | undefined>;
   getBlockByHash(blockHash: string): Promise<StoredBlock | undefined>;
+  getBlockHashesByNumber(blockNumbers: readonly bigint[]): Promise<Map<bigint, string | null>>;
   queryBlocks(filter: BlockQueryFilter): Promise<StoredBlock[]>;
   getTransactionsForBlock(blockNumber: bigint): Promise<StoredTransaction[]>;
   getTransactionByHash(hash: string): Promise<StoredTransaction | null>;
@@ -240,13 +241,18 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
     );
   }
   const rawParams = request.params;
-  if (rawParams !== undefined && !Array.isArray(rawParams)) {
+  // An explicit `"params": null` means "no parameters" the same way omitting
+  // the member does. The spec only blesses omission, but plenty of clients
+  // send the null and nodes accept it, so rejecting it would only break
+  // callers that work fine against a real node.
+  const omittedParams = rawParams === undefined || rawParams === null;
+  if (!omittedParams && !Array.isArray(rawParams)) {
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_INVALID_PARAMS, "Invalid params: expected a positional array"),
     );
   }
-  const params: unknown[] = rawParams === undefined ? [] : (rawParams as unknown[]);
+  const params: unknown[] = omittedParams ? [] : (rawParams as unknown[]);
 
   const handler = METHODS[method];
   if (!handler) {
@@ -581,17 +587,11 @@ const METHODS: Record<string, MethodHandler> = {
     } catch (error) {
       throw new JsonRpcError(JSON_RPC_SERVER_ERROR, error instanceof Error ? error.message : String(error));
     }
-    const blockHashes = new Map<bigint, string | null>();
-    const result: Record<string, unknown>[] = [];
-    for (const log of logs) {
-      let blockHash = blockHashes.get(log.blockNumber);
-      if (blockHash === undefined) {
-        blockHash = (await storage.getBlockByNumber(log.blockNumber))?.blockHash ?? null;
-        blockHashes.set(log.blockNumber, blockHash);
-      }
-      result.push(logObject(log, blockHash));
-    }
-    return result;
+    // One lookup for every block in the result, not one per block: a wide
+    // query can touch thousands of distinct blocks and serial round trips
+    // dominated the call.
+    const blockHashes = await storage.getBlockHashesByNumber(logs.map((log) => log.blockNumber));
+    return logs.map((log) => logObject(log, blockHashes.get(log.blockNumber) ?? null));
   },
 };
 
@@ -905,7 +905,14 @@ function expectParamCount(params: unknown[], min: number, max: number = min): vo
   }
 }
 
-const QUANTITY_PATTERN = /^0x(0|[1-9a-f][0-9a-f]*)$/i;
+/**
+ * Quantities accepted on input. The canonical encoding carries no leading
+ * zeros, but nodes decode padded hex (`0x01`) without complaint and clients do
+ * send it, so being stricter than the node only breaks callers that work
+ * against one. A bare `0x` stays invalid. Output is always canonical — see
+ * `quantity()`.
+ */
+const QUANTITY_PATTERN = /^0x[0-9a-f]+$/i;
 const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/i;
 const HASH_PATTERN = /^0x[0-9a-f]{64}$/i;
 

@@ -2215,6 +2215,32 @@ export class ScannerStorage {
   }
 
   /**
+   * Header hashes for a set of block numbers, in one query. `eth_getLogs`
+   * stamps every log with its block's hash; resolving those one block at a
+   * time costs a round trip per distinct block in the result — up to the
+   * 10,000-log cap — so the whole set is fetched at once. Blocks scanned
+   * before `block_hash` existed map to null; numbers with no stored block are
+   * absent from the map.
+   */
+  async getBlockHashesByNumber(
+    blockNumbers: readonly bigint[],
+  ): Promise<Map<bigint, string | null>> {
+    const hashes = new Map<bigint, string | null>();
+    if (blockNumbers.length === 0) return hashes;
+    const unique = [...new Set(blockNumbers.map((blockNumber) => blockNumber.toString()))];
+    const result = await this.db.query<{ block_number: string; block_hash: string | null }>(
+      `SELECT block_number::text AS block_number, block_hash
+       FROM ${this.qBlocks}
+       WHERE block_number = ANY($1::bigint[])`,
+      [textArrayLiteral(unique)],
+    );
+    for (const row of result.rows) {
+      hashes.set(BigInt(row.block_number), row.block_hash);
+    }
+    return hashes;
+  }
+
+  /**
    * Every stored transaction of one block in position order. Unlike
    * queryTransactions this is not capped: a JSON-RPC block object has to list
    * all of the block's transactions or none.
