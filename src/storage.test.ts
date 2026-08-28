@@ -197,6 +197,7 @@ if (!hasPostgresForTests()) {
         "blocks",
         "transactions",
         "transaction_operations",
+        "transaction_logs",
         "transaction_records",
         "block_ranges",
         "sender_stats",
