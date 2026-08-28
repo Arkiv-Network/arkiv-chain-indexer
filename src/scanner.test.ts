@@ -85,6 +85,43 @@ describe("scanOneBlock", () => {
     expect(storage.savedMetrics.map((entry) => entry.blockNumber)).toEqual([245_650n]);
   });
 
+  test("records the balances of every address a block touched, only when asked", async () => {
+    const rpc = new SimpleRpc(new Map(), 2);
+    const storage = new FakeStorage();
+    const scan = (trackBalances: boolean) =>
+      scanOneBlock(
+        1n,
+        rpc as unknown as EthereumRpcClient,
+        storage as unknown as ScannerStorage,
+        1,
+        { kind: "lastSuccessfulBlock" },
+        {},
+        true,
+        undefined,
+        undefined,
+        undefined,
+        trackBalances,
+      );
+
+    // Off by default: no reading is taken and nothing is written, so the RPC
+    // budget is untouched for deployments that do not want balances.
+    await scan(false);
+    expect(rpc.balanceRequests).toEqual([]);
+    expect(storage.savedBalances).toEqual([undefined]);
+
+    await scan(true);
+    expect(rpc.balanceRequests).toHaveLength(1);
+    expect(rpc.balanceRequests[0]!.blockNumber).toBe(1n);
+    const asked = rpc.balanceRequests[0]!.addresses;
+    // Senders and recipients, deduplicated and lowercased.
+    expect(asked).toEqual([...new Set(asked)]);
+    expect(asked).toEqual(asked.map((address) => address.toLowerCase()));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(storage.savedBalances[1]).toEqual(
+      new Map(asked.map((address, index) => [address, BigInt(index + 1)])),
+    );
+  });
+
   test("stores block metrics without transaction rows when transaction data is disabled", async () => {
     const rpc = new SimpleRpc(new Map(), 2);
     const storage = new FakeStorage();
@@ -722,6 +759,8 @@ class FakeStorage {
   backfillNextBlock: bigint | undefined;
   chainProgress: Array<{ latestBlock: bigint; safeHead: bigint }> = [];
 
+  savedBalances: Array<ReadonlyMap<string, bigint> | undefined> = [];
+
   async getLastSuccessfulBlock(): Promise<bigint | undefined> {
     return this.lastSuccessfulBlock;
   }
@@ -736,8 +775,10 @@ class FakeStorage {
     transactions?: InspectedTransaction[],
     recordCandidates: InspectedTransaction[] = transactions ?? [],
     operations?: TransactionArkivOperations[],
+    balances?: ReadonlyMap<string, bigint>,
   ): Promise<void> {
     this.savedMetrics.push(metrics);
+    this.savedBalances.push(balances);
     if (transactions !== undefined) {
       this.savedTransactions.push(transactions);
     }
@@ -835,6 +876,12 @@ class FakeBatcherCollector implements BatcherMetricsSource {
 class SimpleRpc {
   readonly rpcUrl = "https://example.test";
   requestedBlocks: bigint[] = [];
+  balanceRequests: Array<{ addresses: string[]; blockNumber: bigint }> = [];
+
+  async getBalances(addresses: readonly string[], blockNumber: bigint): Promise<Map<string, bigint>> {
+    this.balanceRequests.push({ addresses: [...addresses], blockNumber });
+    return new Map(addresses.map((address, index) => [address.toLowerCase(), BigInt(index + 1)]));
+  }
 
   constructor(
     private readonly failuresByBlock = new Map<bigint, number>(),
@@ -990,6 +1037,7 @@ function config(overrides: Partial<Parameters<typeof backfillDownForSlice>[1]> =
     retryMs: 5_000,
     txReceiptConcurrency: 1,
     saveTransactionData: true,
+    trackBalances: false,
     disableBackfill: false,
     backfillOnly: false,
     backfillSleepMs: 0,

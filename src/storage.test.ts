@@ -180,6 +180,63 @@ if (!hasPostgresForTests()) {
       expect(await storage.getLastSuccessfulBlock()).toBe(bigBlock);
     });
 
+    test("stores balance readings per block and answers as of a block", async () => {
+      const storage = await withStorage();
+      const holder = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const other = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+      const save = (blockNumber: bigint, balances: Map<string, bigint>) =>
+        storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber }),
+          { kind: "lastSuccessfulBlock" },
+          [],
+          [],
+          undefined,
+          balances,
+        );
+
+      await save(10n, new Map([[holder, 100n], [other, 7n]]));
+      // A block with no touched addresses still counts as tracked.
+      await save(11n, new Map());
+      await save(12n, new Map([[holder, 250n]]));
+
+      expect(await storage.getMinBalanceBlock()).toBe(10n);
+
+      // The newest reading at or before the block; between readings the older
+      // one stands.
+      expect((await storage.getBalanceAt(holder, 12n))?.balanceWei).toBe("250");
+      expect((await storage.getBalanceAt(holder, 11n))?.balanceWei).toBe("100");
+      expect((await storage.getBalanceAt(holder, 10n))?.balanceWei).toBe("100");
+      expect(await storage.getBalanceAt(holder, 9n)).toBeUndefined();
+      expect(await storage.getBalanceAt("0xcccccccccccccccccccccccccccccccccccccccc", 12n)).toBeUndefined();
+      // Addresses are matched case-insensitively by being lowercased on both sides.
+      expect((await storage.getBalanceAt(holder.toUpperCase().replace("0X", "0x"), 12n))?.balanceWei).toBe("250");
+
+      // "Balances at block N" and "one account's history" are the two views.
+      expect((await storage.queryBalances({ blockNumber: 10n })).map((row) => [row.address, row.balanceWei])).toEqual([
+        [holder, "100"],
+        [other, "7"],
+      ]);
+      expect((await storage.queryBalances({ address: holder })).map((row) => row.blockNumber)).toEqual([
+        "12",
+        "10",
+      ]);
+      expect((await storage.queryBalances({ address: holder, order: "asc" })).map((row) => row.blockNumber)).toEqual([
+        "10",
+        "12",
+      ]);
+      expect(await storage.queryBalances({ blockGt: 10n, blockLt: 12n })).toEqual([]);
+
+      // A rescan replaces a block's readings rather than merging them.
+      await save(10n, new Map([[holder, 1n]]));
+      expect((await storage.queryBalances({ blockNumber: 10n })).map((row) => [row.address, row.balanceWei])).toEqual([
+        [holder, "1"],
+      ]);
+
+      // Undefined means "not tracked": existing readings are left alone.
+      await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 10n }), { kind: "lastSuccessfulBlock" }, []);
+      expect((await storage.queryBalances({ blockNumber: 10n })).map((row) => row.balanceWei)).toEqual(["1"]);
+    });
+
     test("reports database and application table sizes", async () => {
       const storage = await withStorage();
       await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 0n }), { kind: "lastSuccessfulBlock" }, [
@@ -199,6 +256,7 @@ if (!hasPostgresForTests()) {
         "transaction_operations",
         "transaction_logs",
         "transaction_records",
+        "account_balances",
         "block_ranges",
         "sender_stats",
         "scanner_state",
@@ -208,6 +266,7 @@ if (!hasPostgresForTests()) {
       expect(byName.get("transactions")?.rowCount).toBe("2");
       expect(byName.get("transaction_operations")?.rowCount).toBe("0");
       expect(byName.get("transaction_records")?.rowCount).toBe("6");
+      expect(byName.get("account_balances")?.rowCount).toBe("0");
       expect(byName.get("block_ranges")?.rowCount).toBe("1");
       expect(byName.get("sender_stats")?.rowCount).toBe("0");
       expect(byName.get("scanner_state")?.rowCount).toBe("1");

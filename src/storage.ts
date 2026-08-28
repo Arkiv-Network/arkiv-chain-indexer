@@ -67,6 +67,7 @@ export const MAX_LOGS_PER_QUERY = 10_000;
 export const MAX_TRANSACTION_RECORDS_PER_CATEGORY = 100;
 export const DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY = 20;
 export const MAX_SENDERS_PER_QUERY = 10_000;
+export const MAX_BALANCES_PER_QUERY = 10_000;
 /** Default number of most-recent operations returned for one entity key. */
 export const DEFAULT_ENTITY_HISTORY_LIMIT = 100;
 
@@ -114,6 +115,33 @@ export interface TransactionQueryFilter {
   dateLt?: string;
   limit?: number;
   page?: number;
+  order?: QueryOrder;
+}
+
+/**
+ * One account's balance at the end of one block, as the node reported it.
+ *
+ * Never computed from transaction values: an EVM balance also moves through
+ * contract-internal transfers, fee payments and withdrawals that a block's
+ * transaction list does not show, and this index does not start at genesis, so
+ * there is no anchor to sum forward from. Every row here is a reading, taken
+ * with `eth_getBalance` at that exact block.
+ */
+export interface StoredAccountBalance {
+  blockNumber: string;
+  blockDate: string;
+  address: string;
+  balanceWei: string;
+}
+
+export interface BalanceQueryFilter {
+  /** Exactly one block — the "balances at block N" view. */
+  blockNumber?: bigint;
+  /** Lowercased on the way in; one account's history. */
+  address?: string;
+  blockGt?: bigint;
+  blockLt?: bigint;
+  limit?: number;
   order?: QueryOrder;
 }
 
@@ -385,6 +413,7 @@ export class ScannerStorage {
   private readonly qTransactions: string;
   private readonly qTransactionOperations: string;
   private readonly qTransactionLogs: string;
+  private readonly qAccountBalances: string;
   private readonly qTransactionRecords: string;
   private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
@@ -400,6 +429,7 @@ export class ScannerStorage {
     this.qTransactions = `${quoteIdent(this.schema)}.transactions`;
     this.qTransactionOperations = `${quoteIdent(this.schema)}.transaction_operations`;
     this.qTransactionLogs = `${quoteIdent(this.schema)}.transaction_logs`;
+    this.qAccountBalances = `${quoteIdent(this.schema)}.account_balances`;
     this.qTransactionRecords = `${quoteIdent(this.schema)}.transaction_records`;
     this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
@@ -622,6 +652,25 @@ export class ScannerStorage {
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_logs_hash_idx")}
        ON ${this.qTransactionLogs} (hash)`,
+    );
+    // Balance readings for every address a block touched as sender or
+    // recipient, taken from the node at that block. Written only when balance
+    // tracking is on, and never backfilled, so coverage starts where it was
+    // switched on.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qAccountBalances} (
+        block_number BIGINT NOT NULL,
+        block_date TEXT NOT NULL,
+        address TEXT NOT NULL,
+        balance_wei TEXT NOT NULL,
+        PRIMARY KEY (block_number, address)
+      )
+    `);
+    // "The balance of this address as of block N" walks backwards from N to the
+    // newest reading at or before it, which is an index-only backward scan here.
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("account_balances_address_block_idx")}
+       ON ${this.qAccountBalances} (address, block_number DESC)`,
     );
     // Decoded Arkiv operation metadata per transaction. Payloads/calldata are
     // never stored — only payload_size_bytes. Under reference mode we also keep
@@ -1012,6 +1061,11 @@ export class ScannerStorage {
         regclassName: regclassName(this.schema, "transaction_records"),
       },
       {
+        name: "account_balances",
+        qualifiedName: this.qAccountBalances,
+        regclassName: regclassName(this.schema, "account_balances"),
+      },
+      {
         name: "block_ranges",
         qualifiedName: this.qBlockRanges,
         regclassName: regclassName(this.schema, "block_ranges"),
@@ -1148,6 +1202,12 @@ export class ScannerStorage {
     transactions?: InspectedTransaction[],
     recordCandidates: InspectedTransaction[] = transactions ?? [],
     operations?: TransactionArkivOperations[],
+    /**
+     * Balance readings for the addresses this block touched, keyed by
+     * lowercased address. Undefined means balance tracking is off and existing
+     * rows are left alone; an empty map means "tracked, nothing to record".
+     */
+    balances?: ReadonlyMap<string, bigint>,
   ): Promise<void> {
     await this.db.transaction(async (client) => {
       await client.query(
@@ -1254,6 +1314,9 @@ export class ScannerStorage {
       if (transactions !== undefined) {
         await this.replaceTransactionsForBlock(client, metrics, transactions);
         await this.replaceOperationsForBlock(client, metrics, operations);
+      }
+      if (balances !== undefined) {
+        await this.replaceBalancesForBlock(client, metrics, balances);
       }
       await this.deleteTransactionRecordsForBlock(client, metrics.blockNumber);
       await this.upsertTransactionRecords(client, metrics, recordCandidates);
@@ -1445,6 +1508,40 @@ export class ScannerStorage {
            LIMIT $2
          )`,
       [category, MAX_TRANSACTION_RECORDS_PER_CATEGORY],
+    );
+  }
+
+  /**
+   * Balance readings live and die with their block, so a rescan replaces them
+   * wholesale rather than merging: a re-read block is the authority on what its
+   * balances were.
+   */
+  private async replaceBalancesForBlock(
+    client: DbQueryable,
+    metrics: BlockMetrics,
+    balances: ReadonlyMap<string, bigint>,
+  ): Promise<void> {
+    await client.query(`DELETE FROM ${this.qAccountBalances} WHERE block_number = $1`, [
+      metrics.blockNumber.toString(),
+    ]);
+    if (balances.size === 0) return;
+
+    const params: string[] = [];
+    const values = [...balances.entries()].map(([address, balanceWei], rowIndex) => {
+      const offset = rowIndex * 4;
+      params.push(
+        metrics.blockNumber.toString(),
+        metrics.blockDate,
+        address.toLowerCase(),
+        balanceWei.toString(),
+      );
+      return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`;
+    });
+    await client.query(
+      `INSERT INTO ${this.qAccountBalances}
+         (block_number, block_date, address, balance_wei)
+       VALUES ${values.join(", ")}`,
+      params,
     );
   }
 
@@ -1887,6 +1984,88 @@ export class ScannerStorage {
       summaries.set(key, entries);
     }
     return summaries;
+  }
+
+  /**
+   * The newest balance reading for `address` at or before `upToBlock`.
+   *
+   * Readings are taken only in blocks where the address sent or received a
+   * transaction, so the answer is exact at its own `blockNumber` and is the
+   * best available claim for every block up to the next reading. Undefined
+   * means the index holds no reading for this address that early — which is
+   * *not* the same as a zero balance, and callers must not report it as one.
+   */
+  async getBalanceAt(
+    address: string,
+    upToBlock: bigint,
+  ): Promise<StoredAccountBalance | undefined> {
+    const result = await this.db.query<{
+      block_number: string;
+      block_date: string;
+      address: string;
+      balance_wei: string;
+    }>(
+      `SELECT block_number::text AS block_number, block_date, address, balance_wei
+       FROM ${this.qAccountBalances}
+       WHERE address = $1 AND block_number <= $2
+       ORDER BY block_number DESC
+       LIMIT 1`,
+      [address.toLowerCase(), upToBlock.toString()],
+    );
+    const row = result.rows[0];
+    return row ? mapAccountBalanceRow(row) : undefined;
+  }
+
+  /** Oldest block carrying a balance reading — the coverage floor, since nothing is backfilled. */
+  async getMinBalanceBlock(): Promise<bigint | undefined> {
+    const result = await this.db.query<{ block_number: string | null }>(
+      `SELECT MIN(block_number)::text AS block_number FROM ${this.qAccountBalances}`,
+    );
+    const value = result.rows[0]?.block_number;
+    return value === null || value === undefined ? undefined : BigInt(value);
+  }
+
+  async queryBalances(filter: BalanceQueryFilter = {}): Promise<StoredAccountBalance[]> {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filter.blockNumber !== undefined) {
+      params.push(filter.blockNumber.toString());
+      clauses.push(`block_number = $${params.length}`);
+    }
+
+    if (filter.address !== undefined) {
+      params.push(filter.address.toLowerCase());
+      clauses.push(`address = $${params.length}`);
+    }
+
+    if (filter.blockGt !== undefined) {
+      params.push(filter.blockGt.toString());
+      clauses.push(`block_number > $${params.length}`);
+    }
+
+    if (filter.blockLt !== undefined) {
+      params.push(filter.blockLt.toString());
+      clauses.push(`block_number < $${params.length}`);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    params.push(resolveLimit(filter.limit, MAX_BALANCES_PER_QUERY));
+    const order = resolveQueryOrder(filter.order);
+    const result = await this.db.query<{
+      block_number: string;
+      block_date: string;
+      address: string;
+      balance_wei: string;
+    }>(
+      `SELECT block_number::text AS block_number, block_date, address, balance_wei
+       FROM ${this.qAccountBalances}
+       ${where}
+       ORDER BY block_number ${order}, address ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows.map(mapAccountBalanceRow);
   }
 
   async queryBlocks(filter: BlockQueryFilter = {}): Promise<StoredBlock[]> {
@@ -3444,6 +3623,20 @@ interface LogRow {
   topic2: string | null;
   topic3: string | null;
   data: string;
+}
+
+function mapAccountBalanceRow(row: {
+  block_number: string;
+  block_date: string;
+  address: string;
+  balance_wei: string;
+}): StoredAccountBalance {
+  return {
+    blockNumber: row.block_number,
+    blockDate: row.block_date,
+    address: row.address,
+    balanceWei: row.balance_wei,
+  };
 }
 
 function mapLogRow(row: LogRow): StoredLog {

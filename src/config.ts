@@ -17,6 +17,7 @@ export interface ScannerConfig {
   retryMs: number;
   txReceiptConcurrency: number;
   saveTransactionData: boolean;
+  trackBalances: boolean;
   disableBackfill: boolean;
   backfillOnly: boolean;
   backfillSleepMs: number;
@@ -84,6 +85,13 @@ const SPEC: CliSpec = {
         "Store inspected transaction rows. Defaults to true (or SCANNER_SAVE_TRANSACTION_DATA / SAVE_TRANSACTION_DATA).",
       env: ["SCANNER_SAVE_TRANSACTION_DATA", "SAVE_TRANSACTION_DATA"],
       default: "true",
+    },
+    {
+      flags: "--track-balances <bool>",
+      description:
+        "Record each block's sender/recipient balances by reading them from the node (one batched eth_getBalance per block). Feeds eth_getBalance and GET /balances. Defaults to false (or SCANNER_TRACK_BALANCES).",
+      env: ["SCANNER_TRACK_BALANCES"],
+      default: "false",
     },
     {
       flags: "--disable-backfill <bool>",
@@ -160,6 +168,7 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
       cli.value("tx-receipt-concurrency")!,
     ),
     saveTransactionData: coerceBoolean("--save-transaction-data", cli.value("save-transaction-data")!),
+    trackBalances: coerceBoolean("--track-balances", cli.value("track-balances")!),
     disableBackfill,
     backfillOnly,
     backfillSleepMs: coerceInt("--backfill-sleep-ms", cli.value("backfill-sleep-ms")!),

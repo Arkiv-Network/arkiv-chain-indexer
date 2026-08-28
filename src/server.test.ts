@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
+  BALANCE_RESPONSE_NAMES,
   BLOCK_RESPONSE_NAMES,
   ENTITY_OPERATION_RESPONSE_NAMES,
   RANGE_RESPONSE_NAMES,
@@ -11,12 +12,14 @@ import {
   createBlockServer,
   entityOperationToResponseRow,
   handleRequest,
+  parseBalanceFilterFromQuery,
   parseFilterFromQuery,
   parseRangeFilterFromQuery,
   type RangeResponseRow,
   parseSenderStatsFilterFromQuery,
   parseTransactionFilterFromQuery,
   parseTransactionRecordsFilterFromQuery,
+  type BalancesResponseBody,
   type BlockInspectResponseBody,
   type BlockResponseRow,
   type EntityByKeyResponseBody,
@@ -39,7 +42,9 @@ import { type BaseloadConfig } from "./baseloadConfig";
 import { ResponseCache } from "./responseCache";
 import { ValueCache } from "./valueCache";
 import type {
+  BalanceQueryFilter,
   ScannerStorage,
+  StoredAccountBalance,
   StoredEntityOperation,
   StoredTransactionRecord,
   TransactionQueryFilter,
@@ -302,6 +307,72 @@ describe("parseTransactionRecordsFilterFromQuery", () => {
     expect(() =>
       parseTransactionRecordsFilterFromQuery(new URLSearchParams("limit=21")),
     ).toThrow(/limit must be at most 20/);
+  });
+});
+
+describe("GET /balances", () => {
+  const HOLDER = "0xAAaaAAaaAAaaAAaaAAaaAAaaAAaaAAaaAAaaAAaa";
+
+  function storageReturning(rows: StoredAccountBalance[], seen: BalanceQueryFilter[] = []) {
+    return {
+      queryBalances: async (filter: BalanceQueryFilter) => {
+        seen.push(filter);
+        return rows;
+      },
+    } as unknown as ScannerStorage;
+  }
+
+  test("serves compact rows and passes the filters through", async () => {
+    const seen: BalanceQueryFilter[] = [];
+    const storage = storageReturning(
+      [
+        {
+          blockNumber: "12",
+          blockDate: "2026-08-28T00:00:00.000Z",
+          address: HOLDER.toLowerCase(),
+          balanceWei: "250",
+        },
+      ],
+      seen,
+    );
+
+    const response = await handleRequest(
+      new Request(`http://example.test/balances?block=12&address=${HOLDER}&order=asc&limit=5`),
+      storage,
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as BalancesResponseBody;
+    expect(body.names).toEqual(BALANCE_RESPONSE_NAMES);
+    expect(body.balances).toEqual([["12", "2026-08-28T00:00:00.000Z", HOLDER.toLowerCase(), "250"]]);
+    expect(body.count).toBe(1);
+    expect(body.truncated).toBe(false);
+    expect(body.filters).toEqual({ order: "asc", blockNumber: "12", address: HOLDER.toLowerCase() });
+    expect(seen).toEqual([
+      { order: "asc", blockNumber: 12n, address: HOLDER.toLowerCase(), limit: 5 },
+    ]);
+  });
+
+  test("defaults to newest first with no filters", async () => {
+    const seen: BalanceQueryFilter[] = [];
+    const response = await handleRequest(
+      new Request("http://example.test/balances"),
+      storageReturning([], seen),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as BalancesResponseBody;
+    expect(body.filters).toEqual({ order: "desc", blockNumber: null, address: null });
+    expect(seen).toEqual([{ order: "desc" }]);
+  });
+
+  test("rejects an address that is not a 20-byte hex address", async () => {
+    const response = await handleRequest(
+      new Request("http://example.test/balances?address=0x1234"),
+      storageReturning([]),
+    );
+    expect(response.status).toBe(400);
+    expect(() => parseBalanceFilterFromQuery(new URLSearchParams("address=nope"))).toThrow(
+      "address must be a 20-byte hex address",
+    );
   });
 });
 

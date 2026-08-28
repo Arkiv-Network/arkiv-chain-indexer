@@ -122,8 +122,8 @@ docker compose up --build
   the block hash of every returned log through one `getBlockHashesByNumber` call: doing it per block cost a
   round trip per distinct block in the result (~420ms for a 1,000-block query, versus ~10ms batched).
 - `src/jsonRpcPassthrough.ts` is the one hole in that: a transaction has to reach a node's mempool, so
-  `SHADOW_RPC_UPSTREAM` (see `serverConfig.ts`) relays an allowlist — `eth_sendRawTransaction`,
-  `eth_sendTransaction` by default — to a real node and returns its answers unchanged. Unset, nothing is
+  `SHADOW_RPC_UPSTREAM` (see `serverConfig.ts`) relays an allowlist — `eth_sendRawTransaction` alone by
+  default, since wallets sign locally — to a real node and returns its answers unchanged. Unset, nothing is
   forwarded and those methods stay `-32601`. Three rules hold: **allowlist only**, never an open proxy; a
   listed method **outranks the local handler and the transaction-data gate**, which makes the list a general
   escape hatch (list `eth_getTransactionCount` to serve the node's live nonce instead of the indexed one);
@@ -132,6 +132,18 @@ docker compose up --build
   rate limited endpoint-wide (`600/min`) because a public endpoint fronting a metered node is a way to spend
   someone else's quota. `jsonRpc.ts` declares the `JsonRpcForwarder` interface so the dependency points one
   way; `/health` lists the forwarded methods under `features.jsonRpcPassthrough`.
+- Account balances (`account_balances`, `SCANNER_TRACK_BALANCES`, default off) are **readings, never sums**.
+  For each block the scanner takes the addresses that appeared as `from` or `to` and asks the node what they
+  hold at that block (`EthereumRpcClient.getBalances`, one batched `eth_getBalance` request per block — never
+  one request per address: the scanner's request count is what its share of the RPC key quota buys). Do not
+  replace this with arithmetic over `value_wei`: balances also move through contract-internal transfers, fee
+  payments and withdrawals that a block's transaction list does not show, and the index has no genesis anchor
+  to sum forward from, so a derived balance would drift silently. Rows are written in the block's own
+  transaction and replaced wholesale on a rescan; nothing is backfilled, so coverage starts where the flag was
+  switched on and the series is sparse (a row exists only where an address was touched). `getBalanceAt` takes
+  the newest reading at or before a block; when there is none, `eth_getBalance` and `GET /balances` say so
+  rather than answering `0x0` — an unindexed account and an empty one are different facts, and conflating them
+  is the `eth_getLogs`-below-the-floor mistake again.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

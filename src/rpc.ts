@@ -87,6 +87,38 @@ export class EthereumRpcClient {
     return result;
   }
 
+  /**
+   * Balances of several accounts at the end of one block, in a single JSON-RPC
+   * batch.
+   *
+   * The scanner snapshots every address a block touched, so this runs once per
+   * block over a handful of addresses. Sending them one at a time would
+   * multiply the scanner's request count — and so its share of the RPC key's
+   * quota, which is what actually caps throughput — by that handful.
+   *
+   * Keyed by lowercased address. An address the node declines to answer for is
+   * absent rather than zero: a missing balance must never be mistaken for an
+   * empty account.
+   */
+  async getBalances(
+    addresses: readonly string[],
+    blockNumber: bigint,
+  ): Promise<Map<string, bigint>> {
+    const balances = new Map<string, bigint>();
+    const unique = [...new Set(addresses.map((address) => address.toLowerCase()))];
+    if (unique.length === 0) return balances;
+
+    const blockTag = blockNumberToHex(blockNumber);
+    const results = await this.batchRequest<Hex>(
+      unique.map((address) => ({ method: "eth_getBalance", params: [address, blockTag] })),
+    );
+    for (const [index, address] of unique.entries()) {
+      const result = results[index];
+      if (result !== undefined) balances.set(address, BigInt(result));
+    }
+    return balances;
+  }
+
   async getTransactionReceipt(transactionHash: Hex): Promise<RpcReceipt> {
     const result = await this.request<RpcReceipt | null>("eth_getTransactionReceipt", [transactionHash]);
 
@@ -95,6 +127,46 @@ export class EthereumRpcClient {
     }
 
     return result;
+  }
+
+  /**
+   * Send several calls as one JSON-RPC batch. Results come back positionally,
+   * matched by id because a node may answer a batch in any order. A failure of
+   * any single call fails the whole batch: the scanner's callers retry blocks
+   * wholesale, so a partially applied batch has nowhere useful to go.
+   */
+  private async batchRequest<T>(
+    calls: ReadonlyArray<{ method: string; params: unknown[] }>,
+  ): Promise<T[]> {
+    if (calls.length === 0) return [];
+    const ids = calls.map(() => this.nextId++);
+    const body = JSON.stringify(
+      calls.map((call, index) => ({
+        jsonrpc: "2.0",
+        id: ids[index],
+        method: call.method,
+        params: call.params,
+      })),
+    );
+
+    const responseText = await this.post(body, calls[0]!.method, calls.length);
+    const payload = JSON.parse(responseText) as Array<JsonRpcResponse<T>>;
+    if (!Array.isArray(payload)) {
+      throw new Error(`RPC batch of ${calls.length} calls did not answer with an array`);
+    }
+
+    const byId = new Map<number, JsonRpcResponse<T>>();
+    for (const entry of payload) byId.set(entry.id, entry);
+    return calls.map((call, index) => {
+      const entry = byId.get(ids[index]!);
+      if (!entry) {
+        throw new Error(`RPC ${call.method} was missing from the batch response`);
+      }
+      if ("error" in entry) {
+        throw new Error(`RPC ${call.method} failed: ${entry.error.code} ${entry.error.message}`);
+      }
+      return entry.result;
+    });
   }
 
   private async request<T>(method: string, params: unknown[]): Promise<T> {
@@ -106,7 +178,19 @@ export class EthereumRpcClient {
       params,
     });
 
-    this.stats.calls += 1;
+    const responseText = await this.post(body, method, 1);
+
+    const payload = JSON.parse(responseText) as JsonRpcResponse<T>;
+    if ("error" in payload) {
+      throw new Error(`RPC ${method} failed: ${payload.error.code} ${payload.error.message}`);
+    }
+
+    return payload.result;
+  }
+
+  /** Transport shared by the single and batch paths: key rotation and accounting. */
+  private async post(body: string, method: string, callCount: number): Promise<string> {
+    this.stats.calls += callCount;
     this.stats.requestBytes += textEncoder.encode(body).byteLength;
 
     const key = this.keyRing ? this.keyRing.next() : this.apiKey;
@@ -131,12 +215,6 @@ export class EthereumRpcClient {
     if (!response.ok) {
       throw new Error(`RPC ${method} failed with HTTP ${response.status}`);
     }
-
-    const payload = JSON.parse(responseText) as JsonRpcResponse<T>;
-    if ("error" in payload) {
-      throw new Error(`RPC ${method} failed: ${payload.error.code} ${payload.error.message}`);
-    }
-
-    return payload.result;
+    return responseText;
   }
 }

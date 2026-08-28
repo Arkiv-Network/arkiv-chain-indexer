@@ -29,6 +29,7 @@ interface FillGapsConfig {
   maxRetries: number;
   txReceiptConcurrency: number;
   saveTransactionData: boolean;
+  trackBalances: boolean;
   once: boolean;
   decoderUrl?: string;
 }
@@ -94,6 +95,13 @@ progress are left untouched.`,
       default: "true",
     },
     {
+      flags: "--track-balances <bool>",
+      description:
+        "Record sender/recipient balances for filled blocks, so gap fills do not leave holes in the balance series. Defaults to false (or SCANNER_TRACK_BALANCES).",
+      env: ["SCANNER_TRACK_BALANCES"],
+      default: "false",
+    },
+    {
       flags: "--decoder-url <url>",
       description:
         "Optional arkiv-transaction-decoder base URL. When set (and transaction rows are stored), filled blocks also get Arkiv operation metadata (no payload).",
@@ -138,6 +146,7 @@ function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): Fill
       cli.value("tx-receipt-concurrency")!,
     ),
     saveTransactionData: coerceBoolean("--save-transaction-data", cli.value("save-transaction-data")!),
+    trackBalances: coerceBoolean("--track-balances", cli.value("track-balances")!),
     once: cli.flag("once"),
     ...(decoderUrl ? { decoderUrl } : {}),
   };
@@ -192,6 +201,7 @@ async function fillBlockWithRetry(
         undefined,
         undefined,
         decoderClient,
+        config.trackBalances,
       );
       return true;
     } catch (error) {

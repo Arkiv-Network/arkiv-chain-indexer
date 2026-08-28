@@ -31,17 +31,20 @@ import { ResponseCache, type CachedResponse } from "./responseCache";
 import { ValueCache } from "./valueCache";
 import {
   DEFAULT_ENTITY_HISTORY_LIMIT,
+  MAX_BALANCES_PER_QUERY,
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
   MAX_SENDERS_PER_QUERY,
   DEFAULT_TRANSACTION_RECORDS_PER_CATEGORY,
   MAX_TRANSACTIONS_PER_QUERY,
   ScannerStorage,
+  type BalanceQueryFilter,
   type BlockQueryFilter,
   type BlockRangeQueryFilter,
   type DatabaseStats,
   type QueryOrder,
   type SenderStatsQueryFilter,
+  type StoredAccountBalance,
   type StoredBlock,
   type StoredBlockRange,
   type StoredBaseloadConfig,
@@ -192,6 +195,19 @@ export interface SendersResponseBody {
   };
   names: typeof SENDER_STATS_RESPONSE_NAMES;
   senders: SenderStatsResponseRow[];
+}
+
+export interface BalancesResponseBody {
+  count: number;
+  limit: number;
+  truncated: boolean;
+  filters: {
+    order: QueryOrder;
+    blockNumber: string | null;
+    address: string | null;
+  };
+  names: typeof BALANCE_RESPONSE_NAMES;
+  balances: BalanceResponseRow[];
 }
 
 export interface GuzzlersResponseBody {
@@ -443,6 +459,19 @@ export function transactionRecordToResponseRow(
   record: StoredTransactionRecord,
 ): TransactionRecordResponseRow {
   return TRANSACTION_RECORD_RESPONSE_NAMES.map((name) => record[name] ?? null);
+}
+
+export const BALANCE_RESPONSE_NAMES = [
+  "blockNumber",
+  "blockDate",
+  "address",
+  "balanceWei",
+] as const satisfies readonly (keyof StoredAccountBalance)[];
+
+export type BalanceResponseRow = Array<string | null>;
+
+export function balanceToResponseRow(balance: StoredAccountBalance): BalanceResponseRow {
+  return BALANCE_RESPONSE_NAMES.map((name) => balance[name] ?? null);
 }
 
 export const SENDER_STATS_RESPONSE_NAMES = [
@@ -710,6 +739,10 @@ async function routeRequest(
 
   if (url.pathname === "/transaction-records") {
     return handleGetTransactionRecords(request, url, storage);
+  }
+
+  if (url.pathname === "/balances") {
+    return handleGetBalances(request, url, storage);
   }
 
   if (url.pathname === "/senders") {
@@ -1551,6 +1584,82 @@ export function guzzlerHistoryPointToResponseRow(
   point: GuzzlerHistoryPoint,
 ): GuzzlerHistoryPointResponseRow {
   return GUZZLER_HISTORY_POINT_RESPONSE_NAMES.map((name) => point[name] ?? null);
+}
+
+/**
+ * `GET /balances`: balance readings, newest first. `block` gives the "who held
+ * what at block N" view; `address` gives one account's history. Rows are only
+ * written for blocks in which an address sent or received a transaction, so
+ * this is a sparse series, not one row per account per block.
+ */
+async function handleGetBalances(
+  request: Request,
+  url: URL,
+  storage: ScannerStorage,
+): Promise<Response> {
+  let filter: BalanceQueryFilter;
+  try {
+    filter = parseBalanceFilterFromQuery(url.searchParams);
+  } catch (error) {
+    return jsonError(400, error instanceof Error ? error.message : String(error));
+  }
+
+  const balances = await storage.queryBalances(filter);
+  const effectiveLimit = Math.min(filter.limit ?? MAX_BALANCES_PER_QUERY, MAX_BALANCES_PER_QUERY);
+
+  const body: BalancesResponseBody = {
+    count: balances.length,
+    limit: effectiveLimit,
+    truncated: balances.length >= effectiveLimit,
+    filters: {
+      order: filter.order ?? "desc",
+      blockNumber: filter.blockNumber?.toString() ?? null,
+      address: filter.address ?? null,
+    },
+    names: BALANCE_RESPONSE_NAMES,
+    balances: balances.map(balanceToResponseRow),
+  };
+
+  return compressedJsonResponse(request, body);
+}
+
+export function parseBalanceFilterFromQuery(params: URLSearchParams): BalanceQueryFilter {
+  const filter: BalanceQueryFilter = { order: "desc" };
+
+  const block = params.get("block");
+  if (block !== null) {
+    filter.blockNumber = parseBlockParam("block", block);
+  }
+
+  const address = params.get("address");
+  if (address !== null) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      throw new Error("address must be a 20-byte hex address");
+    }
+    filter.address = address.toLowerCase();
+  }
+
+  const blockGt = params.get("blockGt");
+  if (blockGt !== null) {
+    filter.blockGt = parseBlockParam("blockGt", blockGt);
+  }
+
+  const blockLt = params.get("blockLt");
+  if (blockLt !== null) {
+    filter.blockLt = parseBlockParam("blockLt", blockLt);
+  }
+
+  const limit = params.get("limit");
+  if (limit !== null) {
+    filter.limit = parseLimitParam(limit, MAX_BALANCES_PER_QUERY);
+  }
+
+  const order = params.get("order");
+  if (order !== null) {
+    filter.order = parseOrderParam(order);
+  }
+
+  return filter;
 }
 
 async function handleGetSenders(

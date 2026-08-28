@@ -1,6 +1,6 @@
 import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format";
 import { decodeBlockArkivOperations, type ArkivDecoderClient } from "./arkivOperations";
-import { inspectBlockFromRpc } from "./blockInspector";
+import { inspectBlockFromRpc, type InspectedTransaction } from "./blockInspector";
 import { readBuildInfo } from "./buildInfo";
 import { computeBlockMetrics } from "./metrics";
 import { shouldIgnoreTransaction } from "./transactionFilter";
@@ -289,6 +289,7 @@ async function scanBlockWithRetry(
         batcherCollector,
         guzzlerRecorder,
         decoderClient,
+        config.trackBalances,
       );
       return;
     } catch (error) {
@@ -312,6 +313,7 @@ export async function scanOneBlock(
   batcherCollector?: BatcherMetricsSource,
   guzzlerRecorder?: GuzzlerRecorder,
   decoderClient?: ArkivDecoderClient,
+  trackBalances = false,
 ): Promise<void> {
   const startedAt = performance.now();
   const rpcStatsBefore = rpc.getStatsSnapshot();
@@ -331,17 +333,40 @@ export async function scanOneBlock(
     decoderClient && saveTransactionData
       ? await decodeBlockArkivOperations(block, decoderClient, receipts)
       : undefined;
+  // Read, never derive: ask the node what each touched address is worth at this
+  // block. A balance also moves through contract-internal transfers and fee
+  // payments that the transaction list does not show, and the index has no
+  // genesis anchor to sum forward from, so anything computed here would drift.
+  // One batched request per block, over the handful of addresses it touched.
+  const balances = trackBalances
+    ? await rpc.getBalances(touchedAddresses(inspectedTransactions), blockNumber)
+    : undefined;
   await storage.saveBlockMetrics(
     metrics,
     progressUpdate,
     transactions,
     inspectedTransactions,
     operations,
+    balances,
   );
   await recordGuzzlerTransactions(guzzlerRecorder, metrics.blockDate, inspectedTransactions);
   const elapsedMs = performance.now() - startedAt;
   const rpcStats = rpc.getStatsSince(rpcStatsBefore);
   console.log(formatBlockSummary(metrics, elapsedMs, rpcStats, summaryContext));
+}
+
+/**
+ * Every address a block touched as sender or recipient, lowercased and
+ * deduplicated. Contract creations contribute their sender only: the created
+ * address is not a `to`.
+ */
+function touchedAddresses(transactions: InspectedTransaction[]): string[] {
+  const addresses = new Set<string>();
+  for (const transaction of transactions) {
+    if (transaction.from) addresses.add(transaction.from.toLowerCase());
+    if (transaction.to) addresses.add(transaction.to.toLowerCase());
+  }
+  return [...addresses];
 }
 
 export async function fillRecentMissingBatcherMetrics(

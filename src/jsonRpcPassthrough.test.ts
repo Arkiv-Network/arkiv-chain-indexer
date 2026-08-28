@@ -57,8 +57,11 @@ async function forwardError(passthrough: JsonRpcPassthrough, method: string, par
 describe("JsonRpcPassthrough", () => {
   test("claims the submission methods by default", () => {
     const passthrough = new JsonRpcPassthrough({ url: UPSTREAM });
-    expect([...passthrough.methods].sort()).toEqual([...DEFAULT_PASSTHROUGH_METHODS].sort());
-    expect(passthrough.methods.has("eth_getBalance")).toBe(false);
+    expect([...passthrough.methods]).toEqual([...DEFAULT_PASSTHROUGH_METHODS]);
+    // Only the raw form: signing happens in the wallet, so a public endpoint
+    // never needs the node to hold keys.
+    expect([...DEFAULT_PASSTHROUGH_METHODS]).toEqual(["eth_sendRawTransaction"]);
+    expect(passthrough.methods.has("eth_sendTransaction")).toBe(false);
   });
 
   test("forwards the call as a well-formed request and returns the node's result", async () => {

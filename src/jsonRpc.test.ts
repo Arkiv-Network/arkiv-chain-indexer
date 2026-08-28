@@ -22,6 +22,7 @@ import type {
   PriorityFeeSample,
   ScannerProgress,
   ScannerStorage,
+  StoredAccountBalance,
   StoredBlock,
   StoredLog,
   StoredTransaction,
@@ -39,6 +40,7 @@ interface FakeChain {
   blocks?: StoredBlock[];
   transactions?: StoredTransaction[];
   logs?: StoredLog[];
+  balances?: StoredAccountBalance[];
 }
 
 function fakeBlock(overrides: Partial<StoredBlock> & { blockNumber: number }): StoredBlock {
@@ -94,10 +96,24 @@ function fakeSource(chain: FakeChain): JsonRpcDataSource {
   const blocks = [...(chain.blocks ?? [])].sort((a, b) => a.blockNumber - b.blockNumber);
   const transactions = chain.transactions ?? [];
   const logs = chain.logs ?? [];
+  const balances = chain.balances ?? [];
   const progress: ScannerProgress = chain.progress ?? {
     ...(blocks.length > 0 ? { lastSuccessfulBlock: BigInt(blocks[blocks.length - 1]!.blockNumber) } : {}),
   };
   return {
+    getBalanceAt: async (address, upToBlock) =>
+      balances
+        .filter(
+          (balance) =>
+            balance.address === address.toLowerCase() && BigInt(balance.blockNumber) <= upToBlock,
+        )
+        .sort((a, b) => Number(BigInt(b.blockNumber) - BigInt(a.blockNumber)))[0],
+    getMinBalanceBlock: async () =>
+      balances.length === 0
+        ? undefined
+        : balances
+            .map((balance) => BigInt(balance.blockNumber))
+            .reduce((lowest, blockNumber) => (blockNumber < lowest ? blockNumber : lowest)),
     getChainId: async () => chain.chainId,
     getScannerProgress: async () => progress,
     getForwardScanSamples: async () => [],
@@ -890,6 +906,68 @@ const BLOCK_1_HASH = `0x${"ab".repeat(32)}`;
 
 // ---------------------------------------------------------------------------
 
+describe("eth_getBalance", () => {
+  const HOLDER = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const STRANGER = "0xcccccccccccccccccccccccccccccccccccccccc";
+
+  function balance(blockNumber: number, address: string, balanceWei: string): StoredAccountBalance {
+    return {
+      blockNumber: blockNumber.toString(),
+      blockDate: new Date(1_700_000_000_000 + blockNumber * 2000).toISOString(),
+      address,
+      balanceWei,
+    };
+  }
+
+  const source = fakeSource({
+    blocks: [fakeBlock({ blockNumber: 3 }), fakeBlock({ blockNumber: 5 }), fakeBlock({ blockNumber: 9 })],
+    balances: [balance(3, HOLDER, "100"), balance(9, HOLDER, "250")],
+  });
+
+  test("answers with the newest reading at or before the tag", async () => {
+    expect(await result(source, "eth_getBalance", [HOLDER, "latest"])).toBe("0xfa");
+    expect(await result(source, "eth_getBalance", [HOLDER])).toBe("0xfa");
+    expect(await result(source, "eth_getBalance", [HOLDER, "0x9"])).toBe("0xfa");
+    // Between readings the older one still stands: it is the last thing the
+    // node told us this account was worth.
+    expect(await result(source, "eth_getBalance", [HOLDER, "0x5"])).toBe("0x64");
+    expect(await result(source, "eth_getBalance", [HOLDER, "0x3"])).toBe("0x64");
+    expect(await result(source, "eth_getBalance", [HOLDER.toUpperCase().replace("0X", "0x")])).toBe("0xfa");
+  });
+
+  test("an unindexed account is an error, never 0x0", async () => {
+    // The whole point: a caller must not be able to mistake "we never saw this
+    // account" for "this account is empty".
+    const stranger = await call(source, "eth_getBalance", [STRANGER, "latest"]);
+    expect(stranger.result).toBeUndefined();
+    expect(stranger.error?.code).toBe(JSON_RPC_SERVER_ERROR);
+    expect(stranger.error?.message).toContain(STRANGER);
+    expect(stranger.error?.message).toContain("balances are recorded from block 3 onwards");
+
+    // Same for a block older than this account's first reading.
+    const tooEarly = await call(source, "eth_getBalance", [HOLDER, "0x2"]);
+    expect(tooEarly.result).toBeUndefined();
+    expect(tooEarly.error?.code).toBe(JSON_RPC_SERVER_ERROR);
+  });
+
+  test("says so plainly when balances are not indexed at all", async () => {
+    const untracked = fakeSource({ blocks: [fakeBlock({ blockNumber: 1 })] });
+    const response = await call(untracked, "eth_getBalance", [HOLDER, "latest"]);
+    expect(response.error?.code).toBe(JSON_RPC_SERVER_ERROR);
+    expect(response.error?.message).toBe(
+      "eth_getBalance is unavailable: account balances are not indexed",
+    );
+  });
+
+  test("rejects a malformed address and a wrong parameter count", async () => {
+    expect((await call(source, "eth_getBalance", ["0x1234"])).error?.code).toBe(JSON_RPC_INVALID_PARAMS);
+    expect((await call(source, "eth_getBalance", [])).error?.code).toBe(JSON_RPC_INVALID_PARAMS);
+    expect((await call(source, "eth_getBalance", [HOLDER, "latest", "extra"])).error?.code).toBe(
+      JSON_RPC_INVALID_PARAMS,
+    );
+  });
+});
+
 describe("passthrough", () => {
   const source = fakeSource({
     chainId: 1337n,
@@ -1216,10 +1294,7 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       expect(seen[0]!.apiKey).toBe("hub-key");
 
       const health = (await (await fetch(`http://${server.hostname}:${server.port}/health`)).json()) as HealthResponseBody;
-      expect(health.features.jsonRpcPassthrough).toEqual([
-        "eth_sendRawTransaction",
-        "eth_sendTransaction",
-      ]);
+      expect(health.features.jsonRpcPassthrough).toEqual(["eth_sendRawTransaction"]);
     } finally {
       server.stop(true);
       node.stop(true);

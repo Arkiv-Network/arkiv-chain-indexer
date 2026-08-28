@@ -94,7 +94,8 @@ Related scanner and worker settings:
 | Baseload admin protection | `BASELOAD_ADMIN_BEARER_TOKEN` | Mutating `/baseload`, all `/baseload/configs...`, and `/admin/verify`. |
 | Guzzlers | `REDIS_URL` or `SERVER_REDIS_URL` | `/guzzlers` and `/guzzler/:address`; disabled routes return `503`. |
 | JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
-| JSON-RPC passthrough | `SHADOW_RPC_UPSTREAM`; forwarded methods listed in `features.jsonRpcPassthrough` in `/health` | Relays only the listed methods (`eth_sendRawTransaction`, `eth_sendTransaction` by default) to a real node. Unset, they answer `-32601`. |
+| Account balances | `SCANNER_TRACK_BALANCES` on the scanner; `account_balances` rows | `GET /balances` and `eth_getBalance` on `/shadow-rpc`. Both answer empty/`-32000` without stored readings. |
+| JSON-RPC passthrough | `SHADOW_RPC_UPSTREAM`; forwarded methods listed in `features.jsonRpcPassthrough` in `/health` | Relays only the listed methods (`eth_sendRawTransaction` by default) to a real node. Unset, they answer `-32601`. |
 
 ## Endpoint Index
 
@@ -113,6 +114,7 @@ Related scanner and worker settings:
 | `GET` | `/entity/:entityKey` | Most recent stored operations for one Arkiv entity key, with the total count. |
 | `GET` | `/transaction-records` | Top stored transaction records by gas, fee, and effective fee. |
 | `GET` | `/senders` | Precomputed sender-address activity stats. |
+| `GET` | `/balances` | Account balance readings per block, for addresses a block touched. |
 | `GET` | `/guzzlers` | Redis-cached active sender leaderboards over recent windows. |
 | `GET` | `/guzzler/:address` | One sender's recent per-minute guzzler history. |
 | `GET` | `/baseload` | Current backend Baseload state and worker statuses. |
@@ -201,6 +203,7 @@ lower than a node reports on blocks that carry it; `transactionIndex` keeps the 
 | `eth_blockNumber` | Indexed head. |
 | `eth_syncing` | `false`, or `{ startingBlock, currentBlock, highestBlock }` while behind. |
 | `eth_getTransactionCount(address, tag)` | Highest stored nonce sent by `address` up to `tag`, plus one (exact for EOAs). |
+| `eth_getBalance(address, tag?)` | Newest stored balance reading for `address` at or before `tag` (see `GET /balances`). `-32000` when the index holds no reading that early — never `0x0`. |
 | `eth_gasPrice`, `eth_maxPriorityFeePerGas` | geth's oracle over stored data: the 60th percentile of each of the last 20 blocks' cheapest tip; `eth_gasPrice` adds the indexed head's base fee. |
 | `eth_feeHistory(count, newest, percentiles?)` | Exact: per-block `baseFeePerGas`, `gasUsedRatio`, and gas-weighted `reward` percentiles from stored transactions (max 1,024 blocks). The closing "next block" base fee repeats the newest one when that block is not stored yet. |
 | `eth_getBlockByNumber(tag, full)`, `eth_getBlockByHash(hash, full)` | Stored block; hashes or full transaction objects. `{ "blockHash": … }` block parameters work too. |
@@ -211,7 +214,7 @@ lower than a node reports on blocks that carry it; `transactionIndex` keeps the 
 | `eth_getUncle*` | No uncles: counts are `0x0`, lookups `null`. |
 
 Transaction-backed methods return `-32000` when transaction data is disabled. Unknown methods return
-`-32601`, so state methods (`eth_call`, `eth_getBalance`, …) fail fast instead of silently hitting a node —
+`-32601`, so state methods (`eth_call`, `eth_estimateGas`, …) fail fast instead of silently hitting a node —
 unless the passthrough below is configured to forward them.
 
 ### Passthrough to a real node
@@ -227,14 +230,15 @@ the endpoint talks to nothing but PostgreSQL. `GET /health` lists what is forwar
 | --- | --- | --- |
 | `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset disables the passthrough. In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
 | `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
-| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,eth_sendTransaction` | Methods to forward. Each overrides the locally answered one. |
+| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction` | Methods to forward. Each overrides the locally answered one. |
 | `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
 | `SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE` | `600` | Forwarded calls per minute across all callers; `0` removes the cap. |
 
 Worth knowing before pointing a wallet at it:
 
-- **`eth_sendRawTransaction` is the one that works.** `eth_sendTransaction` needs an unlocked account on the
-  node and will normally fail there — but it fails with the node's own error rather than a confusing `-32601`.
+- **`eth_sendRawTransaction` is the only method forwarded by default.** Wallets and SDKs sign locally and
+  submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has no
+  business relying on. List it explicitly if a deployment's node really does.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -530,6 +534,31 @@ address, latestNonce, transactionCount, totalGasUsed, totalTransactionFeeWei,
 totalValueWei, averageGasUsed, averageTransactionFeeWei, firstBlockNumber,
 firstBlockNumberDecimal, lastBlockNumber, lastBlockNumberDecimal, firstBlockDate,
 lastBlockDate, aggregatedAt
+```
+
+## `GET /balances`
+
+Account balance readings taken from the node, one per (block, address) where that address sent or
+received a transaction in that block. Never derived from transaction values -- balances also move
+through contract-internal transfers and fee payments the transaction list does not show, and the
+index has no genesis anchor. Requires `SCANNER_TRACK_BALANCES=true`; never backfilled, so coverage
+starts where it was switched on, and the series is sparse.
+
+Query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `block` | Exactly one block: the "who held what at block N" view. |
+| `address` | One account's history; 20-byte hex, matched case-insensitively. |
+| `blockGt`, `blockLt` | Exclusive block bounds. |
+| `limit` | Positive integer, maximum 10,000. |
+| `order` | `desc` default (newest block first), or `asc`. |
+
+The response includes `count`, `limit`, `truncated`, `filters`, `names`, and `balances`. Each
+balance row is a compact JSON array of values in `names` order:
+
+```txt
+blockNumber, blockDate, address, balanceWei
 ```
 
 ## `GET /guzzlers`

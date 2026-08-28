@@ -180,6 +180,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
+| `--track-balances` | `SCANNER_TRACK_BALANCES` | `false` | Record each block's sender/recipient balances by reading them from the node (one batched `eth_getBalance` per block). Feeds `GET /balances` and `eth_getBalance`. |
 | `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict from a decoder that parses references. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. With the compose `rpc-proxy` profile this is `http://rpc-proxy:8788` (see below). |
 
@@ -714,6 +715,35 @@ Example:
 curl 'http://localhost:3000/senders?limit=100'
 ```
 
+### `GET /balances`
+
+Returns stored account balance readings, newest block first. Responses are capped at **10,000 rows**.
+
+Balances are **read, never computed**. For each block the scanner takes the addresses that sent or received a
+transaction in it and asks the node what they are worth at that block (one batched `eth_getBalance` per
+block). Summing transaction values would drift instead: balances also move through contract-internal
+transfers, fee payments and withdrawals that a block's transaction list does not show, and the index has no
+genesis anchor to sum forward from.
+
+That makes this a **sparse series**, not one row per account per block: a row exists only where an address was
+a sender or recipient, and each row is exact at its own block. Set `SCANNER_TRACK_BALANCES=true` to record
+them; nothing is backfilled, so coverage starts at the block where it was switched on.
+
+| Query parameter | Description |
+| --- | --- |
+| `block` | Exactly one block — the "who held what at block N" view. |
+| `address` | One account's history. A 20-byte hex address; matched case-insensitively. |
+| `blockGt`, `blockLt` | Exclusive block bounds. |
+| `limit` | Maximum rows to return, up to `10000`. |
+| `order` | `asc` or `desc` by block number; defaults to `desc`. |
+
+Example:
+
+```sh
+curl 'http://localhost:3000/balances?block=638598'
+curl 'http://localhost:3000/balances?address=0xaaaa...aaaa&limit=100'
+```
+
 ### `GET /ranges`
 
 Returns aggregated fixed-size windows ordered by `range_start` ascending. Each request targets a single
@@ -828,6 +858,7 @@ lower than a node reports on blocks that carry it; `transactionIndex` keeps the 
 | `eth_blockNumber` | Indexed head. |
 | `eth_syncing` | `false`, or `{ startingBlock, currentBlock, highestBlock }` while behind. |
 | `eth_getTransactionCount(address, tag)` | Highest stored nonce sent by `address` up to `tag`, plus one (exact for EOAs). |
+| `eth_getBalance(address, tag?)` | The newest stored balance reading for `address` at or before `tag` (see `GET /balances`). Errors with `-32000` when the index holds no reading that early — never `0x0`, so an unindexed account is never mistaken for an empty one. |
 | `eth_gasPrice`, `eth_maxPriorityFeePerGas` | geth's oracle over stored data: the 60th percentile of each of the last 20 blocks' cheapest tip; `eth_gasPrice` adds the indexed head's base fee. |
 | `eth_feeHistory(count, newest, percentiles?)` | Exact: per-block `baseFeePerGas`, `gasUsedRatio`, and gas-weighted `reward` percentiles from stored transactions (max 1,024 blocks). The closing "next block" base fee repeats the newest one when that block is not stored yet. |
 | `eth_getBlockByNumber(tag, full)`, `eth_getBlockByHash(hash, full)` | Stored block; hashes or full transaction objects. `{ "blockHash": … }` block parameters work too. |
@@ -838,7 +869,7 @@ lower than a node reports on blocks that carry it; `transactionIndex` keeps the 
 | `eth_getUncle*` | No uncles: counts are `0x0`, lookups `null`. |
 
 Transaction-backed methods return `-32000` when transaction data is disabled. Unknown methods return
-`-32601`, so state methods (`eth_call`, `eth_getBalance`, …) fail fast instead of silently hitting a node —
+`-32601`, so state methods (`eth_call`, `eth_estimateGas`, …) fail fast instead of silently hitting a node —
 unless the passthrough below is configured to forward them.
 
 #### Passthrough to a real node
@@ -854,14 +885,15 @@ the endpoint talks to nothing but PostgreSQL. `GET /health` lists what is forwar
 | --- | --- | --- |
 | `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset disables the passthrough. In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
 | `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
-| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,eth_sendTransaction` | Methods to forward. Each overrides the locally answered one. |
+| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction` | Methods to forward. Each overrides the locally answered one. |
 | `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
 | `SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE` | `600` | Forwarded calls per minute across all callers; `0` removes the cap. |
 
 Worth knowing before pointing a wallet at it:
 
-- **`eth_sendRawTransaction` is the one that works.** `eth_sendTransaction` needs an unlocked account on the
-  node and will normally fail there — but it fails with the node's own error rather than a confusing `-32601`.
+- **`eth_sendRawTransaction` is the only method forwarded by default.** Wallets and SDKs sign locally and
+  submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has no
+  business relying on. List it explicitly if a deployment's node really does.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,

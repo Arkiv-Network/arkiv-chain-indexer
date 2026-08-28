@@ -129,6 +129,11 @@ services:
       # Legacy no-op: receipts are fetched sequentially (see README).
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+      # Record each block's sender/recipient balances by reading them from the
+      # node (one batched eth_getBalance per block). Feeds eth_getBalance on
+      # /shadow-rpc and GET /balances. Never backfilled: coverage starts where
+      # this was switched on.
+      SCANNER_TRACK_BALANCES: ${SCANNER_TRACK_BALANCES:-false}
     volumes:
       - ${RPC_KEY_DIR:-./rpc-keys}:/app/rpc-keys:ro
     extra_hosts: *extra-hosts
@@ -167,6 +172,11 @@ services:
       # Legacy no-op: receipts are fetched sequentially (see README).
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+      # Record each block's sender/recipient balances by reading them from the
+      # node (one batched eth_getBalance per block). Feeds eth_getBalance on
+      # /shadow-rpc and GET /balances. Never backfilled: coverage starts where
+      # this was switched on.
+      SCANNER_TRACK_BALANCES: ${SCANNER_TRACK_BALANCES:-false}
     volumes:
       - ${RPC_KEY_DIR:-./rpc-keys}:/app/rpc-keys:ro
     extra_hosts: *extra-hosts
@@ -261,6 +271,11 @@ services:
       # Legacy no-op: receipts are fetched sequentially (see README).
       SCANNER_TX_RECEIPT_CONCURRENCY: ${SCANNER_TX_RECEIPT_CONCURRENCY:-20}
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
+      # Record each block's sender/recipient balances by reading them from the
+      # node (one batched eth_getBalance per block). Feeds eth_getBalance on
+      # /shadow-rpc and GET /balances. Never backfilled: coverage starts where
+      # this was switched on.
+      SCANNER_TRACK_BALANCES: ${SCANNER_TRACK_BALANCES:-false}
     volumes:
       - ${RPC_KEY_DIR:-./rpc-keys}:/app/rpc-keys:ro
     extra_hosts: *extra-hosts

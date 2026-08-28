@@ -27,16 +27,13 @@ import { JSON_RPC_SERVER_ERROR, JsonRpcError, type JsonRpcForwarder } from "./js
 export const JSON_RPC_LIMIT_EXCEEDED = -32005;
 
 /**
- * Forwarded unless the deployment says otherwise: the two ways a client submits
- * a transaction. `eth_sendRawTransaction` is the one wallets and SDKs actually
- * use; `eth_sendTransaction` needs an unlocked account on the node and will
- * usually fail there, but it fails with the node's own error rather than a
- * confusing `-32601` from us.
+ * Forwarded unless the deployment says otherwise. `eth_sendRawTransaction` is
+ * how wallets and SDKs actually submit — they sign locally — so it is the only
+ * method worth forwarding by default. `eth_sendTransaction` needs an unlocked
+ * account on the node, which a public endpoint has no business relying on; list
+ * it explicitly if some deployment's node really does hold keys.
  */
-export const DEFAULT_PASSTHROUGH_METHODS: readonly string[] = [
-  "eth_sendRawTransaction",
-  "eth_sendTransaction",
-];
+export const DEFAULT_PASSTHROUGH_METHODS: readonly string[] = ["eth_sendRawTransaction"];
 
 /** Upstream calls are submissions, not queries: they answer fast or not at all. */
 export const DEFAULT_PASSTHROUGH_TIMEOUT_MS = 10_000;

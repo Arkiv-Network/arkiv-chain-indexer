@@ -23,7 +23,7 @@
  *   list, and `eth_getLogs` only sees what is stored.
  * - Writes have no answer in an index at all: a transaction has to reach a
  *   node's mempool. A configured passthrough relays the methods it lists
- *   (`eth_sendRawTransaction`, `eth_sendTransaction` by default) to a real node
+ *   (`eth_sendRawTransaction` by default) to a real node
  *   and takes precedence over every handler here.
  *
  * `eth_blockNumber` and the `latest` tag mean the *indexed* head
@@ -36,6 +36,7 @@ import type {
   LogQueryFilter,
   PriorityFeeSample,
   ScannerProgress,
+  StoredAccountBalance,
   StoredBlock,
   StoredLog,
   StoredTransaction,
@@ -59,6 +60,8 @@ export interface JsonRpcDataSource {
     position: number,
   ): Promise<StoredTransaction | null>;
   getSentTransactionCount(address: string, upToBlock?: bigint): Promise<bigint>;
+  getBalanceAt(address: string, upToBlock: bigint): Promise<StoredAccountBalance | undefined>;
+  getMinBalanceBlock(): Promise<bigint | undefined>;
   getLogsForTransaction(hash: string): Promise<StoredLog[]>;
   queryLogs(filter: LogQueryFilter): Promise<StoredLog[]>;
   getPriorityFeeSamples(fromBlock: bigint, toBlock: bigint): Promise<PriorityFeeSample[]>;
@@ -169,6 +172,7 @@ export const JSON_RPC_METHODS = [
   "eth_maxPriorityFeePerGas",
   "eth_feeHistory",
   "eth_getTransactionCount",
+  "eth_getBalance",
   "eth_getBlockTransactionCountByNumber",
   "eth_getUncleCountByBlockNumber",
   "eth_getUncleCountByBlockHash",
@@ -476,6 +480,41 @@ const METHODS: Record<string, MethodHandler> = {
       return "0x0";
     }
     return quantity(await storage.getSentTransactionCount(address, block));
+  },
+
+  /**
+   * Balances are readings, not sums: the scanner asks the node for the balance
+   * of every address a block touched, so a stored value is exact at its own
+   * block and stands until the next reading for that address.
+   *
+   * There is no reading before the block where tracking was switched on, and
+   * none for an address the index has never seen touched. Both answer an error
+   * rather than `0x0` — an unindexed account and an empty one are different
+   * facts, and a caller that cannot tell them apart will treat one as the other.
+   */
+  eth_getBalance: async (params, { storage }) => {
+    expectParamCount(params, 1, 2);
+    const address = parseAddressParam(params[0], "address");
+    const block = await resolveBlockTag(params[1] ?? "latest", storage);
+    if (block !== undefined) {
+      const balance = await storage.getBalanceAt(address, block);
+      if (balance) return quantity(BigInt(balance.balanceWei));
+    }
+
+    const floor = await storage.getMinBalanceBlock();
+    if (floor === undefined) {
+      throw new JsonRpcError(
+        JSON_RPC_SERVER_ERROR,
+        "eth_getBalance is unavailable: account balances are not indexed",
+      );
+    }
+    const at = block === undefined ? "the requested block" : `block ${block.toString()}`;
+    throw new JsonRpcError(
+      JSON_RPC_SERVER_ERROR,
+      `No indexed balance for ${address} at or before ${at}; ` +
+        `balances are recorded from block ${floor.toString()} onwards, ` +
+        `and only for blocks in which an address sent or received a transaction`,
+    );
   },
 
   eth_getBlockTransactionCountByNumber: async (params, { storage }) => {
