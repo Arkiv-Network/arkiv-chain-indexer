@@ -19,24 +19,27 @@ async function main(): Promise<void> {
     const batcherCollector = config.batcherCollectorUrl
       ? new HttpBatcherCollector(config.batcherCollectorUrl)
       : undefined;
-    // Probe the chain id once so the decoder verifies payload references against
-    // the right trusted-signer allowlist. On failure fall back to the decoder's
-    // own default chain id (degrades verification trust off the dev chain, so
-    // make it visible). Only probed when decoding is enabled.
-    const decoderChainId = config.decoderUrl
-      ? await rpc.getChainId().catch((error) => {
-          console.warn(
-            `Could not determine chain id for the Arkiv decoder; reference verification will use the decoder default: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          return undefined;
-        })
-      : undefined;
+    // Probe the chain id once. The decoder needs it to verify payload
+    // references against the right trusted-signer allowlist, and the HTTP
+    // backend's JSON-RPC endpoint answers eth_chainId from the persisted copy
+    // (it never talks to a node). On failure the decoder falls back to its own
+    // default chain id (degrades verification trust off the dev chain, so make
+    // it visible) and the backend keeps whatever chain id was stored before.
+    const chainId = await rpc.getChainId().catch((error) => {
+      console.warn(
+        `Could not determine chain id; the Arkiv decoder will use its default and eth_chainId keeps the stored value: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    });
     const decoderClient = config.decoderUrl
-      ? new ArkivDecoderClient(config.decoderUrl, decoderChainId)
+      ? new ArkivDecoderClient(config.decoderUrl, chainId)
       : undefined;
     storage = await ScannerStorage.open(config.databaseUrl);
+    if (chainId !== undefined) {
+      await storage.saveChainId(BigInt(chainId));
+    }
 
     if (config.redisUrl) {
       const store = await RedisGuzzlerStore.open(config.redisUrl);

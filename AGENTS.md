@@ -101,6 +101,16 @@ docker compose up --build
   count. This matters more than it looks: an unfiltered `COUNT(*)` scans every transaction row, and load
   testing showed it single-handedly capping the whole backend — every other Postgres-backed endpoint queues
   behind it. Keep the key free of `limit`/`page`/`order`, and prefer fixing the count over adding indexes.
+- `src/jsonRpc.ts` serves `POST /rpc`, a read-only Ethereum JSON-RPC 2.0 surface answered purely from stored
+  data (it never proxies to a node). `latest` means the indexed head (`scanner_state.last_successful_block`);
+  `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
+  field the scanner does not persist to `null` (hashes, roots, signatures, logs; `input` is always null by the
+  calldata invariant). Block-hash addressed methods fail with `-32000` because hashes are not indexed. The
+  method handlers take a `JsonRpcDataSource` (a structural subset of `ScannerStorage`) so they unit-test
+  against an in-memory fake; `eth_feeHistory` reproduces geth's gas-weighted percentile walk and the
+  gas-price oracle its 60th-percentile-of-per-block-minimum-tip rule. The scanner persists `chain_id` into
+  `scanner_state` at startup so `eth_chainId` needs no node. New methods go in `JSON_RPC_METHODS` and, when
+  they read transaction rows, in `TRANSACTION_DATA_METHODS` so the transaction-data gate covers them.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator
