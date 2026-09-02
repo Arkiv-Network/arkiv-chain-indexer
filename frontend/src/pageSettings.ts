@@ -8,6 +8,7 @@ import { envValues } from "./runtimeConfig";
 
 export interface PageSettings {
   chainName: string;
+  networkName: string;
   tokenSymbol: string;
   blockTimeMs: number;
   stubTickMs: number;
@@ -26,10 +27,10 @@ export interface PageSettings {
 
 export type PageSettingsKey = keyof PageSettings;
 export type EditablePageSettingsKey = Exclude<PageSettingsKey, "noBatcher">;
-export type NumericPageSettingsKey = Exclude<EditablePageSettingsKey, "chainName" | "tokenSymbol">;
+export type NumericPageSettingsKey = Exclude<EditablePageSettingsKey, "chainName" | "networkName" | "tokenSymbol">;
 
 interface TextSettingDefinition {
-  key: "chainName" | "tokenSymbol";
+  key: "chainName" | "networkName" | "tokenSymbol";
   label: string;
   envName: string;
   kind: "text";
@@ -47,6 +48,7 @@ export type PageSettingDefinition = TextSettingDefinition | NumericSettingDefini
 
 export const DEFAULT_PAGE_SETTINGS: PageSettings = {
   chainName: "Arkiv",
+  networkName: "",
   tokenSymbol: "ETH",
   blockTimeMs: 2_000,
   stubTickMs: 500,
@@ -65,6 +67,7 @@ export const DEFAULT_PAGE_SETTINGS: PageSettings = {
 
 export const PAGE_SETTING_DEFINITIONS: readonly PageSettingDefinition[] = [
   { key: "chainName", label: "Chain name", envName: "VITE_CHAIN_NAME", kind: "text" },
+  { key: "networkName", label: "Network name", envName: "VITE_NETWORK_NAME", kind: "text" },
   { key: "tokenSymbol", label: "Token symbol", envName: "VITE_TOKEN_SYMBOL", kind: "text" },
   { key: "blockTimeMs", label: "Block time", envName: "VITE_BLOCK_TIME_MS", kind: "number", unit: "ms" },
   { key: "stubTickMs", label: "Stub tick", envName: "VITE_STUB_TICK_MS", kind: "number", unit: "ms" },
@@ -152,8 +155,10 @@ export function parseBooleanFlag(value: string | undefined): boolean {
 
 export function readBuildPageSettings(env: Record<string, string | undefined> = envValues()): PageSettings {
   const chainName = env.VITE_CHAIN_NAME?.trim() || DEFAULT_PAGE_SETTINGS.chainName;
+  const networkName = env.VITE_NETWORK_NAME?.trim() || DEFAULT_PAGE_SETTINGS.networkName;
   return {
     chainName,
+    networkName,
     tokenSymbol: parseTokenSymbol(env.VITE_TOKEN_SYMBOL),
     blockTimeMs: parseNonNegativeInteger(env.VITE_BLOCK_TIME_MS, DEFAULT_PAGE_SETTINGS.blockTimeMs),
     stubTickMs: parseNonNegativeInteger(env.VITE_STUB_TICK_MS, DEFAULT_PAGE_SETTINGS.stubTickMs),
@@ -191,6 +196,7 @@ export const BUILD_PAGE_SETTINGS = readBuildPageSettings();
 export function settingsToDraft(settings: PageSettings): SettingsDraft {
   return {
     chainName: settings.chainName,
+    networkName: settings.networkName,
     tokenSymbol: settings.tokenSymbol,
     blockTimeMs: String(settings.blockTimeMs),
     stubTickMs: String(settings.stubTickMs),
@@ -221,7 +227,10 @@ export function normalizeSettingsDraft(
     return { settings: fallback, error: "Token symbol must be exactly three letters." };
   }
 
-  const settings: PageSettings = { ...fallback, chainName, tokenSymbol };
+  // Network name is optional: blank hides the header badge.
+  const networkName = draft.networkName.trim();
+
+  const settings: PageSettings = { ...fallback, chainName, networkName, tokenSymbol };
   for (const definition of PAGE_SETTING_DEFINITIONS) {
     if (definition.kind !== "number") continue;
     const raw = draft[definition.key].trim();

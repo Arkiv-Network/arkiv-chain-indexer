@@ -135,6 +135,11 @@ export function App() {
     navItems.find((item) => item.view === activeView)?.label ?? navLabelForView(activeView) ?? "Menu";
 
   useEffect(() => {
+    const network = pageSettings.networkName ? ` · ${pageSettings.networkName}` : "";
+    document.title = `${pageSettings.chainName} BlockExplorer${network}`;
+  }, [pageSettings.chainName, pageSettings.networkName]);
+
+  useEffect(() => {
     const onPopState = () => setClientLocation(getCurrentLocation());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -463,7 +468,12 @@ export function App() {
         <div className="header-inner">
           <h1>
             <span className="brand-name">{pageSettings.chainName}</span>
-            <span className="brand-sub">Scanner</span>
+            <span className="brand-sub">BlockExplorer</span>
+            {pageSettings.networkName ? (
+              <span className="brand-network" title="Network">
+                {pageSettings.networkName}
+              </span>
+            ) : null}
           </h1>
           {adminMode !== "hidden" ? (
             <button

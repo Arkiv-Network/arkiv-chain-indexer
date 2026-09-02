@@ -240,7 +240,18 @@ header h1::before {
 }
 
 header h1::after {
-  content: "] ";
+  content: "]";
+  /* Close the bracket right after the brand name; the product and network
+     pills sit outside it (flex order — the DOM is unchanged). */
+  order: 1;
+}
+
+header h1 .brand-sub {
+  order: 2;
+}
+
+header h1 .brand-network {
+  order: 3;
 }
 
 header h1 .brand-name {
@@ -252,18 +263,47 @@ header h1 .brand-name {
   text-transform: uppercase;
 }
 
+/* Product pill, like the hub's "[ARKIV] HUB" badge. */
 header h1 .brand-sub {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   color: var(--ink-muted);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  border-left: 1px solid var(--line-strong);
-  padding: 0.2rem 0 0.2rem 0.55rem;
-  margin-left: 0.25rem;
-  align-self: stretch;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 0.15rem 0.45rem;
+  margin-left: 0.35rem;
   display: inline-flex;
   align-items: center;
+  line-height: 1.4;
+}
+
+/* Network badge (VITE_NETWORK_NAME): live dot + name. */
+header h1 .brand-network {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--stone);
+  padding: 0.15rem 0.6rem 0.15rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+header h1 .brand-network::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ok) 18%, transparent);
 }
 
 .header-menu {

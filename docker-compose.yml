@@ -366,6 +366,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_CHAIN_NAME: ${VITE_CHAIN_NAME:-Arkiv}
+        VITE_NETWORK_NAME: ${VITE_NETWORK_NAME:-}
         VITE_TOKEN_SYMBOL: ${VITE_TOKEN_SYMBOL:-ETH}
         VITE_TRANSACTION_DECODER_BASE_URL: ${VITE_TRANSACTION_DECODER_BASE_URL:-https://decoder.atlas.arkiv-global.net/}
         VITE_TRANSACTION_EXPLORER_BASE_URL: ${VITE_TRANSACTION_EXPLORER_BASE_URL:-}
