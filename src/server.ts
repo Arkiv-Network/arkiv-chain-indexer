@@ -20,7 +20,9 @@ import {
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
-import { handleJsonRpcText, type JsonRpcForwarder } from "./jsonRpc";
+import { handleJsonRpcText, type JsonRpcForwarder, type JsonRpcMethodHandler } from "./jsonRpc";
+import { ARKIV_INDEX_METHODS, createArkivIndexMethods } from "./arkivJsonRpc";
+import type { EntityIndexReader, EntityIndexStats } from "./entityIndexStorage";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
 import {
   buildPayloadProviderPaymentBreakdown,
@@ -101,6 +103,12 @@ export interface BlockServerOptions {
    * Omitted (the default) POST /shadow-rpc talks to nothing but PostgreSQL.
    */
   jsonRpcPassthrough?: JsonRpcForwarder;
+  /**
+   * The experimental entity index. When present, `POST /shadow-rpc/experimental`
+   * answers the `arkiv_*` reads from it; absent, that path is a 404 and only
+   * `/shadow-rpc` (forwarding to a node) serves them.
+   */
+  entityIndex?: EntityIndexReader & { getStats(): Promise<EntityIndexStats> };
 }
 
 export interface BlocksResponseBody {
@@ -271,6 +279,12 @@ export interface HealthResponseBody {
      * is the only way a caller can tell which writes the endpoint accepts.
      */
     jsonRpcPassthrough: string[] | false;
+    /**
+     * The experimental entity index behind `POST /shadow-rpc/experimental`:
+     * `false` when the deployment has not enabled it, else where its
+     * projection stands. `latest` on that path means `projectedThroughBlock`.
+     */
+    entityQueryIndex: false | EntityQueryIndexHealth;
   };
   guzzlers: {
     enabled: boolean;
@@ -285,6 +299,20 @@ export interface HealthResponseBody {
     /** Approximate total size of the cached entries in bytes, or null. */
     totalSizeBytes: string | null;
   };
+}
+
+export interface EntityQueryIndexHealth {
+  path: string;
+  methods: string[];
+  /** First block the index can attribute entities from; null until the projector has started. */
+  floorBlock: string | null;
+  /** Newest block folded into the index; null until the first chunk lands. */
+  projectedThroughBlock: string | null;
+  /** How far the projection trails the scanner head. */
+  lagBlocks: string | null;
+  /** Entities live at the projection head. */
+  liveEntities: number | null;
+  lastFoldAtUtc: string | null;
 }
 
 export const BLOCK_RESPONSE_NAMES = [
@@ -549,6 +577,13 @@ const PACKAGE_JSON_FILE = new URL("../package.json", import.meta.url);
  * that unindexed fields come back null.
  */
 const JSON_RPC_PATH = "/shadow-rpc";
+/**
+ * The same JSON-RPC surface, except that the `arkiv_*` entity reads are
+ * answered from the experimental entity index instead of being forwarded to a
+ * node. Its own path, rather than a flag on `/shadow-rpc`, so the two sources
+ * can be compared by changing nothing but the URL.
+ */
+const JSON_RPC_EXPERIMENTAL_PATH = "/shadow-rpc/experimental";
 /** Largest JSON-RPC request body accepted, in bytes; batches are capped separately. */
 const JSON_RPC_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -577,6 +612,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
           : {}),
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
+        ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -659,6 +695,23 @@ async function routeRequest(
     return handleJsonRpcRequest(request, storage, transactionDataEnabled, options.jsonRpcPassthrough);
   }
 
+  if (url.pathname === JSON_RPC_EXPERIMENTAL_PATH) {
+    if (!options.entityIndex) {
+      return jsonError(
+        404,
+        "The experimental entity index is not enabled on this deployment (ENTITY_QUERY_INDEX=true); use /shadow-rpc",
+      );
+    }
+    return handleJsonRpcRequest(
+      request,
+      storage,
+      transactionDataEnabled,
+      options.jsonRpcPassthrough,
+      createArkivIndexMethods(options.entityIndex, storage),
+      JSON_RPC_EXPERIMENTAL_PATH,
+    );
+  }
+
   if (request.method !== "GET") {
     return jsonError(405, `Method ${request.method} is not allowed`);
   }
@@ -673,6 +726,7 @@ async function routeRequest(
       transactionDataEnabled,
       options.guzzlerStore,
       options.jsonRpcPassthrough,
+      options.entityIndex,
     );
   }
 
@@ -917,6 +971,7 @@ async function handleGetHealth(
   transactionDataEnabled: boolean,
   guzzlerStore: GuzzlerStore | undefined,
   jsonRpcPassthrough: JsonRpcForwarder | undefined,
+  entityIndex: BlockServerOptions["entityIndex"],
 ): Promise<Response> {
   const guzzlers = await readGuzzlerCacheHealth(guzzlerStore);
   const now = new Date();
@@ -926,6 +981,9 @@ async function handleGetHealth(
     storage.getDatabaseStats(),
   ]);
   const sync = computeSyncStatus({ now, ...progress, samples });
+  const entityQueryIndex = entityIndex
+    ? await readEntityIndexHealth(entityIndex, progress.lastSuccessfulBlock)
+    : false;
   const lastBlockAgeSeconds = secondsBetween(now, progress.lastSuccessfulBlockDate);
   const latestObservationAgeSeconds = secondsBetween(now, progress.latestObservedAt);
   const headLagBlocks =
@@ -963,11 +1021,30 @@ async function handleGetHealth(
       jsonRpcPassthrough: jsonRpcPassthrough
         ? [...jsonRpcPassthrough.methods].sort()
         : false,
+      entityQueryIndex,
     },
     guzzlers,
   };
 
   return jsonResponse(body);
+}
+
+async function readEntityIndexHealth(
+  entityIndex: NonNullable<BlockServerOptions["entityIndex"]>,
+  scannerHead: bigint | undefined,
+): Promise<EntityQueryIndexHealth> {
+  const [progress, stats] = await Promise.all([entityIndex.getProgress(), entityIndex.getStats()]);
+  const projected = progress.projectedThroughBlock;
+  return {
+    path: JSON_RPC_EXPERIMENTAL_PATH,
+    methods: [...ARKIV_INDEX_METHODS],
+    floorBlock: progress.floorBlock?.toString() ?? null,
+    projectedThroughBlock: projected?.toString() ?? null,
+    lagBlocks:
+      projected !== undefined && scannerHead !== undefined ? clampLag(scannerHead - projected) : null,
+    liveEntities: stats.liveEntities,
+    lastFoldAtUtc: progress.lastFoldAt ?? null,
+  };
 }
 
 let clientVersionPromise: Promise<string> | undefined;
@@ -1000,9 +1077,11 @@ async function handleJsonRpcRequest(
   storage: ScannerStorage,
   transactionDataEnabled: boolean,
   passthrough: JsonRpcForwarder | undefined,
+  localOverrides?: Record<string, JsonRpcMethodHandler>,
+  path: string = JSON_RPC_PATH,
 ): Promise<Response> {
   if (request.method !== "POST") {
-    return jsonError(405, `JSON-RPC requests must be POSTed to ${JSON_RPC_PATH}`);
+    return jsonError(405, `JSON-RPC requests must be POSTed to ${path}`);
   }
   const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
   if (declaredLength > JSON_RPC_MAX_BODY_BYTES) {
@@ -1016,6 +1095,7 @@ async function handleJsonRpcRequest(
     transactionDataEnabled,
     clientVersion: await readClientVersion(),
     ...(passthrough ? { passthrough } : {}),
+    ...(localOverrides ? { localOverrides } : {}),
   });
   return new Response(JSON.stringify(body), {
     status: 200,

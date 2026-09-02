@@ -45,7 +45,10 @@ export interface DataPageFilters extends Record<string, string> {
   q: string;
   pageSize: string;
   expiration: string;
-  /** A custom RPC URL the query was run against; empty when it ran through the indexer backend. */
+  /**
+   * Where the query ran: a custom RPC URL, `index` for the backend's
+   * experimental entity index, or empty for the indexer backend.
+   */
   rpc: string;
 }
 
@@ -70,13 +73,14 @@ export function dataPageFilters(
   query: string,
   pageSize: PageSize,
   expiration: ExpirationFilter,
-  customRpcUrl = "",
+  /** The `rpc` link value: a custom URL, `index`, or empty (see {@link DataPageFilters.rpc}). */
+  rpcLink = "",
 ): DataPageFilters {
   return {
     q: query,
     pageSize: pageSize === DEFAULT_PAGE_SIZE ? "" : pageSize,
     expiration: expiration === DEFAULT_EXPIRATION_FILTER ? "" : expiration,
-    rpc: customRpcUrl.trim(),
+    rpc: rpcLink.trim(),
   };
 }
 

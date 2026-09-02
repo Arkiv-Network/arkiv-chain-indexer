@@ -1296,6 +1296,7 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       const health = (await (await fetch(`http://${server.hostname}:${server.port}/health`)).json()) as HealthResponseBody;
       expect(health.features.jsonRpcPassthrough).toEqual([
         "arkiv_getBlockTiming",
+        "arkiv_getEntity",
         "arkiv_getEntityCount",
         "arkiv_query",
         "eth_sendRawTransaction",

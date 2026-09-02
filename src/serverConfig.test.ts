@@ -133,7 +133,7 @@ describe("parseServerConfig", () => {
     const config = parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM: "http://rpc-proxy:8788" });
     expect(config.jsonRpcPassthrough).toEqual({
       url: "http://rpc-proxy:8788",
-      methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntityCount", "arkiv_getBlockTiming"],
+      methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntity", "arkiv_getEntityCount", "arkiv_getBlockTiming"],
       timeoutMs: 10_000,
       rateLimitPerMinute: 600,
     });
@@ -168,7 +168,7 @@ describe("parseServerConfig", () => {
     });
     expect(config.jsonRpcPassthrough).toEqual({
       url: "http://rpc-proxy:8788",
-      methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntityCount", "arkiv_getBlockTiming"],
+      methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntity", "arkiv_getEntityCount", "arkiv_getBlockTiming"],
       timeoutMs: 10_000,
       rateLimitPerMinute: 600,
     });

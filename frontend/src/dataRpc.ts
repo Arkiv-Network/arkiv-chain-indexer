@@ -6,17 +6,29 @@
 
 import { readStoredString, writeStoredString, type StorageLike } from "./localStorage";
 
-/** Where the page sends its JSON-RPC calls. */
-export type RpcSourceKind = "backend" | "custom";
+/**
+ * Where the page sends its JSON-RPC calls: the backend forwarding to its node
+ * (`backend`), the backend's own experimental entity index (`index`), or any
+ * node the user names (`custom`).
+ */
+export type RpcSourceKind = "backend" | "index" | "custom";
 
 export interface RpcSource {
   kind: RpcSourceKind;
-  /** Only meaningful for `custom`; ignored for `backend`. */
+  /** Only meaningful for `custom`; ignored otherwise. */
   customUrl: string;
 }
 
 /** The backend's JSON-RPC surface, reached through the frontend's `/api` proxy. */
 export const BACKEND_RPC_PATH = "/api/shadow-rpc";
+/**
+ * The same surface with the entity reads answered from the backend's own
+ * experimental entity index instead of a node. Only served when the
+ * deployment enables it (`features.entityQueryIndex` in `/health`).
+ */
+export const BACKEND_INDEX_RPC_PATH = "/api/shadow-rpc/experimental";
+/** The `rpc=` link value that selects the experimental index. */
+export const INDEX_RPC_LINK_VALUE = "index";
 
 /** The entity read methods the page depends on. `/health` lists which ones the backend forwards. */
 export const ARKIV_READ_METHODS = ["arkiv_query", "arkiv_getEntityCount", "arkiv_getBlockTiming"] as const;
@@ -29,7 +41,7 @@ const CUSTOM_URL_STORAGE_KEY = "data.rpcCustomUrl";
 export const DEFAULT_RPC_SOURCE: RpcSource = { kind: "backend", customUrl: "" };
 
 export function isRpcSourceKind(value: string): value is RpcSourceKind {
-  return value === "backend" || value === "custom";
+  return value === "backend" || value === "index" || value === "custom";
 }
 
 /** Accepts absolute http(s) URLs only; a key baked into the path is allowed but the page never logs it. */
@@ -45,12 +57,32 @@ export function isValidRpcUrl(value: string): boolean {
 }
 
 export function rpcEndpointUrl(source: RpcSource): string {
-  return source.kind === "backend" ? BACKEND_RPC_PATH : source.customUrl.trim();
+  if (source.kind === "backend") return BACKEND_RPC_PATH;
+  if (source.kind === "index") return BACKEND_INDEX_RPC_PATH;
+  return source.customUrl.trim();
+}
+
+/**
+ * What a shared link carries for the endpoint: the custom URL, the word
+ * `index` for the experimental index, nothing for the default backend.
+ */
+export function rpcLinkValue(source: RpcSource): string {
+  if (source.kind === "custom") return source.customUrl.trim();
+  if (source.kind === "index") return INDEX_RPC_LINK_VALUE;
+  return "";
+}
+
+/** The endpoint a link's `rpc=` value names, or null when it names none (or junk). */
+export function rpcSourceFromLinkValue(value: string): RpcSource | null {
+  const trimmed = value.trim();
+  if (trimmed === INDEX_RPC_LINK_VALUE) return { kind: "index", customUrl: "" };
+  return trimmed && isValidRpcUrl(trimmed) ? { kind: "custom", customUrl: trimmed } : null;
 }
 
 /** A displayable form of the endpoint with any credential in the URL blanked out. */
 export function describeRpcEndpoint(source: RpcSource): string {
   if (source.kind === "backend") return BACKEND_RPC_PATH;
+  if (source.kind === "index") return BACKEND_INDEX_RPC_PATH;
   const raw = source.customUrl.trim();
   try {
     const url = new URL(raw);

@@ -350,6 +350,12 @@ services:
       SHADOW_RPC_UPSTREAM_METHODS: ${SHADOW_RPC_UPSTREAM_METHODS:-}
       SHADOW_RPC_UPSTREAM_TIMEOUT_MS: ${SHADOW_RPC_UPSTREAM_TIMEOUT_MS:-}
       SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE: ${SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE:-}
+      # Experimental: answer arkiv_query / arkiv_getEntity / arkiv_getEntityCount /
+      # arkiv_getBlockTiming from the indexer's own tables on
+      # POST /shadow-rpc/experimental. Off by default; /shadow-rpc keeps relaying
+      # those methods to the node, so the two can be checked against each other.
+      ENTITY_QUERY_INDEX: ${ENTITY_QUERY_INDEX:-}
+      ENTITY_INDEX_FLOOR_BLOCK: ${ENTITY_INDEX_FLOOR_BLOCK:-}
       ARKIV_PROTOCOL_SCHEDULE_URL: ${ARKIV_PROTOCOL_SCHEDULE_URL:-}
       ARKIV_PROTOCOL_SCHEDULE_PATH: ${ARKIV_PROTOCOL_SCHEDULE_PATH:-}
       PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: ${PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS:-}

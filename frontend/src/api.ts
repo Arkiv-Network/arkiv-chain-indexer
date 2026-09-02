@@ -781,6 +781,8 @@ export interface HealthResponse {
     jsonRpc?: boolean;
     /** Methods the backend forwards to its upstream node, or `false` without an upstream. */
     jsonRpcPassthrough?: string[] | false;
+    /** The experimental entity index behind `/api/shadow-rpc/experimental`, or `false` when not enabled. */
+    entityQueryIndex?: false | EntityQueryIndexHealth;
   };
   guzzlers?: {
     enabled: boolean;
@@ -790,6 +792,19 @@ export interface HealthResponse {
     newestBucket: string | null;
     totalSizeBytes: string | null;
   };
+}
+
+export interface EntityQueryIndexHealth {
+  path: string;
+  methods: string[];
+  /** First block the index can attribute entities from; null until the projector has started. */
+  floorBlock: string | null;
+  /** Newest block folded into the index; null until the first chunk lands. */
+  projectedThroughBlock: string | null;
+  /** How far the projection trails the scanner head. */
+  lagBlocks: string | null;
+  liveEntities: number | null;
+  lastFoldAtUtc: string | null;
 }
 
 export const BASELOAD_WORKER_BEHAVIORS = [

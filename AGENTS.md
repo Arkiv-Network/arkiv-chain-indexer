@@ -132,6 +132,30 @@ docker compose up --build
   rate limited endpoint-wide (`600/min`) because a public endpoint fronting a metered node is a way to spend
   someone else's quota. `jsonRpc.ts` declares the `JsonRpcForwarder` interface so the dependency points one
   way; `/health` lists the forwarded methods under `features.jsonRpcPassthrough`.
+- The experimental entity index (`ENTITY_QUERY_INDEX`, `POST /shadow-rpc/experimental`,
+  `JSON_RPC_EXPERIMENTAL_PATH` in `server.ts`) answers the `arkiv_*` reads from PostgreSQL on a path of its
+  own, so `/shadow-rpc` keeps relaying them to the node and the two stay comparable
+  (`scripts/compareEntityQuery.ts`; `scripts/seedEntityQueryFixtures.ts` seeds the fixture suite). The pieces:
+  `entityQueryLanguage.ts` is a byte-offset port of the node's `arkiv-query` crate (`~/arkiv-network/arkiv`),
+  and its tests pin the node's exact messages and positions — change a message only after checking the node;
+  `entityValues.ts` holds the type ids, bounds and wire encodings (`dec` is stored as 18-place units, `u256`
+  as `numeric`, strings compared bytewise via `value_text`); `entityIndex.ts` folds one key's operations into
+  versions (`foldEntityVersions`, pure — tombstones unset, `$payload`/`$contentType` cells route to fields,
+  reverted transactions apply nothing, expiry comes from the `EntityCreated`/`ExpiryExtended` event when a log
+  is stored and from calldata otherwise); `entityQuerySql.ts` compiles the AST to correlated `EXISTS` over
+  `entity_version_attributes`; `entityIndexStorage.ts` owns the tables and the paging query
+  (`ORDER BY created_at DESC, created_position DESC, entity_key DESC` — the node's entity-id order: ids are
+  allocated when a transaction commits, walking its staged deltas in **ascending key order**
+  (`BTreeMap<EntityAddress, …>` in `arkiv-reth-statemanager`), so inside one transaction the operation index
+  plays no part; across transactions it is creation order because a key can never be re-created); `entityProjector.ts` folds forward in chunks and
+  refolds keys whose operations landed below the fold point (`transaction_operations.scanned_at`), lowering
+  the floor when a backfill brings keyed creates in below it; `arkivJsonRpc.ts` is the method layer
+  (projection, cursors, options, errors) and plugs into `jsonRpc.ts` through `localOverrides`. Invariants:
+  never store payload bytes (`select.payload` is refused); `latest` is the projection head, never the
+  scanner or chain head; blocks outside `[floor, head]` are `-32006`, never a silently partial answer;
+  `creationFlags` is `null` rather than guessed for pre-logs creates. The node evaluates `$createdAt` ranges
+  by scanning (~10s per page on cheesecake at a past block), so the comparison cuts node walks at the floor
+  instead of windowing every query.
 - Account balances (`account_balances`, `SCANNER_TRACK_BALANCES`, default off) are **readings, never sums**.
   For each block the scanner takes the addresses that appeared as `from` or `to` and asks the node what they
   hold at that block (`EthereumRpcClient.getBalances`, one batched `eth_getBalance` request per block — never

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { fetchHealth } from "./api";
+import { fetchHealth, type EntityQueryIndexHealth } from "./api";
 import {
   appendQueryExpression,
   buildQueryParams,
@@ -20,6 +20,7 @@ import {
 } from "./dataQuery";
 import {
   ARKIV_READ_METHODS,
+  BACKEND_INDEX_RPC_PATH,
   BACKEND_RPC_PATH,
   callRpc,
   checkRpcSource,
@@ -29,6 +30,8 @@ import {
   isValidRpcUrl,
   missingBackendMethods,
   readStoredRpcSource,
+  rpcLinkValue,
+  rpcSourceFromLinkValue,
   writeStoredRpcSource,
   type BlockTiming,
   type RpcCheckReport,
@@ -65,7 +68,7 @@ interface DataViewProps {
 type BackendForwarding =
   | { status: "loading" }
   | { status: "unknown"; error: string }
-  | { status: "known"; methods: readonly string[] | false };
+  | { status: "known"; methods: readonly string[] | false; entityQueryIndex: false | EntityQueryIndexHealth };
 
 type CheckState =
   | { status: "idle" }
@@ -84,14 +87,9 @@ interface ResultState {
   error: unknown | null;
 }
 
-/** The custom endpoint a shared link names, or null when it has none (or junk). */
+/** The endpoint a shared link names, or null when it has none (or junk). */
 function sourceFromUrl(rpc: string): RpcSource | null {
-  const url = rpc.trim();
-  return url && isValidRpcUrl(url) ? { kind: "custom", customUrl: url } : null;
-}
-
-function customRpcUrl(source: RpcSource): string {
-  return source.kind === "custom" ? source.customUrl.trim() : "";
+  return rpcSourceFromLinkValue(rpc);
 }
 
 const EMPTY_RESULTS: ResultState = {
@@ -127,7 +125,11 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     fetchHealth()
       .then((body) => {
         if (cancelled) return;
-        setBackend({ status: "known", methods: body.features.jsonRpcPassthrough ?? false });
+        setBackend({
+          status: "known",
+          methods: body.features.jsonRpcPassthrough ?? false,
+          entityQueryIndex: body.features.entityQueryIndex ?? false,
+        });
       })
       .catch((error: Error) => {
         if (cancelled) return;
@@ -207,7 +209,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       if (!normalized) return;
       setQuery(normalized);
       urlQueryRef.current = normalized;
-      if (writePermalink("data", dataPageFilters(normalized, size, filter, customRpcUrl(source)))) onLocationChange();
+      if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcLinkValue(source)))) onLocationChange();
       void runQuery(normalized, size);
     },
     [expiration, onLocationChange, pageSize, runQuery, source],
@@ -262,7 +264,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     const filter = resolveExpirationFilter(value);
     setExpiration(filter);
     if (results.executedQuery) {
-      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, customRpcUrl(source)))) {
+      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, rpcLinkValue(source)))) {
         onLocationChange();
       }
     }
@@ -303,7 +305,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
   const permalink =
     results.executedQuery === null
       ? null
-      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, customRpcUrl(source)));
+      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, rpcLinkValue(source)));
 
   const onFallbackKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -434,6 +436,15 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
               {backend.methods === false ? "No upstream" : missing.length === 0 ? "Forwarding" : "Incomplete"}
             </span>
           ) : null}
+          {source.kind === "index" ? (
+            <span
+              className={`tx-status-badge ${
+                backend.status !== "known" ? "unknown" : backend.entityQueryIndex === false ? "fail" : "ok"
+              }`}
+            >
+              {backend.status !== "known" ? "Experimental" : backend.entityQueryIndex === false ? "Not enabled" : "Experimental"}
+            </span>
+          ) : null}
           {check.status === "done" ? (
             <span className={`tx-status-badge ${check.report.ok ? "ok" : check.report.arkivOk ? "unknown" : "fail"}`}>
               {check.report.ok ? "Checked OK" : check.report.arkivOk ? "Arkiv reads OK" : "Check failed"}
@@ -461,6 +472,28 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                       configured with, using the deployment&apos;s own API key.
                     </span>
                     <BackendForwardingNote backend={backend} missing={missing} />
+                  </span>
+                </label>
+                <label className={`rpc-source-option${source.kind === "index" ? " selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="rpc-source"
+                    value="index"
+                    checked={source.kind === "index"}
+                    onChange={() => onKindChange("index")}
+                  />
+                  <span className="rpc-source-option-body">
+                    <span className="rpc-source-option-title">
+                      Indexer entity index <span className="tx-status-badge unknown">experimental</span>
+                    </span>
+                    <span className="rpc-source-option-detail">
+                      <span className="mono">{BACKEND_INDEX_RPC_PATH}</span> answers the entity reads from the
+                      indexer&apos;s own projection of the decoded operations, without asking a node. Same query
+                      language and wire format, so its answers can be checked against the backend&apos;s. Payloads
+                      are never available, entities created before the index floor are unknown, and{" "}
+                      <span className="mono">latest</span> means the projected head.
+                    </span>
+                    <IndexStatusNote backend={backend} />
                   </span>
                 </label>
                 <label className={`rpc-source-option${source.kind === "custom" ? " selected" : ""}`}>
@@ -518,6 +551,45 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         ) : null}
       </details>
     </section>
+  );
+}
+
+function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
+  if (backend.status === "loading") {
+    return <span className="rpc-source-option-status muted">Reading the backend&apos;s entity index status…</span>;
+  }
+  if (backend.status === "unknown") {
+    return (
+      <span className="rpc-source-option-status warn">
+        Could not read <span className="mono">/api/health</span>: {backend.error}
+      </span>
+    );
+  }
+  const index = backend.entityQueryIndex;
+  if (index === false) {
+    return (
+      <span className="rpc-source-option-status warn">
+        This deployment has not enabled the entity index (<span className="mono">ENTITY_QUERY_INDEX</span>), so
+        this endpoint answers 404.
+      </span>
+    );
+  }
+  if (index.projectedThroughBlock === null) {
+    return (
+      <span className="rpc-source-option-status warn">
+        Enabled, but the projector has not folded a block yet
+        {index.floorBlock ? ` (starting at block ${index.floorBlock})` : ""}.
+      </span>
+    );
+  }
+  const lag = index.lagBlocks === null ? "" : `, ${index.lagBlocks} blocks behind the scanner`;
+  const live = index.liveEntities === null ? "" : `; ${index.liveEntities.toLocaleString("en-US")} live entities`;
+  return (
+    <span className="rpc-source-option-status ok">
+      Projected through block {index.projectedThroughBlock}
+      {lag}
+      {live}. Entities created before block {index.floorBlock ?? "?"} are not indexed.
+    </span>
   );
 }
 

@@ -22,6 +22,8 @@ function adminDb(url: string): Db {
 
 export async function createIsolatedStorage(prefix = "test"): Promise<{
   storage: ScannerStorage;
+  /** The schema the storage was opened in, for opening a second store on the same tables. */
+  schema: string;
   cleanup: () => Promise<void>;
 }> {
   if (!TEST_DATABASE_URL) {
@@ -48,7 +50,7 @@ export async function createIsolatedStorage(prefix = "test"): Promise<{
     }
   };
 
-  return { storage, cleanup };
+  return { storage, schema, cleanup };
 }
 
 export async function closeTestPools(): Promise<void> {

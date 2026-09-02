@@ -9,6 +9,8 @@ import { ResponseCache } from "./responseCache";
 import { ValueCache } from "./valueCache";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
+import { EntityIndexStorage } from "./entityIndexStorage";
+import { EntityProjector } from "./entityProjector";
 import type { GuzzlerStore } from "./guzzlers";
 
 async function main(): Promise<void> {
@@ -18,6 +20,8 @@ async function main(): Promise<void> {
   let stopEntityInvalidationListener: (() => Promise<void>) | undefined;
   let stopStoredBlockListener: (() => Promise<void>) | undefined;
   let syncPrecomputer: PrecomputedResponse | undefined;
+  let entityIndex: EntityIndexStorage | undefined;
+  let entityProjector: EntityProjector | undefined;
 
   try {
     const config = parseServerConfig(process.argv.slice(2));
@@ -126,6 +130,15 @@ async function main(): Promise<void> {
           rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
         })
       : undefined;
+    // Experimental: the entity index behind /shadow-rpc/experimental. Its own
+    // small pool, so a long initial fold never starves the API's connections.
+    if (config.entityQueryIndex) {
+      entityIndex = await EntityIndexStorage.open(config.databaseUrl, { max: 4 });
+      entityProjector = new EntityProjector(entityIndex, {
+        ...(config.entityIndexFloorBlock !== undefined ? { floorBlock: config.entityIndexFloorBlock } : {}),
+      });
+      entityProjector.start();
+    }
     const server = createBlockServer(storage, {
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
@@ -142,6 +155,7 @@ async function main(): Promise<void> {
       transactionCountCache,
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
+      ...(entityIndex ? { entityIndex } : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);
@@ -172,6 +186,11 @@ async function main(): Promise<void> {
         : "JSON-RPC passthrough: disabled (/shadow-rpc answers from stored data only)",
     );
     console.log(
+      entityIndex
+        ? "Entity index (experimental): projector running; arkiv_* reads answered from the index at /shadow-rpc/experimental"
+        : "Entity index (experimental): disabled (set ENTITY_QUERY_INDEX=true to build it)",
+    );
+    console.log(
       transactionCountCache.enabled
         ? `Transaction count cache: up to ${config.transactionCountCacheMaxEntries} filters, ` +
             `TTL ${config.transactionCountCacheTtlMs}ms, ` +
@@ -182,7 +201,9 @@ async function main(): Promise<void> {
     const shutdown = async () => {
       baseloadRuntime?.stop();
       syncPrecomputer?.stop();
+      await entityProjector?.stop();
       await server.stop();
+      await entityIndex?.close();
       await stopEntityInvalidationListener?.();
       await stopStoredBlockListener?.();
       await guzzlerStore?.close();
@@ -201,6 +222,8 @@ async function main(): Promise<void> {
     console.error(error);
     baseloadRuntime?.stop();
     syncPrecomputer?.stop();
+    await entityProjector?.stop();
+    await entityIndex?.close();
     await stopEntityInvalidationListener?.();
     await stopStoredBlockListener?.();
     await guzzlerStore?.close();

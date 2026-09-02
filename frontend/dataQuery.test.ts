@@ -77,6 +77,7 @@ describe("page settings", () => {
 
   test("dataPageFilters names a custom RPC endpoint so the link reproduces the run", () => {
     expect(dataPageFilters("*", "25", "all", " https://rpc.example/x ").rpc).toBe("https://rpc.example/x");
+    expect(dataPageFilters("*", "25", "all", "index").rpc).toBe("index");
   });
 });
 

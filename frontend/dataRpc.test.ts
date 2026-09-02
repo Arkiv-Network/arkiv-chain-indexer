@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { StorageLike } from "./src/localStorage";
 import {
   ARKIV_READ_METHODS,
+  BACKEND_INDEX_RPC_PATH,
   BACKEND_RPC_PATH,
   RpcCallError,
   callRpc,
@@ -12,6 +13,8 @@ import {
   missingBackendMethods,
   readStoredRpcSource,
   rpcEndpointUrl,
+  rpcLinkValue,
+  rpcSourceFromLinkValue,
   writeStoredRpcSource,
   type RpcSource,
 } from "./src/dataRpc";
@@ -88,6 +91,24 @@ describe("rpc source selection", () => {
     expect(describeRpcEndpoint(BACKEND)).toBe("/api/shadow-rpc");
   });
 
+  test("the experimental index source is the backend's experimental path", () => {
+    const index: RpcSource = { kind: "index", customUrl: "ignored" };
+    expect(rpcEndpointUrl(index)).toBe(BACKEND_INDEX_RPC_PATH);
+    expect(rpcEndpointUrl(index)).toBe("/api/shadow-rpc/experimental");
+    expect(describeRpcEndpoint(index)).toBe("/api/shadow-rpc/experimental");
+  });
+
+  test("links carry the custom URL, the word index, or nothing", () => {
+    expect(rpcLinkValue(BACKEND)).toBe("");
+    expect(rpcLinkValue({ kind: "index", customUrl: "" })).toBe("index");
+    expect(rpcLinkValue({ kind: "custom", customUrl: " https://rpc.example.test/ " })).toBe("https://rpc.example.test/");
+    expect(rpcSourceFromLinkValue("")).toBeNull();
+    expect(rpcSourceFromLinkValue(" index ")).toEqual({ kind: "index", customUrl: "" });
+    expect(rpcSourceFromLinkValue("https://rpc.example.test/")).toEqual({ kind: "custom", customUrl: "https://rpc.example.test/" });
+    expect(rpcSourceFromLinkValue("not a url")).toBeNull();
+    expect(rpcSourceFromLinkValue("backend")).toBeNull();
+  });
+
   test("a custom source is used as typed, trimmed", () => {
     expect(rpcEndpointUrl({ kind: "custom", customUrl: "  https://rpc.example.test/  " })).toBe("https://rpc.example.test/");
   });
@@ -114,6 +135,9 @@ describe("rpc source selection", () => {
 
     writeStoredRpcSource(CUSTOM, storage);
     expect(readStoredRpcSource(storage)).toEqual(CUSTOM);
+
+    storage.setItem("gas-price-tracker:data.rpcSourceKind", "index");
+    expect(readStoredRpcSource(storage).kind).toBe("index");
 
     storage.setItem("gas-price-tracker:data.rpcSourceKind", "bogus");
     expect(readStoredRpcSource(storage).kind).toBe("backend");

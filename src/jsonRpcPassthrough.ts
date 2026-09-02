@@ -29,11 +29,14 @@ export const JSON_RPC_LIMIT_EXCEEDED = -32005;
 /**
  * The Arkiv entity read methods. The index stores operation metadata, never the
  * entity state a node keeps (current attributes, owner, absolute expiry,
- * payload), so these can only ever be answered upstream. They are read-only and
- * cheap, and the frontend's Data tab queries entities through them.
+ * payload), so on `/shadow-rpc` these are answered upstream. They are read-only
+ * and cheap, and the frontend's Data tab queries entities through them. The
+ * experimental entity index (`ENTITY_QUERY_INDEX`) answers the same four on
+ * `/shadow-rpc/experimental` from a projection of that metadata instead.
  */
 export const ARKIV_READ_METHODS: readonly string[] = [
   "arkiv_query",
+  "arkiv_getEntity",
   "arkiv_getEntityCount",
   "arkiv_getBlockTiming",
 ];

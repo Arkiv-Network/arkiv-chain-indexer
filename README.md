@@ -887,7 +887,7 @@ the endpoint talks to nothing but PostgreSQL. `GET /health` lists what is forwar
 | --- | --- | --- |
 | `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset disables the passthrough. In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
 | `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
-| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
+| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntity,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
 | `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
 | `SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE` | `600` | Forwarded calls per minute across all callers; `0` removes the cap. |
 
@@ -896,9 +896,11 @@ Worth knowing before pointing a wallet at it:
 - **`eth_sendRawTransaction` is the only write method forwarded by default.** Wallets and SDKs sign locally
   and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
   no business relying on. List it explicitly if a deployment's node really does.
-- **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`) are forwarded by
-  default too.** The index stores operation metadata, never an entity's live state, so nothing but the node
-  can answer them. The frontend's `/data` page queries entities through them.
+- **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`)
+  are forwarded by default too.** The index stores operation metadata, never an entity's live state, so on
+  this path nothing but the node answers them. The frontend's `/data` page queries entities through them. The
+  experimental entity index below is the opt-in second opinion: the same methods, answered from PostgreSQL,
+  on a path of their own.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -917,6 +919,60 @@ curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 
+#### Experimental: entity reads from the index (`POST /shadow-rpc/experimental`)
+
+Off by default. With `ENTITY_QUERY_INDEX=true` the backend folds the decoded Arkiv operations
+(`transaction_operations`, so `SAVE_TRANSACTION_DATA=true` and a `DECODER_URL` are required) and the receipt
+event logs (`transaction_logs`) into two tables of its own — `entity_versions`, one row per state an entity
+went through with the block range it held for, and `entity_version_attributes`, that state's typed
+attributes — and answers `arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount` and `arkiv_getBlockTiming`
+from them on a **separate path**, `POST /shadow-rpc/experimental` (`/api/shadow-rpc/experimental` publicly).
+`/shadow-rpc` is untouched and keeps relaying those methods to the node, so the two paths are two independent
+sources for the same questions, and either can be checked against the other. The path answers `404` when the
+feature is off; `GET /health` reports it under `features.entityQueryIndex` as `false` or as
+`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, lastFoldAtUtc }`.
+
+The wire contract is the node's (`arkiv-reth-rpc` / `arkiv-rpc-types` in the 0.8 engine): the same parameter
+shapes and defaults (`atBlock` hex or `latest`, `limit` 1–200 default 100, `select` with `attributes` as a
+boolean or a per-name map), the same query grammar and limits (`*`, `= < <= > >= STARTSWITH`, `AND`/`OR`/`NOT`,
+typed literals, `$owner $creator $key $expiresAt $createdAt $contentType`; 8 KiB, 64 predicates, depth 32),
+the same error codes with the same messages and byte positions (`-32001` malformed, `-32002` type, `-32003`
+literal, `-32004` limit, `-32005` cursor, `-32006` block unavailable), the same newest-first order, the same
+encodings (`u64`/`createdAt`/`updatedAt`/`expiresAt` as hex, `i32` as a number, `dec` as a trimmed decimal
+string, `u256` minimal hex, addresses/keys lowercase), attributes sorted by name, and the same fold semantics:
+a patch merges (a tombstone unsets), every mutation bumps `updatedAt`, expiry is the receipt event's value
+when logs are stored and the calldata's otherwise, a reverted transaction applies nothing, and an entity is
+live at block `B` while `expiresAt > B` and it was not deleted — so a query evaluated `atBlock` a past block
+sees exactly what was live then.
+
+Where the index cannot honour something the node does, it says so rather than approximating:
+
+| | Node | Index |
+| --- | --- | --- |
+| `latest` | The chain head. | The **projection head** (`projectedThroughBlock` in `/health`): the newest block folded, a few blocks behind the scanner head, itself behind the chain. `blockNumber` in every reply says which block answered. |
+| History | Any block the node keeps state for. | Blocks between the **floor** and the projection head; anything else is `-32006` with `{ requested, latest }`. The floor is the first block whose stored creates carry entity keys (`floorBlock` in `/health`); entities created before it are unknown, so counts count what the index holds. A backfill that writes older blocks lowers the floor as it goes; `ENTITY_INDEX_FLOOR_BLOCK` pins it instead. |
+| `select.payload` | The bytes. | Refused with `-32000`: payload bytes are never stored (the calldata invariant). `arkiv_getEntity` leaves `payload` out. |
+| `creationFlags` | Always known. | `null` for entities created before receipt logs were stored (the flags travel in the `EntityCreated` event, not the calldata). |
+| Cursors | Resume below an internal entity id. | Resume below a creation position. Both are opaque, bound to the query, block and `select`, and reject a cursor from another request with the node's own messages — but a cursor from one source cannot be handed to the other: the index answers a node's cursor with `-32005` and a message saying so. |
+| `arkiv_getBlockTiming` | The node's clock. | The scanner head's block and its timestamp. |
+
+The projection is kept up to date by an in-process projector: every few seconds it folds the operations of the
+blocks the scanner has stored since its last pass (per entity key, replaying the key's whole history, so a
+refold is idempotent), and once a minute it looks for operation rows written *below* its fold point — a gap
+fill, a rescan, the backfill scanner — and refolds those keys too. A first build walks the whole stored
+history in chunks and takes minutes for a few hundred thousand blocks. All writes run under an advisory lock,
+so two backends on one database never fold on top of each other.
+
+Two scripts turn the pair into a test rig. `scripts/compareEntityQuery.ts --node <url> --index <url>` walks
+the same queries on both sides at the same block — discovering them from the data, plus any fixture manifest —
+and reports every difference in order, fields, page boundaries, counts, `arkiv_getEntity` and the error
+code/message/position of invalid requests, with `--bench` timing both. `scripts/seedEntityQueryFixtures.ts`
+creates a suite of entities covering every attribute type, every mutation, expiry, flags and reverting
+transactions, and writes the manifest the comparison reads.
+
+The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
+`rpc=index` in shared links) when `/health` reports it enabled.
+
 ### Server configuration
 
 | CLI flag | Environment variable | Default | Description |
@@ -924,6 +980,8 @@ curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
 | `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
+| `--entity-query-index` | `ENTITY_QUERY_INDEX` | `false` | Build the experimental entity index and serve `POST /shadow-rpc/experimental`. |
+| `--entity-index-floor-block` | `ENTITY_INDEX_FLOOR_BLOCK` | detected | Pin the index floor instead of detecting the first keyed create. |
 
 ```sh
 bun run serve -- --help

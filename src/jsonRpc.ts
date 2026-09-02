@@ -83,6 +83,9 @@ export interface JsonRpcForwarder {
   forward(method: string, params: unknown[]): Promise<unknown>;
 }
 
+/** A method answered outside the built-in table; receives the positional params. */
+export type JsonRpcMethodHandler = (params: unknown[]) => Promise<unknown>;
+
 export interface JsonRpcOptions {
   /** Gate for transaction/receipt/block-body methods (mirrors the REST feature flag). */
   transactionDataEnabled?: boolean;
@@ -96,6 +99,13 @@ export interface JsonRpcOptions {
    * (the default) the endpoint is read-only and node-free.
    */
   passthrough?: JsonRpcForwarder | null;
+  /**
+   * Methods answered by these handlers before anything else — ahead of the
+   * passthrough and of the built-in table. This is how the experimental
+   * entity index takes the `arkiv_*` reads on its own path while the default
+   * path keeps forwarding them to a node.
+   */
+  localOverrides?: Record<string, JsonRpcMethodHandler>;
 }
 
 export type JsonRpcId = string | number | null;
@@ -285,13 +295,17 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
   }
   const params: unknown[] = omittedParams ? [] : (rawParams as unknown[]);
 
-  // A configured passthrough outranks the local table: listing a method there
-  // means "let the node answer this one", whether or not we could have.
+  // An override answers first. Below it, a configured passthrough outranks the
+  // local table: listing a method there means "let the node answer this one",
+  // whether or not we could have.
+  const override = context.options.localOverrides[method];
   const passthrough = context.options.passthrough;
-  const forwarder = passthrough && passthrough.methods.has(method) ? passthrough : null;
-  const handler: MethodHandler | undefined = forwarder
-    ? (forwardedParams) => forwarder.forward(method, forwardedParams)
-    : METHODS[method];
+  const forwarder = !override && passthrough && passthrough.methods.has(method) ? passthrough : null;
+  const handler: MethodHandler | undefined = override
+    ? (overrideParams) => override(overrideParams)
+    : forwarder
+      ? (forwardedParams) => forwarder.forward(method, forwardedParams)
+      : METHODS[method];
   if (!handler) {
     return errorResponse(
       id,
@@ -299,7 +313,7 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
     );
   }
   // The gate protects stored transaction rows; a forwarded call never reads them.
-  if (!forwarder && !context.options.transactionDataEnabled && TRANSACTION_DATA_METHODS.has(method)) {
+  if (!override && !forwarder && !context.options.transactionDataEnabled && TRANSACTION_DATA_METHODS.has(method)) {
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_SERVER_ERROR, `${method} is unavailable: transaction data is disabled`),
@@ -324,6 +338,7 @@ function resolveOptions(options: JsonRpcOptions): Required<JsonRpcOptions> {
     clientVersion: options.clientVersion ?? DEFAULT_CLIENT_VERSION,
     maxBatchSize: options.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE,
     passthrough: options.passthrough ?? null,
+    localOverrides: options.localOverrides ?? {},
   };
 }
 

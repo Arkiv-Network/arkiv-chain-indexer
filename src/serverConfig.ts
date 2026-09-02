@@ -52,6 +52,15 @@ export interface ServerConfig {
   transactionCountCacheMaxEntries: number;
   transactionCountCacheTtlMs: number;
   jsonRpcPassthrough?: JsonRpcPassthroughConfig;
+  /**
+   * Serve the Arkiv entity reads from the indexer's own experimental entity
+   * index at `POST /shadow-rpc/experimental`, and run the projector that
+   * builds it. Off by default: `/shadow-rpc` keeps forwarding those reads to a
+   * node, and the index is a second, independent source to check against it.
+   */
+  entityQueryIndex: boolean;
+  /** Pins the first block the entity index folds; detected from the data when unset. */
+  entityIndexFloorBlock?: bigint;
 }
 
 const DEFAULT_PORT = 3000;
@@ -200,6 +209,19 @@ const SPEC: CliSpec = {
       default: DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS.toString(),
     },
     {
+      flags: "--entity-query-index <bool>",
+      description:
+        "Experimental: answer arkiv_query, arkiv_getEntity, arkiv_getEntityCount and arkiv_getBlockTiming from the indexer's own entity index at POST /shadow-rpc/experimental, and run the projector that builds it. Defaults to false (or ENTITY_QUERY_INDEX). /shadow-rpc keeps forwarding those methods to the upstream node.",
+      env: ["ENTITY_QUERY_INDEX"],
+      default: "false",
+    },
+    {
+      flags: "--entity-index-floor-block <n>",
+      description:
+        "First block the entity index folds. Defaults to the first stored create operation that carries an entity key (or ENTITY_INDEX_FLOOR_BLOCK).",
+      env: ["ENTITY_INDEX_FLOOR_BLOCK"],
+    },
+    {
       flags: "--shadow-rpc-upstream <url>",
       description:
         "Real JSON-RPC node that POST /shadow-rpc forwards submission methods to. Unset (the default) keeps the endpoint node-free and those methods answer -32601.",
@@ -345,6 +367,12 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS,
   );
 
+  const entityQueryIndex = coerceBoolean("--entity-query-index", cli.value("entity-query-index")!);
+  const entityIndexFloorBlockValue = cli.value("entity-index-floor-block")?.trim();
+  const entityIndexFloorBlock = entityIndexFloorBlockValue
+    ? BigInt(coerceInt("--entity-index-floor-block", entityIndexFloorBlockValue))
+    : undefined;
+
   // The upstream URL is the switch: no URL, no passthrough, and the rest of
   // these settings never come into play.
   const passthroughUrl = cli.value("shadow-rpc-upstream")?.trim();
@@ -408,5 +436,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     transactionCountCacheMaxEntries,
     transactionCountCacheTtlMs,
     ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
+    entityQueryIndex,
+    ...(entityIndexFloorBlock !== undefined ? { entityIndexFloorBlock } : {}),
   };
 }
