@@ -87,6 +87,10 @@ services:
       POOL_SIZE: ${RPC_PROXY_POOL_SIZE:-100}
       # Minted keys are named <prefix>_<wallet tag> on the Hub.
       KEY_NAME_PREFIX: ${RPC_PROXY_KEY_NAME_PREFIX:-indexer}
+      # Which Arkiv Hub portal mints the keys. A bouncer only honours keys the
+      # Hub wired to its control-service projected, so this must be the Hub
+      # that fronts RPC_PROXY_UPSTREAM's network (stage Hub -> cheesecake).
+      HUB_BASE: ${RPC_PROXY_HUB_BASE:-https://stage.hub.arkiv.network}
       KEYS_FILE: /data/pool.json
     volumes:
       - rpcproxypool:/data
