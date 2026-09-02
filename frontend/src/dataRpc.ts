@@ -108,6 +108,28 @@ export class RpcCallError extends Error {
 export interface RpcCallDeps {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Lets the caller cancel a call before the timeout does. */
+  signal?: AbortSignal;
+}
+
+/** One signal that fires when either input does, without relying on `AbortSignal.any`. */
+function combineSignals(a: AbortSignal, b: AbortSignal | undefined): AbortSignal {
+  if (!b) return a;
+  const controller = new AbortController();
+  const forward = (signal: AbortSignal) => () => controller.abort(signal.reason);
+  if (a.aborted) controller.abort(a.reason);
+  else if (b.aborted) controller.abort(b.reason);
+  else {
+    a.addEventListener("abort", forward(a), { once: true });
+    b.addEventListener("abort", forward(b), { once: true });
+  }
+  return controller.signal;
+}
+
+/** Whether a failure came from the caller cancelling the call. */
+export function isAbortError(error: unknown): boolean {
+  if (error instanceof RpcCallError) return isAbortError(error.cause);
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 let nextRequestId = 1;
@@ -134,16 +156,19 @@ export async function callRpc<T = unknown>(
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: combineSignals(AbortSignal.timeout(timeoutMs), deps.signal),
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    const cancelled = error instanceof DOMException && error.name === "AbortError";
     throw new RpcCallError(
       method,
       timedOut
         ? `${method} timed out after ${Math.round(timeoutMs / 1000)}s`
-        : `${method} could not reach the endpoint (${reason}). A custom URL also needs to allow browser (CORS) requests.`,
+        : cancelled
+          ? `${method} was cancelled`
+          : `${method} could not reach the endpoint (${reason}). A custom URL also needs to allow browser (CORS) requests.`,
       { cause: error },
     );
   }
@@ -261,7 +286,7 @@ function hexToNumber(value: unknown): number {
   throw new Error(`expected a hex quantity, got ${JSON.stringify(value)}`);
 }
 
-function parseBlockTiming(value: unknown): BlockTiming {
+export function parseBlockTiming(value: unknown): BlockTiming {
   const raw = value as Partial<ArkivBlockTimingResult> | null;
   if (
     !raw ||
@@ -276,6 +301,11 @@ function parseBlockTiming(value: unknown): BlockTiming {
     currentBlockTime: raw.current_block_time,
     blockDurationSeconds: raw.duration,
   };
+}
+
+/** The node's view of the head block and its cadence, for turning block heights into dates. */
+export async function fetchBlockTiming(source: RpcSource, deps: RpcCallDeps = {}): Promise<BlockTiming> {
+  return parseBlockTiming(await callRpc(source, "arkiv_getBlockTiming", [], deps));
 }
 
 /**

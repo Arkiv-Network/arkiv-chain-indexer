@@ -5481,3 +5481,568 @@ form select {
 .rpc-check-step-fail .rpc-check-result {
   color: var(--ark-orange);
 }
+
+/* ---------------------------------------------------------------------------
+   Data page: query editor, results, and entity cards
+   --------------------------------------------------------------------------- */
+
+:root {
+  --q-keyword: #7a3fb8;
+  --q-operator: #0e7490;
+  --q-string: #1b7a4c;
+  --q-number: #b25e09;
+  --q-system: #b3261e;
+  --q-attribute: #181ea9;
+  --q-type: #8a6d00;
+  --q-paren: #5e6b80;
+  --q-selection: #181ea92a;
+}
+
+:root[data-theme="dark"] {
+  --q-keyword: #c678dd;
+  --q-operator: #56b6c2;
+  --q-string: #98c379;
+  --q-number: #d19a66;
+  --q-system: #e06c75;
+  --q-attribute: #61afef;
+  --q-type: #e5c07b;
+  --q-paren: #abb2bf;
+  --q-selection: #7b83e040;
+}
+
+.data-view .summary a {
+  color: var(--accent);
+}
+
+.data-view .query-card {
+  margin-bottom: 1rem;
+}
+
+.query-editor {
+  border-bottom: 1px solid var(--border);
+}
+
+.query-editor-host .cm-editor {
+  min-height: 3.4rem;
+}
+
+.query-editor-fallback {
+  display: block;
+  width: 100%;
+  min-height: 3.4rem;
+  padding: 0.6rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.query-editor-fallback:focus {
+  outline: none;
+}
+
+.query-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+}
+
+.query-hint {
+  margin-right: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.query-hint kbd {
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--stone);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-2);
+}
+
+.query-toolbar-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.query-toolbar-field select {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.query-run {
+  padding: 0.38rem 0.9rem;
+  border: 1px solid var(--btn-primary-bg);
+  border-radius: var(--r-sm);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.query-run:hover:not(:disabled) {
+  background: var(--btn-primary-bg-hover);
+  border-color: var(--btn-primary-bg-hover);
+}
+
+.query-run:disabled,
+.query-toolbar button.secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.query-form-error {
+  margin: 0;
+  padding: 0 0.75rem 0.5rem;
+}
+
+.query-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.75rem 0.65rem;
+}
+
+.query-examples-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.query-example {
+  padding: 0.18rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--stone);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.query-example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.query-results {
+  margin-bottom: 1rem;
+}
+
+.query-status {
+  padding: 1.2rem 0;
+  text-align: center;
+}
+
+.query-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+.query-status-count {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.query-status-meta {
+  color: var(--muted);
+}
+
+.query-error {
+  margin: 0 0 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--op-red);
+  border-radius: var(--r-sm);
+  background: var(--sand);
+}
+
+.query-error-title {
+  margin: 0;
+}
+
+.query-error-context {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 4px;
+  background: var(--stone);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--ink-2);
+}
+
+.entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.entity-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--sand);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.entity-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--stone);
+}
+
+.entity-key-link {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+}
+
+.entity-card-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.entity-card-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem 1.5rem;
+  padding: 0.55rem 0.85rem 0.7rem;
+}
+
+@media (min-width: 60rem) {
+  .entity-card-body {
+    grid-template-columns: minmax(0, 1fr) 18rem;
+    align-items: start;
+  }
+}
+
+.entity-meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.entity-meta-row {
+  grid-template-columns: minmax(6rem, 7rem) minmax(0, 1fr);
+}
+
+.entity-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.entity-block-stamp {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.6rem;
+}
+
+.entity-block-estimate {
+  font-family: var(--font-sans, inherit);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.entity-flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.entity-flag {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--stone);
+  font-size: 0.76rem;
+}
+
+.entity-lifetime {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.entity-lifetime-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+}
+
+.entity-lifetime-left {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.entity-lifetime-track {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--stone-2);
+  overflow: hidden;
+}
+
+.entity-lifetime-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok);
+}
+
+.entity-lifetime.green .entity-lifetime-left {
+  color: var(--ok);
+}
+
+.entity-lifetime.amber .entity-lifetime-fill {
+  background: var(--op-amber);
+}
+
+.entity-lifetime.amber .entity-lifetime-left {
+  color: var(--op-amber);
+}
+
+.entity-lifetime.red .entity-lifetime-fill {
+  background: var(--op-red);
+}
+
+.entity-lifetime.red .entity-lifetime-left {
+  color: var(--op-red);
+}
+
+.entity-lifetime.expired .entity-lifetime-fill {
+  background: var(--line-strong);
+}
+
+.entity-attributes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.5rem 0.85rem 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.entity-attributes-empty {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* Filter menu: a chip or a funnel button that opens a three-item menu. */
+.filter-menu {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.filter-menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.filter-menu-button svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.filter-menu-button:hover,
+.filter-menu-button:focus-visible,
+.filter-menu.open .filter-menu-button {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.filter-menu-chip {
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.attr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  padding: 0.15rem 0.5rem 0.15rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--stone);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--ink-2);
+}
+
+.filter-menu-chip:hover .attr-chip,
+.filter-menu.open .attr-chip {
+  border-color: var(--accent);
+}
+
+.attr-chip-type {
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--sand);
+  border: 1px solid var(--border);
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+
+.attr-chip-name {
+  color: var(--q-attribute);
+}
+
+.attr-chip-eq {
+  color: var(--muted);
+}
+
+.attr-chip-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attr-chip-value.numeric {
+  color: var(--q-number);
+}
+
+.attr-chip-value.text {
+  color: var(--q-string);
+}
+
+.filter-menu-popup {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 13rem;
+  max-width: min(28rem, 80vw);
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--sand);
+  box-shadow: var(--shadow-card);
+}
+
+.filter-menu-popup button {
+  padding: 0.4rem 0.6rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filter-menu-popup button:hover,
+.filter-menu-popup button:focus-visible {
+  background: var(--stone);
+  color: var(--accent);
+}
+
+.filter-menu-expression {
+  margin: 0.2rem 0.3rem 0.15rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+  font-size: 0.72rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.query-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.85rem;
+}
+
+/* The endpoint settings fold away once the page is in use. */
+.rpc-endpoint-details {
+  margin-top: 0.5rem;
+}
+
+.rpc-endpoint-details > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--sand);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.rpc-endpoint-details[open] > summary {
+  margin-bottom: 0.75rem;
+}
+
+.rpc-endpoint-summary-label {
+  font-weight: 600;
+}
+
+.rpc-endpoint-summary-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-size: 0.8rem;
+  color: var(--muted);
+}

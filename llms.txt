@@ -722,7 +722,12 @@ responses. They are intentionally dropped and must not be persisted.
 - Direct backend URLs use paths such as `/blocks`; frontend-origin URLs use `/api/blocks`.
 - Readonly views and status APIs are public. Baseload mutating controls send the optional admin
   bearer token from browser local storage only when configured by the user.
-- The `/data` page reads live entity state over JSON-RPC, not from the index. By default it POSTs to
+- The `/data` page reads live entity state over JSON-RPC, not from the index. It takes an Arkiv 0.8 query
+  (`arkiv_query` with every projection except the payload; page sizes 5–100, node cap 200) and records each
+  run in the URL as `q`, `pageSize` (default 25) and `expiration` (`all` | `soon`, a client-side 24h filter
+  estimated from `arkiv_getBlockTiming`), so `/data?q=%24owner+%3D+addr(0x..)` is a shareable link that runs
+  on load. A bare 64-hex key or 40-hex address in `q` is rewritten to `$key = key(..)` / `$owner = addr(..)`.
+  Paging resumes the node cursor at the block the first page was read at. By default it POSTs to
   `/api/shadow-rpc`, so the backend must forward `arkiv_query`, `arkiv_getEntityCount` and
   `arkiv_getBlockTiming` (the default `SHADOW_RPC_UPSTREAM_METHODS` once `SHADOW_RPC_UPSTREAM` is set). The
   page can be switched to a custom RPC URL called directly from the browser; that endpoint must allow

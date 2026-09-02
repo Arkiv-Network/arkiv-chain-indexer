@@ -951,8 +951,18 @@ are hidden:
 - **Transactions** — stored transaction query table for exact block, block range, and date range inspection.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
 - **Charts** — interactive historical chart view with links from selected block points into Transactions.
-- **Data** (`/data`) — live entity state read from an Arkiv node rather than from the index. The page has an
-  RPC endpoint switch: the **indexer backend** (`/api/shadow-rpc`, which forwards `arkiv_query`,
+- **Data** (`/data`) — live entity state read from an Arkiv node rather than from the index. A CodeMirror
+  editor (loaded as its own chunk only on this page) takes an Arkiv 0.8 query with highlighting and
+  completions; a pasted bare entity key or address is rewritten to `$key = key(..)` / `$owner = addr(..)`.
+  Ctrl+Enter or **Run query** sends `arkiv_query` with every projection except the payload (payloads on this
+  network run to ~100 KB each), and the run is recorded in the URL as `/data?q=...&pageSize=...&expiration=...`
+  so it can be shared and reached by back/forward. Results are cards: key linked to its indexed history,
+  owner/creator, content type, creation flags, created/updated/expires blocks with dates estimated from
+  `arkiv_getBlockTiming`, a lifetime bar, and one chip per attribute; chips and the funnel buttons open a
+  menu to query by that value only, add it to the current query, or copy it. "Load next page" resumes the
+  node's cursor at the block the first page was read at; "Expiring within 24h" filters the loaded cards
+  client-side. Syntax errors show the node's message with a caret at the reported position. Below the results
+  is a collapsed RPC endpoint switch: the **indexer backend** (`/api/shadow-rpc`, which forwards `arkiv_query`,
   `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the node it is configured with, using the deployment's
   key) or a **custom RPC URL** called straight from the browser. The choice is kept in browser local storage.
   "Check connection" runs `eth_chainId`, `web3_clientVersion` and the three Arkiv reads against the selected

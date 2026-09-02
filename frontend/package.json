@@ -10,6 +10,13 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.2",
+    "@codemirror/view": "^6.43.10",
+    "@lezer/highlight": "^1.2.3",
+    "codemirror": "^6.0.2",
     "plotly.js-basic-dist-min": "^3.5.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
