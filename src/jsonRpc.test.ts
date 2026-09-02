@@ -1294,7 +1294,12 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       expect(seen[0]!.apiKey).toBe("hub-key");
 
       const health = (await (await fetch(`http://${server.hostname}:${server.port}/health`)).json()) as HealthResponseBody;
-      expect(health.features.jsonRpcPassthrough).toEqual(["eth_sendRawTransaction"]);
+      expect(health.features.jsonRpcPassthrough).toEqual([
+        "arkiv_getBlockTiming",
+        "arkiv_getEntityCount",
+        "arkiv_query",
+        "eth_sendRawTransaction",
+      ]);
     } finally {
       server.stop(true);
       node.stop(true);
