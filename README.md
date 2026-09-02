@@ -233,6 +233,7 @@ RPC_PROXY_UPSTREAM=https://rpc.cheesecake.db-chain.devnet.gobas.me   # the real 
 RPC_PROXY_POOL_SIZE=100                                              # keys to keep minted (default 100)
 RPC_PROXY_KEY_NAME_PREFIX=pietruszka                                 # Hub key names: <prefix>_<wallet tag>
 RPC_PROXY_HUB_BASE=https://stage.hub.arkiv.network                   # Hub that mints the keys (must be the one projected into this bouncer)
+RPC_PROXY_HUB_NETWORK=tiramisu                                       # Network the keys are for (empty = the Hub's default); must match RPC_PROXY_UPSTREAM
 SCANNER_RPC_FULL_NODE=http://rpc-proxy:8788
 BASELOAD_RPC_NODE=http://rpc-proxy:8788
 ```

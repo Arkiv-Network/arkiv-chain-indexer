@@ -91,6 +91,11 @@ services:
       # Hub wired to its control-service projected, so this must be the Hub
       # that fronts RPC_PROXY_UPSTREAM's network (stage Hub -> cheesecake).
       HUB_BASE: ${RPC_PROXY_HUB_BASE:-https://stage.hub.arkiv.network}
+      # Which network the keys are minted for (tiramisu, cheesecake, ...). The
+      # Hub issues keys per network and projects each into that network's
+      # bouncer only, so this must name RPC_PROXY_UPSTREAM's network. Empty
+      # leaves the Hub's default network.
+      HUB_NETWORK: ${RPC_PROXY_HUB_NETWORK:-}
       KEYS_FILE: /data/pool.json
     volumes:
       - rpcproxypool:/data

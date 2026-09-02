@@ -1,8 +1,16 @@
 # Getting RPC keys for tiramisu (and any new db-chain network)
 
-Status 2026-09-02: the tiramisu indexer at kalarepa.arkiv-global.net is deployed
-but its scanners sit on HTTP 429 — tiramisu's RPC edge accepts no key we can
-mint. This note explains why, and lists what unblocks it, cheapest first.
+**Resolved 2026-09-02 (evening):** the stage Hub now issues keys per network
+(arkiv-hub PR #63) and is wired to tiramisu's control-service, and the
+api-key-generator mints network-scoped keys when told `HUB_NETWORK`
+(`RPC_PROXY_HUB_NETWORK=tiramisu` in the compose profile). The tiramisu indexer
+went from 0 to ~385 blocks/min the moment it switched to the proxy. The rest of
+this note is the analysis from earlier that day, kept for the next network.
+
+Status 2026-09-02 (morning): the tiramisu indexer at kalarepa.arkiv-global.net
+is deployed but its scanners sit on HTTP 429 — tiramisu's RPC edge accepts no
+key we can mint. This note explains why, and lists what unblocks it, cheapest
+first.
 
 ## Why the cheesecake setup does not carry over
 
