@@ -56,6 +56,13 @@ describe("frontend permalink helpers", () => {
     expect(readViewFromLocation({ pathname: "/health", search: "" })).toBe("health");
   });
 
+  test("reads the data route", () => {
+    expect(readViewFromLocation({ pathname: "/data", search: "" })).toBe("data");
+    expect(readViewFromLocation({ pathname: "/data/", search: "?q=%2A" })).toBe("data");
+    expect(readViewFromLocation({ pathname: "/", search: "?view=data" })).toBe("data");
+    expect(buildRouteHref("data", { q: "$owner = addr(0xabc)" })).toBe("/data?q=%24owner+%3D+addr%280xabc%29");
+  });
+
   test("reads the baseload route", () => {
     expect(readViewFromLocation({ pathname: "/baseload", search: "" })).toBe("baseload");
   });

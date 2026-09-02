@@ -27,13 +27,29 @@ import { JSON_RPC_SERVER_ERROR, JsonRpcError, type JsonRpcForwarder } from "./js
 export const JSON_RPC_LIMIT_EXCEEDED = -32005;
 
 /**
+ * The Arkiv entity read methods. The index stores operation metadata, never the
+ * entity state a node keeps (current attributes, owner, absolute expiry,
+ * payload), so these can only ever be answered upstream. They are read-only and
+ * cheap, and the frontend's Data tab queries entities through them.
+ */
+export const ARKIV_READ_METHODS: readonly string[] = [
+  "arkiv_query",
+  "arkiv_getEntityCount",
+  "arkiv_getBlockTiming",
+];
+
+/**
  * Forwarded unless the deployment says otherwise. `eth_sendRawTransaction` is
  * how wallets and SDKs actually submit — they sign locally — so it is the only
- * method worth forwarding by default. `eth_sendTransaction` needs an unlocked
- * account on the node, which a public endpoint has no business relying on; list
- * it explicitly if some deployment's node really does hold keys.
+ * write method worth forwarding by default. `eth_sendTransaction` needs an
+ * unlocked account on the node, which a public endpoint has no business relying
+ * on; list it explicitly if some deployment's node really does hold keys. The
+ * Arkiv read methods ride along because nothing else can answer them.
  */
-export const DEFAULT_PASSTHROUGH_METHODS: readonly string[] = ["eth_sendRawTransaction"];
+export const DEFAULT_PASSTHROUGH_METHODS: readonly string[] = [
+  "eth_sendRawTransaction",
+  ...ARKIV_READ_METHODS,
+];
 
 /** Upstream calls are submissions, not queries: they answer fast or not at all. */
 export const DEFAULT_PASSTHROUGH_TIMEOUT_MS = 10_000;

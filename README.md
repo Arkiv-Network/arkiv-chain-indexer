@@ -887,15 +887,18 @@ the endpoint talks to nothing but PostgreSQL. `GET /health` lists what is forwar
 | --- | --- | --- |
 | `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset disables the passthrough. In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
 | `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
-| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction` | Methods to forward. Each overrides the locally answered one. |
+| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
 | `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
 | `SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE` | `600` | Forwarded calls per minute across all callers; `0` removes the cap. |
 
 Worth knowing before pointing a wallet at it:
 
-- **`eth_sendRawTransaction` is the only method forwarded by default.** Wallets and SDKs sign locally and
-  submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has no
-  business relying on. List it explicitly if a deployment's node really does.
+- **`eth_sendRawTransaction` is the only write method forwarded by default.** Wallets and SDKs sign locally
+  and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
+  no business relying on. List it explicitly if a deployment's node really does.
+- **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`) are forwarded by
+  default too.** The index stores operation metadata, never an entity's live state, so nothing but the node
+  can answer them. The frontend's `/data` page queries entities through them.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -948,6 +951,14 @@ are hidden:
 - **Transactions** — stored transaction query table for exact block, block range, and date range inspection.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
 - **Charts** — interactive historical chart view with links from selected block points into Transactions.
+- **Data** (`/data`) — live entity state read from an Arkiv node rather than from the index. The page has an
+  RPC endpoint switch: the **indexer backend** (`/api/shadow-rpc`, which forwards `arkiv_query`,
+  `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the node it is configured with, using the deployment's
+  key) or a **custom RPC URL** called straight from the browser. The choice is kept in browser local storage.
+  "Check connection" runs `eth_chainId`, `web3_clientVersion` and the three Arkiv reads against the selected
+  endpoint and reports each call's verdict, latency and result, plus the node's head block, block time, live
+  entity count and a sample entity key linked to its indexed history. The page also reads `/api/health` to warn
+  when the backend's `SHADOW_RPC_UPSTREAM_METHODS` does not cover the entity reads.
 
 Every page carries a **scanner sync banner** above the content whenever the indexer trails the chain head. It
 polls `GET /sync` every 10 seconds and states how far behind the scanner is (in blocks and in chain time),

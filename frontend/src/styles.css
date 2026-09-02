@@ -5298,3 +5298,186 @@ form input,
 form select {
   border-radius: var(--r-sm);
 }
+
+/* ---------------------------------------------------------------------------
+   Data page: RPC source switch and connection check
+   --------------------------------------------------------------------------- */
+
+.data-view .rpc-source-card {
+  margin-bottom: 1rem;
+}
+
+.rpc-source-groups {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 52rem) {
+  .rpc-source-groups {
+    grid-template-columns: minmax(0, 3fr) minmax(16rem, 2fr);
+  }
+}
+
+.rpc-source-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rpc-source-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  background: var(--sand);
+}
+
+.rpc-source-option.selected {
+  border-color: var(--ark-blue);
+  box-shadow: inset 0 0 0 1px var(--ark-blue);
+}
+
+.rpc-source-option input[type="radio"] {
+  margin-top: 0.2rem;
+}
+
+.rpc-source-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.rpc-source-option-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.rpc-source-option-detail {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.rpc-source-option-status {
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.rpc-source-option-status.ok {
+  color: var(--ok);
+}
+
+.rpc-source-option-status.warn {
+  color: var(--ark-orange);
+}
+
+.rpc-source-option-status.muted {
+  color: var(--muted);
+}
+
+.rpc-source-url {
+  width: 100%;
+  max-width: 34rem;
+  margin-top: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.rpc-source-url:disabled {
+  opacity: 0.55;
+}
+
+.rpc-check-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.rpc-check-report .tx-detail-topline {
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.rpc-check-endpoint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.rpc-check-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.rpc-check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rpc-check-inline .block-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rpc-check-table {
+  border-top: 1px solid var(--border);
+}
+
+/* The verdict text is the point of this table, so unlike the other data
+   tables it never scrolls sideways: fixed layout, and every cell wraps. */
+.rpc-check-table .data-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.rpc-check-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rpc-check-table th:nth-child(1) {
+  width: 20%;
+}
+
+.rpc-check-table th:nth-child(2) {
+  width: 22%;
+}
+
+.rpc-check-table th:nth-child(3) {
+  width: 11%;
+}
+
+.rpc-check-table th:nth-child(4) {
+  width: 8%;
+}
+
+.rpc-check-result {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 52rem) {
+  .rpc-check-table th:nth-child(1),
+  .rpc-check-table th:nth-child(2),
+  .rpc-check-table th:nth-child(3),
+  .rpc-check-table th:nth-child(4) {
+    width: auto;
+  }
+}
+
+.rpc-check-step-fail .rpc-check-result {
+  color: var(--ark-orange);
+}

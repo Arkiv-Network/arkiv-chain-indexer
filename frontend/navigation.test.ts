@@ -10,6 +10,7 @@ describe("frontend navigation visibility", () => {
     expect(visibleLabels(false, true)).toEqual([
       "Home",
       "Blocks",
+      "Data",
       "Block",
       "Entity",
       "Address",
@@ -25,6 +26,7 @@ describe("frontend navigation visibility", () => {
     expect(visibleLabels(true, true)).toEqual([
       "Home",
       "Blocks",
+      "Data",
       "Block",
       "Entity",
       "Address",
@@ -43,6 +45,7 @@ describe("frontend navigation visibility", () => {
     expect(visibleLabels(true, false)).toEqual([
       "Home",
       "Blocks",
+      "Data",
       "Records",
       "Ranges",
       "Charts",
@@ -58,5 +61,6 @@ describe("frontend navigation visibility", () => {
     expect(navLabelForView("baseload")).toBe("Baseload");
     expect(navLabelForView("health")).toBe("Health");
     expect(navLabelForView("ranges")).toBe("Ranges");
+    expect(navLabelForView("data")).toBe("Data");
   });
 });

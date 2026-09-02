@@ -59,8 +59,14 @@ describe("JsonRpcPassthrough", () => {
     const passthrough = new JsonRpcPassthrough({ url: UPSTREAM });
     expect([...passthrough.methods]).toEqual([...DEFAULT_PASSTHROUGH_METHODS]);
     // Only the raw form: signing happens in the wallet, so a public endpoint
-    // never needs the node to hold keys.
-    expect([...DEFAULT_PASSTHROUGH_METHODS]).toEqual(["eth_sendRawTransaction"]);
+    // never needs the node to hold keys. The Arkiv entity reads ride along
+    // because the index has no entity state to answer them from.
+    expect([...DEFAULT_PASSTHROUGH_METHODS]).toEqual([
+      "eth_sendRawTransaction",
+      "arkiv_query",
+      "arkiv_getEntityCount",
+      "arkiv_getBlockTiming",
+    ]);
     expect(passthrough.methods.has("eth_sendTransaction")).toBe(false);
   });
 

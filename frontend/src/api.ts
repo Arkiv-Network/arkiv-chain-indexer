@@ -778,6 +778,9 @@ export interface HealthResponse {
   features: {
     transactionData: boolean;
     guzzlers?: boolean;
+    jsonRpc?: boolean;
+    /** Methods the backend forwards to its upstream node, or `false` without an upstream. */
+    jsonRpcPassthrough?: string[] | false;
   };
   guzzlers?: {
     enabled: boolean;

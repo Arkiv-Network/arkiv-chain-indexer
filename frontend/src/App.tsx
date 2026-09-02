@@ -24,6 +24,7 @@ import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
+import { DataView } from "./DataView";
 import { EntityView } from "./EntityView";
 import { ChartsView } from "./ChartsView";
 import { CedricView } from "./CedricView";
@@ -623,6 +624,8 @@ export function App() {
             tokenSymbol={pageSettings.tokenSymbol}
             lockedAddress={addressParam}
           />
+        ) : activeView === "data" ? (
+          <DataView onLocationChange={refreshFromLocation} timeZone={timeZone} />
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView
             onLocationChange={refreshFromLocation}

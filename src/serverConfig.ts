@@ -214,7 +214,7 @@ const SPEC: CliSpec = {
     {
       flags: "--shadow-rpc-upstream-methods <list>",
       description:
-        "Comma-separated methods to forward; each overrides the locally answered one. Defaults to eth_sendRawTransaction (or SHADOW_RPC_UPSTREAM_METHODS).",
+        "Comma-separated methods to forward; each overrides the locally answered one. Defaults to eth_sendRawTransaction plus the arkiv_* entity reads (or SHADOW_RPC_UPSTREAM_METHODS).",
       env: ["SHADOW_RPC_UPSTREAM_METHODS"],
       default: DEFAULT_PASSTHROUGH_METHODS.join(","),
     },

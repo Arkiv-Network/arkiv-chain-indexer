@@ -129,11 +129,11 @@ describe("parseServerConfig", () => {
     ).toBeUndefined();
   });
 
-  test("an upstream URL enables the passthrough with submission defaults", () => {
+  test("an upstream URL enables the passthrough with the submission and entity-read defaults", () => {
     const config = parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM: "http://rpc-proxy:8788" });
     expect(config.jsonRpcPassthrough).toEqual({
       url: "http://rpc-proxy:8788",
-      methods: ["eth_sendRawTransaction"],
+      methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntityCount", "arkiv_getBlockTiming"],
       timeoutMs: 10_000,
       rateLimitPerMinute: 600,
     });
@@ -168,7 +168,7 @@ describe("parseServerConfig", () => {
     });
     expect(config.jsonRpcPassthrough).toEqual({
       url: "http://rpc-proxy:8788",
-      methods: ["eth_sendRawTransaction"],
+      methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntityCount", "arkiv_getBlockTiming"],
       timeoutMs: 10_000,
       rateLimitPerMinute: 600,
     });

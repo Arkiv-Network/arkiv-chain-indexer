@@ -6,6 +6,7 @@ export type View =
   | "transaction"
   | "entity"
   | "address"
+  | "data"
   | "transaction-records"
   | "senders"
   | "ranges"
@@ -26,6 +27,7 @@ const VIEW_PATHS: Record<View, string> = {
   transaction: "/tx",
   entity: "/entity",
   address: "/address",
+  data: "/data",
   "transaction-records": "/records",
   senders: "/senders",
   ranges: "/ranges",
@@ -46,6 +48,7 @@ const VIEW_PATH_ALIASES: Record<string, View> = {
   "/tx": "transaction",
   "/entity": "entity",
   "/address": "address",
+  "/data": "data",
   "/transaction-records": "transaction-records",
   "/records": "transaction-records",
   "/senders": "senders",
@@ -105,6 +108,7 @@ export function readViewFromSearch(search: string): View {
   if (value === "transaction") return "transaction";
   if (value === "entity") return "entity";
   if (value === "address") return "address";
+  if (value === "data") return "data";
   if (value === "transaction-records") return "transaction-records";
   if (value === "senders") return "senders";
   if (value === "ranges") return "ranges";
