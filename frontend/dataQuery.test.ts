@@ -71,8 +71,12 @@ describe("page settings", () => {
   });
 
   test("dataPageFilters leaves defaults out of the URL", () => {
-    expect(dataPageFilters("*", "25", "all")).toEqual({ q: "*", pageSize: "", expiration: "" });
-    expect(dataPageFilters("*", "100", "soon")).toEqual({ q: "*", pageSize: "100", expiration: "soon" });
+    expect(dataPageFilters("*", "25", "all")).toEqual({ q: "*", pageSize: "", expiration: "", rpc: "" });
+    expect(dataPageFilters("*", "100", "soon")).toEqual({ q: "*", pageSize: "100", expiration: "soon", rpc: "" });
+  });
+
+  test("dataPageFilters names a custom RPC endpoint so the link reproduces the run", () => {
+    expect(dataPageFilters("*", "25", "all", " https://rpc.example/x ").rpc).toBe("https://rpc.example/x");
   });
 });
 

@@ -40,6 +40,7 @@ import { EntityResults } from "./EntityResults";
 import { fmtDate, fmtInteger } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import {
+  buildPermalinkHref,
   entityDetailHref,
   readFiltersFromSearch,
   shouldHandleClientNavigation,
@@ -83,6 +84,16 @@ interface ResultState {
   error: unknown | null;
 }
 
+/** The custom endpoint a shared link names, or null when it has none (or junk). */
+function sourceFromUrl(rpc: string): RpcSource | null {
+  const url = rpc.trim();
+  return url && isValidRpcUrl(url) ? { kind: "custom", customUrl: url } : null;
+}
+
+function customRpcUrl(source: RpcSource): string {
+  return source.kind === "custom" ? source.customUrl.trim() : "";
+}
+
 const EMPTY_RESULTS: ResultState = {
   executedQuery: null,
   entities: [],
@@ -97,7 +108,8 @@ const EMPTY_RESULTS: ResultState = {
 export function DataView({ locationSearch, onLocationChange, timeZone }: DataViewProps) {
   const urlFilters = readFiltersFromSearch(locationSearch, DATA_FILTER_KEYS, EMPTY_DATA_FILTERS);
 
-  const [source, setSource] = useState<RpcSource>(() => readStoredRpcSource());
+  // A link that names an endpoint wins over the remembered one, without overwriting it.
+  const [source, setSource] = useState<RpcSource>(() => sourceFromUrl(urlFilters.rpc) ?? readStoredRpcSource());
   const [backend, setBackend] = useState<BackendForwarding>({ status: "loading" });
   const [check, setCheck] = useState<CheckState>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
@@ -129,10 +141,10 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const runQuery = useCallback(
-    async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }) => {
+    async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }, via: RpcSource = source) => {
       const normalized = normalizeQueryInput(rawQuery);
       if (!normalized) return;
-      if (source.kind === "custom" && !isValidRpcUrl(source.customUrl)) {
+      if (via.kind === "custom" && !isValidRpcUrl(via.customUrl)) {
         setFormError("Enter an absolute http(s) URL for the custom RPC endpoint, or switch back to the indexer backend.");
         return;
       }
@@ -158,9 +170,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         });
         const deps = { signal: controller.signal };
         const [pageResult, timingResult] = await Promise.all([
-          callRpc(source, "arkiv_query", params, deps),
+          callRpc(via, "arkiv_query", params, deps),
           // Block timing turns heights into dates; a failure there is not a query failure.
-          fetchBlockTiming(source, deps).catch(() => null),
+          fetchBlockTiming(via, deps).catch(() => null),
         ]);
         if (controller.signal.aborted) return;
         const page = decodeQueryResult(pageResult);
@@ -195,10 +207,10 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       if (!normalized) return;
       setQuery(normalized);
       urlQueryRef.current = normalized;
-      if (writePermalink("data", dataPageFilters(normalized, size, filter))) onLocationChange();
+      if (writePermalink("data", dataPageFilters(normalized, size, filter, customRpcUrl(source)))) onLocationChange();
       void runQuery(normalized, size);
     },
-    [expiration, onLocationChange, pageSize, runQuery],
+    [expiration, onLocationChange, pageSize, runQuery, source],
   );
 
   // A shared link, or back/forward, changes `q` under us: adopt it and run it.
@@ -217,8 +229,10 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     }
     const normalized = normalizeQueryInput(fromUrl);
     setQuery(normalized);
-    void runQuery(normalized, size);
-  }, [runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q]);
+    const linked = sourceFromUrl(urlFilters.rpc);
+    if (linked) setSource(linked);
+    void runQuery(normalized, size, undefined, linked ?? undefined);
+  }, [runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
 
   const cancel = () => {
     abortRef.current?.abort();
@@ -248,7 +262,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     const filter = resolveExpirationFilter(value);
     setExpiration(filter);
     if (results.executedQuery) {
-      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter))) onLocationChange();
+      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, customRpcUrl(source)))) {
+        onLocationChange();
+      }
     }
   };
 
@@ -284,6 +300,10 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       : results.entities;
   const hasText = query.trim().length > 0;
   const running = results.running !== null;
+  const permalink =
+    results.executedQuery === null
+      ? null
+      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, customRpcUrl(source)));
 
   const onFallbackKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -359,6 +379,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
           <button type="button" className="secondary" onClick={clear} disabled={!hasText && results.executedQuery === null}>
             Clear
           </button>
+          {permalink ? <CopyLinkButton href={permalink} /> : null}
           {running ? (
             <button type="button" className="query-run" onClick={cancel}>
               Cancel
@@ -654,6 +675,32 @@ function Row({ label, value }: { label: string; value: string }) {
       <dt className="tx-detail-label">{label}</dt>
       <dd className="tx-detail-value">{value}</dd>
     </div>
+  );
+}
+
+/** Copies the permalink of the last run: the query, its page size and filter, and a custom endpoint if one is in use. */
+function CopyLinkButton({ href }: { href: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(href);
+      setCopied(true);
+    } catch {
+      // Clipboard unavailable (e.g. insecure context): the address bar already holds the same link.
+    }
+  };
+
+  return (
+    <button type="button" className="secondary query-copy-link" onClick={onCopy} title={href}>
+      {copied ? "Copied" : "Copy link"}
+    </button>
   );
 }
 

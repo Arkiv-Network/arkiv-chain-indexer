@@ -5607,6 +5607,10 @@ form select {
   border-color: var(--btn-primary-bg-hover);
 }
 
+.query-copy-link {
+  min-width: 6.2rem;
+}
+
 .query-run:disabled,
 .query-toolbar button.secondary:disabled {
   opacity: 0.5;

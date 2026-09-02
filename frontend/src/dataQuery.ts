@@ -45,10 +45,12 @@ export interface DataPageFilters extends Record<string, string> {
   q: string;
   pageSize: string;
   expiration: string;
+  /** A custom RPC URL the query was run against; empty when it ran through the indexer backend. */
+  rpc: string;
 }
 
-export const DATA_FILTER_KEYS = ["q", "pageSize", "expiration"] as const;
-export const EMPTY_DATA_FILTERS: DataPageFilters = { q: "", pageSize: "", expiration: "" };
+export const DATA_FILTER_KEYS = ["q", "pageSize", "expiration", "rpc"] as const;
+export const EMPTY_DATA_FILTERS: DataPageFilters = { q: "", pageSize: "", expiration: "", rpc: "" };
 
 /** Coerces raw URL values to the page's settings, falling back to the defaults for junk. */
 export function resolvePageSize(value: string | null | undefined): PageSize {
@@ -59,12 +61,22 @@ export function resolveExpirationFilter(value: string | null | undefined): Expir
   return value && isExpirationFilter(value) ? value : DEFAULT_EXPIRATION_FILTER;
 }
 
-/** The URL parameters a query run should be reachable at; defaults are left out. */
-export function dataPageFilters(query: string, pageSize: PageSize, expiration: ExpirationFilter): DataPageFilters {
+/**
+ * The URL parameters a query run should be reachable at; defaults are left out.
+ * `rpc` names a custom endpoint so the link reproduces the run on someone else's
+ * browser; the indexer backend is the default and stays implicit.
+ */
+export function dataPageFilters(
+  query: string,
+  pageSize: PageSize,
+  expiration: ExpirationFilter,
+  customRpcUrl = "",
+): DataPageFilters {
   return {
     q: query,
     pageSize: pageSize === DEFAULT_PAGE_SIZE ? "" : pageSize,
     expiration: expiration === DEFAULT_EXPIRATION_FILTER ? "" : expiration,
+    rpc: customRpcUrl.trim(),
   };
 }
 
