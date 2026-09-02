@@ -901,7 +901,7 @@ button.secondary {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   overflow: hidden;
-  background: color-mix(in oklab, var(--stone) 42%, transparent);
+  background: var(--sand);
 }
 
 .admin-settings-row {
@@ -921,7 +921,7 @@ button.secondary {
 
 .admin-settings-row--head {
   color: var(--ink);
-  background: color-mix(in oklab, var(--stone-2) 48%, transparent);
+  background: var(--stone);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.04em;
@@ -1969,6 +1969,7 @@ button.secondary {
   border-radius: var(--r-md);
   margin-bottom: 0.75rem;
   overflow: hidden;
+  background: var(--sand);
 }
 
 .filters-panel-head {
@@ -2056,6 +2057,7 @@ button.secondary {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 0.3rem 0.6rem 0.55rem;
+  background: var(--sand);
 }
 
 .filter-group legend {
@@ -2082,10 +2084,6 @@ button.secondary {
   flex-wrap: wrap;
 }
 
-.blocks-filters-panel {
-  background: color-mix(in oklab, var(--stone) 18%, transparent);
-}
-
 /* Nudge the block-count summary down a touch below the filters panel. */
 .blocks-view > .summary {
   margin-top: 20px;
@@ -2110,7 +2108,6 @@ button.secondary {
 
 .blocks-filter-form .filter-group {
   flex: 0 0 auto;
-  background: color-mix(in oklab, var(--sand) 68%, transparent);
 }
 
 .blocks-filter-form .filter-group label {
@@ -2169,7 +2166,7 @@ button.secondary {
   border-radius: var(--r-md);
   margin: 0 0 0.75rem;
   overflow: hidden;
-  background: color-mix(in oklab, var(--stone) 12%, transparent);
+  background: var(--sand);
 }
 
 .ranges-columns-head {
@@ -2326,6 +2323,7 @@ button.secondary {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: var(--sand);
 }
 
 /* Cedric peeks over the top edge of a data table. The table-wrap clips its own
@@ -2549,6 +2547,7 @@ td.num {
   padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: var(--sand);
 }
 
 .baseload-config-manager label {
@@ -5020,6 +5019,7 @@ a.home-feed-item:hover {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   padding: 1rem 1.25rem;
+  background: var(--sand);
 }
 
 .admin-debug-tools h3 {
@@ -5055,8 +5055,8 @@ a.home-feed-item:hover {
   width: min(48rem, 100%);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: var(--panel-bg);
-  box-shadow: var(--shadow-lg);
+  background: var(--sand);
+  box-shadow: var(--shadow-card);
   padding: 1.25rem;
 }
 
@@ -5259,6 +5259,9 @@ footer {
 .home-feed-panel,
 .tx-detail-card,
 .table-wrap,
+.filters-panel,
+.ranges-columns-panel,
+.admin-settings-table,
 .chart-card,
 .guzzler-card,
 .menu-panel {
