@@ -69,11 +69,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The wire-format contract test (frontend/apiWireFormat.test.ts) imports
+      # the backend's src/server.ts to pin both halves of the API together, so
+      # the root dependencies (viem, the SDK, commander) must be present too.
+      - name: Install backend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: .
+
       # `build` runs `tsc -b` first, so this covers the type/language check.
       - name: Typecheck and build
         run: npm run build
 
       # Frontend tests run here (not in the backend job) because they import
-      # .tsx modules that resolve React from frontend/node_modules.
+      # .tsx modules that resolve React from frontend/node_modules. The
+      # cross-package contract test additionally resolves backend imports from
+      # the root node_modules installed above.
       - name: Run tests
         run: bun test
