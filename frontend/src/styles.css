@@ -34,14 +34,24 @@
   --ark-blue-2: #2a30c9;
   --ark-orange: #fe7446;
   --ink: #111111;
-  --ink-2: #2a2a2a;
-  --ink-muted: #6b6b6b;
-  --sand: #f6f4ef;
-  --stone: #e9e6de;
-  --stone-2: #dbd7cb;
-  --line: #1111111a;
-  --line-strong: #11111133;
-  --ok: #1f7a4d;
+  --ink-2: #374151;
+  --ink-muted: #5e6b80;
+  /* Hub palette (hub.arkiv.network): cool-gray page, white raised surfaces.
+     --sand is the *surface* colour (cards, inputs, header); --page is the
+     canvas behind them. */
+  --page: #f2f2f7;
+  --sand: #ffffff;
+  --stone: #f3f4f6;
+  --stone-2: #e5e7eb;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --ok: #1b7a4c;
+
+  /* Hub surface treatment: soft card shadow, near-black primary buttons. */
+  --shadow-card: 0 1px 2px #0000000a, 0 2px 12px -2px #00000012;
+  --btn-primary-bg: #1f1f1f;
+  --btn-primary-bg-hover: #292524;
+  --btn-primary-fg: #ffffff;
 
   /* Arkiv operation badge hues (create/update reuse --ok / --ark-blue). */
   --op-amber: #b25e09;
@@ -63,25 +73,31 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
     monospace;
 
-  --r-sm: 4px;
-  --r-md: 8px;
-  --r-lg: 14px;
+  --r-sm: 6px;
+  --r-md: 12px;
+  --r-lg: 16px;
 }
 
 /* Dark palette — applied when the user explicitly opts in via the header
    toggle (data-theme="dark"), or when the OS prefers dark and the user has
    not opted into light. The data-theme attribute wins over the OS hint. */
 :root[data-theme="dark"] {
-  --ink: #f4f1e9;
-  --ink-2: #d8d4c8;
-  --ink-muted: #8a8a8a;
-  --sand: #0d0d10;
-  --stone: #16161b;
-  --stone-2: #20202a;
-  --line: #ffffff14;
-  --line-strong: #ffffff2e;
-  --ark-blue: #6970ff;
-  --ark-blue-2: #8a8fff;
+  --ink: #f0ede8;
+  --ink-2: #d0cdc9;
+  --ink-muted: #a0a0a0;
+  --page: #111111;
+  --sand: #202020;
+  --stone: #252525;
+  --stone-2: #2e2e2e;
+  --line: #2e2e2e;
+  --line-strong: #3a3a3a;
+  --ok: #3fbf7a;
+  --ark-blue: #7b83e0;
+  --ark-blue-2: #969cf0;
+  --shadow-card: inset 0 1px 0 #ffffff0f, 0 4px 16px 0 #00000080;
+  --btn-primary-bg: var(--ark-orange);
+  --btn-primary-bg-hover: #e5673f;
+  --btn-primary-fg: #111111;
   --op-amber: #e8a34c;
   --op-purple: #b48cf0;
   --op-red: #f08a82;
@@ -97,16 +113,22 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ink: #f4f1e9;
-    --ink-2: #d8d4c8;
-    --ink-muted: #8a8a8a;
-    --sand: #0d0d10;
-    --stone: #16161b;
-    --stone-2: #20202a;
-    --line: #ffffff14;
-    --line-strong: #ffffff2e;
-    --ark-blue: #6970ff;
-    --ark-blue-2: #8a8fff;
+    --ink: #f0ede8;
+    --ink-2: #d0cdc9;
+    --ink-muted: #a0a0a0;
+    --page: #111111;
+    --sand: #202020;
+    --stone: #252525;
+    --stone-2: #2e2e2e;
+    --line: #2e2e2e;
+    --line-strong: #3a3a3a;
+    --ok: #3fbf7a;
+    --ark-blue: #7b83e0;
+    --ark-blue-2: #969cf0;
+    --shadow-card: inset 0 1px 0 #ffffff0f, 0 4px 16px 0 #00000080;
+    --btn-primary-bg: var(--ark-orange);
+    --btn-primary-bg-hover: #e5673f;
+    --btn-primary-fg: #111111;
     --op-amber: #e8a34c;
     --op-purple: #b48cf0;
     --op-red: #f08a82;
@@ -131,7 +153,7 @@ body {
   font-feature-settings: "ss01", "ss02", "cv11";
   -webkit-font-smoothing: antialiased;
   color: var(--ink);
-  background: var(--sand);
+  background: var(--page);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -5178,4 +5200,61 @@ a.home-feed-item:hover {
   .sync-details {
     padding: 0 1rem 0.85rem;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Hub look (hub.arkiv.network): white raised cards on a cool-gray canvas,
+   soft shadows, near-black primary buttons. Overrides only
+   colour / background / radius / shadow — typography is untouched.
+   --------------------------------------------------------------------------- */
+header {
+  background: color-mix(in oklab, var(--sand) 92%, transparent);
+}
+
+footer {
+  background: transparent;
+}
+
+.home-stats,
+.home-feed-panel,
+.tx-detail-card,
+.table-wrap,
+.chart-card,
+.guzzler-card,
+.menu-panel {
+  box-shadow: var(--shadow-card);
+}
+
+.table-wrap,
+.chart-card {
+  border-radius: var(--r-md);
+}
+
+.menu-panel {
+  background: var(--sand);
+}
+
+/* Primary actions: near-black in light, orange in dark (hub buttons). */
+form button {
+  border-color: var(--btn-primary-bg);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  border-radius: var(--r-sm);
+}
+
+form button:hover:not(:disabled) {
+  border-color: var(--btn-primary-bg-hover);
+  background: var(--btn-primary-bg-hover);
+}
+
+.segmented button.active {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+}
+
+button.secondary,
+.secondary-link,
+form input,
+form select {
+  border-radius: var(--r-sm);
 }
