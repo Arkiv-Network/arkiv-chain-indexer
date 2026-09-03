@@ -127,6 +127,22 @@ let nextId = 1;
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
 const USER_AGENT = "Mozilla/5.0 (compatible; compareEntityQuery/1.0)";
 
+/**
+ * A relay caps how many calls it forwards upstream (600 a minute by default),
+ * so a comparison run outruns the relay long before it outruns the node. The
+ * correctness phases wait that cap out, because a refusal there is not a real
+ * disagreement; the benchmark counts refusals instead, because pausing would
+ * measure the cap rather than the two engines.
+ */
+const RATE_LIMIT_CODE = -32005;
+let rateLimitPauses = 0;
+let rateLimitedCalls = 0;
+let benchMode = false;
+
+function isRateLimited(error: RpcError | undefined): boolean {
+  return error !== undefined && error.code === RATE_LIMIT_CODE && /rate limited/i.test(error.message);
+}
+
 async function rpc(source: RpcSource, method: string, params: unknown[]): Promise<RpcOutcome> {
   let attempt = 0;
   for (;;) {
@@ -161,6 +177,17 @@ async function rpc(source: RpcSource, method: string, params: unknown[]): Promis
     if (VERBOSE) {
       const summary = body.error ? `error ${body.error.code} ${body.error.message}` : "ok";
       console.log(`  [${source.name}] ${method} ${JSON.stringify(params).slice(0, 120)} → ${summary} (${ms.toFixed(1)}ms)`);
+    }
+    if (isRateLimited(body.error)) {
+      rateLimitedCalls += 1;
+      if (!benchMode && attempt < 12) {
+        rateLimitPauses += 1;
+        if (rateLimitPauses === 1 || rateLimitPauses % 25 === 0) {
+          console.log(`  … ${source.name} refused a forwarded call as rate limited, waiting it out (${rateLimitPauses} pause(s) so far)`);
+        }
+        await Bun.sleep(Math.min(15_000, 3_000 * attempt));
+        continue;
+      }
     }
     if (body.error) return { error: body.error, ms };
     return { result: body.result, ms };
@@ -891,6 +918,8 @@ async function main(): Promise<void> {
     const benchQueries = ["*", ...discovered.filter((query) => !query.startsWith("$createdAt") && !query.startsWith("$expiresAt")).slice(0, 8)];
     if (manifest) benchQueries.push(`suite = str(${quoteStr(manifest.suite)}) AND run = str(${quoteStr(manifest.run)})`);
     const cases = benchCases(benchQueries, since, seed[0]?.key);
+    const refusedBefore = rateLimitedCalls;
+    benchMode = true;
     const latency = await benchSequential(cases, block, BENCH_ROUNDS);
     console.log(`\nThroughput, ${CONCURRENCY} concurrent clients for ${BENCH_SECONDS}s per side, at block ${block}, all requests but the range scan`);
     const mix = cases.filter((testCase) => !testCase.label.includes("range scan"));
@@ -899,6 +928,14 @@ async function main(): Promise<void> {
       const result = await benchThroughput(source, mix, block, CONCURRENCY, BENCH_SECONDS);
       throughput[source.name] = result;
       console.log(`  ${source.name.padEnd(5)} ${result.perSecond.toFixed(1)} req/s, ${formatStats(result)}`);
+    }
+    benchMode = false;
+    const refused = rateLimitedCalls - refusedBefore;
+    if (refused > 0) {
+      console.log(
+        `\n  Note: ${refused} benchmark call(s) were refused as rate limited. A relay caps forwarded calls, so those` +
+          ` numbers measure the cap, not the engine — point --node at the upstream RPC directly to time the node.`,
+      );
     }
     bench = { latency, throughput };
   }
@@ -922,6 +959,8 @@ async function main(): Promise<void> {
           since: since?.toString() ?? null,
           checks,
           creationFlagsUnknown,
+          rateLimitPauses,
+          rateLimitedCalls,
           findings,
           queries: queryReports,
           bench,

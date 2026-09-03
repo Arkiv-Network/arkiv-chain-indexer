@@ -968,7 +968,8 @@ the same queries on both sides at the same block — discovering them from the d
 and reports every difference in order, fields, page boundaries, counts, `arkiv_getEntity` and the error
 code/message/position of invalid requests, with `--bench` timing both. `scripts/seedEntityQueryFixtures.ts`
 creates a suite of entities covering every attribute type, every mutation, expiry, flags and reverting
-transactions, and writes the manifest the comparison reads.
+transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
+a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
 
 The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
 `rpc=index` in shared links) when `/health` reports it enabled.
