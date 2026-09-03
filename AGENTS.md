@@ -155,7 +155,7 @@ docker compose up --build
   scanner or chain head; blocks outside `[floor, head]` are `-32006`, never a silently partial answer;
   `creationFlags` is `null` rather than guessed for pre-logs creates. The node evaluates `$createdAt` ranges
   by scanning (~10s per page on cheesecake at a past block), so the comparison cuts node walks at the floor
-  instead of windowing every query.
+  instead of windowing every query. Index every address column paired with `expires_at`, never alone: an address keeps a row for every entity it ever owned and most of them have expired, so `(owner, expires_at)` turned a 95ms scan of 167k rows at a past block into 1ms.
 - Account balances (`account_balances`, `SCANNER_TRACK_BALANCES`, default off) are **readings, never sums**.
   For each block the scanner takes the addresses that appeared as `from` or `to` and asks the node what they
   hold at that block (`EthereumRpcClient.getBalances`, one batched `eth_getBalance` request per block — never

@@ -310,13 +310,19 @@ export class EntityIndexStorage implements EntityIndexReader {
        ON ${this.qVersions} (created_at DESC, created_position DESC, entity_key DESC)
        WHERE to_block IS NULL AND NOT deleted`,
     );
+    // An address keeps every entity it ever owned, and on a busy chain almost
+    // all of them have expired, so a bare owner lookup reads a hundred times
+    // more rows than it returns. Pairing the address with the expiry bound
+    // lets one index range answer "what did this address hold at block B".
+    await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent("entity_versions_live_owner_idx")}`);
+    await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent("entity_versions_live_creator_idx")}`);
     await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_owner_idx")}
-       ON ${this.qVersions} (owner) WHERE to_block IS NULL AND NOT deleted`,
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_owner_expiry_idx")}
+       ON ${this.qVersions} (owner, expires_at) WHERE to_block IS NULL AND NOT deleted`,
     );
     await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_creator_idx")}
-       ON ${this.qVersions} (creator) WHERE to_block IS NULL AND NOT deleted`,
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_creator_expiry_idx")}
+       ON ${this.qVersions} (creator, expires_at) WHERE to_block IS NULL AND NOT deleted`,
     );
     // Historical reads bound the candidates by creation block, and by expiry:
     // at a past block B only versions with expires_at > B can be live, which
@@ -329,6 +335,16 @@ export class EntityIndexStorage implements EntityIndexReader {
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_expiry_idx")}
        ON ${this.qVersions} (expires_at)`,
+    );
+    // The partial pair above stops at the head; a read at a past block needs
+    // the same range over every version, live or not.
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_owner_expiry_idx")}
+       ON ${this.qVersions} (owner, expires_at)`,
+    );
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_creator_expiry_idx")}
+       ON ${this.qVersions} (creator, expires_at)`,
     );
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qAttributes} (
