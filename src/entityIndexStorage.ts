@@ -367,6 +367,17 @@ export class EntityIndexStorage implements EntityIndexReader {
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_version_attributes_live_num_idx")}
        ON ${this.qAttributes} (name, type_id, value_num) WHERE current`,
     );
+    // `current` covers the head only. A read at a past block matches whichever
+    // version was valid then, so without the same two indexes over every row
+    // an attribute predicate falls back to scanning the whole table.
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_version_attributes_text_idx")}
+       ON ${this.qAttributes} (name, type_id, value_text text_pattern_ops)`,
+    );
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_version_attributes_num_idx")}
+       ON ${this.qAttributes} (name, type_id, value_num)`,
+    );
     // Late arrivals (gap fills, rescans) are found by when they were written.
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_scanned_at_idx")}
