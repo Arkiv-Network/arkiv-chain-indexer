@@ -79,6 +79,41 @@ export function rpcSourceFromLinkValue(value: string): RpcSource | null {
   return trimmed && isValidRpcUrl(trimmed) ? { kind: "custom", customUrl: trimmed } : null;
 }
 
+/**
+ * What a run sends to: one of the sources, or — as `both` — the backend's own
+ * two endpoints at once, so the node's answer and the experimental index's can
+ * be compared. `both` is not an {@link RpcSource} because it names two of them.
+ */
+export type RpcMode = RpcSourceKind | "both";
+
+/** The `rpc=` link value that asks for the side-by-side comparison. */
+export const COMPARE_RPC_LINK_VALUE = "both";
+
+/** The two endpoints `both` compares, the node's relay first. */
+export const COMPARE_SOURCES: readonly [RpcSource, RpcSource] = [
+  { kind: "backend", customUrl: "" },
+  { kind: "index", customUrl: "" },
+];
+
+const MODE_STORAGE_KEY = "data.rpcMode";
+
+export function isRpcMode(value: string): value is RpcMode {
+  return value === "both" || isRpcSourceKind(value);
+}
+
+/** What a shared link carries for the mode: `both`, or whatever the single endpoint carries. */
+export function rpcModeLinkValue(mode: RpcMode, source: RpcSource): string {
+  if (mode === "both") return COMPARE_RPC_LINK_VALUE;
+  return rpcLinkValue({ ...source, kind: mode });
+}
+
+/** The mode and endpoint a link's `rpc=` value names, or null when it names none (or junk). */
+export function rpcModeFromLinkValue(value: string): { mode: RpcMode; source: RpcSource } | null {
+  if (value.trim() === COMPARE_RPC_LINK_VALUE) return { mode: "both", source: COMPARE_SOURCES[0] };
+  const source = rpcSourceFromLinkValue(value);
+  return source ? { mode: source.kind, source } : null;
+}
+
 /** A displayable form of the endpoint with any credential in the URL blanked out. */
 export function describeRpcEndpoint(source: RpcSource): string {
   if (source.kind === "backend") return BACKEND_RPC_PATH;
@@ -105,6 +140,16 @@ export function readStoredRpcSource(storage?: StorageLike | null): RpcSource {
 export function writeStoredRpcSource(source: RpcSource, storage?: StorageLike | null): void {
   writeStoredString(SOURCE_KIND_STORAGE_KEY, source.kind, storage);
   writeStoredString(CUSTOM_URL_STORAGE_KEY, source.customUrl, storage);
+}
+
+export function readStoredRpcMode(storage?: StorageLike | null): RpcMode {
+  const stored = readStoredString(MODE_STORAGE_KEY, "", isRpcMode, storage);
+  // Before the mode was remembered on its own, the stored source kind was it.
+  return stored ? (stored as RpcMode) : readStoredRpcSource(storage).kind;
+}
+
+export function writeStoredRpcMode(mode: RpcMode, storage?: StorageLike | null): void {
+  writeStoredString(MODE_STORAGE_KEY, mode, storage);
 }
 
 /** Which of the Arkiv read methods the backend does not forward, per `/health`'s `features.jsonRpcPassthrough`. */

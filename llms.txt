@@ -315,8 +315,12 @@ creates a suite of entities covering every attribute type, every mutation, expir
 transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
 a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
 
-The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
-`rpc=index` in shared links) when `/health` reports it enabled.
+The frontend's `/data` page picks its RPC source at the top of the page: the default node
+(`/shadow-rpc`), the experimental index (`rpc=index` in shared links), or **both** (`rpc=both`), which
+sends each query to the two endpoints at once — pinned to the lower of their two heads so the index's lag
+is not read as a difference — and prints the timings side by side with every field the answers disagree on,
+the browser-side twin of `scripts/compareEntityQuery.ts`. Only the first page is compared: a cursor belongs
+to the endpoint that issued it.
 
 ## `GET /blocks`
 

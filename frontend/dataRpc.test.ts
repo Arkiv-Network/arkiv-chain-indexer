@@ -11,10 +11,15 @@ import {
   isMethodNotFound,
   isValidRpcUrl,
   missingBackendMethods,
+  isRpcMode,
+  readStoredRpcMode,
   readStoredRpcSource,
   rpcEndpointUrl,
   rpcLinkValue,
+  rpcModeFromLinkValue,
+  rpcModeLinkValue,
   rpcSourceFromLinkValue,
+  writeStoredRpcMode,
   writeStoredRpcSource,
   type RpcSource,
 } from "./src/dataRpc";
@@ -107,6 +112,39 @@ describe("rpc source selection", () => {
     expect(rpcSourceFromLinkValue("https://rpc.example.test/")).toEqual({ kind: "custom", customUrl: "https://rpc.example.test/" });
     expect(rpcSourceFromLinkValue("not a url")).toBeNull();
     expect(rpcSourceFromLinkValue("backend")).toBeNull();
+  });
+
+  test("the compare mode is its own link value, and the single modes keep theirs", () => {
+    expect(isRpcMode("both")).toBe(true);
+    expect(isRpcMode("index")).toBe(true);
+    expect(isRpcMode("nope")).toBe(false);
+
+    expect(rpcModeLinkValue("both", BACKEND)).toBe("both");
+    expect(rpcModeLinkValue("both", CUSTOM)).toBe("both");
+    expect(rpcModeLinkValue("backend", BACKEND)).toBe("");
+    expect(rpcModeLinkValue("index", BACKEND)).toBe("index");
+    expect(rpcModeLinkValue("custom", CUSTOM)).toBe(CUSTOM.customUrl);
+
+    expect(rpcModeFromLinkValue(" both ")).toEqual({ mode: "both", source: { kind: "backend", customUrl: "" } });
+    expect(rpcModeFromLinkValue("index")).toEqual({ mode: "index", source: { kind: "index", customUrl: "" } });
+    expect(rpcModeFromLinkValue(CUSTOM.customUrl)).toEqual({ mode: "custom", source: CUSTOM });
+    expect(rpcModeFromLinkValue("")).toBeNull();
+    expect(rpcModeFromLinkValue("not a url")).toBeNull();
+  });
+
+  test("the mode round-trips through storage and falls back to the remembered source kind", () => {
+    const storage = memoryStorage();
+    expect(readStoredRpcMode(storage)).toBe("backend");
+
+    // A browser that only ever stored the source kind keeps that as its mode.
+    storage.setItem("gas-price-tracker:data.rpcSourceKind", "index");
+    expect(readStoredRpcMode(storage)).toBe("index");
+
+    writeStoredRpcMode("both", storage);
+    expect(readStoredRpcMode(storage)).toBe("both");
+
+    storage.setItem("gas-price-tracker:data.rpcMode", "bogus");
+    expect(readStoredRpcMode(storage)).toBe("index");
   });
 
   test("a custom source is used as typed, trimmed", () => {

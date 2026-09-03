@@ -106,6 +106,10 @@ export interface QueryPageRequest {
   pageSize: number;
   /** Continue a previous page. Only valid together with the block that page was read at. */
   cursor?: string;
+  /**
+   * Read at this block rather than the head. Required with a cursor, and used
+   * on its own to pin two endpoints to the same block when comparing them.
+   */
   atBlock?: number;
 }
 
@@ -119,13 +123,11 @@ export interface QueryRpcOptions {
 export function buildQueryParams(request: QueryPageRequest): [string, QueryRpcOptions] {
   const limit = Math.max(1, Math.min(MAX_QUERY_LIMIT, Math.floor(request.pageSize)));
   const options: QueryRpcOptions = { select: LIST_SELECT, limit: `0x${limit.toString(16)}` };
-  if (request.cursor) {
-    if (request.atBlock === undefined) {
-      throw new Error("a cursor can only be resumed at the block its page was read at");
-    }
-    options.cursor = request.cursor;
-    options.atBlock = `0x${request.atBlock.toString(16)}`;
+  if (request.cursor && request.atBlock === undefined) {
+    throw new Error("a cursor can only be resumed at the block its page was read at");
   }
+  if (request.atBlock !== undefined) options.atBlock = `0x${request.atBlock.toString(16)}`;
+  if (request.cursor) options.cursor = request.cursor;
   return [request.query, options];
 }
 

@@ -22,6 +22,7 @@ import {
   ARKIV_READ_METHODS,
   BACKEND_INDEX_RPC_PATH,
   BACKEND_RPC_PATH,
+  COMPARE_SOURCES,
   callRpc,
   checkRpcSource,
   describeRpcEndpoint,
@@ -29,16 +30,25 @@ import {
   isAbortError,
   isValidRpcUrl,
   missingBackendMethods,
+  readStoredRpcMode,
   readStoredRpcSource,
-  rpcLinkValue,
-  rpcSourceFromLinkValue,
+  rpcModeFromLinkValue,
+  rpcModeLinkValue,
+  writeStoredRpcMode,
   writeStoredRpcSource,
   type BlockTiming,
   type RpcCheckReport,
   type RpcCheckStep,
+  type RpcMode,
   type RpcSource,
   type RpcSourceKind,
 } from "./dataRpc";
+import {
+  compareEntityPages,
+  speedupFactor,
+  type ComparisonReport,
+  type ComparisonSide,
+} from "./entityCompare";
 import { EntityResults } from "./EntityResults";
 import { fmtDate, fmtInteger } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
@@ -75,6 +85,8 @@ type CheckState =
   | { status: "running"; startedAt: number }
   | { status: "done"; report: RpcCheckReport };
 
+type CompareState = { status: "idle" } | { status: "running" } | { status: "done"; report: ComparisonReport };
+
 interface ResultState {
   /** The query the results belong to, as sent to the node; null before the first run. */
   executedQuery: string | null;
@@ -87,9 +99,9 @@ interface ResultState {
   error: unknown | null;
 }
 
-/** The endpoint a shared link names, or null when it has none (or junk). */
-function sourceFromUrl(rpc: string): RpcSource | null {
-  return rpcSourceFromLinkValue(rpc);
+/** The mode and endpoint a shared link names, or null when it has none (or junk). */
+function modeFromUrl(rpc: string): { mode: RpcMode; source: RpcSource } | null {
+  return rpcModeFromLinkValue(rpc);
 }
 
 const EMPTY_RESULTS: ResultState = {
@@ -107,9 +119,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
   const urlFilters = readFiltersFromSearch(locationSearch, DATA_FILTER_KEYS, EMPTY_DATA_FILTERS);
 
   // A link that names an endpoint wins over the remembered one, without overwriting it.
-  const [source, setSource] = useState<RpcSource>(() => sourceFromUrl(urlFilters.rpc) ?? readStoredRpcSource());
+  const linkedSource = modeFromUrl(urlFilters.rpc);
+  const [source, setSource] = useState<RpcSource>(() => linkedSource?.source ?? readStoredRpcSource());
+  const [mode, setMode] = useState<RpcMode>(() => linkedSource?.mode ?? readStoredRpcMode());
   const [backend, setBackend] = useState<BackendForwarding>({ status: "loading" });
   const [check, setCheck] = useState<CheckState>({ status: "idle" });
+  const [comparison, setComparison] = useState<CompareState>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
 
   const [query, setQuery] = useState(() => urlFilters.q);
@@ -157,6 +172,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       abortRef.current = controller;
 
       const more = continueFrom !== undefined;
+      if (!more) setComparison({ status: "idle" });
       setResults((previous) =>
         more
           ? { ...previous, running: "more", error: null }
@@ -202,6 +218,96 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     [source],
   );
 
+  /**
+   * Sends the same query to the node's relay and to the experimental index and
+   * reports where they part company. Both calls are pinned to the lower of the
+   * two heads: the index runs a little behind the node, and an unpinned pair
+   * would read as a wall of differences that is really just that lag.
+   */
+  const runComparison = useCallback(async (rawQuery: string, size: PageSize) => {
+    const normalized = normalizeQueryInput(rawQuery);
+    if (!normalized) return;
+    setFormError(null);
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setComparison({ status: "running" });
+    setResults({ ...EMPTY_RESULTS, executedQuery: normalized, running: "first" });
+
+    const [nodeSource, indexSource] = COMPARE_SOURCES;
+    const deps = { signal: controller.signal };
+    /** A cancelled run takes its own spinner down, unless a newer run owns it now. */
+    const cancelled = () => {
+      if (abortRef.current !== null && abortRef.current !== controller) return;
+      setResults((previous) => ({ ...previous, running: null }));
+      setComparison({ status: "idle" });
+    };
+    try {
+      const [nodeTiming, indexTiming] = await Promise.all([
+        fetchBlockTiming(nodeSource, deps).catch(() => null),
+        fetchBlockTiming(indexSource, deps).catch(() => null),
+      ]);
+      if (controller.signal.aborted) {
+        cancelled();
+        return;
+      }
+      const heads = [nodeTiming?.currentBlock, indexTiming?.currentBlock].filter(
+        (block): block is number => typeof block === "number",
+      );
+      const atBlock = heads.length > 0 ? Math.min(...heads) : undefined;
+      const params = buildQueryParams({
+        query: normalized,
+        pageSize: Number(size),
+        ...(atBlock === undefined ? {} : { atBlock }),
+      });
+
+      const call = async (via: RpcSource): Promise<ComparisonSide> => {
+        const started = performance.now();
+        try {
+          const raw = await callRpc(via, "arkiv_query", params, deps);
+          return { durationMs: Math.round(performance.now() - started), page: decodeQueryResult(raw), error: null };
+        } catch (error) {
+          return { durationMs: Math.round(performance.now() - started), page: null, error };
+        }
+      };
+      const [nodeSide, indexSide] = await Promise.all([call(nodeSource), call(indexSource)]);
+      if (controller.signal.aborted || isAbortError(nodeSide.error) || isAbortError(indexSide.error)) {
+        cancelled();
+        return;
+      }
+
+      setComparison({ status: "done", report: compareEntityPages(nodeSide, indexSide) });
+
+      // The table shows the node's answer; when only the index answered, its own.
+      const shown = nodeSide.page ?? indexSide.page;
+      if (!shown) {
+        setResults((previous) => ({ ...previous, running: null, error: nodeSide.error ?? indexSide.error }));
+        return;
+      }
+      setResults({
+        executedQuery: normalized,
+        entities: shown.entities,
+        cursor: shown.cursor,
+        blockNumber: shown.blockNumber,
+        timing: nodeTiming ?? indexTiming,
+        durationMs: nodeSide.page ? nodeSide.durationMs : indexSide.durationMs,
+        running: null,
+        error: null,
+      });
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) {
+        cancelled();
+      } else {
+        setResults((previous) => ({ ...previous, running: null, error }));
+        setComparison({ status: "idle" });
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  }, []);
+
   /** Runs the editor's text and records it in the URL so the run can be shared or returned to. */
   const execute = useCallback(
     (text: string, size: PageSize = pageSize, filter: ExpirationFilter = expiration) => {
@@ -209,10 +315,13 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       if (!normalized) return;
       setQuery(normalized);
       urlQueryRef.current = normalized;
-      if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcLinkValue(source)))) onLocationChange();
-      void runQuery(normalized, size);
+      if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcModeLinkValue(mode, source)))) {
+        onLocationChange();
+      }
+      if (mode === "both") void runComparison(normalized, size);
+      else void runQuery(normalized, size);
     },
-    [expiration, onLocationChange, pageSize, runQuery, source],
+    [expiration, mode, onLocationChange, pageSize, runComparison, runQuery, source],
   );
 
   // A shared link, or back/forward, changes `q` under us: adopt it and run it.
@@ -231,10 +340,18 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     }
     const normalized = normalizeQueryInput(fromUrl);
     setQuery(normalized);
-    const linked = sourceFromUrl(urlFilters.rpc);
-    if (linked) setSource(linked);
-    void runQuery(normalized, size, undefined, linked ?? undefined);
-  }, [runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
+    const linked = modeFromUrl(urlFilters.rpc);
+    if (linked) {
+      setSource(linked.source);
+      setMode(linked.mode);
+    }
+    const linkedMode = linked?.mode ?? mode;
+    if (linkedMode === "both") void runComparison(normalized, size);
+    else void runQuery(normalized, size, undefined, linked?.source ?? undefined);
+    // `mode` is only read as the fallback for a link that names none; a mode
+    // change on its own must not re-run the query behind the user's back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runComparison, runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
 
   const cancel = () => {
     abortRef.current?.abort();
@@ -246,12 +363,16 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     setQuery("");
     urlQueryRef.current = "";
     setResults(EMPTY_RESULTS);
+    setComparison({ status: "idle" });
     if (writePermalink("data", {})) onLocationChange();
   };
 
   const loadMore = () => {
     if (!results.executedQuery || !results.cursor || results.blockNumber === null) return;
-    void runQuery(results.executedQuery, pageSize, { cursor: results.cursor, atBlock: results.blockNumber });
+    // A cursor belongs to the endpoint that issued it, so in compare mode the
+    // later pages come from the side the table is showing: the node's.
+    const via = mode === "both" ? COMPARE_SOURCES[0] : source;
+    void runQuery(results.executedQuery, pageSize, { cursor: results.cursor, atBlock: results.blockNumber }, via);
   };
 
   const onPageSizeChange = (value: string) => {
@@ -264,7 +385,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     const filter = resolveExpirationFilter(value);
     setExpiration(filter);
     if (results.executedQuery) {
-      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, rpcLinkValue(source)))) {
+      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, rpcModeLinkValue(mode, source)))) {
         onLocationChange();
       }
     }
@@ -279,18 +400,33 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     setFormError(null);
   };
 
-  const onKindChange = (kind: RpcSourceKind) => updateSource({ ...source, kind });
+  const updateMode = (next: RpcMode) => {
+    setMode(next);
+    writeStoredRpcMode(next);
+    setFormError(null);
+    if (next !== "both") updateSource({ ...source, kind: next });
+    // The old comparison describes endpoints the page is no longer using.
+    setComparison({ status: "idle" });
+  };
+
+  const onKindChange = (kind: RpcSourceKind) => updateMode(kind);
+
+  /** The one endpoint the connection check and the summary line talk about. */
+  const checkSource: RpcSource = mode === "both" ? COMPARE_SOURCES[0] : source;
 
   const runCheck = async () => {
-    if (source.kind === "custom" && !isValidRpcUrl(source.customUrl)) {
+    if (checkSource.kind === "custom" && !isValidRpcUrl(checkSource.customUrl)) {
       setFormError("Enter an absolute http(s) URL for the custom RPC endpoint.");
       return;
     }
     setFormError(null);
     setCheck({ status: "running", startedAt: Date.now() });
-    const report = await checkRpcSource(source);
+    const report = await checkRpcSource(checkSource);
     setCheck({ status: "done", report });
   };
+
+  /** True once `/health` has said this deployment serves no entity index. */
+  const indexOff = backend.status === "known" && backend.entityQueryIndex === false;
 
   const missing = backend.status === "known" ? missingBackendMethods(backend.methods) : [];
   const nowMs = Date.now();
@@ -305,7 +441,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
   const permalink =
     results.executedQuery === null
       ? null
-      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, rpcLinkValue(source)));
+      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, rpcModeLinkValue(mode, source)));
 
   const onFallbackKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -335,6 +471,50 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         </a>
         .
       </p>
+
+      <div className="rpc-mode-bar">
+        <span className="rpc-mode-label">Query against</span>
+        <div className="segmented rpc-mode-segmented" role="group" aria-label="RPC source">
+          <button
+            type="button"
+            className={mode === "backend" ? "active" : ""}
+            title={BACKEND_RPC_PATH}
+            onClick={() => updateMode("backend")}
+          >
+            Default node
+          </button>
+          <button
+            type="button"
+            className={mode === "index" ? "active" : ""}
+            title={BACKEND_INDEX_RPC_PATH}
+            onClick={() => updateMode("index")}
+          >
+            Experimental index
+          </button>
+          <button type="button" className={mode === "both" ? "active" : ""} onClick={() => updateMode("both")}>
+            Both (compare)
+          </button>
+          {mode === "custom" || source.customUrl.trim() ? (
+            <button
+              type="button"
+              className={mode === "custom" ? "active" : ""}
+              title={describeRpcEndpoint({ kind: "custom", customUrl: source.customUrl })}
+              onClick={() => updateMode("custom")}
+            >
+              Custom
+            </button>
+          ) : null}
+        </div>
+        <span className="rpc-mode-endpoint mono">
+          {mode === "both" ? `${BACKEND_RPC_PATH} vs ${BACKEND_INDEX_RPC_PATH}` : describeRpcEndpoint(source) || "not set"}
+        </span>
+      </div>
+      {indexOff && (mode === "index" || mode === "both") ? (
+        <p className="summary rpc-mode-warning">
+          This deployment has not enabled the entity index (<span className="mono">ENTITY_QUERY_INDEX</span>), so{" "}
+          <span className="mono">{BACKEND_INDEX_RPC_PATH}</span> answers 404.
+        </p>
+      ) : null}
 
       <div className="tx-detail-card query-card">
         <div className="query-editor">
@@ -409,6 +589,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         </div>
       </div>
 
+      {comparison.status === "running" ? (
+        <p className="summary comparison-pending">Running the query on both endpoints…</p>
+      ) : comparison.status === "done" ? (
+        <ComparisonPanel report={comparison.report} />
+      ) : null}
+
       <EntityResults
         executedQuery={results.executedQuery}
         entities={visibleEntities}
@@ -430,13 +616,15 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       <details className="rpc-endpoint-details">
         <summary>
           <span className="rpc-endpoint-summary-label">RPC endpoint</span>
-          <span className="rpc-endpoint-summary-value mono">{describeRpcEndpoint(source) || "not set"}</span>
-          {source.kind === "backend" && backend.status === "known" ? (
+          <span className="rpc-endpoint-summary-value mono">
+            {mode === "both" ? `${BACKEND_RPC_PATH} vs ${BACKEND_INDEX_RPC_PATH}` : describeRpcEndpoint(source) || "not set"}
+          </span>
+          {mode === "backend" && backend.status === "known" ? (
             <span className={`tx-status-badge ${backend.methods !== false && missing.length === 0 ? "ok" : "fail"}`}>
               {backend.methods === false ? "No upstream" : missing.length === 0 ? "Forwarding" : "Incomplete"}
             </span>
           ) : null}
-          {source.kind === "index" ? (
+          {mode === "index" || mode === "both" ? (
             <span
               className={`tx-status-badge ${
                 backend.status !== "known" ? "unknown" : backend.entityQueryIndex === false ? "fail" : "ok"
@@ -457,12 +645,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
             <div className="tx-detail-group">
               <h3>RPC endpoint</h3>
               <div className="rpc-source-options" role="radiogroup" aria-label="RPC endpoint">
-                <label className={`rpc-source-option${source.kind === "backend" ? " selected" : ""}`}>
+                <label className={`rpc-source-option${mode === "backend" ? " selected" : ""}`}>
                   <input
                     type="radio"
                     name="rpc-source"
                     value="backend"
-                    checked={source.kind === "backend"}
+                    checked={mode === "backend"}
                     onChange={() => onKindChange("backend")}
                   />
                   <span className="rpc-source-option-body">
@@ -474,12 +662,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                     <BackendForwardingNote backend={backend} missing={missing} />
                   </span>
                 </label>
-                <label className={`rpc-source-option${source.kind === "index" ? " selected" : ""}`}>
+                <label className={`rpc-source-option${mode === "index" ? " selected" : ""}`}>
                   <input
                     type="radio"
                     name="rpc-source"
                     value="index"
-                    checked={source.kind === "index"}
+                    checked={mode === "index"}
                     onChange={() => onKindChange("index")}
                   />
                   <span className="rpc-source-option-body">
@@ -496,12 +684,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                     <IndexStatusNote backend={backend} />
                   </span>
                 </label>
-                <label className={`rpc-source-option${source.kind === "custom" ? " selected" : ""}`}>
+                <label className={`rpc-source-option${mode === "custom" ? " selected" : ""}`}>
                   <input
                     type="radio"
                     name="rpc-source"
                     value="custom"
-                    checked={source.kind === "custom"}
+                    checked={mode === "custom"}
                     onChange={() => onKindChange("custom")}
                   />
                   <span className="rpc-source-option-body">
@@ -518,9 +706,29 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                       autoComplete="off"
                       placeholder="https://rpc.example.arkiv.network/<api-key>"
                       value={source.customUrl}
-                      disabled={source.kind !== "custom"}
+                      disabled={mode !== "custom"}
                       onChange={(event) => updateSource({ ...source, customUrl: event.target.value })}
                     />
+                  </span>
+                </label>
+                <label className={`rpc-source-option${mode === "both" ? " selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="rpc-source"
+                    value="both"
+                    checked={mode === "both"}
+                    onChange={() => updateMode("both")}
+                  />
+                  <span className="rpc-source-option-body">
+                    <span className="rpc-source-option-title">Both, compared</span>
+                    <span className="rpc-source-option-detail">
+                      Sends each query to <span className="mono">{BACKEND_RPC_PATH}</span> and{" "}
+                      <span className="mono">{BACKEND_INDEX_RPC_PATH}</span> at once, both pinned to the lower of
+                      the two heads so the index&apos;s lag does not read as a difference, and reports the timings
+                      side by side with every field the two answers disagree on. The table below shows the
+                      node&apos;s answer.
+                    </span>
+                    <IndexStatusNote backend={backend} />
                   </span>
                 </label>
               </div>
@@ -551,6 +759,81 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         ) : null}
       </details>
     </section>
+  );
+}
+
+/**
+ * The verdict of a "Both" run: what each endpoint cost, and every field the two
+ * answers disagree on. It covers the first page only — cursors are not
+ * interchangeable between the node and the index, so "Load more" reads on from
+ * the node alone.
+ */
+function ComparisonPanel({ report }: { report: ComparisonReport }) {
+  const speedup = speedupFactor(report);
+  const verdict = report.identical
+    ? { className: "ok", text: `Identical (${report.comparedEntities} entities compared)` }
+    : { className: "fail", text: `${report.differences.length} difference${report.differences.length === 1 ? "" : "s"}` };
+
+  return (
+    <div className="tx-detail-card comparison-card">
+      <div className="comparison-head">
+        <h3>Node vs experimental index</h3>
+        <span className={`tx-status-badge ${verdict.className}`}>{verdict.text}</span>
+        {speedup !== null ? (
+          <span className="comparison-speedup">
+            index {speedup >= 1 ? `${speedup.toFixed(1)}× faster` : `${(1 / speedup).toFixed(1)}× slower`}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="comparison-sides">
+        <ComparisonSideRow label="Default node" path={BACKEND_RPC_PATH} side={report.node} />
+        <ComparisonSideRow label="Experimental index" path={BACKEND_INDEX_RPC_PATH} side={report.index} />
+      </div>
+
+      {report.identical ? (
+        <p className="tx-detail-note">
+          Same entities, same order, same fields on the first page. Later pages are not compared: a cursor belongs to
+          the endpoint that issued it.
+        </p>
+      ) : (
+        <ul className="comparison-differences">
+          {report.differences.map((difference, position) => (
+            <li key={`${difference.scope}-${position}`}>
+              <span className="comparison-difference-scope mono">{difference.scope}</span>
+              <span className="comparison-difference-detail">{difference.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ComparisonSideRow({
+  label,
+  path,
+  side,
+}: {
+  label: string;
+  path: string;
+  side: ComparisonReport["node"];
+}) {
+  return (
+    <div className="comparison-side">
+      <span className="comparison-side-label">{label}</span>
+      <span className="comparison-side-path mono">{path}</span>
+      <span className="comparison-side-timing mono">{fmtInteger(side.durationMs)} ms</span>
+      <span className="comparison-side-count">
+        {side.error !== null
+          ? "failed"
+          : `${fmtInteger(side.count ?? 0)} ${side.count === 1 ? "entity" : "entities"}${side.hasMore ? ", more" : ""}`}
+      </span>
+      {side.blockNumber !== null ? (
+        <span className="comparison-side-block mono">block {fmtInteger(side.blockNumber)}</span>
+      ) : null}
+      {side.error !== null ? <span className="comparison-side-error">{side.error}</span> : null}
+    </div>
   );
 }
 
