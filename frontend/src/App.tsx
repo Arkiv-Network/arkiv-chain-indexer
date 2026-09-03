@@ -287,6 +287,25 @@ export function App() {
     }
   }, [themeOverride]);
 
+  // Mirror the effective theme as a `.dark` class on <html>. The design
+  // system (globals.css, Tailwind `dark:` variant) keys off the class; the
+  // legacy stylesheet keys off `data-theme` and the OS media query.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const media =
+      typeof window !== "undefined" && typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-color-scheme: dark)")
+        : undefined;
+    const apply = () => {
+      const dark =
+        themeOverride === "dark" || (themeOverride === "" && (media?.matches ?? false));
+      document.documentElement.classList.toggle("dark", dark);
+    };
+    apply();
+    media?.addEventListener("change", apply);
+    return () => media?.removeEventListener("change", apply);
+  }, [themeOverride]);
+
   const toggleFullWidth = () => setFullWidth((value) => !value);
   const toggleDarkMode = () => {
     setThemeOverride((current) => {

@@ -26,6 +26,28 @@
     U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/*
+ * Legacy browser defaults. Tailwind's preflight (loaded from globals.css)
+ * zeroes heading sizes, margins, list indents and link underlines. The rules
+ * below rely on those defaults, so restore them here until each view moves
+ * to the design system. Delete this block together with the rest of this file.
+ */
+h1 { font-size: 2em; margin: 0.67em 0; font-weight: bold; }
+h2 { font-size: 1.5em; margin: 0.83em 0; font-weight: bold; }
+h3 { font-size: 1.17em; margin: 1em 0; font-weight: bold; }
+h4 { font-size: 1em; margin: 1.33em 0; font-weight: bold; }
+h5 { font-size: 0.83em; margin: 1.67em 0; font-weight: bold; }
+h6 { font-size: 0.67em; margin: 2.33em 0; font-weight: bold; }
+p, pre, blockquote { margin: 1em 0; }
+ul, ol { margin: 1em 0; padding-left: 40px; }
+ul { list-style: disc; }
+ol { list-style: decimal; }
+hr { margin: 0.5em 0; border-top-width: 1px; }
+small { font-size: smaller; }
+a { text-decoration: underline; }
+button { font-size: 13.3333px; line-height: normal; letter-spacing: normal; }
+img, svg { display: inline; vertical-align: baseline; }
+
 :root {
   color-scheme: light dark;
 
