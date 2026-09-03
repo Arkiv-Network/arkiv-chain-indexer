@@ -1483,7 +1483,7 @@ button.secondary {
   align-items: stretch;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: color-mix(in oklab, var(--stone) 38%, transparent);
+  background: var(--sand);
   padding: 0.75rem;
 }
 
@@ -2948,7 +2948,9 @@ td.num {
   padding: 0.75rem 1rem;
   border: 1px solid var(--error, #b91c1c);
   border-radius: 6px;
-  background: rgba(185, 28, 28, 0.08);
+  /* Tinted over the card surface, not over whatever is behind: a translucent
+     red on the grey page canvas came out muddy next to the solid panels. */
+  background: color-mix(in oklab, #b91c1c 8%, var(--sand));
   color: var(--error, #b91c1c);
 }
 
@@ -3663,7 +3665,7 @@ button.secondary.guzzler-refresh {
   padding: 1rem 1.1rem;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: color-mix(in oklab, var(--stone) 42%, transparent);
+  background: var(--sand);
 }
 
 .block-lookup-form {
@@ -5262,6 +5264,8 @@ footer {
 .filters-panel,
 .ranges-columns-panel,
 .admin-settings-table,
+.block-lookup,
+.home-debug-summary,
 .chart-card,
 .guzzler-card,
 .menu-panel {
@@ -6052,4 +6056,154 @@ form select {
   max-width: 100%;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Data page: the RPC source bar above the editor, and the comparison verdict
+   a "Both" run prints above the results.
+   --------------------------------------------------------------------------- */
+
+.rpc-mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.9rem;
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--sand);
+  box-shadow: var(--shadow-card);
+}
+
+.rpc-mode-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rpc-mode-segmented {
+  flex-wrap: wrap;
+}
+
+.rpc-mode-endpoint {
+  min-width: 0;
+  flex: 1 1 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.rpc-mode-warning {
+  margin-top: -0.5rem;
+  color: var(--ark-orange);
+}
+
+.comparison-card {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+}
+
+.comparison-pending {
+  color: var(--muted);
+}
+
+.comparison-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.comparison-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.comparison-speedup {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.comparison-sides {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+@media (min-width: 52rem) {
+  .comparison-sides {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.comparison-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--stone);
+  font-size: 0.82rem;
+}
+
+.comparison-side-label {
+  font-weight: 600;
+}
+
+.comparison-side-path,
+.comparison-side-count,
+.comparison-side-block {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.comparison-side-timing {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.comparison-side-error {
+  flex-basis: 100%;
+  color: var(--ark-orange);
+  font-size: 0.76rem;
+}
+
+.comparison-differences {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.comparison-differences li {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr);
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--sand);
+  font-size: 0.8rem;
+}
+
+.comparison-difference-scope {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.comparison-difference-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
