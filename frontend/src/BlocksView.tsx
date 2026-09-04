@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchBlocks, type BlocksResponse, type StoredBlock } from "./api";
-import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
-import { BlockNumberLink } from "./blockLinks";
+import { fmtBytes, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
+import { BlockCell } from "@/components/block-cell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { FilterField, FilterGroup, FiltersPanel, selectClass } from "@/components/filters-panel";
+import { cn } from "@/lib/utils";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -58,28 +70,25 @@ function blockColumns(
       key: "block",
       label: "Block",
       render: (row) => (
-        <div className="block-meta">
-          <BlockNumberLink blockNumber={row.blockNumber} onLocationChange={onLocationChange} />
-          <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
-        </div>
+        <BlockCell blockNumber={row.blockNumber} date={row.blockDate} timeZone={timeZone} onLocationChange={onLocationChange} />
       ),
     },
     {
       key: "blockTimeSeconds",
       label: "Block time",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => `${fmtInteger(row.blockTimeSeconds)}s`,
     },
     {
       key: "transactionCount",
       label: "Tx count",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => row.transactionCount,
     },
     {
       key: "baseBlockFeeWei",
       label: "Base fee",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => (
         <BaseFeeCell
           baseFeeWei={row.baseBlockFeeWei}
@@ -90,38 +99,40 @@ function blockColumns(
     {
       key: "burntFeesWei",
       label: "Burnt fees",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtTokenAmount(row.burntFeesWei ?? "0", tokenSymbol),
     },
     {
       key: "averageFeePriceWei",
       label: "Avg fee price",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtGasPrice(row.averageFeePriceWei),
     },
     {
       key: "averageTransactionGasUsed",
       label: "Avg tx gas",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtGasK(row.averageTransactionGasUsed),
     },
     {
       key: "inputDataSizeBytes",
       label: "Input data",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => (
-        <div className="block-size-cell">
+        <div className="flex flex-col items-end gap-0.5 leading-tight">
           <span>
             {fmtBytes(row.totalInputDataCompressedSizeBytes)} / {fmtBytes(row.totalInputDataSizeBytes)}
           </span>
-          <span>{fmtCompressionRatio(row.totalInputDataCompressedSizeBytes, row.totalInputDataSizeBytes)}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {fmtCompressionRatio(row.totalInputDataCompressedSizeBytes, row.totalInputDataSizeBytes)}
+          </span>
         </div>
       ),
     },
     {
       key: "gasUsed",
       label: "Gas used / limit",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtGasRatioK(row.totalGasUsed, row.maxGasInBlock),
     },
   ];
@@ -136,9 +147,18 @@ function BaseFeeCell({
 }) {
   const diff = baseFeeDifference(baseFeeWei, previousBaseFeeWei);
   return (
-    <div className="base-fee-cell">
+    <div className="flex flex-col items-end gap-0.5 leading-tight">
       <span>{fmtGasPrice(baseFeeWei)}</span>
-      <span className={`base-fee-diff ${diff.className}`}>{diff.label}</span>
+      <span
+        className={cn(
+          "font-mono text-[11px]",
+          diff.className === "up" && "text-red-600 dark:text-red-400",
+          diff.className === "down" && "text-emerald-600 dark:text-emerald-400",
+          (diff.className === "flat" || diff.className === "missing") && "text-muted-foreground",
+        )}
+      >
+        {diff.label}
+      </span>
     </div>
   );
 }
@@ -320,100 +340,72 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
   ).length;
   const dateGtPlaceholder = useMemo(() => dateSuggestion(-1), []);
   const dateLtPlaceholder = useMemo(() => dateSuggestion(1), []);
+  const filtersChanged = activeFilterCount > 0 || filters.limit !== EMPTY.limit;
 
   return (
-    <section className="view blocks-view">
-      <div className="page-heading">
-        <PageBreadcrumbs
-          items={[
-            { view: "home", label: "Home" },
-            { view: "blocks", label: "Block list" },
-          ]}
-          onLocationChange={onLocationChange}
-        />
-      </div>
-      <div className={`filters-panel blocks-filters-panel${filtersOpen ? " open" : ""}`}>
-        <div className="filters-panel-head">
-          <button
-            type="button"
-            className="filters-toggle"
-            aria-expanded={filtersOpen}
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <span className="filters-toggle-chevron" aria-hidden="true" />
-            <span>Filters</span>
-            {activeFilterCount > 0 ? <span className="filters-count">{activeFilterCount}</span> : null}
-          </button>
-          <span className="blocks-filter-meta">{filters.limit} rows</span>
-          {activeFilterCount > 0 || filters.limit !== EMPTY.limit ? (
-            <button type="button" className="link-button filters-clear" onClick={clearFilters}>
-              Clear all
-            </button>
-          ) : null}
-        </div>
-        {filtersOpen ? (
-          <form onSubmit={onSubmit} className="blocks-filter-form">
-            <fieldset className="filter-group">
-              <legend>Block</legend>
-              <label>
-                &gt;
-                <input type="text" inputMode="numeric" value={filters.blockGt} onChange={onChange("blockGt")} />
-              </label>
-              <label>
-                &lt;
-                <input type="text" inputMode="numeric" value={filters.blockLt} onChange={onChange("blockLt")} />
-              </label>
-            </fieldset>
-            <fieldset className="filter-group blocks-date-filter">
-              <legend>Date UTC</legend>
-              <label>
-                &gt;
-                <input
-                  type="text"
-                  placeholder={dateGtPlaceholder}
-                  value={filters.dateGt}
-                  onChange={onChange("dateGt")}
-                />
-              </label>
-              <label>
-                &lt;
-                <input
-                  type="text"
-                  placeholder={dateLtPlaceholder}
-                  value={filters.dateLt}
-                  onChange={onChange("dateLt")}
-                />
-              </label>
-            </fieldset>
-            <fieldset className="filter-group blocks-limit-filter">
-              <legend>Rows</legend>
-              <label>
-                limit
-                <select value={filters.limit} onChange={onLimitChange}>
-                  {LIMIT_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </fieldset>
-            <div className="blocks-filter-actions">
-              <button type="button" className="secondary" onClick={copyPermalink}>
-                Copy link
-              </button>
-              {activeFilterCount > 0 || filters.limit !== EMPTY.limit ? (
-                <button type="button" className="secondary" onClick={clearFilters}>
-                  Clear
-                </button>
-              ) : null}
-              <button type="submit">Search</button>
-              {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
-            </div>
-          </form>
-        ) : null}
-      </div>
-      <p className={`summary${error ? " error" : ""}`}>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <PageBreadcrumbs
+        items={[
+          { view: "home", label: "Home" },
+          { view: "blocks", label: "Block list" },
+        ]}
+        onLocationChange={onLocationChange}
+      />
+      <h2 className="font-heading text-lg font-black tracking-tight">Block list</h2>
+
+      <FiltersPanel
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        activeCount={activeFilterCount}
+        meta={`${filters.limit} rows`}
+        onClearAll={filtersChanged ? clearFilters : undefined}
+      >
+        <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">
+          <FilterGroup label="Block">
+            <FilterField label="&gt;">
+              <Input type="text" inputMode="numeric" className="w-28" value={filters.blockGt} onChange={onChange("blockGt")} />
+            </FilterField>
+            <FilterField label="&lt;">
+              <Input type="text" inputMode="numeric" className="w-28" value={filters.blockLt} onChange={onChange("blockLt")} />
+            </FilterField>
+          </FilterGroup>
+          <FilterGroup label="Date UTC">
+            <FilterField label="&gt;">
+              <Input type="text" className="w-52" placeholder={dateGtPlaceholder} value={filters.dateGt} onChange={onChange("dateGt")} />
+            </FilterField>
+            <FilterField label="&lt;">
+              <Input type="text" className="w-52" placeholder={dateLtPlaceholder} value={filters.dateLt} onChange={onChange("dateLt")} />
+            </FilterField>
+          </FilterGroup>
+          <FilterGroup label="Rows">
+            <FilterField label="Limit">
+              <select className={cn(selectClass, "w-28")} value={filters.limit} onChange={onLimitChange}>
+                {LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+          </FilterGroup>
+          <div className="ml-auto flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={copyPermalink}>
+              Copy link
+            </Button>
+            {filtersChanged ? (
+              <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                Clear
+              </Button>
+            ) : null}
+            <Button type="submit" size="sm">
+              Search
+            </Button>
+            {copyStatus ? <span className="text-xs text-muted-foreground">{copyStatus}</span> : null}
+          </div>
+        </form>
+      </FiltersPanel>
+
+      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {loading
           ? "Loading…"
           : error
@@ -422,34 +414,32 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
               ? `${data.count} blocks${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
-      <div className="cedric-table-wrap">
+
+      <div className="relative mt-6">
         <CedricOnTimer />
-        {/* Opaque shelf hiding Cedric's body so only his head peeks over the
-            table's top edge (the table-wrap clips its own overflow). */}
-        <div className="cedric-shelf cedric-table-shelf" aria-hidden="true" />
-        <div className="table-wrap">
-          <table className="data-table">
-          <thead>
-            <tr>
+        <div className="relative z-10 overflow-x-auto border border-border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
                 {columns.map((column) => (
-                  <th key={column.key} scope="col" className={column.className}>
+                  <TableHead key={column.key} className={column.className}>
                     {renderTableHeader(column.label)}
-                  </th>
+                  </TableHead>
                 ))}
-              </tr>
-          </thead>
-          <tbody>
-            {sorted.map((row) => (
-              <tr key={row.blockNumber}>
-                {columns.map((column) => (
-                  <td key={column.key} className={column.className} data-label={column.label}>
-                    {column.render(row)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((row) => (
+                <TableRow key={row.blockNumber}>
+                  {columns.map((column) => (
+                    <TableCell key={column.key} className={column.className} data-label={column.label}>
+                      {column.render(row)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       </div>
     </section>

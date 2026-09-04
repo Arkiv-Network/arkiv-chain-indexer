@@ -13,6 +13,7 @@ import blockListSvg from "./icons/block-list.svg?raw";
 import blockSolidSvg from "./icons/block-solid.svg?raw";
 import blockWireAccentSvg from "./icons/block-wire-accent.svg?raw";
 import infoSvg from "./icons/info.svg?raw";
+import { cn } from "@/lib/utils";
 import txBoltSvg from "./icons/tx-bolt.svg?raw";
 import txBracketedSvg from "./icons/tx-bracketed.svg?raw";
 import txDiagonalSvg from "./icons/tx-diagonal.svg?raw";
@@ -48,7 +49,7 @@ function makeIcon(raw: string) {
   return function Icon({ size = DEFAULT_SIZE, className }: IconProps) {
     return (
       <span
-        className={className ? `svg-icon ${className}` : "svg-icon"}
+        className={cn("inline-flex leading-none [&>svg]:block [&>svg]:h-full [&>svg]:w-full", className)}
         style={{ width: size, height: size }}
         dangerouslySetInnerHTML={{ __html: stripped }}
       />

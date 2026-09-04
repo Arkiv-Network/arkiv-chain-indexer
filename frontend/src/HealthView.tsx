@@ -2,11 +2,31 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchHealth, type HealthResponse } from "./api";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtInteger, fmtUtcDate } from "./format";
 import { SyncDetails } from "./SyncStatusBanner";
-import { describeSync } from "./syncStatus";
+import { describeSync, type SyncTone } from "./syncStatus";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 interface HealthViewProps {
   timeZone: string;
 }
+
+const SYNC_TONE_STYLES: Record<SyncTone, { border: string; badge: string }> = {
+  ok: { border: "border-l-emerald-500", badge: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
+  info: { border: "border-l-primary", badge: "bg-primary/10 text-primary" },
+  warn: { border: "border-l-amber-500", badge: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  danger: { border: "border-l-destructive", badge: "bg-destructive/10 text-destructive" },
+  muted: { border: "border-l-border", badge: "bg-muted text-muted-foreground" },
+};
 
 export function HealthView({ timeZone }: HealthViewProps) {
   const [data, setData] = useState<HealthResponse | null>(null);
@@ -37,148 +57,201 @@ export function HealthView({ timeZone }: HealthViewProps) {
   const scanner = data?.scanner;
   const sync = data?.sync ?? null;
   const syncPresentation = describeSync(sync);
+  const syncTone = SYNC_TONE_STYLES[syncPresentation.tone];
   const database = data?.database;
   const guzzlers = data?.guzzlers;
   const guzzlersEnabled = guzzlers?.enabled ?? data?.features.guzzlers ?? false;
 
   return (
-    <section className="view health-view">
-      <div className="view-heading-row">
-        <h2>Health</h2>
-        <button type="button" className="secondary" onClick={load} disabled={loading}>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 py-6 md:px-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-heading text-lg font-black tracking-tight">Health</h2>
+        <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
           {loading ? "Refreshing" : "Refresh"}
-        </button>
+        </Button>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
       {sync ? (
-        <section className={`health-panel sync-panel sync-banner-${syncPresentation.tone}`}>
-          <div className="sync-panel-heading">
-            <h3>Sync status</h3>
-            <span className="sync-banner-badge">{syncPresentation.label}</span>
-          </div>
-          <p className="sync-panel-headline">{syncPresentation.headline}</p>
-          <p className="sync-panel-detail">{syncPresentation.detail}</p>
-          <SyncDetails status={sync} timeZone={timeZone} />
-        </section>
+        <Card className={cn("border-l-4", syncTone.border)}>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <CardTitle>Sync status</CardTitle>
+              <Badge className={cn("rounded-full", syncTone.badge)} variant="secondary">
+                {syncPresentation.label}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div>
+              <p className="text-xs font-medium text-foreground">{syncPresentation.headline}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{syncPresentation.detail}</p>
+            </div>
+            <SyncDetails status={sync} timeZone={timeZone} />
+          </CardContent>
+        </Card>
       ) : null}
-      <div className="health-grid">
-        <section className="health-panel">
-          <h3>Scanner progress</h3>
-          <dl>
-            <Metric label="Last stored block" value={fmtInteger(scanner?.lastSuccessfulBlock)} />
-            <Metric label="Safe head lag" value={fmtInteger(scanner?.safeHeadLagBlocks)} />
-            <Metric label="Chain head lag" value={fmtInteger(scanner?.headLagBlocks)} />
-            <Metric label="Last block age" value={fmtDurationSeconds(scanner?.lastBlockAgeSeconds)} />
-            <Metric label="Last block time" value={fmtDate(scanner?.lastSuccessfulBlockDate, timeZone)} />
-            <Metric label="Stored at UTC" value={fmtUtcDate(scanner?.lastSuccessfulScannedAtUtc)} />
-          </dl>
-        </section>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Scanner progress</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <MetricList>
+              <Metric label="Last stored block" value={fmtInteger(scanner?.lastSuccessfulBlock)} />
+              <Metric label="Safe head lag" value={fmtInteger(scanner?.safeHeadLagBlocks)} />
+              <Metric label="Chain head lag" value={fmtInteger(scanner?.headLagBlocks)} />
+              <Metric label="Last block age" value={fmtDurationSeconds(scanner?.lastBlockAgeSeconds)} />
+              <Metric label="Last block time" value={fmtDate(scanner?.lastSuccessfulBlockDate, timeZone)} />
+              <Metric label="Stored at UTC" value={fmtUtcDate(scanner?.lastSuccessfulScannedAtUtc)} />
+            </MetricList>
+          </CardContent>
+        </Card>
 
-        <section className="health-panel">
-          <h3>Chain observation</h3>
-          <dl>
-            <Metric label="Latest observed head" value={fmtInteger(scanner?.latestObservedBlock)} />
-            <Metric label="Safe head" value={fmtInteger(scanner?.safeHeadBlock)} />
-            <Metric label="Backfill next block" value={fmtInteger(scanner?.backfillNextBlock)} />
-            <Metric label="Observed at UTC" value={fmtUtcDate(scanner?.latestObservedAtUtc)} />
-            <Metric
-              label="Observation age"
-              value={fmtDurationSeconds(scanner?.latestObservationAgeSeconds)}
-            />
-          </dl>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Chain observation</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <MetricList>
+              <Metric label="Latest observed head" value={fmtInteger(scanner?.latestObservedBlock)} />
+              <Metric label="Safe head" value={fmtInteger(scanner?.safeHeadBlock)} />
+              <Metric label="Backfill next block" value={fmtInteger(scanner?.backfillNextBlock)} />
+              <Metric label="Observed at UTC" value={fmtUtcDate(scanner?.latestObservedAtUtc)} />
+              <Metric
+                label="Observation age"
+                value={fmtDurationSeconds(scanner?.latestObservationAgeSeconds)}
+              />
+            </MetricList>
+          </CardContent>
+        </Card>
 
-        <section className="health-panel">
-          <h3>Time and build</h3>
-          <dl>
-            <Metric label="Server UTC" value={fmtUtcDate(data?.serverTimeUtc)} />
-            <Metric label="Browser time" value={fmtDate(browserNow.toISOString(), browserTimeZone)} />
-            <Metric label="Selected time" value={fmtDate(browserNow.toISOString(), timeZone)} />
-            <Metric label="Selected time zone" value={timeZone} />
-            <Metric label="Transaction data" value={data?.features.transactionData === false ? "Disabled" : "Enabled"} />
-            <Metric label="Build commit" value={shortCommit(data?.build.commit)} />
-            <Metric label="Build date UTC" value={fmtUtcDate(data?.build.builtAtUtc)} />
-          </dl>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Time and build</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <MetricList>
+              <Metric label="Server UTC" value={fmtUtcDate(data?.serverTimeUtc)} />
+              <Metric label="Browser time" value={fmtDate(browserNow.toISOString(), browserTimeZone)} />
+              <Metric label="Selected time" value={fmtDate(browserNow.toISOString(), timeZone)} />
+              <Metric label="Selected time zone" value={timeZone} />
+              <Metric
+                label="Transaction data"
+                value={data?.features.transactionData === false ? "Disabled" : "Enabled"}
+              />
+              <Metric label="Build commit" value={shortCommit(data?.build.commit)} />
+              <Metric label="Build date UTC" value={fmtUtcDate(data?.build.builtAtUtc)} />
+            </MetricList>
+          </CardContent>
+        </Card>
 
-        <section className="health-panel">
-          <h3>Guzzler cache</h3>
-          <dl>
-            <Metric label="Status" value={guzzlersEnabled ? "Enabled" : "Disabled"} />
-            <Metric
-              label="Cached senders"
-              value={guzzlersEnabled ? fmtInteger(guzzlers?.entryCount) : "—"}
-            />
-            <Metric
-              label="Cached buckets"
-              value={guzzlersEnabled ? fmtInteger(guzzlers?.bucketCount) : "—"}
-            />
-            <Metric
-              label="Cache size"
-              value={guzzlersEnabled ? fmtBytes(guzzlers?.totalSizeBytes) : "—"}
-              title={guzzlersEnabled ? bytesTitle(guzzlers?.totalSizeBytes) : undefined}
-            />
-            <Metric
-              label="Oldest bucket"
-              value={guzzlersEnabled ? fmtDate(guzzlers?.oldestBucket, timeZone) : "—"}
-            />
-            <Metric
-              label="Newest bucket"
-              value={guzzlersEnabled ? fmtDate(guzzlers?.newestBucket, timeZone) : "—"}
-            />
-          </dl>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Guzzler cache</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <MetricList>
+              <Metric label="Status" value={guzzlersEnabled ? "Enabled" : "Disabled"} />
+              <Metric
+                label="Cached senders"
+                value={guzzlersEnabled ? fmtInteger(guzzlers?.entryCount) : "—"}
+              />
+              <Metric
+                label="Cached buckets"
+                value={guzzlersEnabled ? fmtInteger(guzzlers?.bucketCount) : "—"}
+              />
+              <Metric
+                label="Cache size"
+                value={guzzlersEnabled ? fmtBytes(guzzlers?.totalSizeBytes) : "—"}
+                title={guzzlersEnabled ? bytesTitle(guzzlers?.totalSizeBytes) : undefined}
+              />
+              <Metric
+                label="Oldest bucket"
+                value={guzzlersEnabled ? fmtDate(guzzlers?.oldestBucket, timeZone) : "—"}
+              />
+              <Metric
+                label="Newest bucket"
+                value={guzzlersEnabled ? fmtDate(guzzlers?.newestBucket, timeZone) : "—"}
+              />
+            </MetricList>
+          </CardContent>
+        </Card>
       </div>
 
-      <section className="health-panel database-panel">
-        <h3>Database</h3>
-        <dl>
-          <Metric
-            label="Total database size"
-            value={fmtBytes(database?.totalSizeBytes)}
-            title={bytesTitle(database?.totalSizeBytes)}
-          />
-        </dl>
-        <div className="table-wrap health-table-wrap">
-            <table className="data-table health-table">
-              <thead>
-                <tr>
-                  <th>Table</th>
-                  <th>Rows (est.)</th>
-                  <th>Table</th>
-                  <th>Indexes</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
+      <Card>
+        <CardHeader>
+          <CardTitle>Database</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <MetricList>
+            <Metric
+              label="Total database size"
+              value={fmtBytes(database?.totalSizeBytes)}
+              title={bytesTitle(database?.totalSizeBytes)}
+            />
+          </MetricList>
+          <div className="overflow-hidden rounded-none border border-border">
+            <Table className="min-w-[720px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Table</TableHead>
+                  <TableHead className="text-right">Rows (est.)</TableHead>
+                  <TableHead className="text-right">Table</TableHead>
+                  <TableHead className="text-right">Indexes</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(database?.tables ?? []).map((table) => (
-                  <tr key={table.tableName}>
-                    <td>{table.tableName}</td>
-                    <td className="num">{fmtInteger(table.rowCount)}</td>
-                    <td className="num" title={bytesTitle(table.tableSizeBytes)}>
+                  <TableRow key={table.tableName}>
+                    <TableCell>{table.tableName}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {fmtInteger(table.rowCount)}
+                    </TableCell>
+                    <TableCell
+                      className="text-right font-mono tabular-nums"
+                      title={bytesTitle(table.tableSizeBytes)}
+                    >
                       {fmtBytes(table.tableSizeBytes)}
-                    </td>
-                    <td className="num" title={bytesTitle(table.indexesSizeBytes)}>
+                    </TableCell>
+                    <TableCell
+                      className="text-right font-mono tabular-nums"
+                      title={bytesTitle(table.indexesSizeBytes)}
+                    >
                       {fmtBytes(table.indexesSizeBytes)}
-                    </td>
-                    <td className="num" title={bytesTitle(table.totalSizeBytes)}>
+                    </TableCell>
+                    <TableCell
+                      className="text-right font-mono tabular-nums"
+                      title={bytesTitle(table.totalSizeBytes)}
+                    >
                       {fmtBytes(table.totalSizeBytes)}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
-        </section>
+        </CardContent>
+      </Card>
     </section>
+  );
+}
+
+function MetricList({ children }: { children: React.ReactNode }) {
+  return (
+    <dl className="grid grid-cols-[minmax(7rem,max-content)_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-xs">
+      {children}
+    </dl>
   );
 }
 
 function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <>
-      <dt>{label}</dt>
-      <dd title={title}>{value}</dd>
+      <dt className="whitespace-nowrap text-muted-foreground">{label}</dt>
+      <dd title={title} className="min-w-0 break-words font-mono tabular-nums text-foreground">
+        {value}
+      </dd>
     </>
   );
 }

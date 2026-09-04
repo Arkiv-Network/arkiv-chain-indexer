@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import { buildRouteHref, shouldHandleClientNavigation, type View, writePermalink } from "./permalinks";
 
@@ -25,20 +26,29 @@ export function PageBreadcrumbs({
   };
 
   return (
-    <nav className="page-breadcrumbs" aria-label="Breadcrumb">
+    <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground" aria-label="Breadcrumb">
       {items.map((item, index) => {
         const last = index === items.length - 1;
         return (
-          <span className="page-breadcrumb-item" key={`${item.view}:${item.label}`}>
+          <span className="inline-flex items-center gap-1" key={`${item.view}:${item.label}`}>
+            {index > 0 ? (
+              <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" aria-hidden="true" />
+            ) : null}
             {item.icon ? (
-              <span className="page-breadcrumb-icon" aria-hidden="true">
+              <span className="inline-flex items-center" aria-hidden="true">
                 {item.icon}
               </span>
             ) : null}
             {last ? (
-              <span aria-current="page">{item.label}</span>
+              <span className="text-foreground" aria-current="page">
+                {item.label}
+              </span>
             ) : (
-              <a href={buildRouteHref(item.view, {})} onClick={onClick(item.view)}>
+              <a
+                className="transition-colors hover:text-foreground hover:underline"
+                href={buildRouteHref(item.view, {})}
+                onClick={onClick(item.view)}
+              >
                 {item.label}
               </a>
             )}

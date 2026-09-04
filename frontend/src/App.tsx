@@ -1,4 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  Boxes,
+  Box,
+  Database,
+  ExternalLink,
+  Gauge,
+  HeartPulse,
+  Home,
+  Layers,
+  LineChart,
+  ListOrdered,
+  type LucideIcon,
+  Moon,
+  Receipt,
+  Settings2,
+  Shield,
+  Sun,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import {
   deleteBaseloadConfig,
   fetchBaseloadState,
@@ -33,7 +54,7 @@ import { HealthView } from "./HealthView";
 import { SyncStatusBanner } from "./SyncStatusBanner";
 import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
-import { navLabelForView, visibleNavItems } from "./navigation";
+import { visibleNavItems } from "./navigation";
 import {
   BUILD_PAGE_SETTINGS,
   readStoredPageSettings,
@@ -42,11 +63,14 @@ import {
   writeStoredPageSettings,
 } from "./pageSettings";
 import {
+  buildRouteHref,
   getCurrentLocation,
   readAddressFromLocation,
   readEntityKeyFromLocation,
   readTransactionHashFromLocation,
   readViewFromLocation,
+  shouldHandleClientNavigation,
+  type View,
   writePermalink,
 } from "./permalinks";
 import { RangesView } from "./RangesView";
@@ -55,6 +79,10 @@ import { SendersView } from "./SendersView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
 import { TransactionView } from "./TransactionView";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
@@ -65,10 +93,101 @@ const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
 
 type ThemeOverride = "light" | "dark" | "";
 
+const NAV_ICONS: Partial<Record<View, LucideIcon>> = {
+  home: Home,
+  blocks: Boxes,
+  block: Box,
+  transactions: Wallet,
+  entity: Layers,
+  address: Wallet,
+  data: Database,
+  "transaction-records": Receipt,
+  senders: Users,
+  ranges: ListOrdered,
+  charts: LineChart,
+  guzzlers: Activity,
+  health: HeartPulse,
+  admin: Shield,
+  baseload: Gauge,
+};
+
+// Compact "Display" menu: full width toggle + time zone select, tucked behind
+// a Settings2 icon button in the header. Mirrors the manual dropdown pattern
+// used by the explorer's chain selector (open state + backdrop-to-close),
+// rather than pulling in a new popover primitive for one header control.
+function DisplayMenu({
+  fullWidth,
+  onToggleFullWidth,
+  timeZone,
+  onTimeZoneChange,
+}: {
+  fullWidth: boolean;
+  onToggleFullWidth: () => void;
+  timeZone: string;
+  onTimeZoneChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title="Display settings"
+        className={cn(
+          "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          open && "bg-accent text-foreground",
+        )}
+      >
+        <Settings2 className="size-4" />
+      </button>
+      {open ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setOpen(false)}
+            aria-label="Close display settings"
+          />
+          <div className="absolute top-full right-0 z-20 mt-1 w-64 rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium">Full width</span>
+              <Button
+                type="button"
+                variant={fullWidth ? "default" : "outline"}
+                size="xs"
+                onClick={onToggleFullWidth}
+                aria-pressed={fullWidth}
+              >
+                {fullWidth ? "On" : "Off"}
+              </Button>
+            </div>
+            <Separator className="my-3" />
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Time zone</span>
+              <select
+                value={timeZone}
+                onChange={onTimeZoneChange}
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+              >
+                {TIME_ZONE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function App() {
   const [clientLocation, setClientLocation] = useState(getCurrentLocation);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
   const [baseloadConfig, setBaseloadConfig] = useState<BaseloadConfig>(EMPTY_BASELOAD_CONFIG);
   const [baseloadTaskStatuses, setBaseloadTaskStatuses] = useState<Record<string, BaseloadTaskStatus>>({});
@@ -132,8 +251,6 @@ export function App() {
   const adminMode = adminModeStatus(adminVerified, adminModeEnabled);
   const adminModeIsActive = adminModeActive(adminVerified, adminModeEnabled);
   const navItems = visibleNavItems(adminModeIsActive, transactionDataEnabled);
-  const activeNavLabel =
-    navItems.find((item) => item.view === activeView)?.label ?? navLabelForView(activeView) ?? "Menu";
 
   useEffect(() => {
     const network = pageSettings.networkName ? ` · ${pageSettings.networkName}` : "";
@@ -145,27 +262,6 @@ export function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return;
-      setMenuOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [menuOpen]);
 
   useEffect(() => {
     fetchHealth()
@@ -244,7 +340,12 @@ export function App() {
     if (writePermalink(nextView, {})) {
       refreshFromLocation();
     }
-    setMenuOpen(false);
+  };
+
+  const onNavClick = (targetView: View) => (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!shouldHandleClientNavigation(event)) return;
+    event.preventDefault();
+    setView(targetView);
   };
 
   const onTimeZoneChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -464,11 +565,11 @@ export function App() {
     setPageSettings(settings);
   };
 
-  const mainClassName = activeView === "charts" ? "fullscreen" : "contained";
+  const isChartsMain = activeView === "charts";
 
   if (chartFullscreen) {
     return (
-      <main className="fullscreen chart-fullscreen-main">
+      <main className="flex h-screen w-screen min-h-screen p-0">
         <ChartsView
           locationSearch={locationSearch}
           onLocationChange={refreshFromLocation}
@@ -482,106 +583,106 @@ export function App() {
     );
   }
 
+  const showChainLabel = pageSettings.chainName && pageSettings.chainName !== "Arkiv";
+
   return (
-    <>
-      <header>
-        <div className="header-inner">
-          <h1>
-            <span className="brand-name">{pageSettings.chainName}</span>
-            <span className="brand-sub">BlockExplorer</span>
-            {pageSettings.networkName ? (
-              <span className="brand-network" title="Network">
-                {pageSettings.networkName}
-              </span>
-            ) : null}
-          </h1>
-          {adminMode !== "hidden" ? (
-            <button
-              type="button"
-              className={`admin-mode-indicator${adminMode === "enabled" ? " active" : ""}`}
-              aria-pressed={adminMode === "enabled"}
-              onClick={() => setAdminModeEnabled((value) => !value)}
-              title={
-                adminMode === "enabled" ? "Disable admin mode" : "Enable admin mode"
-              }
-            >
-              Admin mode {adminMode}
-            </button>
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="sticky top-0 z-50 border-b border-border bg-card/95 px-3 py-2 backdrop-blur md:px-6 md:py-3">
+        <div className={cn("mx-auto flex flex-wrap items-center gap-2", !fullWidth && "max-w-415")}>
+          <button
+            type="button"
+            onClick={() => setView("home")}
+            className="inline-flex items-center gap-2 font-heading text-lg font-black tracking-tight transition-colors hover:text-muted-foreground"
+          >
+            [ ARKIV ] BlockExplorer
+          </button>
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-primary uppercase">
+            beta
+          </span>
+          {showChainLabel ? (
+            <span className="rounded-md border border-border px-2 py-0.5 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+              {pageSettings.chainName}
+            </span>
           ) : null}
-          <div className="header-menu" ref={menuRef}>
+
+          {pageSettings.networkName ? (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1 text-xs font-medium"
+              title="Network"
+            >
+              <span className="size-1.5 rounded-full bg-emerald-500" />
+              {pageSettings.networkName}
+            </span>
+          ) : null}
+
+          <nav aria-label="Primary navigation" className="flex flex-wrap items-center gap-1">
+            {navItems.map((item) => {
+              const Icon = NAV_ICONS[item.view] ?? Home;
+              const active = activeView === item.view;
+              return (
+                <a
+                  key={item.view}
+                  href={buildRouteHref(item.view, {})}
+                  aria-current={active ? "page" : undefined}
+                  onClick={onNavClick(item.view)}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                    active
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-3" />
+                  {item.label}
+                </a>
+              );
+            })}
+          </nav>
+
+          <div className="flex-1" />
+
+          <div className="flex flex-wrap items-center gap-2">
+            {adminMode !== "hidden" ? (
+              <Badge
+                variant={adminMode === "enabled" ? "default" : "outline"}
+                render={<button type="button" />}
+                aria-pressed={adminMode === "enabled"}
+                onClick={() => setAdminModeEnabled((value) => !value)}
+                title={adminMode === "enabled" ? "Disable admin mode" : "Enable admin mode"}
+                className="cursor-pointer tracking-wide uppercase"
+              >
+                Admin {adminMode}
+              </Badge>
+            ) : null}
+
+            <a
+              href="https://github.com/Arkiv-Network/reported-issues/issues/new/choose"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              title="Submit feedback or report a bug"
+              data-umami-event="outbound-link-click"
+              data-umami-event-url="https://github.com/Arkiv-Network/reported-issues/issues/new/choose"
+            >
+              Feedback
+              <ExternalLink className="size-3" />
+            </a>
+
+            <DisplayMenu
+              fullWidth={fullWidth}
+              onToggleFullWidth={toggleFullWidth}
+              timeZone={timeZone}
+              onTimeZoneChange={onTimeZoneChange}
+            />
+
             <button
               type="button"
-              className={`menu-button${menuOpen ? " active" : ""}`}
-              onClick={() => setMenuOpen((value) => !value)}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
-              title="Navigation menu"
+              onClick={toggleDarkMode}
+              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title={darkModeActive ? "Switch to light mode" : "Switch to dark mode"}
             >
-              <span className="menu-button-icon" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-              <span className="menu-button-label">{activeNavLabel}</span>
+              {darkModeActive ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </button>
-            {menuOpen ? (
-              <div className="menu-panel" role="menu">
-                <div className="menu-section">
-                  <div className="menu-section-title">Pages</div>
-                  <nav className="menu-nav" aria-label="Primary navigation">
-                    {navItems.map((item) => (
-                      <button
-                        key={item.view}
-                        type="button"
-                        role="menuitem"
-                        className={activeView === item.view ? "active" : ""}
-                        onClick={() => setView(item.view)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </nav>
-                </div>
-                <div className="menu-section">
-                  <div className="menu-section-title">Display</div>
-                  <div className="menu-control-row">
-                    <span>Full width</span>
-                    <button
-                      type="button"
-                      className={`ui-toggle${fullWidth ? " active" : ""}`}
-                      onClick={toggleFullWidth}
-                      aria-pressed={fullWidth}
-                      title={fullWidth ? "Switch to constrained width" : "Switch to full-width view"}
-                    >
-                      {fullWidth ? "On" : "Off"}
-                    </button>
-                  </div>
-                  <div className="menu-control-row">
-                    <span>Theme</span>
-                    <button
-                      type="button"
-                      className={`ui-toggle${darkModeActive ? " active" : ""}`}
-                      onClick={toggleDarkMode}
-                      aria-pressed={darkModeActive}
-                      title={darkModeActive ? "Switch to light mode" : "Switch to dark mode"}
-                    >
-                      {darkModeActive ? "Dark" : "Light"}
-                    </button>
-                  </div>
-                  <label className="timezone-select">
-                    Time zone
-                    <select value={timeZone} onChange={onTimeZoneChange}>
-                      {TIME_ZONE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
       </header>
@@ -589,7 +690,13 @@ export function App() {
         timeZone={timeZone}
         minLagSeconds={pageSettings.scannerDelayWarningAgeMs / 1000}
       />
-      <main className={mainClassName}>
+      <main
+        className={cn(
+          "relative z-[1] flex-1 min-h-0",
+          isChartsMain ? "flex p-0" : "mx-auto w-full p-4 md:p-6",
+          !isChartsMain && !fullWidth && "max-w-415",
+        )}
+      >
         {activeView === "home" ? (
           <HomeView
             onLocationChange={refreshFromLocation}
@@ -712,16 +819,23 @@ export function App() {
           <HealthView timeZone={timeZone} />
         )}
       </main>
-      <footer>
-        <div className="footer-inner">
-          <a href="/llms.txt" className="footer-link">
+      <footer className="border-t border-border bg-card">
+        <div className={cn("mx-auto flex items-center justify-end gap-4 px-3 py-2 md:px-6", !fullWidth && "max-w-415")}>
+          <a
+            href="/llms.txt"
+            className="text-xs text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:underline"
+          >
             llms.txt
           </a>
-          <a href="#" className="admin-login-link" onClick={onAdminLoginClick}>
+          <a
+            href="#"
+            onClick={onAdminLoginClick}
+            className="text-xs text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:underline"
+          >
             admin login
           </a>
         </div>
       </footer>
-    </>
+    </div>
   );
 }

@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { AddressFace } from "./AddressFace";
-import { BlockNumberLink } from "./blockLinks";
+import { BlockCell } from "@/components/block-cell";
+import { CopyCell } from "@/components/copy-cell";
+import { OpBadgeList } from "@/components/op-badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { FilterField, FilterGroup, FiltersPanel } from "@/components/filters-panel";
+import { cn } from "@/lib/utils";
 import { CedricOnTimer } from "./Cedric";
-import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
+import { fmtBytes, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
 import {
   buildAddressPermalinkHref,
   buildPermalinkHref,
@@ -17,7 +24,7 @@ import {
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { addressSearchHref } from "./transactionLinks";
-import { renderTableHeader } from "./tableHeader";
+import { renderTableHeader, SortIcon } from "./tableHeader";
 
 interface TransactionsViewProps {
   locationSearch: string;
@@ -126,10 +133,12 @@ function transactionColumns(
     key: "blockNumber",
     label: "Block",
     render: (row) => (
-      <div className="block-meta">
-        <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
-        <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
-      </div>
+      <BlockCell
+        blockNumber={row.blockNumberDecimal}
+        date={row.blockDate}
+        timeZone={timeZone}
+        onLocationChange={onLocationChange}
+      />
     ),
   };
   const hash: Column = {
@@ -151,18 +160,7 @@ function transactionColumns(
   const arkivOps: Column = {
     key: "arkivOps",
     label: "Arkiv ops",
-    render: (row) =>
-      row.operationsSummary?.length ? (
-        <span className="op-badge-list">
-          {row.operationsSummary.map((entry) => (
-            <span key={entry.operationType} className={`op-badge op-${entry.operation}`}>
-              {entry.count > 1 ? `${entry.operation} ×${entry.count}` : entry.operation}
-            </span>
-          ))}
-        </span>
-      ) : (
-        <span className="tx-muted">—</span>
-      ),
+    render: (row) => <OpBadgeList operations={row.operationsSummary} />,
   };
   const from: Column = {
     key: "from",
@@ -172,37 +170,37 @@ function transactionColumns(
   const nonce: Column = {
     key: "nonce",
     label: "Nonce",
-    className: "num",
+    className: "text-right font-mono tabular-nums",
     render: (row) => row.nonce ?? "-",
   };
   const gas: Column = {
     key: "gasUsed",
     label: "Gas (used / limit)",
-    className: "num",
+    className: "text-right font-mono tabular-nums",
     render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
   };
   const inputData: Column = {
     key: "inputDataSizeBytes",
     label: "Input data",
-    className: "num",
+    className: "text-right font-mono tabular-nums",
     render: (row) => fmtBytes(row.inputDataSizeBytes),
   };
   const inputDataCompressed: Column = {
     key: "inputDataCompressedSizeBytes",
     label: "Input zstd",
-    className: "num",
+    className: "text-right font-mono tabular-nums",
     render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
   };
   const effectiveFee: Column = {
     key: "effectiveGasPriceWei",
     label: "Effective fee",
-    className: "num",
+    className: "text-right font-mono tabular-nums",
     render: (row) => fmtGasPrice(row.effectiveGasPriceWei),
   };
   const txFee: Column = {
     key: "transactionFeeWei",
     label: "Tx fee",
-    className: "num",
+    className: "text-right font-mono tabular-nums",
     render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
   };
 
@@ -365,115 +363,93 @@ export function TransactionsView({
   const hasAppliedFilters = hasScopedFilters(applied);
   const activeFilterCount = countActiveFilters(filters, locked);
   const transactionLabel = applied.address.trim() ? "outgoing transactions" : "transactions";
+  const filtersChanged = activeFilterCount > 0 || filters.limit !== EMPTY.limit;
 
   return (
-    <section className="view transactions-view">
-      <h2>Address transactions</h2>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <h2 className="font-heading text-lg font-black tracking-tight">Address transactions</h2>
       {locked ? (
-        <div className="address-id">
+        <div className="flex items-center gap-2 border border-border bg-card px-3 py-2">
           <AddressFace address={lockedAddr} />
           <CopyCell value={lockedAddr} label={lockedAddr} copyLabel="address" />
         </div>
       ) : null}
-      <div className={`filters-panel${filtersOpen ? " open" : ""}`}>
-        <div className="filters-panel-head">
-          <button
-            type="button"
-            className="filters-toggle"
-            aria-expanded={filtersOpen}
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <span className="filters-toggle-chevron" aria-hidden="true" />
-            <span>Filters</span>
-            {activeFilterCount > 0 ? <span className="filters-count">{activeFilterCount}</span> : null}
-          </button>
-          {activeFilterCount > 0 ? (
-            <button type="button" className="link-button filters-clear" onClick={clearFilters}>
-              Clear all
-            </button>
-          ) : null}
-        </div>
-        {filtersOpen ? (
-          <form onSubmit={onSubmit} className="transactions-form">
-            {locked ? null : (
-              <label className="wide-field">
-                address
-                <input type="text" value={filters.address} onChange={setFilter("address")} />
-              </label>
-            )}
-            <fieldset className="filter-group">
-              <legend>Block</legend>
-              <label>
-                exact
-                <input type="text" inputMode="numeric" value={filters.block} onChange={setFilter("block")} />
-              </label>
-              <label>
-                &gt;
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={filters.blockGt}
-                  onChange={setFilter("blockGt")}
-                  disabled={Boolean(filters.block.trim())}
-                />
-              </label>
-              <label>
-                &lt;
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={filters.blockLt}
-                  onChange={setFilter("blockLt")}
-                  disabled={Boolean(filters.block.trim())}
-                />
-              </label>
-            </fieldset>
-            <fieldset className="filter-group">
-              <legend>Nonce</legend>
-              <label>
-                &gt;
-                <input type="text" inputMode="numeric" value={filters.nonceGt} onChange={setFilter("nonceGt")} />
-              </label>
-              <label>
-                &lt;
-                <input type="text" inputMode="numeric" value={filters.nonceLt} onChange={setFilter("nonceLt")} />
-              </label>
-            </fieldset>
-            <fieldset className="filter-group">
-              <legend>Date</legend>
-              <label>
-                &gt;
-                <input type="text" value={filters.dateGt} onChange={setFilter("dateGt")} />
-              </label>
-              <label>
-                &lt;
-                <input type="text" value={filters.dateLt} onChange={setFilter("dateLt")} />
-              </label>
-            </fieldset>
-            <fieldset className="filter-group">
-              <legend>Paging</legend>
-              <label>
-                page size
-                <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
-              </label>
-              <label>
-                page
-                <input type="text" inputMode="numeric" value={filters.page} onChange={setFilter("page")} />
-              </label>
-            </fieldset>
-            <div className="transactions-form-actions">
-              {activeFilterCount > 0 ? (
-                <button type="button" className="secondary" onClick={clearFilters}>
-                  Clear
-                </button>
-              ) : null}
-              <button type="submit">Query</button>
-            </div>
-          </form>
-        ) : null}
-      </div>
 
-      <p className={`summary${error ? " error" : ""}`}>
+      <FiltersPanel
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        activeCount={activeFilterCount}
+        onClearAll={activeFilterCount > 0 ? clearFilters : undefined}
+      >
+        <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">
+          {locked ? null : (
+            <FilterField label="Address" className="basis-full">
+              <Input type="text" className="max-w-2xl font-mono" value={filters.address} onChange={setFilter("address")} />
+            </FilterField>
+          )}
+          <FilterGroup label="Block">
+            <FilterField label="exact">
+              <Input type="text" inputMode="numeric" className="w-24" value={filters.block} onChange={setFilter("block")} />
+            </FilterField>
+            <FilterField label="&gt;">
+              <Input
+                type="text"
+                inputMode="numeric"
+                className="w-24"
+                value={filters.blockGt}
+                onChange={setFilter("blockGt")}
+                disabled={Boolean(filters.block.trim())}
+              />
+            </FilterField>
+            <FilterField label="&lt;">
+              <Input
+                type="text"
+                inputMode="numeric"
+                className="w-24"
+                value={filters.blockLt}
+                onChange={setFilter("blockLt")}
+                disabled={Boolean(filters.block.trim())}
+              />
+            </FilterField>
+          </FilterGroup>
+          <FilterGroup label="Nonce">
+            <FilterField label="&gt;">
+              <Input type="text" inputMode="numeric" className="w-20" value={filters.nonceGt} onChange={setFilter("nonceGt")} />
+            </FilterField>
+            <FilterField label="&lt;">
+              <Input type="text" inputMode="numeric" className="w-20" value={filters.nonceLt} onChange={setFilter("nonceLt")} />
+            </FilterField>
+          </FilterGroup>
+          <FilterGroup label="Date">
+            <FilterField label="&gt;">
+              <Input type="text" className="w-48" value={filters.dateGt} onChange={setFilter("dateGt")} />
+            </FilterField>
+            <FilterField label="&lt;">
+              <Input type="text" className="w-48" value={filters.dateLt} onChange={setFilter("dateLt")} />
+            </FilterField>
+          </FilterGroup>
+          <FilterGroup label="Paging">
+            <FilterField label="page size">
+              <Input type="text" inputMode="numeric" className="w-20" value={filters.limit} onChange={setFilter("limit")} />
+            </FilterField>
+            <FilterField label="page">
+              <Input type="text" inputMode="numeric" className="w-20" value={filters.page} onChange={setFilter("page")} />
+            </FilterField>
+          </FilterGroup>
+          <div className="ml-auto flex items-center gap-2">
+            {filtersChanged ? (
+              <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                Clear
+              </Button>
+            ) : null}
+            <Button type="submit" size="sm">
+              Query
+            </Button>
+          </div>
+        </form>
+      </FiltersPanel>
+
+      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {loading
           ? "Loading..."
           : error
@@ -486,75 +462,77 @@ export function TransactionsView({
       </p>
 
       {sortIsPageLocal ? (
-        <p className="sort-scope-note" role="status">
+        <p className="text-xs text-muted-foreground" role="status">
           Sorting reorders the {data?.count ?? 0} rows on this page, not all {data?.totalCount ?? 0}{" "}
           matching transactions.
         </p>
       ) : null}
 
-      <div className="permalink-row transactions-actions">
-        <button type="button" className="secondary" onClick={copyPermalink} disabled={!hasAppliedFilters}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={copyPermalink} disabled={!hasAppliedFilters}>
           Copy link
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="secondary"
+          variant="outline"
+          size="sm"
           onClick={() => goToPage((data?.page ?? toPositiveInteger(applied.page, 1)) - 1)}
           disabled={!data?.hasPreviousPage || loading}
         >
           Previous
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="secondary"
+          variant="outline"
+          size="sm"
           onClick={() => goToPage((data?.page ?? toPositiveInteger(applied.page, 1)) + 1)}
           disabled={!data?.hasNextPage || loading}
         >
           Next
-        </button>
-        {copyStatus ? <span>{copyStatus}</span> : null}
+        </Button>
+        {copyStatus ? <span className="text-xs text-muted-foreground">{copyStatus}</span> : null}
       </div>
 
-      <div className="cedric-table-wrap">
+      <div className="relative mt-6">
         <CedricOnTimer />
-        {/* Opaque shelf hiding Cedric's body so only his head peeks over the
-            table's top edge (the table-wrap clips its own overflow). */}
-        <div className="cedric-shelf cedric-table-shelf" aria-hidden="true" />
-        <div className="table-wrap">
-          <table className="data-table tx-table">
-          <thead>
-            <tr>
-              {columns.map((column) => (
-                <th key={column.key} scope="col" className={column.className}>
-                  <button
-                    type="button"
-                    className="sort-header"
-                    onClick={() => setSortKey(column.key)}
-                    title={
-                      sortIsPageLocal
-                        ? `Sort the rows on this page by ${column.label}`
-                        : `Sort by ${column.label}`
-                    }
-                  >
-                    <span>{renderTableHeader(column.label)}</span>
-                    <span aria-hidden="true">{sort?.key === column.key ? sortIcon(sort.direction) : ""}</span>
-                  </button>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.blockNumberDecimal}:${row.position}:${row.hash}`}>
+        <div className="relative z-10 overflow-x-auto border border-border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
                 {columns.map((column) => (
-                  <td key={column.key} className={column.className} data-label={column.label}>
-                    {column.render(row)}
-                  </td>
+                  <TableHead key={column.key} className={column.className}>
+                    <button
+                      type="button"
+                      className={cn(
+                        "inline-flex w-full items-center gap-1 text-left font-medium hover:text-accent",
+                        column.className?.includes("text-right") && "justify-end",
+                      )}
+                      onClick={() => setSortKey(column.key)}
+                      title={
+                        sortIsPageLocal
+                          ? `Sort the rows on this page by ${column.label}`
+                          : `Sort by ${column.label}`
+                      }
+                    >
+                      <span>{renderTableHeader(column.label)}</span>
+                      <SortIcon active={sort?.key === column.key} direction={sort?.key === column.key ? sort.direction : "asc"} />
+                    </button>
+                  </TableHead>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-          </table>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={`${row.blockNumberDecimal}:${row.position}:${row.hash}`}>
+                  {columns.map((column) => (
+                    <TableCell key={column.key} className={column.className} data-label={column.label}>
+                      {column.render(row)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       </div>
     </section>
@@ -573,117 +551,6 @@ export function AddressCell({ address }: { address: string | null | undefined })
       href={addressSearchHref(value)}
     />
   );
-}
-
-function CopyCell({
-  value,
-  label,
-  title,
-  copyLabel,
-  href,
-  external = false,
-  onClick,
-}: {
-  value: string | null | undefined;
-  label: string;
-  title?: string;
-  copyLabel: string;
-  href?: string | null;
-  external?: boolean;
-  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
-}) {
-  const copyValue = value?.trim();
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timeout = window.setTimeout(() => setCopied(false), 1200);
-    return () => window.clearTimeout(timeout);
-  }, [copied]);
-
-  if (!copyValue) {
-    return (
-      <span className="mono truncate" title={title}>
-        {label}
-      </span>
-    );
-  }
-
-  const onCopy = async () => {
-    if (await copyText(copyValue)) {
-      setCopied(true);
-    }
-  };
-
-  const text = href ? (
-    <a
-      className="mono truncate copy-cell-link"
-      title={title ?? copyValue}
-      href={href}
-      target={external ? "_blank" : undefined}
-      rel={external ? "noreferrer" : undefined}
-      onClick={onClick}
-    >
-      {label}
-    </a>
-  ) : (
-    <span className="mono truncate" title={title ?? copyValue}>
-      {label}
-    </span>
-  );
-
-  return (
-    <span className="copy-cell">
-      {text}
-      <button
-        type="button"
-        className="copy-cell-button"
-        aria-label={`Copy ${copyLabel}`}
-        title={copied ? "Copied" : `Copy ${copyLabel}`}
-        onClick={onCopy}
-      >
-        <span aria-hidden="true" className="copy-cell-icon">
-          {copied ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="11" height="11" rx="2" />
-              <path d="M5 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2" />
-            </svg>
-          )}
-        </span>
-      </button>
-    </span>
-  );
-}
-
-async function copyText(value: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(value);
-    return true;
-  } catch {
-    return copyTextFallback(value);
-  }
-}
-
-function copyTextFallback(value: string): boolean {
-  const textArea = document.createElement("textarea");
-  textArea.value = value;
-  textArea.setAttribute("readonly", "");
-  textArea.style.position = "fixed";
-  textArea.style.left = "-9999px";
-  document.body.appendChild(textArea);
-  textArea.select();
-
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    document.body.removeChild(textArea);
-  }
 }
 
 function filtersToParams(filters: TransactionFilters): URLSearchParams {
@@ -820,10 +687,6 @@ function defaultDirection(key: SortKey): SortDirection {
     key === "to"
     ? "asc"
     : "desc";
-}
-
-function sortIcon(direction: SortDirection): string {
-  return direction === "asc" ? "^" : "v";
 }
 
 function shortHash(value: string | null | undefined): string {

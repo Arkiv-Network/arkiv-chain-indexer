@@ -1,4 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ChevronRight } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { CopyButton } from "@/components/copy-cell";
+import { selectClass } from "@/components/filters-panel";
+import { StatusBadge } from "@/components/op-badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { fetchHealth, type EntityQueryIndexHealth } from "./api";
 import {
   appendQueryExpression,
@@ -61,7 +70,6 @@ import {
   writePermalink,
 } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
-import { CopyButton } from "./TransactionView";
 import type { MouseEvent } from "react";
 
 const QueryEditor = lazy(() => import("./QueryEditor"));
@@ -451,8 +459,8 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
   };
 
   return (
-    <section className="view data-view">
-      <div className="page-heading">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 py-6 md:px-6">
+      <div className="flex flex-col gap-1.5">
         <PageBreadcrumbs
           items={[
             { view: "home", label: "Home" },
@@ -460,68 +468,58 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
           ]}
           onLocationChange={onLocationChange}
         />
-        <h2>Data</h2>
+        <h2 className="font-heading text-lg font-black tracking-tight">Data</h2>
       </div>
 
-      <p className="summary">
+      <p className="max-w-3xl text-xs text-muted-foreground">
         Query the live entity state held by an Arkiv node. The index does not store entity state, so every result here
         comes straight from the selected RPC endpoint.{" "}
-        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
+        <a
+          href={DOCS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:text-foreground hover:decoration-foreground"
+        >
           Query language docs
         </a>
         .
       </p>
 
-      <div className="rpc-mode-bar">
-        <span className="rpc-mode-label">Query against</span>
-        <div className="segmented rpc-mode-segmented" role="group" aria-label="RPC source">
-          <button
-            type="button"
-            className={mode === "backend" ? "active" : ""}
-            title={BACKEND_RPC_PATH}
-            onClick={() => updateMode("backend")}
-          >
-            Default node
-          </button>
-          <button
-            type="button"
-            className={mode === "index" ? "active" : ""}
-            title={BACKEND_INDEX_RPC_PATH}
-            onClick={() => updateMode("index")}
-          >
-            Experimental index
-          </button>
-          <button type="button" className={mode === "both" ? "active" : ""} onClick={() => updateMode("both")}>
-            Both (compare)
-          </button>
-          {mode === "custom" || source.customUrl.trim() ? (
-            <button
-              type="button"
-              className={mode === "custom" ? "active" : ""}
-              title={describeRpcEndpoint({ kind: "custom", customUrl: source.customUrl })}
-              onClick={() => updateMode("custom")}
-            >
-              Custom
-            </button>
-          ) : null}
-        </div>
-        <span className="rpc-mode-endpoint mono">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-xs font-medium text-muted-foreground">Query against</span>
+        <Tabs value={mode} onValueChange={(value) => updateMode(value as RpcMode)}>
+          <TabsList aria-label="RPC source">
+            <TabsTrigger value="backend" title={BACKEND_RPC_PATH}>
+              Default node
+            </TabsTrigger>
+            <TabsTrigger value="index" title={BACKEND_INDEX_RPC_PATH}>
+              Experimental index
+            </TabsTrigger>
+            <TabsTrigger value="both">Both (compare)</TabsTrigger>
+            {mode === "custom" || source.customUrl.trim() ? (
+              <TabsTrigger value="custom" title={describeRpcEndpoint({ kind: "custom", customUrl: source.customUrl })}>
+                Custom
+              </TabsTrigger>
+            ) : null}
+          </TabsList>
+        </Tabs>
+        <span className="font-mono text-xs text-muted-foreground">
           {mode === "both" ? `${BACKEND_RPC_PATH} vs ${BACKEND_INDEX_RPC_PATH}` : describeRpcEndpoint(source) || "not set"}
         </span>
       </div>
       {indexOff && (mode === "index" || mode === "both") ? (
-        <p className="summary rpc-mode-warning">
-          This deployment has not enabled the entity index (<span className="mono">ENTITY_QUERY_INDEX</span>), so{" "}
-          <span className="mono">{BACKEND_INDEX_RPC_PATH}</span> answers 404.
+        <p className="border border-amber-600/30 bg-amber-600/10 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300">
+          This deployment has not enabled the entity index (<span className="font-mono">ENTITY_QUERY_INDEX</span>), so{" "}
+          <span className="font-mono">{BACKEND_INDEX_RPC_PATH}</span> answers 404.
         </p>
       ) : null}
 
-      <div className="tx-detail-card query-card">
-        <div className="query-editor">
-          <Suspense
-            fallback={
+      <Card className="gap-3 p-4">
+        <Suspense
+          fallback={
+            <div className="overflow-hidden rounded-md border border-input bg-muted">
               <textarea
-                className="query-editor-fallback"
+                className="w-full resize-y bg-transparent px-3 py-2 font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 value={query}
                 placeholder={QUERY_PLACEHOLDER}
                 spellCheck={false}
@@ -529,18 +527,21 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                 onKeyDown={onFallbackKeyDown}
                 rows={2}
               />
-            }
-          >
-            <QueryEditor value={query} onChange={setQuery} onExecute={(text) => execute(text)} placeholder={QUERY_PLACEHOLDER} />
-          </Suspense>
-        </div>
-        <div className="query-toolbar">
-          <span className="query-hint">
-            <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs the query
+            </div>
+          }
+        >
+          <QueryEditor value={query} onChange={setQuery} onExecute={(text) => execute(text)} placeholder={QUERY_PLACEHOLDER} />
+        </Suspense>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="mr-auto hidden items-center gap-1.5 text-xs text-muted-foreground sm:inline-flex">
+            Press
+            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground/80">Ctrl</kbd>+
+            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground/80">Enter</kbd>
+            to run the query
           </span>
-          <label className="query-toolbar-field">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
             Page size
-            <select value={pageSize} onChange={(event) => onPageSizeChange(event.target.value)} disabled={running}>
+            <select value={pageSize} onChange={(event) => onPageSizeChange(event.target.value)} disabled={running} className={selectClass}>
               {PAGE_SIZE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {option}
@@ -548,9 +549,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
               ))}
             </select>
           </label>
-          <label className="query-toolbar-field">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
             Show
-            <select value={expiration} onChange={(event) => onExpirationChange(event.target.value)}>
+            <select value={expiration} onChange={(event) => onExpirationChange(event.target.value)} className={selectClass}>
               {EXPIRATION_FILTERS.map((option) => (
                 <option key={option} value={option}>
                   {option === "all" ? "All entities" : "Expiring within 24h"}
@@ -558,39 +559,39 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
               ))}
             </select>
           </label>
-          <button type="button" className="secondary" onClick={clear} disabled={!hasText && results.executedQuery === null}>
+          <Button type="button" variant="outline" size="sm" onClick={clear} disabled={!hasText && results.executedQuery === null}>
             Clear
-          </button>
+          </Button>
           {permalink ? <CopyLinkButton href={permalink} /> : null}
           {running ? (
-            <button type="button" className="query-run" onClick={cancel}>
+            <Button type="button" variant="destructive" size="sm" onClick={cancel}>
               Cancel
-            </button>
+            </Button>
           ) : (
-            <button type="button" className="query-run" onClick={() => execute(query)} disabled={!hasText}>
+            <Button type="button" size="sm" onClick={() => execute(query)} disabled={!hasText}>
               Run query
-            </button>
+            </Button>
           )}
         </div>
-        {formError ? <p className="summary error query-form-error">{formError}</p> : null}
-        <div className="query-examples">
-          <span className="query-examples-label">Try</span>
+        {formError ? <p className="border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{formError}</p> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Try</span>
           {EXAMPLE_QUERIES.map((example) => (
             <button
               key={example.label}
               type="button"
-              className="query-example"
               title={example.query}
               onClick={() => setQuery(example.query)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               {example.label}
             </button>
           ))}
         </div>
-      </div>
+      </Card>
 
       {comparison.status === "running" ? (
-        <p className="summary comparison-pending">Running the query on both endpoints…</p>
+        <p className="text-xs text-muted-foreground">Running the query on both endpoints…</p>
       ) : comparison.status === "done" ? (
         <ComparisonPanel report={comparison.report} />
       ) : null}
@@ -613,152 +614,146 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         onLocationChange={onLocationChange}
       />
 
-      <details className="rpc-endpoint-details">
-        <summary>
-          <span className="rpc-endpoint-summary-label">RPC endpoint</span>
-          <span className="rpc-endpoint-summary-value mono">
+      <details className="group border border-border bg-card">
+        <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-4 py-2.5 text-xs font-medium text-foreground [&::-webkit-details-marker]:hidden [&::marker]:content-none">
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+          <span className="text-muted-foreground">RPC endpoint</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-foreground">
             {mode === "both" ? `${BACKEND_RPC_PATH} vs ${BACKEND_INDEX_RPC_PATH}` : describeRpcEndpoint(source) || "not set"}
           </span>
           {mode === "backend" && backend.status === "known" ? (
-            <span className={`tx-status-badge ${backend.methods !== false && missing.length === 0 ? "ok" : "fail"}`}>
+            <StatusBadge tone={backend.methods !== false && missing.length === 0 ? "ok" : "fail"}>
               {backend.methods === false ? "No upstream" : missing.length === 0 ? "Forwarding" : "Incomplete"}
-            </span>
+            </StatusBadge>
           ) : null}
           {mode === "index" || mode === "both" ? (
-            <span
-              className={`tx-status-badge ${
-                backend.status !== "known" ? "unknown" : backend.entityQueryIndex === false ? "fail" : "ok"
-              }`}
-            >
+            <StatusBadge tone={backend.status !== "known" ? "unknown" : backend.entityQueryIndex === false ? "fail" : "ok"}>
               {backend.status !== "known" ? "Experimental" : backend.entityQueryIndex === false ? "Not enabled" : "Experimental"}
-            </span>
+            </StatusBadge>
           ) : null}
           {check.status === "done" ? (
-            <span className={`tx-status-badge ${check.report.ok ? "ok" : check.report.arkivOk ? "unknown" : "fail"}`}>
+            <StatusBadge tone={check.report.ok ? "ok" : check.report.arkivOk ? "unknown" : "fail"}>
               {check.report.ok ? "Checked OK" : check.report.arkivOk ? "Arkiv reads OK" : "Check failed"}
-            </span>
+            </StatusBadge>
           ) : null}
         </summary>
 
-        <div className="tx-detail-card rpc-source-card">
-          <div className="tx-detail-groups rpc-source-groups">
-            <div className="tx-detail-group">
-              <h3>RPC endpoint</h3>
-              <div className="rpc-source-options" role="radiogroup" aria-label="RPC endpoint">
-                <label className={`rpc-source-option${mode === "backend" ? " selected" : ""}`}>
-                  <input
-                    type="radio"
-                    name="rpc-source"
-                    value="backend"
-                    checked={mode === "backend"}
-                    onChange={() => onKindChange("backend")}
-                  />
-                  <span className="rpc-source-option-body">
-                    <span className="rpc-source-option-title">Indexer backend</span>
-                    <span className="rpc-source-option-detail">
-                      <span className="mono">{BACKEND_RPC_PATH}</span> forwards the entity reads to the node it is
-                      configured with, using the deployment&apos;s own API key.
-                    </span>
-                    <BackendForwardingNote backend={backend} missing={missing} />
+        <div className="flex flex-col gap-4 border-t border-border p-4">
+          <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+            <div className="flex flex-col gap-2">
+              <h3 className="text-xs font-semibold text-foreground">RPC endpoint</h3>
+              <div className="flex flex-col gap-2" role="radiogroup" aria-label="RPC endpoint">
+                <RpcSourceOption checked={mode === "backend"} onChange={() => onKindChange("backend")} title="Indexer backend">
+                  <span>
+                    <span className="font-mono">{BACKEND_RPC_PATH}</span> forwards the entity reads to the node it is
+                    configured with, using the deployment&apos;s own API key.
                   </span>
-                </label>
-                <label className={`rpc-source-option${mode === "index" ? " selected" : ""}`}>
-                  <input
-                    type="radio"
-                    name="rpc-source"
-                    value="index"
-                    checked={mode === "index"}
-                    onChange={() => onKindChange("index")}
-                  />
-                  <span className="rpc-source-option-body">
-                    <span className="rpc-source-option-title">
-                      Indexer entity index <span className="tx-status-badge unknown">experimental</span>
-                    </span>
-                    <span className="rpc-source-option-detail">
-                      <span className="mono">{BACKEND_INDEX_RPC_PATH}</span> answers the entity reads from the
-                      indexer&apos;s own projection of the decoded operations, without asking a node. Same query
-                      language and wire format, so its answers can be checked against the backend&apos;s. Payloads
-                      are never available, entities created before the index floor are unknown, and{" "}
-                      <span className="mono">latest</span> means the projected head.
-                    </span>
-                    <IndexStatusNote backend={backend} />
+                  <BackendForwardingNote backend={backend} missing={missing} />
+                </RpcSourceOption>
+
+                <RpcSourceOption
+                  checked={mode === "index"}
+                  onChange={() => onKindChange("index")}
+                  title="Indexer entity index"
+                  badge={<StatusBadge tone="unknown">experimental</StatusBadge>}
+                >
+                  <span>
+                    <span className="font-mono">{BACKEND_INDEX_RPC_PATH}</span> answers the entity reads from the
+                    indexer&apos;s own projection of the decoded operations, without asking a node. Same query
+                    language and wire format, so its answers can be checked against the backend&apos;s. Payloads are
+                    never available, entities created before the index floor are unknown, and{" "}
+                    <span className="font-mono">latest</span> means the projected head.
                   </span>
-                </label>
-                <label className={`rpc-source-option${mode === "custom" ? " selected" : ""}`}>
-                  <input
-                    type="radio"
-                    name="rpc-source"
-                    value="custom"
-                    checked={mode === "custom"}
-                    onChange={() => onKindChange("custom")}
-                  />
-                  <span className="rpc-source-option-body">
-                    <span className="rpc-source-option-title">Custom RPC URL</span>
-                    <span className="rpc-source-option-detail">
-                      Called straight from the browser, so the node must allow cross-origin requests. A key in the
-                      URL stays in this browser&apos;s local storage only.
-                    </span>
-                    <input
-                      type="url"
-                      className="rpc-source-url"
-                      inputMode="url"
-                      spellCheck={false}
-                      autoComplete="off"
-                      placeholder="https://rpc.example.arkiv.network/<api-key>"
-                      value={source.customUrl}
-                      disabled={mode !== "custom"}
-                      onChange={(event) => updateSource({ ...source, customUrl: event.target.value })}
-                    />
+                  <IndexStatusNote backend={backend} />
+                </RpcSourceOption>
+
+                <RpcSourceOption checked={mode === "custom"} onChange={() => onKindChange("custom")} title="Custom RPC URL">
+                  <span>
+                    Called straight from the browser, so the node must allow cross-origin requests. A key in the URL
+                    stays in this browser&apos;s local storage only.
                   </span>
-                </label>
-                <label className={`rpc-source-option${mode === "both" ? " selected" : ""}`}>
                   <input
-                    type="radio"
-                    name="rpc-source"
-                    value="both"
-                    checked={mode === "both"}
-                    onChange={() => updateMode("both")}
+                    type="url"
+                    inputMode="url"
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="https://rpc.example.arkiv.network/<api-key>"
+                    value={source.customUrl}
+                    disabled={mode !== "custom"}
+                    onChange={(event) => updateSource({ ...source, customUrl: event.target.value })}
+                    className={cn(selectClass, "w-full font-mono")}
                   />
-                  <span className="rpc-source-option-body">
-                    <span className="rpc-source-option-title">Both, compared</span>
-                    <span className="rpc-source-option-detail">
-                      Sends each query to <span className="mono">{BACKEND_RPC_PATH}</span> and{" "}
-                      <span className="mono">{BACKEND_INDEX_RPC_PATH}</span> at once, both pinned to the lower of
-                      the two heads so the index&apos;s lag does not read as a difference, and reports the timings
-                      side by side with every field the two answers disagree on. The table below shows the
-                      node&apos;s answer.
-                    </span>
-                    <IndexStatusNote backend={backend} />
+                </RpcSourceOption>
+
+                <RpcSourceOption checked={mode === "both"} onChange={() => updateMode("both")} title="Both, compared">
+                  <span>
+                    Sends each query to <span className="font-mono">{BACKEND_RPC_PATH}</span> and{" "}
+                    <span className="font-mono">{BACKEND_INDEX_RPC_PATH}</span> at once, both pinned to the lower of
+                    the two heads so the index&apos;s lag does not read as a difference, and reports the timings side
+                    by side with every field the two answers disagree on. The table below shows the node&apos;s
+                    answer.
                   </span>
-                </label>
+                  <IndexStatusNote backend={backend} />
+                </RpcSourceOption>
               </div>
             </div>
-            <div className="tx-detail-group rpc-check-actions">
-              <h3>Connection check</h3>
-              <p className="tx-detail-note">
-                Calls <span className="mono">eth_chainId</span>, <span className="mono">web3_clientVersion</span>, and
+            <div className="flex flex-col gap-2">
+              <h3 className="text-xs font-semibold text-foreground">Connection check</h3>
+              <p className="text-xs text-muted-foreground">
+                Calls <span className="font-mono">eth_chainId</span>, <span className="font-mono">web3_clientVersion</span>, and
                 the three Arkiv reads ({ARKIV_READ_METHODS.join(", ")}) against the selected endpoint. Nothing is
                 written.
               </p>
-              <div className="rpc-check-buttons">
-                <button type="button" onClick={runCheck} disabled={check.status === "running"}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" onClick={runCheck} disabled={check.status === "running"}>
                   {check.status === "running" ? "Checking…" : "Check connection"}
-                </button>
+                </Button>
                 {check.status === "done" ? (
-                  <span className={`tx-status-badge ${check.report.ok ? "ok" : check.report.arkivOk ? "unknown" : "fail"}`}>
+                  <StatusBadge tone={check.report.ok ? "ok" : check.report.arkivOk ? "unknown" : "fail"}>
                     {check.report.ok ? "All methods answered" : check.report.arkivOk ? "Arkiv reads OK" : "Not usable"}
-                  </span>
+                  </StatusBadge>
                 ) : null}
               </div>
             </div>
           </div>
-        </div>
 
-        {check.status === "done" ? (
-          <CheckReport report={check.report} timeZone={timeZone} onLocationChange={onLocationChange} />
-        ) : null}
+          {check.status === "done" ? <CheckReport report={check.report} timeZone={timeZone} onLocationChange={onLocationChange} /> : null}
+        </div>
       </details>
     </section>
+  );
+}
+
+/** One radio option in the RPC endpoint picker: a title, a description, and an optional status note. */
+function RpcSourceOption({
+  checked,
+  onChange,
+  title,
+  badge,
+  children,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  title: string;
+  badge?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer gap-3 border p-3 transition-colors",
+        checked ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40",
+      )}
+    >
+      <input type="radio" name="rpc-source" checked={checked} onChange={onChange} className="mt-0.5 accent-primary" />
+      <span className="flex flex-col gap-1.5">
+        <span className="flex flex-wrap items-center gap-2 text-xs font-medium text-foreground">
+          {title}
+          {badge}
+        </span>
+        <span className="flex flex-col gap-1.5 text-xs text-muted-foreground">{children}</span>
+      </span>
+    </label>
   );
 }
 
@@ -771,42 +766,42 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
 function ComparisonPanel({ report }: { report: ComparisonReport }) {
   const speedup = speedupFactor(report);
   const verdict = report.identical
-    ? { className: "ok", text: `Identical (${report.comparedEntities} entities compared)` }
-    : { className: "fail", text: `${report.differences.length} difference${report.differences.length === 1 ? "" : "s"}` };
+    ? { tone: "ok" as const, text: `Identical (${report.comparedEntities} entities compared)` }
+    : { tone: "fail" as const, text: `${report.differences.length} difference${report.differences.length === 1 ? "" : "s"}` };
 
   return (
-    <div className="tx-detail-card comparison-card">
-      <div className="comparison-head">
-        <h3>Node vs experimental index</h3>
-        <span className={`tx-status-badge ${verdict.className}`}>{verdict.text}</span>
+    <Card className="gap-3 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="font-heading text-sm">Node vs experimental index</h3>
+        <StatusBadge tone={verdict.tone}>{verdict.text}</StatusBadge>
         {speedup !== null ? (
-          <span className="comparison-speedup">
+          <span className="text-xs text-muted-foreground">
             index {speedup >= 1 ? `${speedup.toFixed(1)}× faster` : `${(1 / speedup).toFixed(1)}× slower`}
           </span>
         ) : null}
       </div>
 
-      <div className="comparison-sides">
+      <div className="grid gap-3 sm:grid-cols-2">
         <ComparisonSideRow label="Default node" path={BACKEND_RPC_PATH} side={report.node} />
         <ComparisonSideRow label="Experimental index" path={BACKEND_INDEX_RPC_PATH} side={report.index} />
       </div>
 
       {report.identical ? (
-        <p className="tx-detail-note">
+        <p className="text-xs text-muted-foreground">
           Same entities, same order, same fields on the first page. Later pages are not compared: a cursor belongs to
           the endpoint that issued it.
         </p>
       ) : (
-        <ul className="comparison-differences">
+        <ul className="flex flex-col gap-1.5 border-t border-border pt-3">
           {report.differences.map((difference, position) => (
-            <li key={`${difference.scope}-${position}`}>
-              <span className="comparison-difference-scope mono">{difference.scope}</span>
-              <span className="comparison-difference-detail">{difference.detail}</span>
+            <li key={`${difference.scope}-${position}`} className="flex flex-wrap items-baseline gap-2 text-xs">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{difference.scope}</span>
+              <span className="text-foreground">{difference.detail}</span>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -820,46 +815,46 @@ function ComparisonSideRow({
   side: ComparisonReport["node"];
 }) {
   return (
-    <div className="comparison-side">
-      <span className="comparison-side-label">{label}</span>
-      <span className="comparison-side-path mono">{path}</span>
-      <span className="comparison-side-timing mono">{fmtInteger(side.durationMs)} ms</span>
-      <span className="comparison-side-count">
+    <div className="flex flex-col gap-0.5 border border-border bg-muted/30 px-3 py-2">
+      <span className="text-xs font-medium text-foreground">{label}</span>
+      <span className="font-mono text-[11px] text-muted-foreground">{path}</span>
+      <span className="font-mono text-[11px] text-muted-foreground">{fmtInteger(side.durationMs)} ms</span>
+      <span className="text-xs text-foreground">
         {side.error !== null
           ? "failed"
           : `${fmtInteger(side.count ?? 0)} ${side.count === 1 ? "entity" : "entities"}${side.hasMore ? ", more" : ""}`}
       </span>
       {side.blockNumber !== null ? (
-        <span className="comparison-side-block mono">block {fmtInteger(side.blockNumber)}</span>
+        <span className="font-mono text-[11px] text-muted-foreground">block {fmtInteger(side.blockNumber)}</span>
       ) : null}
-      {side.error !== null ? <span className="comparison-side-error">{side.error}</span> : null}
+      {side.error !== null ? <span className="text-xs text-destructive">{side.error}</span> : null}
     </div>
   );
 }
 
 function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
   if (backend.status === "loading") {
-    return <span className="rpc-source-option-status muted">Reading the backend&apos;s entity index status…</span>;
+    return <span className="block text-xs text-muted-foreground">Reading the backend&apos;s entity index status…</span>;
   }
   if (backend.status === "unknown") {
     return (
-      <span className="rpc-source-option-status warn">
-        Could not read <span className="mono">/api/health</span>: {backend.error}
+      <span className="block text-xs text-amber-700 dark:text-amber-400">
+        Could not read <span className="font-mono">/api/health</span>: {backend.error}
       </span>
     );
   }
   const index = backend.entityQueryIndex;
   if (index === false) {
     return (
-      <span className="rpc-source-option-status warn">
-        This deployment has not enabled the entity index (<span className="mono">ENTITY_QUERY_INDEX</span>), so
+      <span className="block text-xs text-amber-700 dark:text-amber-400">
+        This deployment has not enabled the entity index (<span className="font-mono">ENTITY_QUERY_INDEX</span>), so
         this endpoint answers 404.
       </span>
     );
   }
   if (index.projectedThroughBlock === null) {
     return (
-      <span className="rpc-source-option-status warn">
+      <span className="block text-xs text-amber-700 dark:text-amber-400">
         Enabled, but the projector has not folded a block yet
         {index.floorBlock ? ` (starting at block ${index.floorBlock})` : ""}.
       </span>
@@ -868,7 +863,7 @@ function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
   const lag = index.lagBlocks === null ? "" : `, ${index.lagBlocks} blocks behind the scanner`;
   const live = index.liveEntities === null ? "" : `; ${index.liveEntities.toLocaleString("en-US")} live entities`;
   return (
-    <span className="rpc-source-option-status ok">
+    <span className="block text-xs text-emerald-700 dark:text-emerald-400">
       Projected through block {index.projectedThroughBlock}
       {lag}
       {live}. Entities created before block {index.floorBlock ?? "?"} are not indexed.
@@ -878,32 +873,32 @@ function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
 
 function BackendForwardingNote({ backend, missing }: { backend: BackendForwarding; missing: string[] }) {
   if (backend.status === "loading") {
-    return <span className="rpc-source-option-status muted">Reading the backend&apos;s forwarded methods…</span>;
+    return <span className="block text-xs text-muted-foreground">Reading the backend&apos;s forwarded methods…</span>;
   }
   if (backend.status === "unknown") {
     return (
-      <span className="rpc-source-option-status warn">
-        Could not read <span className="mono">/api/health</span>: {backend.error}
+      <span className="block text-xs text-amber-700 dark:text-amber-400">
+        Could not read <span className="font-mono">/api/health</span>: {backend.error}
       </span>
     );
   }
   if (backend.methods === false) {
     return (
-      <span className="rpc-source-option-status warn">
-        The backend has no upstream node configured (<span className="mono">SHADOW_RPC_UPSTREAM</span> is unset), so
-        it cannot forward entity reads.
+      <span className="block text-xs text-amber-700 dark:text-amber-400">
+        The backend has no upstream node configured (<span className="font-mono">SHADOW_RPC_UPSTREAM</span> is
+        unset), so it cannot forward entity reads.
       </span>
     );
   }
   if (missing.length > 0) {
     return (
-      <span className="rpc-source-option-status warn">
+      <span className="block text-xs text-amber-700 dark:text-amber-400">
         The backend forwards {backend.methods.length === 0 ? "no methods" : backend.methods.join(", ")}, but not{" "}
-        {missing.join(", ")}. Add them to <span className="mono">SHADOW_RPC_UPSTREAM_METHODS</span>.
+        {missing.join(", ")}. Add them to <span className="font-mono">SHADOW_RPC_UPSTREAM_METHODS</span>.
       </span>
     );
   }
-  return <span className="rpc-source-option-status ok">Forwards all three entity read methods.</span>;
+  return <span className="block text-xs text-emerald-700 dark:text-emerald-400">Forwards all three entity read methods.</span>;
 }
 
 function CheckReport({
@@ -919,116 +914,112 @@ function CheckReport({
   const headTime = report.timing ? new Date(report.timing.currentBlockTime * 1000).toISOString() : null;
 
   return (
-    <div className="tx-detail-card rpc-check-report">
-      <div className="tx-detail-topline">
-        <span className={`tx-status-badge ${report.ok ? "ok" : report.arkivOk ? "unknown" : "fail"}`}>
+    <Card className="gap-4 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <StatusBadge tone={report.ok ? "ok" : report.arkivOk ? "unknown" : "fail"}>
           {report.ok ? "OK" : report.arkivOk ? "Partial" : "Failed"}
-        </span>
-        <span className="rpc-check-endpoint mono" title={report.endpoint}>
+        </StatusBadge>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={report.endpoint}>
           {report.endpoint}
         </span>
-        <span className="rpc-check-meta">
+        <span className="shrink-0 text-xs text-muted-foreground">
           {fmtDate(report.startedAtUtc, timeZone)} · {report.steps.length} calls · {fmtInteger(totalMs)} ms
         </span>
       </div>
 
-      <div className="tx-detail-groups">
-        <div className="tx-detail-group">
-          <h3>Node</h3>
-          <dl className="tx-detail-grid">
+      <div className="grid gap-6 border-t border-border pt-4 sm:grid-cols-3">
+        <section className="flex flex-col gap-2">
+          <h3 className="text-xs font-semibold text-foreground">Node</h3>
+          <dl className="flex flex-col gap-2">
             <Row label="Chain id" value={report.chainId === null ? "—" : fmtInteger(report.chainId)} />
             <Row label="Client" value={report.clientVersion ?? "—"} />
             <Row label="Head block" value={report.timing ? fmtInteger(report.timing.currentBlock) : "—"} />
             <Row label="Head time" value={headTime ? fmtDate(headTime, timeZone) : "—"} />
             <Row label="Block time" value={report.timing ? `${report.timing.blockDurationSeconds}s` : "—"} />
           </dl>
-        </div>
-        <div className="tx-detail-group">
-          <h3>Entities</h3>
-          <dl className="tx-detail-grid">
+        </section>
+        <section className="flex flex-col gap-2">
+          <h3 className="text-xs font-semibold text-foreground">Entities</h3>
+          <dl className="flex flex-col gap-2">
             <Row label="Live entities" value={report.entityCount === null ? "—" : fmtInteger(report.entityCount)} />
-            <div className="tx-detail-row">
-              <dt className="tx-detail-label">Sample key</dt>
-              <dd className="tx-detail-value">
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Sample key</dt>
+              <dd className="text-xs text-foreground">
                 {report.sampleEntityKey ? (
-                  <span className="rpc-check-inline">
+                  <span className="flex items-center gap-1.5">
                     <SampleEntityLink entityKey={report.sampleEntityKey} onLocationChange={onLocationChange} />
-                    <CopyButton value={report.sampleEntityKey} label="Copy entity key" />
+                    <CopyButton value={report.sampleEntityKey} label="entity key" />
                   </span>
                 ) : (
                   "—"
                 )}
               </dd>
             </div>
-            <div className="tx-detail-row">
-              <dt className="tx-detail-label">Sample owner</dt>
-              <dd className="tx-detail-value">
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Sample owner</dt>
+              <dd className="text-xs text-foreground">
                 {report.sampleEntityOwner ? <AddressCell address={report.sampleEntityOwner} /> : "—"}
               </dd>
             </div>
           </dl>
-        </div>
-        <div className="tx-detail-group">
-          <h3>Verdict</h3>
-          <p className="tx-detail-note">
+        </section>
+        <section className="flex flex-col gap-2">
+          <h3 className="text-xs font-semibold text-foreground">Verdict</h3>
+          <p className="text-xs text-muted-foreground">
             {report.ok
               ? "Every call answered. The Data page can use this endpoint."
               : report.arkivOk
                 ? "The Arkiv entity reads answered, so entity queries will work; a plain Ethereum method failed, see below."
                 : "At least one Arkiv read method failed. Entity queries will not work through this endpoint until it does."}
           </p>
-        </div>
+        </section>
       </div>
 
-      <div className="table-wrap rpc-check-table">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Method</th>
-              <th>Checks that</th>
-              <th>Status</th>
-              <th>Time</th>
-              <th>Result</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="border-t border-border pt-4">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Method</TableHead>
+              <TableHead>Checks that</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Time</TableHead>
+              <TableHead>Result</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {report.steps.map((step) => (
               <StepRow key={step.method} step={step} />
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
-    </div>
+    </Card>
   );
 }
 
 function StepRow({ step }: { step: RpcCheckStep }) {
   return (
-    <tr className={step.status === "fail" ? "rpc-check-step-fail" : undefined}>
-      <td data-label="Method" className="mono">
-        {step.method}
-      </td>
-      <td data-label="Checks that">{step.purpose}</td>
-      <td data-label="Status">
-        <span className={`tx-status-badge ${step.status === "ok" ? "ok" : "fail"}`}>
+    <TableRow className={step.status === "fail" ? "bg-destructive/5" : undefined}>
+      <TableCell className="font-mono">{step.method}</TableCell>
+      <TableCell className="max-w-2xs text-wrap text-muted-foreground">{step.purpose}</TableCell>
+      <TableCell>
+        <StatusBadge tone={step.status === "ok" ? "ok" : "fail"}>
           {step.status === "ok" ? "OK" : step.code !== undefined ? `Error ${step.code}` : "Failed"}
-        </span>
-      </td>
-      <td data-label="Time" className="num">
-        {fmtInteger(step.durationMs)} ms
-      </td>
-      <td data-label="Result" className="rpc-check-result">
+        </StatusBadge>
+      </TableCell>
+      <TableCell className="text-right font-mono">{fmtInteger(step.durationMs)} ms</TableCell>
+      <TableCell className="max-w-2xs truncate text-muted-foreground" title={step.summary}>
         {step.summary}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="tx-detail-row">
-      <dt className="tx-detail-label">{label}</dt>
-      <dd className="tx-detail-value">{value}</dd>
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">{label}</dt>
+      <dd className="text-xs text-foreground">{value}</dd>
     </div>
   );
 }
@@ -1053,9 +1044,9 @@ function CopyLinkButton({ href }: { href: string }) {
   };
 
   return (
-    <button type="button" className="secondary query-copy-link" onClick={onCopy} title={href}>
+    <Button type="button" variant="outline" size="sm" onClick={onCopy} title={href}>
       {copied ? "Copied" : "Copy link"}
-    </button>
+    </Button>
   );
 }
 
@@ -1066,7 +1057,12 @@ function SampleEntityLink({ entityKey, onLocationChange }: { entityKey: string; 
     if (writeEntityPermalink(entityKey)) onLocationChange();
   };
   return (
-    <a className="mono block-link" href={entityDetailHref(entityKey)} onClick={onClick} title="Open the indexed history">
+    <a
+      className="truncate font-mono text-xs text-foreground underline decoration-muted-foreground/40 decoration-dotted underline-offset-2 transition-colors hover:text-accent-foreground hover:decoration-accent-foreground"
+      href={entityDetailHref(entityKey)}
+      onClick={onClick}
+      title="Open the indexed history"
+    >
       {entityKey}
     </a>
   );

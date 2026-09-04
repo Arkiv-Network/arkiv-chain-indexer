@@ -1,3 +1,4 @@
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
@@ -37,6 +38,11 @@ import {
   normalizeChartPointCount,
   parseChartPointCount,
 } from "./chartPointCounts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -588,12 +594,18 @@ export function ChartsView({
     [presentationMode],
   );
 
+  const emptyState = (text: string) => (
+    <div className="flex h-full flex-1 items-center justify-center px-4 text-center text-sm text-muted-foreground">
+      {text}
+    </div>
+  );
+
   const chartContent = error ? (
-    <div className="chart-empty">Failed: {error}</div>
+    emptyState(`Failed: ${error}`)
   ) : selected.length === 0 ? (
-    <div className="chart-empty">Select at least one parameter to plot.</div>
+    emptyState("Select at least one parameter to plot.")
   ) : points.length === 0 && !loading ? (
-    <div className="chart-empty">No data in the selected window.</div>
+    emptyState("No data in the selected window.")
   ) : (
     <Plot
       data={traces}
@@ -617,284 +629,318 @@ export function ChartsView({
 
   if (presentationMode === "fullscreen") {
     return (
-      <section className="view charts-view chart-only-view">
-        <div className="chart-only-frame">{chartContent}</div>
+      <section className="flex h-full min-h-0 w-full flex-1 bg-background">
+        <div className="flex min-h-0 flex-1">{chartContent}</div>
       </section>
     );
   }
 
   return (
-    <section className={`view charts-view${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
-      <div className="charts-layout">
-        {sidebarCollapsed ? (
-          <button
-            type="button"
-            className="sidebar-show"
-            onClick={() => setSidebarCollapsed(false)}
-            title="Show options"
-            aria-label="Show options"
-          >
-            »
-          </button>
-        ) : (
-          <aside className="charts-sidebar">
-            <div className="sidebar-header">
-              <h2>History charts</h2>
-              <button
-                type="button"
-                className="sidebar-hide"
-                onClick={() => setSidebarCollapsed(true)}
-                title="Hide options"
-                aria-label="Hide options"
-              >
-                «
-              </button>
-            </div>
+    <section className="relative flex min-h-0 w-full flex-1 flex-col lg:flex-row">
+      {sidebarCollapsed ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="absolute left-2 top-2 z-10"
+          onClick={() => setSidebarCollapsed(false)}
+          title="Show options"
+          aria-label="Show options"
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+      ) : (
+        <aside className="flex w-full shrink-0 flex-col gap-4 overflow-y-auto border-b border-border bg-muted/20 p-3 lg:w-80 lg:border-r lg:border-b-0">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-heading text-sm">History charts</h2>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              onClick={() => setSidebarCollapsed(true)}
+              title="Hide options"
+              aria-label="Hide options"
+            >
+              <ChevronLeft className="size-3.5" />
+            </Button>
+          </div>
 
-            <div className="sidebar-section">
-              <span className="toolbar-label">Pan window</span>
-              <div className="time-nav-grid">
-                {TIME_STEPS.map((s) => (
-                  <button
-                    key={`back-${s.label}`}
-                    type="button"
-                    className="secondary time-nav-btn"
-                    onClick={() => panTime(-s.ms)}
-                    title={`Go back ${s.label}`}
-                  >
-                    −{s.label}
-                  </button>
-                ))}
-                {TIME_STEPS.slice().reverse().map((s) => (
-                  <button
+          <SidebarSection label="Pan window">
+            <div className="grid grid-cols-4 gap-1">
+              {TIME_STEPS.map((s) => (
+                <Button
+                  key={`back-${s.label}`}
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="font-mono tabular-nums"
+                  onClick={() => panTime(-s.ms)}
+                  title={`Go back ${s.label}`}
+                >
+                  −{s.label}
+                </Button>
+              ))}
+              {TIME_STEPS.slice()
+                .reverse()
+                .map((s) => (
+                  <Button
                     key={`fwd-${s.label}`}
                     type="button"
-                    className="secondary time-nav-btn"
+                    variant="outline"
+                    size="xs"
+                    className="font-mono tabular-nums"
                     onClick={() => panTime(s.ms)}
                     disabled={!startDate && !activeBlockWindow}
                     title={startDate || activeBlockWindow ? `Go forward ${s.label}` : "Already at latest"}
                   >
                     +{s.label}
-                  </button>
+                  </Button>
                 ))}
-              </div>
-              <button
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={goLatest}
+              disabled={!startDate && !activeBlockWindow}
+              title={startDate || activeBlockWindow ? "Jump to latest" : "Already at latest"}
+            >
+              ⤓ Jump to latest
+            </Button>
+          </SidebarSection>
+
+          <SidebarSection label="Zoom (range size)">
+            <div className="flex items-center gap-1.5">
+              <Button
                 type="button"
-                className="secondary latest-btn"
-                onClick={goLatest}
-                disabled={!startDate && !activeBlockWindow}
-                title={startDate || activeBlockWindow ? "Jump to latest" : "Already at latest"}
+                variant="outline"
+                size="icon-xs"
+                onClick={() => setZoomIndex(zoomIndex - 1)}
+                disabled={zoomIndex === 0}
+                title="Zoom in (smaller range size)"
               >
-                ⤓ Jump to latest
-              </button>
-            </div>
-
-            <div className="sidebar-section">
-              <span className="toolbar-label">Zoom (range size)</span>
-              <div className="zoom-buttons">
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setZoomIndex(zoomIndex - 1)}
-                  disabled={zoomIndex === 0}
-                  title="Zoom in (smaller range size)"
-                >
-                  −
-                </button>
-                <div className="zoom-options">
-                  {ZOOM_LEVELS.map((z, i) => (
-                    <button
-                      type="button"
-                      key={z.rangeSize}
-                      className={`zoom-pill${i === zoomIndex ? " active" : ""}`}
-                      onClick={() => setZoomIndex(i)}
-                    >
-                      {z.label}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setZoomIndex(zoomIndex + 1)}
-                  disabled={zoomIndex === ZOOM_LEVELS.length - 1}
-                  title="Zoom out (larger range size)"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="sidebar-section">
-              <span className="toolbar-label">Points</span>
-              <div className="point-count-toggle" role="group" aria-label="Chart point count">
-                {CHART_POINT_COUNT_OPTIONS.map((count) => (
-                  <button
-                    key={count}
+                −
+              </Button>
+              <div className="flex flex-1 flex-wrap gap-1">
+                {ZOOM_LEVELS.map((z, i) => (
+                  <Button
                     type="button"
-                    className={pointCount === count ? "active" : ""}
-                    onClick={() => setPointCount(count)}
+                    key={z.rangeSize}
+                    variant={i === zoomIndex ? "default" : "outline"}
+                    size="xs"
+                    className="rounded-full font-mono tabular-nums"
+                    onClick={() => setZoomIndex(i)}
                   >
-                    {count}
-                  </button>
+                    {z.label}
+                  </Button>
                 ))}
               </div>
-            </div>
-
-            <div className="sidebar-section">
-              <span className="toolbar-label">X axis</span>
-              <div className="axis-mode-toggle" role="group" aria-label="X axis mode">
-                {X_AXIS_MODES.map((mode) => (
-                  <button
-                    key={mode.value}
-                    type="button"
-                    className={xAxisMode === mode.value ? "active" : ""}
-                    onClick={() => setXAxisMode(mode.value)}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="sidebar-section">
-              <span className="toolbar-label">Anchor</span>
-              <div className="anchor-info">
-                {activeBlockWindow
-                  ? `Blocks ${activeBlockWindow.start}–${activeBlockWindow.end}`
-                  : startDate
-                    ? fmtShortDate(startDate, timeZone)
-                    : "Latest"}
-              </div>
-            </div>
-
-            <div className="sidebar-section">
-              <span className="toolbar-label">Status</span>
-              <div className="charts-status">
-                {loading
-                  ? "Loading…"
-                  : error
-                    ? <span className="error">Failed: {error}</span>
-                    : windowInfo
-                      ? (
-                        <>
-                          {points.length} pts · blocks {windowInfo.first}–{windowInfo.last}
-                          <br />
-                          {fmtShortDate(windowInfo.firstDate, timeZone)} → {fmtShortDate(windowInfo.lastDate, timeZone)}
-                        </>
-                      )
-                      : "No data"}
-              </div>
-            </div>
-
-            <div className="sidebar-section">
-              <span className="toolbar-label">Parameters</span>
-              <div className="parameter-groups">
-                {parameterGroups.map((group) => (
-                  <div key={group.key} className="parameter-group">
-                    <span className="parameter-group-title">{group.label}</span>
-                    <div className="parameters-grid sidebar-params">
-                      {group.parameters.map((p) => {
-                        const isOn = selected.includes(p.key);
-                        return (
-                          <label key={p.key} className={`param-check${isOn ? " on" : ""}`}>
-                            <input
-                              type="checkbox"
-                              checked={isOn}
-                              onChange={() => toggleParameter(p.key)}
-                            />
-                            <span className="param-swatch" style={{ background: isOn ? p.color : "transparent", borderColor: p.color }} />
-                            <span className="param-label">{p.label}</span>
-                            <span className="param-unit">{displayUnit(p.unit, tokenSymbol)}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="sidebar-section">
-              <div className="chart-link-actions">
-                <button type="button" className="secondary" onClick={copyPermalink}>
-                  Copy link
-                </button>
-                <a
-                  className="secondary-link"
-                  href={fullscreenHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Open chart-only permalink in a new tab"
-                >
-                  Fullscreen chart
-                </a>
-                <button type="button" className="secondary" onClick={resetChartSettings}>
-                  Reset to defaults
-                </button>
-              </div>
-              {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
-            </div>
-          </aside>
-        )}
-
-        <div className="chart-area">
-          <div className="chart-card">
-            {chartContent}
-          </div>
-        </div>
-        <aside className="selection-panel">
-          <div className="selection-header">
-            <h2>Selection</h2>
-            <div className="selection-actions">
-              <button
+              <Button
                 type="button"
-                className="secondary"
-                onClick={zoomToSelectedRange}
-                disabled={!selectedPoint || selectedPoint.rangeSize === 1}
+                variant="outline"
+                size="icon-xs"
+                onClick={() => setZoomIndex(zoomIndex + 1)}
+                disabled={zoomIndex === ZOOM_LEVELS.length - 1}
+                title="Zoom out (larger range size)"
+              >
+                +
+              </Button>
+            </div>
+          </SidebarSection>
+
+          <SidebarSection label="Points">
+            <div className="grid grid-cols-5 gap-1 border border-border bg-background p-1">
+              {CHART_POINT_COUNT_OPTIONS.map((count) => (
+                <Button
+                  key={count}
+                  type="button"
+                  variant={pointCount === count ? "default" : "ghost"}
+                  size="xs"
+                  className="font-mono tabular-nums"
+                  onClick={() => setPointCount(count)}
+                >
+                  {count}
+                </Button>
+              ))}
+            </div>
+          </SidebarSection>
+
+          <SidebarSection label="X axis">
+            <Tabs value={xAxisMode} onValueChange={(value) => setXAxisMode(value as XAxisMode)}>
+              <TabsList className="w-full">
+                {X_AXIS_MODES.map((mode) => (
+                  <TabsTrigger key={mode.value} value={mode.value} className="flex-1">
+                    {mode.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </SidebarSection>
+
+          <SidebarSection label="Anchor">
+            <div className="border border-border bg-background px-2 py-1.5 font-mono text-xs tabular-nums">
+              {activeBlockWindow
+                ? `Blocks ${activeBlockWindow.start}–${activeBlockWindow.end}`
+                : startDate
+                  ? fmtShortDate(startDate, timeZone)
+                  : "Latest"}
+            </div>
+          </SidebarSection>
+
+          <SidebarSection label="Status">
+            <div className="text-xs leading-relaxed text-foreground">
+              {loading ? (
+                "Loading…"
+              ) : error ? (
+                <span className="text-destructive">Failed: {error}</span>
+              ) : windowInfo ? (
+                <>
+                  {points.length} pts · blocks {windowInfo.first}–{windowInfo.last}
+                  <br />
+                  {fmtShortDate(windowInfo.firstDate, timeZone)} → {fmtShortDate(windowInfo.lastDate, timeZone)}
+                </>
+              ) : (
+                "No data"
+              )}
+            </div>
+          </SidebarSection>
+
+          <SidebarSection label="Parameters">
+            <div className="flex flex-col gap-3">
+              {parameterGroups.map((group) => (
+                <div key={group.key} className="flex flex-col gap-0.5 border-t border-border pt-2 first:border-t-0 first:pt-0">
+                  <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                    {group.label}
+                  </span>
+                  {group.parameters.map((p) => {
+                    const isOn = selected.includes(p.key);
+                    return (
+                      <label
+                        key={p.key}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2 px-1.5 py-1 text-xs transition-colors hover:bg-accent",
+                          isOn && "bg-muted",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isOn}
+                          onChange={() => toggleParameter(p.key)}
+                          className="size-3.5 accent-primary"
+                        />
+                        <span
+                          className="size-2.5 shrink-0 border"
+                          style={{ background: isOn ? p.color : "transparent", borderColor: p.color }}
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{p.label}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {displayUnit(p.unit, tokenSymbol)}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </SidebarSection>
+
+          <SidebarSection>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button type="button" variant="outline" size="xs" onClick={copyPermalink}>
+                Copy link
+              </Button>
+              <a
+                href={fullscreenHref}
+                target="_blank"
+                rel="noreferrer"
+                title="Open chart-only permalink in a new tab"
+                className="inline-flex h-6 items-center gap-1 border border-border bg-background px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                Fullscreen chart
+              </a>
+              <Button type="button" variant="outline" size="xs" onClick={resetChartSettings}>
+                Reset to defaults
+              </Button>
+            </div>
+            {copyStatus ? <span className="text-xs text-muted-foreground">{copyStatus}</span> : null}
+          </SidebarSection>
+        </aside>
+      )}
+
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col p-2 lg:p-3", sidebarCollapsed && "lg:pl-12")}>
+        <Card className="flex min-h-[420px] flex-1 flex-col gap-0 overflow-x-auto p-2 lg:min-h-0">
+          {chartContent}
+        </Card>
+      </div>
+
+      <aside className="flex w-full shrink-0 flex-col gap-4 overflow-y-auto border-t border-border bg-muted/20 p-3 lg:w-72 lg:border-t-0 lg:border-l">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-heading text-sm">Selection</h2>
+          <div className="flex flex-wrap justify-end gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={zoomToSelectedRange}
+              disabled={!selectedPoint || selectedPoint.rangeSize === 1}
+              title={
+                selectedPoint
+                  ? selectedPoint.rangeSize === 1
+                    ? "Blocks cannot be zoomed further"
+                    : "Zoom to this range and show blocks"
+                  : "Select a chart point first"
+              }
+            >
+              Zoom to range
+            </Button>
+            {transactionDataEnabled ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={inspectSelectedBlock}
+                disabled={!selectedPoint || selectedPoint.rangeSize !== 1}
                 title={
                   selectedPoint
                     ? selectedPoint.rangeSize === 1
-                      ? "Blocks cannot be zoomed further"
-                      : "Zoom to this range and show blocks"
+                      ? "Inspect this block"
+                      : "Zoom to blocks before inspecting one block"
                     : "Select a chart point first"
                 }
               >
-                Zoom to range
-              </button>
-              {transactionDataEnabled ? (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={inspectSelectedBlock}
-                  disabled={!selectedPoint || selectedPoint.rangeSize !== 1}
-                  title={
-                    selectedPoint
-                      ? selectedPoint.rangeSize === 1
-                        ? "Inspect this block"
-                        : "Zoom to blocks before inspecting one block"
-                      : "Select a chart point first"
-                  }
-                >
-                  Inspect block
-                </button>
-              ) : null}
-            </div>
+                Inspect block
+              </Button>
+            ) : null}
           </div>
-          {selectedPoint ? (
-            <SelectionDetails
-              point={selectedPoint}
-              selectedKeys={selected}
-              timeZone={timeZone}
-              tokenSymbol={tokenSymbol}
-              availableParameters={availableParameters}
-            />
-          ) : (
-            <div className="selection-empty">Click a chart point to view block or range details.</div>
-          )}
-        </aside>
-      </div>
+        </div>
+        {selectedPoint ? (
+          <SelectionDetails
+            point={selectedPoint}
+            selectedKeys={selected}
+            timeZone={timeZone}
+            tokenSymbol={tokenSymbol}
+            availableParameters={availableParameters}
+          />
+        ) : (
+          <div className="border border-dashed border-border px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+            Click a chart point to view block or range details.
+          </div>
+        )}
+      </aside>
     </section>
+  );
+}
+
+function SidebarSection({ label, children }: { label?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {label ? (
+        <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">{label}</span>
+      ) : null}
+      {children}
+    </div>
   );
 }
 
@@ -1006,7 +1052,7 @@ function buildPlot(
     margin: { l: 60, r: 60, t: 30, b: 50 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    font: { color: getCssColor("--fg", "#1a1d23") },
+    font: { color: getCssColor("--foreground", "#111111") },
     legend: {
       orientation: "h",
       yanchor: "bottom",
@@ -1019,8 +1065,8 @@ function buildPlot(
       title: { text: xAxisMode === "dates" ? "Date" : "Block range" } as Plotly.DataTitle,
       domain: [domainStart, domainEnd],
       range: xRange,
-      gridcolor: getCssColor("--border", "#d6d9df"),
-      zerolinecolor: getCssColor("--border", "#d6d9df"),
+      gridcolor: getCssColor("--border", "#e9e6de"),
+      zerolinecolor: getCssColor("--border", "#e9e6de"),
     },
   };
 
@@ -1035,8 +1081,8 @@ function buildPlot(
         x1: selectedEnd,
         y0: 0,
         y1: 1,
-        fillcolor: "rgba(46, 99, 216, 0.14)",
-        line: { color: getCssColor("--accent", "#2e63d8"), width: 1 },
+        fillcolor: withAlpha(getCssColor("--primary", "#181ea9"), 0.14),
+        line: { color: getCssColor("--primary", "#181ea9"), width: 1 },
         layer: "below",
       },
     ];
@@ -1048,8 +1094,8 @@ function buildPlot(
     const refKey = i === 0 ? "yaxis" : `yaxis${i + 1}`;
     const baseAxis: Partial<Plotly.LayoutAxis> = {
       title: { text: a.axisLabel } as Plotly.DataTitle,
-      gridcolor: getCssColor("--border", "#d6d9df"),
-      zerolinecolor: getCssColor("--border", "#d6d9df"),
+      gridcolor: getCssColor("--border", "#e9e6de"),
+      zerolinecolor: getCssColor("--border", "#e9e6de"),
     };
 
     if (i === 0) {
@@ -1148,36 +1194,42 @@ function SelectionDetails({
 }) {
   const activeParams = availableParameters.filter((p) => selectedKeys.includes(p.key));
   return (
-    <div className="selection-content">
-      <dl className="selection-meta">
-        <div>
-          <dt>Type</dt>
-          <dd>{point.rangeSize === 1 ? "Block" : "Range"}</dd>
-        </div>
-        <div>
-          <dt>Blocks</dt>
-          <dd>{point.rangeStart === point.rangeEnd ? point.rangeStart : `${point.rangeStart}–${point.rangeEnd}`}</dd>
-        </div>
-        <div>
-          <dt>Range size</dt>
-          <dd>{point.rangeSize}</dd>
-        </div>
-        <div>
-          <dt>Date</dt>
-          <dd>{fmtShortDate(point.midDate, timeZone)}</dd>
-        </div>
+    <div className="flex flex-col gap-4">
+      <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1.5 text-xs">
+        <dt className="text-muted-foreground">Type</dt>
+        <dd>
+          <Badge variant="outline">{point.rangeSize === 1 ? "Block" : "Range"}</Badge>
+        </dd>
+        <dt className="text-muted-foreground">Blocks</dt>
+        <dd className="tabular-nums">
+          {point.rangeStart === point.rangeEnd ? point.rangeStart : `${point.rangeStart}–${point.rangeEnd}`}
+        </dd>
+        <dt className="text-muted-foreground">Range size</dt>
+        <dd className="tabular-nums">{point.rangeSize}</dd>
+        <dt className="text-muted-foreground">Date</dt>
+        <dd className="tabular-nums">{fmtShortDate(point.midDate, timeZone)}</dd>
       </dl>
 
-      <div className="selection-metrics">
-        <span className="toolbar-label">Selected metrics</span>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+          Selected metrics
+        </span>
         {activeParams.length === 0 ? (
-          <div className="selection-empty compact">No active metrics.</div>
+          <div className="border border-dashed border-border px-2 py-1.5 text-xs text-muted-foreground">
+            No active metrics.
+          </div>
         ) : (
           activeParams.map((param) => (
-            <div key={param.key} className="selection-metric-row">
-              <span className="param-swatch" style={{ background: param.color, borderColor: param.color }} />
-              <span className="selection-metric-label">{param.label}</span>
-              <span className="selection-metric-value">{formatMetricValue(param, point, tokenSymbol)}</span>
+            <div key={param.key} className="flex items-center gap-2 border border-border px-2 py-1.5">
+              <span
+                className="size-2.5 shrink-0 border"
+                style={{ background: param.color, borderColor: param.color }}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{param.label}</span>
+              <span className="shrink-0 font-mono text-xs tabular-nums">
+                {formatMetricValue(param, point, tokenSymbol)}
+              </span>
             </div>
           ))
         )}
