@@ -34,7 +34,8 @@ import {
   type BaseloadWorkerBalance,
   type StoredBaseloadConfigSummary,
 } from "./api";
-import { fmtEth } from "./format";
+import { fmtBytes, fmtEth } from "./format";
+import { formatCountShort, projectBaseloadMinutes, projectBaseloadTraffic } from "./baseloadProjection";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 
 interface BaseloadViewProps {
@@ -372,6 +373,8 @@ export function BaseloadView({
       />
 
       <FleetSummary workers={config.workers} taskStatuses={taskStatuses} />
+
+      <TrafficProjection workers={config.workers} />
 
       <div className="baseload-workbench">
         <aside className="worker-list" aria-label="Workers">
@@ -930,6 +933,212 @@ function FleetSummary({
       ))}
     </div>
   );
+}
+
+/**
+ * Two small-multiple bar charts, one per measure, of the fleet's expected
+ * traffic across a UTC day. Separate charts rather than one dual-axis chart
+ * because transactions and bytes live on unrelated scales.
+ */
+function TrafficProjection({ workers }: { workers: readonly BaseloadWorkerConfig[] }) {
+  const projection = useMemo(() => projectBaseloadTraffic(workers), [workers]);
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [hoveredMinute, setHoveredMinute] = useState<number | null>(null);
+  const currentHour = new Date().getUTCHours();
+  const currentMinute = new Date().getUTCMinutes();
+  const focus = hovered ?? currentHour;
+  const minutes = useMemo(() => projectBaseloadMinutes(workers, focus), [workers, focus]);
+  if (workers.length === 0) return null;
+  const focused = projection.hours[focus]!;
+  const minuteFocus = hoveredMinute ?? (focus === currentHour ? currentMinute : null);
+  const focusedMinute = minuteFocus === null ? null : minutes[minuteFocus]!;
+  const peakMinuteTx = Math.max(0, ...minutes.map((entry) => entry.txCount));
+  const peakMinuteBytes = Math.max(0, ...minutes.map((entry) => entry.payloadBytes));
+  const hourLabels = ["00", "06", "12", "18", "24"];
+  const minuteLabels = ["00", "15", "30", "45", "60"];
+  const busiest = projection.hours.reduce((best, entry) => (entry.txCount > best.txCount ? entry : best));
+  const quietest = projection.hours.reduce((best, entry) => (entry.txCount < best.txCount ? entry : best));
+
+  return (
+    <section className="traffic-projection" aria-label="Projected baseload traffic">
+      <header className="traffic-projection-head">
+        <h3>Projected traffic per UTC hour</h3>
+        <span className="traffic-projection-hint">
+          from schedules and rates; block and duration limits ignored, calldata overhead excluded
+        </span>
+      </header>
+      <div className="traffic-projection-stats">
+        <span className="fleet-chip">
+          <strong>{formatCountShort(projection.dayTxCount)}</strong> tx / day
+        </span>
+        <span className="fleet-chip">
+          <strong>{fmtBytes(projection.dayPayloadBytes)}</strong> payload / day
+        </span>
+        <span className="fleet-chip">
+          <strong>{formatCountShort(busiest.txCount)}</strong> tx busiest ({pad2(busiest.hour)}:00)
+        </span>
+        {quietest.txCount !== busiest.txCount ? (
+          <span className="fleet-chip">
+            <strong>{formatCountShort(quietest.txCount)}</strong> tx quietest ({pad2(quietest.hour)}:00)
+          </span>
+        ) : null}
+        <span className="fleet-chip traffic-projection-focus">
+          <strong>{pad2(focused.hour)}:00</strong> {formatCountShort(focused.txCount)} tx ·{" "}
+          {fmtBytes(focused.payloadBytes)} · {focused.activeWorkers} workers
+          {hovered === null ? " (now)" : ""}
+        </span>
+      </div>
+      <div className="traffic-projection-charts">
+        <BarStrip
+          title="Transactions per hour"
+          values={projection.hours.map((entry) => entry.txCount)}
+          format={formatCountShort}
+          peak={projection.peakTxCount}
+          current={currentHour}
+          hovered={hovered}
+          onHover={setHovered}
+          labels={hourLabels}
+          bucket={(index) => `${pad2(index)}:00 UTC`}
+        />
+        <BarStrip
+          title="Payload per hour"
+          values={projection.hours.map((entry) => entry.payloadBytes)}
+          format={fmtBytes}
+          peak={projection.peakPayloadBytes}
+          current={currentHour}
+          hovered={hovered}
+          onHover={setHovered}
+          labels={hourLabels}
+          bucket={(index) => `${pad2(index)}:00 UTC`}
+        />
+      </div>
+      <div className="traffic-projection-subhead">
+        <span>
+          Inside {pad2(focus)}:00{hovered === null ? " (current hour)" : ""}, minute by minute
+        </span>
+        {focusedMinute ? (
+          <span className="traffic-projection-focus">
+            {pad2(focus)}:{pad2(focusedMinute.minute)} · {formatCountShort(focusedMinute.txCount)} tx/min ·{" "}
+            {fmtBytes(focusedMinute.payloadBytes)}/min · {focusedMinute.activeWorkers} workers
+          </span>
+        ) : null}
+      </div>
+      <div className="traffic-projection-charts">
+        <BarStrip
+          title="Transactions per minute"
+          values={minutes.map((entry) => entry.txCount)}
+          format={formatCountShort}
+          peak={peakMinuteTx}
+          current={focus === currentHour ? currentMinute : null}
+          hovered={hoveredMinute}
+          onHover={setHoveredMinute}
+          labels={minuteLabels}
+          bucket={(index) => `${pad2(focus)}:${pad2(index)} UTC`}
+        />
+        <BarStrip
+          title="Payload per minute"
+          values={minutes.map((entry) => entry.payloadBytes)}
+          format={fmtBytes}
+          peak={peakMinuteBytes}
+          current={focus === currentHour ? currentMinute : null}
+          hovered={hoveredMinute}
+          onHover={setHoveredMinute}
+          labels={minuteLabels}
+          bucket={(index) => `${pad2(focus)}:${pad2(index)} UTC`}
+        />
+      </div>
+      <details className="traffic-projection-table">
+        <summary>Hourly table</summary>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>UTC hour</th>
+                <th>Transactions</th>
+                <th>Payload</th>
+                <th>Active workers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projection.hours.map((entry) => (
+                <tr key={entry.hour} data-current={entry.hour === currentHour ? "true" : undefined}>
+                  <td>{pad2(entry.hour)}:00</td>
+                  <td>{Math.round(entry.txCount).toLocaleString()}</td>
+                  <td>{fmtBytes(entry.payloadBytes)}</td>
+                  <td>{entry.activeWorkers}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function BarStrip({
+  title,
+  values,
+  format,
+  peak,
+  current,
+  hovered,
+  onHover,
+  labels,
+  bucket,
+}: {
+  title: string;
+  values: readonly number[];
+  format: (value: number) => string;
+  peak: number;
+  current: number | null;
+  hovered: number | null;
+  onHover: (index: number | null) => void;
+  labels: readonly string[];
+  bucket: (index: number) => string;
+}) {
+  const height = 72;
+  const width = 100 / values.length;
+  const focus = hovered ?? current;
+  return (
+    <figure className="hour-bars" onMouseLeave={() => onHover(null)}>
+      <figcaption>
+        <span>{title}</span>
+        <span className="hour-bars-value">{focus === null ? "" : format(values[focus] ?? 0)}</span>
+      </figcaption>
+      <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" role="img" aria-label={title}>
+        {values.map((measure, index) => {
+          const barHeight = peak > 0 ? Math.max(measure > 0 ? 1.5 : 0, (measure / peak) * (height - 4)) : 0;
+          const x = index * width;
+          return (
+            <g key={index} onMouseEnter={() => onHover(index)}>
+              <rect className="hour-bars-hit" x={x} y={0} width={width} height={height} />
+              <rect
+                className="hour-bars-bar"
+                data-focus={index === focus ? "true" : undefined}
+                data-current={index === current ? "true" : undefined}
+                x={x + width * 0.12}
+                y={height - barHeight}
+                width={width * 0.76}
+                height={barHeight}
+              >
+                <title>{`${bucket(index)} — ${format(measure)}`}</title>
+              </rect>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="hour-bars-axis" aria-hidden="true">
+        {labels.map((label) => (
+          <span key={label}>{label}</span>
+        ))}
+      </div>
+    </figure>
+  );
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {

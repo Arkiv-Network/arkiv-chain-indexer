@@ -6441,3 +6441,136 @@ form select {
   color: var(--op-amber, var(--muted));
   font-family: var(--font-mono);
 }
+
+/* Projected traffic: two single-series small multiples over a UTC day. */
+.traffic-projection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--row-alt);
+}
+
+.traffic-projection-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.traffic-projection-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.traffic-projection-hint {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.traffic-projection-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.traffic-projection-focus {
+  font-family: var(--font-mono);
+}
+
+.traffic-projection-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem 1.25rem;
+}
+
+.hour-bars {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.hour-bars figcaption {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hour-bars-value {
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg);
+}
+
+.hour-bars svg {
+  display: block;
+  width: 100%;
+  height: 72px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hour-bars-hit {
+  fill: transparent;
+}
+
+.hour-bars-bar {
+  fill: color-mix(in oklab, var(--accent) 55%, transparent);
+  transition: fill 100ms ease;
+}
+
+.hour-bars-bar[data-current="true"] {
+  fill: color-mix(in oklab, var(--accent) 80%, transparent);
+}
+
+.hour-bars-bar[data-focus="true"] {
+  fill: var(--accent);
+}
+
+.hour-bars-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.traffic-projection-table summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.traffic-projection-table table {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.traffic-projection-table tr[data-current="true"] td {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.traffic-projection-table .table-scroll {
+  overflow-x: auto;
+}
+
+.traffic-projection-subhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
