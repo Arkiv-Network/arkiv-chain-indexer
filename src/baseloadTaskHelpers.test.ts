@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   BASELOAD_PROJECT_ATTRIBUTE,
+  isFeeCapBelowBaseFeeError,
   chooseBaseloadOperation,
   createBaseloadAttributes,
   createBaseloadEntityInput,
@@ -215,3 +216,25 @@ function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfi
 function fixedRandomBytes(size: number): Uint8Array {
   return Uint8Array.from({ length: size }, (_, index) => index % 256);
 }
+
+describe("isFeeCapBelowBaseFeeError", () => {
+  test("recognizes viem's error by name, by message, and through the cause chain", () => {
+    const named = Object.assign(new Error("boom"), { name: "FeeCapTooLowError" });
+    expect(isFeeCapBelowBaseFeeError(named)).toBe(true);
+    expect(
+      isFeeCapBelowBaseFeeError(
+        new Error("The fee cap (`maxFeePerGas` = 1.7 gwei) cannot be lower than the block base fee."),
+      ),
+    ).toBe(true);
+    const wrapped = new Error("EntityMutationError: Transaction failed", {
+      cause: new Error("max fee per gas less than block base fee"),
+    });
+    expect(isFeeCapBelowBaseFeeError(wrapped)).toBe(true);
+  });
+
+  test("leaves other failures alone", () => {
+    expect(isFeeCapBelowBaseFeeError(new Error("Execution error without revert data"))).toBe(false);
+    expect(isFeeCapBelowBaseFeeError(null)).toBe(false);
+    expect(isFeeCapBelowBaseFeeError("nonce too low")).toBe(false);
+  });
+});

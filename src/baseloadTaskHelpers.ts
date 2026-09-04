@@ -244,3 +244,24 @@ function bytesToSafeInteger(bytes: Uint8Array): number {
   }
   return value;
 }
+
+/**
+ * True when a send was refused because the worker's fee cap sits below the
+ * current block base fee. That is the cap doing its job, not a fault: the
+ * worker should wait for gas to come down rather than report an error.
+ */
+export function isFeeCapBelowBaseFeeError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { name?: unknown; message?: unknown; cause?: unknown };
+    if (candidate.name === "FeeCapTooLowError") return true;
+    if (typeof candidate.message === "string" && FEE_CAP_TOO_LOW_PATTERN.test(candidate.message)) return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
+const FEE_CAP_TOO_LOW_PATTERN =
+  /cannot be lower than the block base fee|max fee per gas less than block base fee|fee cap less than block base fee/i;

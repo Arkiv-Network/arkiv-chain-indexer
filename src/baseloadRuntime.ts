@@ -38,6 +38,7 @@ import {
   getMinuteAttemptLimit,
   getTimeBombDetonationMs,
   getTimeBombRemainingSeconds,
+  isFeeCapBelowBaseFeeError,
   parseGweiToWei,
   pickSoonestExpiringPoolEntries,
   pruneExpiredPoolEntries,
@@ -810,6 +811,15 @@ class BaseloadWorkerTask {
           }
         } catch (error) {
           if (this.abortController.signal.aborted) break;
+          if (isFeeCapBelowBaseFeeError(error)) {
+            this.postStatus("waiting", {
+              currentBlock: lastKnownBlock,
+              message: `Base fee above the ${worker.maxGasPriceGwei} gwei cap, waiting for gas to drop`,
+              ...statusCounts(),
+            });
+            await sleep(5_000, this.abortController.signal).catch(() => undefined);
+            continue;
+          }
           const verbose = describeError(error);
           console.error(
             `[baseload] worker ${this.worker.id} (wallet ${this.worker.walletNumber}) failed: ${verbose}`,
