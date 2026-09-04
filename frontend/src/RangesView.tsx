@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchRanges, type RangesResponse, type StoredBlockRange } from "./api";
 import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtRatio, fmtTokenAmount } from "./format";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { FilterField, FilterGroup, FiltersPanel, selectClass } from "@/components/filters-panel";
+import { cn } from "@/lib/utils";
 import {
   buildPermalinkHref,
   filtersEqual,
@@ -60,26 +65,27 @@ interface ColumnGroup<T> {
 }
 
 function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlockRange>[] {
+  const num = "text-right font-mono tabular-nums";
   return [
     {
       key: "rangeSize",
       label: "Range size",
       group: "Range",
-      className: "num",
+      className: num,
       render: (row) => row.rangeSize,
     },
     {
       key: "rangeStart",
       label: "Start block",
       group: "Range",
-      className: "num",
+      className: num,
       render: (row) => row.rangeStart,
     },
     {
       key: "rangeEnd",
       label: "End block",
       group: "Range",
-      className: "num",
+      className: num,
       render: (row) => row.rangeEnd,
     },
     {
@@ -98,203 +104,203 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
       key: "minBaseFeeWei",
       label: "Min base fee",
       group: "Gas price",
-      className: "num",
+      className: num,
       render: (row) => fmtGasPrice(row.minBaseFeeWei),
     },
     {
       key: "maxBaseFeeWei",
       label: "Max base fee",
       group: "Gas price",
-      className: "num",
+      className: num,
       render: (row) => fmtGasPrice(row.maxBaseFeeWei),
     },
     {
       key: "averageBaseFeeWei",
       label: "Avg base fee",
       group: "Gas price",
-      className: "num",
+      className: num,
       render: (row) => fmtGasPrice(row.averageBaseFeeWei),
     },
     {
       key: "totalBlockRewardWei",
       label: "Total rewards",
       group: "Rewards",
-      className: "num",
+      className: num,
       render: (row) => fmtTokenAmount(row.totalBlockRewardWei, tokenSymbol),
     },
     {
       key: "totalBurntFeesWei",
       label: "Total burnt",
       group: "Rewards",
-      className: "num",
+      className: num,
       render: (row) => fmtTokenAmount(row.totalBurntFeesWei, tokenSymbol),
     },
     {
       key: "averageBlockRewardWei",
       label: "Avg reward/block",
       group: "Rewards",
-      className: "num",
+      className: num,
       render: (row) => fmtTokenAmount(row.averageBlockRewardWei, tokenSymbol),
     },
     {
       key: "averageBurntFeesWei",
       label: "Avg burnt/block",
       group: "Rewards",
-      className: "num",
+      className: num,
       render: (row) => fmtTokenAmount(row.averageBurntFeesWei, tokenSymbol),
     },
     {
       key: "averageFeePriceWei",
       label: "Avg fee price",
       group: "Gas price",
-      className: "num",
+      className: num,
       render: (row) => fmtGasPrice(row.averageFeePriceWei),
     },
     {
       key: "averagePriorityFeeWeightedWei",
       label: "Gas-weighted priority",
       group: "Gas price",
-      className: "num",
+      className: num,
       render: (row) => fmtGasPrice(row.averagePriorityFeeWeightedWei),
     },
     {
       key: "averagePriorityFeeWei",
       label: "Avg priority fee",
       group: "Gas price",
-      className: "num",
+      className: num,
       render: (row) => fmtGasPrice(row.averagePriorityFeeWei),
     },
     {
       key: "averageTransactionGasUsed",
       label: "Avg tx gas",
       group: "Transactions",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.averageTransactionGasUsed),
     },
     {
       key: "averageTransactionInputDataSizeBytes",
       label: "Avg tx input",
       group: "Transactions",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.averageTransactionInputDataSizeBytes),
     },
     {
       key: "averageTransactionInputDataCompressedSizeBytes",
       label: "Avg tx input zstd",
       group: "Transactions",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.averageTransactionInputDataCompressedSizeBytes),
     },
     {
       key: "transactionCount",
       label: "Tx count",
       group: "Transactions",
-      className: "num",
+      className: num,
       render: (row) => row.transactionCount,
     },
     {
       key: "minMaxGasInBlock",
       label: "Min block gas limit",
       group: "Block gas",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.minMaxGasInBlock),
     },
     {
       key: "maxMaxGasInBlock",
       label: "Max block gas limit",
       group: "Block gas",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.maxMaxGasInBlock),
     },
     {
       key: "gasUsed",
       label: "Gas used / total max",
       group: "Block gas",
-      className: "num",
+      className: num,
       render: (row) => fmtRatio(row.totalGasUsed, row.totalMaxGas),
     },
     {
       key: "totalGasUsed",
       label: "Total gas used",
       group: "Block gas",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.totalGasUsed),
     },
     {
       key: "averageTotalGasUsed",
       label: "Avg block gas used",
       group: "Block gas",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.averageTotalGasUsed),
     },
     {
       key: "minTotalGasUsed",
       label: "Min block gas used",
       group: "Block gas",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.minTotalGasUsed),
     },
     {
       key: "maxTotalGasUsed",
       label: "Max block gas used",
       group: "Block gas",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.maxTotalGasUsed),
     },
     {
       key: "totalInputDataSizeBytes",
       label: "Total input data",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.totalInputDataSizeBytes),
     },
     {
       key: "averageTotalInputDataSizeBytes",
       label: "Avg block input data",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.averageTotalInputDataSizeBytes),
     },
     {
       key: "minTotalInputDataSizeBytes",
       label: "Min block input data",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.minTotalInputDataSizeBytes),
     },
     {
       key: "maxTotalInputDataSizeBytes",
       label: "Max block input data",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.maxTotalInputDataSizeBytes),
     },
     {
       key: "totalInputDataCompressedSizeBytes",
       label: "Total input data zstd",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.totalInputDataCompressedSizeBytes),
     },
     {
       key: "averageTotalInputDataCompressedSizeBytes",
       label: "Avg block input zstd",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.averageTotalInputDataCompressedSizeBytes),
     },
     {
       key: "minTotalInputDataCompressedSizeBytes",
       label: "Min block input zstd",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.minTotalInputDataCompressedSizeBytes),
     },
     {
       key: "maxTotalInputDataCompressedSizeBytes",
       label: "Max block input zstd",
       group: "Data size",
-      className: "num",
+      className: num,
       render: (row) => fmtBytes(row.maxTotalInputDataCompressedSizeBytes),
     },
   ];
@@ -466,112 +472,71 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
     activeFilterCount > 0 || filters.limit !== EMPTY.limit || filters.rangeSize !== EMPTY.rangeSize;
 
   return (
-    <section className="view ranges-view">
-      <h2>Aggregated ranges</h2>
-      <div className={`filters-panel blocks-filters-panel${filtersOpen ? " open" : ""}`}>
-        <div className="filters-panel-head">
-          <button
-            type="button"
-            className="filters-toggle"
-            aria-expanded={filtersOpen}
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <span className="filters-toggle-chevron" aria-hidden="true" />
-            <span>Filters</span>
-            {activeFilterCount > 0 ? <span className="filters-count">{activeFilterCount}</span> : null}
-          </button>
-          <span className="blocks-filter-meta">
-            {filters.limit} rows / {filters.rangeSize} blocks
-          </span>
-          {filtersChanged ? (
-            <button type="button" className="link-button filters-clear" onClick={clearFilters}>
-              Clear all
-            </button>
-          ) : null}
-        </div>
-        {filtersOpen ? (
-          <form onSubmit={onSubmit} className="blocks-filter-form ranges-filter-form">
-            <fieldset className="filter-group ranges-size-filter">
-              <legend>Range</legend>
-              <label>
-                size
-                <select value={filters.rangeSize} onChange={onSelectChange("rangeSize")}>
-                  {RANGE_SIZES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                &gt;
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={filters.rangeStartGt}
-                  onChange={onTextChange("rangeStartGt")}
-                />
-              </label>
-              <label>
-                &lt;
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={filters.rangeStartLt}
-                  onChange={onTextChange("rangeStartLt")}
-                />
-              </label>
-            </fieldset>
-            <fieldset className="filter-group blocks-date-filter">
-              <legend>Date UTC</legend>
-              <label>
-                &gt;
-                <input
-                  type="text"
-                  placeholder="2024-01-01T00:00:00Z"
-                  value={filters.dateGt}
-                  onChange={onTextChange("dateGt")}
-                />
-              </label>
-              <label>
-                &lt;
-                <input
-                  type="text"
-                  placeholder="2024-12-31T00:00:00Z"
-                  value={filters.dateLt}
-                  onChange={onTextChange("dateLt")}
-                />
-              </label>
-            </fieldset>
-            <fieldset className="filter-group blocks-limit-filter">
-              <legend>Rows</legend>
-              <label>
-                limit
-                <select value={filters.limit} onChange={onSelectChange("limit")}>
-                  {LIMIT_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </fieldset>
-            <div className="blocks-filter-actions">
-              <button type="button" className="secondary" onClick={copyPermalink}>
-                Copy link
-              </button>
-              {filtersChanged ? (
-                <button type="button" className="secondary" onClick={clearFilters}>
-                  Clear
-                </button>
-              ) : null}
-              <button type="submit">Search</button>
-              {copyStatus ? <span className="copy-status">{copyStatus}</span> : null}
-            </div>
-          </form>
-        ) : null}
-      </div>
-      <p className={`summary${error ? " error" : ""}`}>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <h2 className="font-heading text-lg font-black tracking-tight">Aggregated ranges</h2>
+
+      <FiltersPanel
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        activeCount={activeFilterCount}
+        meta={`${filters.limit} rows / ${filters.rangeSize} blocks`}
+        onClearAll={filtersChanged ? clearFilters : undefined}
+      >
+        <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">
+          <FilterGroup label="Range">
+            <FilterField label="Size">
+              <select className={cn(selectClass, "w-24")} value={filters.rangeSize} onChange={onSelectChange("rangeSize")}>
+                {RANGE_SIZES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+            <FilterField label="&gt;">
+              <Input type="text" inputMode="numeric" className="w-28" value={filters.rangeStartGt} onChange={onTextChange("rangeStartGt")} />
+            </FilterField>
+            <FilterField label="&lt;">
+              <Input type="text" inputMode="numeric" className="w-28" value={filters.rangeStartLt} onChange={onTextChange("rangeStartLt")} />
+            </FilterField>
+          </FilterGroup>
+          <FilterGroup label="Date UTC">
+            <FilterField label="&gt;">
+              <Input type="text" className="w-52" placeholder="2024-01-01T00:00:00Z" value={filters.dateGt} onChange={onTextChange("dateGt")} />
+            </FilterField>
+            <FilterField label="&lt;">
+              <Input type="text" className="w-52" placeholder="2024-12-31T00:00:00Z" value={filters.dateLt} onChange={onTextChange("dateLt")} />
+            </FilterField>
+          </FilterGroup>
+          <FilterGroup label="Rows">
+            <FilterField label="Limit">
+              <select className={cn(selectClass, "w-28")} value={filters.limit} onChange={onSelectChange("limit")}>
+                {LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+          </FilterGroup>
+          <div className="ml-auto flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={copyPermalink}>
+              Copy link
+            </Button>
+            {filtersChanged ? (
+              <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                Clear
+              </Button>
+            ) : null}
+            <Button type="submit" size="sm">
+              Search
+            </Button>
+            {copyStatus ? <span className="text-xs text-muted-foreground">{copyStatus}</span> : null}
+          </div>
+        </form>
+      </FiltersPanel>
+
+      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {loading
           ? "Loading..."
           : error
@@ -580,73 +545,67 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
               ? `${data.count} ranges${data.truncated ? ` (truncated to ${data.limit})` : ""}`
               : ""}
       </p>
-      <div className={`ranges-columns-panel${columnsOpen ? " open" : ""}`}>
-        <div className="ranges-columns-head">
-          <button
-            type="button"
-            className="filters-toggle"
-            aria-expanded={columnsOpen}
-            onClick={() => setColumnsOpen((open) => !open)}
-          >
-            <span className="filters-toggle-chevron" aria-hidden="true" />
-            <span>Columns</span>
-            <span className="filters-count">{visibleColumns.length}</span>
-          </button>
-          {visibleColumns.length < columns.length ? (
-            <button type="button" className="link-button filters-clear" onClick={showAllColumns}>
-              Show all
-            </button>
-          ) : null}
-        </div>
-        {columnsOpen ? (
-          <div className="ranges-column-groups">
-            {columnGroups.map((group) => (
-              <div key={group.key} className="ranges-column-group">
-                <span className="ranges-column-group-title">{group.label}</span>
-                <div className="ranges-column-grid">
-                  {group.columns.map((column) => {
-                    const checked = visibleColumnKeys.includes(column.key);
-                    return (
-                      <label key={column.key} className="ranges-column-toggle">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={checked && visibleColumns.length === 1}
-                          onChange={() => toggleColumn(column.key)}
-                        />
-                        <span>{column.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
+
+      <FiltersPanel
+        title="Columns"
+        open={columnsOpen}
+        onOpenChange={setColumnsOpen}
+        activeCount={visibleColumns.length}
+        showCountAlways
+        onClearAll={visibleColumns.length < columns.length ? showAllColumns : undefined}
+        clearLabel="Show all"
+      >
+        <div className="flex flex-col gap-4">
+          {columnGroups.map((group) => (
+            <div key={group.key} className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                {group.label}
+              </span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {group.columns.map((column) => {
+                  const checked = visibleColumnKeys.includes(column.key);
+                  return (
+                    <label key={column.key} className="flex items-center gap-1.5 text-xs text-foreground">
+                      <input
+                        type="checkbox"
+                        className="size-3.5 rounded-none border-input accent-primary"
+                        checked={checked}
+                        disabled={checked && visibleColumns.length === 1}
+                        onChange={() => toggleColumn(column.key)}
+                      />
+                      <span>{column.label}</span>
+                    </label>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <div className="table-wrap">
-        <table className="data-table ranges-table">
-          <thead>
-            <tr>
+            </div>
+          ))}
+        </div>
+      </FiltersPanel>
+
+      <div className="overflow-x-auto border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
               {visibleColumns.map((column) => (
-                <th key={column.key} scope="col" className={column.className}>
+                <TableHead key={column.key} className={column.className}>
                   {renderTableHeader(column.label)}
-                </th>
+                </TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {sorted.map((row) => (
-              <tr key={`${row.rangeSize}-${row.rangeStart}`}>
+              <TableRow key={`${row.rangeSize}-${row.rangeStart}`}>
                 {visibleColumns.map((column) => (
-                  <td key={column.key} className={column.className} data-label={column.label}>
+                  <TableCell key={column.key} className={column.className} data-label={column.label}>
                     {column.render(row)}
-                  </td>
+                  </TableCell>
                 ))}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </section>
   );

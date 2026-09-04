@@ -1,0 +1,259 @@
+/*
+ * Design system foundation, copied from the Arkiv Data Explorer
+ * (data-explorer/app/globals.css). Tokens, fonts and Tailwind setup live
+ * here; the legacy styles.css is loaded after this file and is retired
+ * view by view.
+ */
+@import "tailwindcss";
+
+/* Fonts: IBM Plex Mono for all text, BrutalType for headings. Self-hosted
+   and preloaded from index.html so text paints in its final face. */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/ibm-plex-mono-400-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("/fonts/ibm-plex-mono-500-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "BrutalType";
+  src: url("/fonts/BrutalType-Black.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* shadcn/tailwind.css, inlined (accordion keyframes, base-ui data-* variants). */
+@theme inline {
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(
+        --radix-accordion-content-height,
+        var(--accordion-panel-height, auto)
+      );
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(
+        --radix-accordion-content-height,
+        var(--accordion-panel-height, auto)
+      );
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+/* Custom variants */
+@custom-variant data-open {
+  &:where([data-state="open"]),
+  &:where([data-open]:not([data-open="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-closed {
+  &:where([data-state="closed"]),
+  &:where([data-closed]:not([data-closed="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-checked {
+  &:where([data-state="checked"]),
+  &:where([data-checked]:not([data-checked="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-unchecked {
+  &:where([data-state="unchecked"]),
+  &:where([data-unchecked]:not([data-unchecked="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-selected {
+  &:where([data-selected="true"]) {
+    @slot;
+  }
+}
+
+@custom-variant data-disabled {
+  &:where([data-disabled="true"]),
+  &:where([data-disabled]:not([data-disabled="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-active {
+  &:where([data-state="active"]),
+  &:where([data-active]:not([data-active="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-horizontal {
+  &:where([data-orientation="horizontal"]) {
+    @slot;
+  }
+}
+
+@custom-variant data-vertical {
+  &:where([data-orientation="vertical"]) {
+    @slot;
+  }
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: "BrutalType", var(--font-sans);
+  --font-sans: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --font-sans: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  --font-mono: var(--font-sans);
+  --background: #f6f4ef;
+  --foreground: #111111;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #181ea9;
+  --primary-foreground: #ffffff;
+  --secondary: #e9e6de;
+  --secondary-foreground: #111111;
+  --muted: #e9e6de;
+  --muted-foreground: #64625d;
+  --accent: #fe7446;
+  --accent-foreground: #c44a1e;
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: #e9e6de;
+  --input: #e9e6de;
+  --ring: #181ea9;
+  --chart-1: #181ea9;
+  --chart-2: #fe7446;
+  --chart-3: #4b52c7;
+  --chart-4: #e9e6de;
+  --chart-5: #111111;
+  --radius: 0.625rem;
+  --sidebar: #f6f4ef;
+  --sidebar-foreground: #111111;
+  --sidebar-primary: #181ea9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e9e6de;
+  --sidebar-accent-foreground: #111111;
+  --sidebar-border: #e9e6de;
+  --sidebar-ring: #181ea9;
+}
+
+.dark {
+  --background: #111111;
+  --foreground: #f6f4ef;
+  --card: #1c1c1c;
+  --card-foreground: #f6f4ef;
+  --popover: #1c1c1c;
+  --popover-foreground: #f6f4ef;
+  --primary: #4b52c7;
+  --primary-foreground: #ffffff;
+  --secondary: #2a2823;
+  --secondary-foreground: #f6f4ef;
+  --muted: #2a2823;
+  --muted-foreground: #a09e98;
+  --accent: #fe7446;
+  --accent-foreground: #ffffff;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #2a2823;
+  --input: #2a2823;
+  --ring: #4b52c7;
+  --chart-1: #4b52c7;
+  --chart-2: #fe7446;
+  --chart-3: #7a7fe0;
+  --chart-4: #2a2823;
+  --chart-5: #f6f4ef;
+  --sidebar: #111111;
+  --sidebar-foreground: #f6f4ef;
+  --sidebar-primary: #4b52c7;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2a2823;
+  --sidebar-accent-foreground: #f6f4ef;
+  --sidebar-border: #2a2823;
+  --sidebar-ring: #4b52c7;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

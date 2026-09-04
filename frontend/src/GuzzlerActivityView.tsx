@@ -1,9 +1,16 @@
+import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
 import { AddressFace } from "./AddressFace";
 import { fetchGuzzlerHistory, type GuzzlerHistoryPoint, type GuzzlerHistoryResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
+import { Stat, StatGrid } from "@/components/stat";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { fmtDate, fmtDurationSeconds, fmtInteger, fmtMillions, fmtTokenAmount } from "./format";
 import {
   activityPlotRange,
@@ -115,76 +122,71 @@ export function GuzzlerActivityView({
   };
 
   return (
-    <section className="view guzzlers-view guzzler-activity">
-      <div className="view-heading-row">
-        <div className="guzzler-activity-title">
-          <button type="button" className="link-button guzzler-back" onClick={onBack}>
-            ← Leaderboard
-          </button>
-          <h2>Wallet activity</h2>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Button type="button" variant="ghost" size="sm" onClick={onBack} className="gap-1">
+            <ArrowLeft className="size-3.5" />
+            Leaderboard
+          </Button>
+          <h2 className="font-heading text-lg font-black tracking-tight">Wallet activity</h2>
         </div>
-        <div className="guzzler-controls">
-          <div className="segmented" role="group" aria-label="Metric">
-            {GUZZLER_ACTIVITY_METRICS.map((m) => (
-              <button
-                key={m.key}
-                type="button"
-                className={m.key === metricKey ? "active" : ""}
-                aria-pressed={m.key === metricKey}
-                onClick={() => setMetricKey(m.key)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          <div className="segmented" role="group" aria-label="Time window">
-            {GUZZLER_ACTIVITY_WINDOWS.map((w) => (
-              <button
-                key={w.key}
-                type="button"
-                className={w.key === windowKey ? "active" : ""}
-                aria-pressed={w.key === windowKey}
-                onClick={() => onWindowChange(w.key)}
-              >
-                {w.label}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="secondary guzzler-refresh" onClick={load} disabled={loading}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs value={metricKey} onValueChange={(value) => setMetricKey(value as GuzzlerActivityMetricKey)}>
+            <TabsList aria-label="Metric">
+              {GUZZLER_ACTIVITY_METRICS.map((m) => (
+                <TabsTrigger key={m.key} value={m.key}>
+                  {m.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <Tabs value={windowKey} onValueChange={(value) => onWindowChange(value as GuzzlerActivityWindowKey)}>
+            <TabsList aria-label="Time window">
+              {GUZZLER_ACTIVITY_WINDOWS.map((w) => (
+                <TabsTrigger key={w.key} value={w.key}>
+                  {w.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
             {loading ? "Refreshing" : "Refresh"}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="guzzler-activity-id">
-        <AddressFace address={address} />
-        <form className="guzzler-address-form" onSubmit={onSubmitAddress}>
-          <label className="visually-hidden" htmlFor="guzzler-address-input">
-            Wallet address
-          </label>
-          <input
-            id="guzzler-address-input"
-            className="mono"
-            value={addressInput}
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(event) => setAddressInput(event.target.value)}
-            placeholder="0x…"
-            title={display.title ?? address}
-          />
-          <button type="submit" className="secondary">
+      <div className="flex flex-wrap items-center gap-3 border border-border bg-card p-3">
+        <AddressFace address={address} className="size-10 border border-border" />
+        <form className="flex items-end gap-2" onSubmit={onSubmitAddress}>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="guzzler-address-input" className="sr-only">
+              Wallet address
+            </Label>
+            <Input
+              id="guzzler-address-input"
+              className="w-96 font-mono"
+              value={addressInput}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(event) => setAddressInput(event.target.value)}
+              placeholder="0x…"
+              title={display.title ?? address}
+            />
+          </div>
+          <Button type="submit" variant="outline" size="sm">
             View
-          </button>
-          {inputError ? <span className="field-error">{inputError}</span> : null}
+          </Button>
+          {inputError ? <span className="text-xs text-destructive">{inputError}</span> : null}
         </form>
         {transactionsHref ? (
-          <a className="secondary-link guzzler-activity-txns" href={transactionsHref}>
+          <a className="text-xs text-accent hover:underline" href={transactionsHref}>
             View transactions
           </a>
         ) : null}
       </div>
 
-      <p className={`summary${error ? " error" : ""}`}>
+      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {error
           ? `Failed to load activity: ${error}`
           : data
@@ -198,34 +200,16 @@ export function GuzzlerActivityView({
               : "No activity loaded."}
       </p>
 
-      <dl className="guzzler-activity-stats">
-        <div>
-          <dt>Transactions</dt>
-          <dd>{fmtInteger(summary.totalTransactions)}</dd>
-        </div>
-        <div className="stat-wide">
-          <dt>Gas used</dt>
-          <dd>{fmtMillions(summary.totalGasUsed)}</dd>
-        </div>
-        <div className="stat-wide">
-          <dt>Fees</dt>
-          <dd>{fmtTokenAmount(summary.totalFeeWei, tokenSymbol)}</dd>
-        </div>
-        <div>
-          <dt>Active minutes</dt>
-          <dd>{fmtInteger(summary.activeMinutes)}</dd>
-        </div>
-        <div>
-          <dt>Peak txs / min</dt>
-          <dd>{fmtInteger(summary.peakTransactions)}</dd>
-        </div>
-        <div>
-          <dt>Last seen</dt>
-          <dd>{summary.lastSeen ? fmtDate(summary.lastSeen, timeZone) : "—"}</dd>
-        </div>
-      </dl>
+      <StatGrid className="sm:grid-cols-3 lg:grid-cols-6">
+        <Stat label="Transactions" size="lg">{fmtInteger(summary.totalTransactions)}</Stat>
+        <Stat label="Gas used" size="lg" wide>{fmtMillions(summary.totalGasUsed)}</Stat>
+        <Stat label="Fees" size="lg" wide>{fmtTokenAmount(summary.totalFeeWei, tokenSymbol)}</Stat>
+        <Stat label="Active minutes" size="lg">{fmtInteger(summary.activeMinutes)}</Stat>
+        <Stat label="Peak txs / min" size="lg">{fmtInteger(summary.peakTransactions)}</Stat>
+        <Stat label="Last seen" size="lg">{summary.lastSeen ? fmtDate(summary.lastSeen, timeZone) : "—"}</Stat>
+      </StatGrid>
 
-      <div className="guzzler-activity-chart">
+      <div className="h-96 border border-border bg-card p-2">
         {windowedPoints.length > 0 ? (
           <Plot
             data={traces}
@@ -235,7 +219,7 @@ export function GuzzlerActivityView({
             config={{ displaylogo: false, responsive: true }}
           />
         ) : (
-          <div className="selection-empty">
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
             {error
               ? "Could not load activity for this address."
               : data
@@ -312,8 +296,8 @@ function buildActivityPlot(
     // Plotly's default "Open Sans" isn't bundled, so it falls back to an ugly
     // system font; pin it to a webfont the app actually ships.
     font: {
-      family: getCssVar("--font-mono", '"JetBrains Mono", ui-monospace, monospace'),
-      color: getCssVar("--fg", "#1a1d23"),
+      family: getCssVar("--font-mono", '"IBM Plex Mono", ui-monospace, monospace'),
+      color: getCssVar("--foreground", "#111111"),
     },
     bargap: 0.05,
     showlegend: false,
@@ -321,15 +305,15 @@ function buildActivityPlot(
     xaxis: {
       type: "date",
       title: { text: "Time" } as Plotly.DataTitle,
-      gridcolor: getCssVar("--border", "#d6d9df"),
-      zerolinecolor: getCssVar("--border", "#d6d9df"),
+      gridcolor: getCssVar("--border", "#e9e6de"),
+      zerolinecolor: getCssVar("--border", "#e9e6de"),
       ...(range ? { range, autorange: false } : { autorange: true }),
     },
     yaxis: {
       title: { text: meta.axisTitle.replace("{token}", tokenSymbol) } as Plotly.DataTitle,
       rangemode: "tozero",
-      gridcolor: getCssVar("--border", "#d6d9df"),
-      zerolinecolor: getCssVar("--border", "#d6d9df"),
+      gridcolor: getCssVar("--border", "#e9e6de"),
+      zerolinecolor: getCssVar("--border", "#e9e6de"),
     },
   };
 

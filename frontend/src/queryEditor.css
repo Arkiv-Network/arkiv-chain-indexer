@@ -1,0 +1,46 @@
+/*
+ * CodeMirror structural overrides for the Data page's query editor.
+ *
+ * CodeMirror targets its own `.cm-*` class names directly, so these rules
+ * cannot be expressed as Tailwind utility classes on the mounted node. Kept
+ * separate from QueryEditor.tsx's EditorView.theme() (which covers colors and
+ * spacing) because this is the one rule that must reach the outer `.cm-editor`
+ * element CodeMirror itself renders, not an element the theme's `&` selector
+ * can address. Migrated from the legacy `.query-editor-host .cm-editor` rule
+ * in styles.css.
+ */
+
+.query-editor-host .cm-editor {
+  min-height: 3.4rem;
+  outline: none;
+}
+
+/*
+ * Query syntax-highlight palette, consumed by queryLanguage.ts's
+ * HighlightStyle (var(--q-keyword) etc.). Not part of the shadcn token set in
+ * globals.css — these are bespoke per-token-kind colors for the Arkiv query
+ * grammar, so they live next to the editor that uses them. Migrated verbatim
+ * from styles.css's `:root` / `:root[data-theme="dark"]` block; the selector
+ * is updated to the `.dark` class globals.css now toggles.
+ */
+:root {
+  --q-keyword: #7a3fb8;
+  --q-operator: #0e7490;
+  --q-string: #1b7a4c;
+  --q-number: #b25e09;
+  --q-system: #b3261e;
+  --q-attribute: #181ea9;
+  --q-type: #8a6d00;
+  --q-paren: #5e6b80;
+}
+
+.dark {
+  --q-keyword: #c678dd;
+  --q-operator: #56b6c2;
+  --q-string: #98c379;
+  --q-number: #d19a66;
+  --q-system: #e06c75;
+  --q-attribute: #61afef;
+  --q-type: #e5c07b;
+  --q-paren: #abb2bf;
+}

@@ -1,3 +1,4 @@
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   fetchBlockInspect,
@@ -11,6 +12,13 @@ import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
 import { TransactionHashLink } from "./TransactionView";
 import { renderTableHeader } from "./tableHeader";
+import { OpBadgeList } from "@/components/op-badge";
+import { Stat, StatGrid } from "@/components/stat";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 interface BlockViewProps {
   locationSearch: string;
@@ -121,169 +129,158 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   return (
-    <section className="view block-view">
-      <div className="page-heading">
-        <PageBreadcrumbs
-          items={[
-            { view: "home", label: "Home" },
-            { view: "blocks", label: "Block list" },
-            { view: "block", label: "Block details" },
-          ]}
-          onLocationChange={onLocationChange}
-        />
-        <h2>Block info</h2>
-      </div>
-      <div className="block-lookup">
-        <form onSubmit={onSubmit} className="block-lookup-form">
-          <div className="block-lookup-field">
-            <label htmlFor="block-number-input">Block number</label>
-            <div className="block-lookup-input">
-              <span className="block-lookup-hash" aria-hidden="true">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <PageBreadcrumbs
+        items={[
+          { view: "home", label: "Home" },
+          { view: "blocks", label: "Block list" },
+          { view: "block", label: "Block details" },
+        ]}
+        onLocationChange={onLocationChange}
+      />
+      <h2 className="font-heading text-lg font-black tracking-tight">Block info</h2>
+
+      <div className="flex flex-col gap-3 border border-border bg-card p-3">
+        <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="block-number-input" className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+              Block number
+            </Label>
+            <div className="flex items-center">
+              <span
+                className="flex h-8 items-center border border-r-0 border-input bg-muted px-2 font-mono text-xs text-muted-foreground"
+                aria-hidden="true"
+              >
                 #
               </span>
-              <input
+              <Input
                 id="block-number-input"
                 type="text"
                 inputMode="numeric"
                 placeholder="e.g. 29668"
+                className="w-40 rounded-none"
                 value={blockNumber}
                 onChange={(event) => setBlockNumber(event.target.value)}
               />
             </div>
           </div>
-          <button type="submit" className="block-lookup-load" disabled={loading}>
+          <Button type="submit" size="sm" disabled={loading}>
+            {loading ? <Loader2 className="size-3.5 animate-spin" /> : null}
             {loading ? "Loading…" : "Load"}
-          </button>
+          </Button>
         </form>
 
-        <div className="block-lookup-meta">
-          <p className={`block-lookup-status${error ? " error" : ""}`}>
-            <span className="block-lookup-status-label">
-              Block <strong>{displayedBlockNumber.trim() || "—"}</strong>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className={cn("flex flex-wrap items-center gap-2 text-xs", error && "text-destructive")}>
+            <span className="text-foreground">
+              Block <strong className="font-mono">{displayedBlockNumber.trim() || "—"}</strong>
             </span>
             {loading ? (
-              <span className="block-lookup-txcount">Loading…</span>
+              <span className="text-muted-foreground">Loading…</span>
             ) : error ? (
-              <span className="block-lookup-txcount">Failed to load block: {error}</span>
+              <span className="text-destructive">Failed to load block: {error}</span>
             ) : block ? (
-              <span className="block-lookup-txcount">{block.transactionCount} txns</span>
+              <span className="text-muted-foreground">{block.transactionCount} txns</span>
             ) : (
-              <span className="block-lookup-txcount">Enter a block number to inspect stored block details.</span>
+              <span className="text-muted-foreground">Enter a block number to inspect stored block details.</span>
             )}
           </p>
 
-          <div className="block-lookup-actions">
-            <div className="block-adjacent-nav" aria-label="Adjacent blocks">
-              <button
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1" aria-label="Adjacent blocks">
+              <Button
                 type="button"
-                className="block-adjacent-button"
+                variant="outline"
+                size="sm"
                 onClick={() => adjacentBlocks.previous && navigateToBlock(adjacentBlocks.previous)}
                 disabled={loading || !adjacentBlocks.previous}
                 aria-label="Previous block"
                 title="Previous block"
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <span>{adjacentBlocks.previous ?? "Prev"}</span>
-              </button>
-              <button
+                <ChevronLeft className="size-3.5" />
+                {adjacentBlocks.previous ?? "Prev"}
+              </Button>
+              <Button
                 type="button"
-                className="block-adjacent-button"
+                variant="outline"
+                size="sm"
                 onClick={() => adjacentBlocks.next && navigateToBlock(adjacentBlocks.next)}
                 disabled={loading || !adjacentBlocks.next}
                 aria-label="Next block"
                 title="Next block"
               >
-                <span>{adjacentBlocks.next ?? "Next"}</span>
-                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+                {adjacentBlocks.next ?? "Next"}
+                <ChevronRight className="size-3.5" />
+              </Button>
             </div>
-            <button
-              type="button"
-              className="block-lookup-copy"
-              onClick={copyPermalink}
-              disabled={!displayedBlockNumber.trim()}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+            <Button type="button" variant="outline" size="sm" onClick={copyPermalink} disabled={!displayedBlockNumber.trim()}>
               Copy link
-            </button>
-            {copyStatus ? <span className="block-lookup-copied">{copyStatus}</span> : null}
+            </Button>
+            {copyStatus ? <span className="text-xs text-muted-foreground">{copyStatus}</span> : null}
           </div>
         </div>
       </div>
 
       {block ? (
         <>
-          <dl className="block-summary">
-            <Metric label="Block" value={block.blockNumberDecimal} />
-            <Metric label="Date" value={fmtDate(block.blockDate, timeZone)} />
-            <Metric label="Block time" value={`${fmtInteger(block.blockTimeSeconds)}s`} />
-            <Metric label="Transactions" value={fmtInteger(block.transactionCount)} />
-            <Metric label="Base fee" value={fmtGasPrice(block.baseBlockFeeWei)} />
-            <Metric label="Gas used / limit" value={fmtRatio(block.totalGasUsed, block.maxGasInBlock)} />
-            <Metric label="Input data" value={fmtBytes(block.totalInputDataSizeBytes)} />
-            <Metric label="Input data zstd" value={fmtBytes(block.totalInputDataCompressedSizeBytes)} />
-            <Metric label="Block reward" value={fmtTokenAmount(block.blockRewardWei, tokenSymbol)} />
-            <Metric label="Burnt fees" value={fmtTokenAmount(block.burntFeesWei, tokenSymbol)} />
-            <Metric label="Total tx fees" value={fmtTokenAmount(block.totalTransactionFeeWei, tokenSymbol)} />
-            <Metric label="Avg fee price" value={fmtGasPrice(block.averageFeePriceWei)} />
-            <Metric label="Avg tx fee" value={fmtTokenAmount(block.averageTransactionFeeWei, tokenSymbol)} />
-            <Metric label="Avg tx gas" value={fmtInteger(block.averageTransactionGasUsed)} />
-            <Metric label="Avg tx input data" value={fmtBytes(block.averageTransactionInputDataSizeBytes)} />
-            <Metric
-              label="Avg tx input zstd"
-              value={fmtBytes(block.averageTransactionInputDataCompressedSizeBytes)}
-            />
-            <Metric label="Avg priority fee" value={fmtGasPrice(block.averagePriorityFeeWei)} />
-            <Metric
-              label="Gas-weighted priority"
-              value={fmtGasPrice(block.averagePriorityFeeWeightedWei)}
-            />
+          <StatGrid>
+            <Stat label="Block">{block.blockNumberDecimal}</Stat>
+            <Stat label="Date">{fmtDate(block.blockDate, timeZone)}</Stat>
+            <Stat label="Block time">{`${fmtInteger(block.blockTimeSeconds)}s`}</Stat>
+            <Stat label="Transactions">{fmtInteger(block.transactionCount)}</Stat>
+            <Stat label="Base fee">{fmtGasPrice(block.baseBlockFeeWei)}</Stat>
+            <Stat label="Gas used / limit">{fmtRatio(block.totalGasUsed, block.maxGasInBlock)}</Stat>
+            <Stat label="Input data">{fmtBytes(block.totalInputDataSizeBytes)}</Stat>
+            <Stat label="Input data zstd">{fmtBytes(block.totalInputDataCompressedSizeBytes)}</Stat>
+            <Stat label="Block reward">{fmtTokenAmount(block.blockRewardWei, tokenSymbol)}</Stat>
+            <Stat label="Burnt fees">{fmtTokenAmount(block.burntFeesWei, tokenSymbol)}</Stat>
+            <Stat label="Total tx fees">{fmtTokenAmount(block.totalTransactionFeeWei, tokenSymbol)}</Stat>
+            <Stat label="Avg fee price">{fmtGasPrice(block.averageFeePriceWei)}</Stat>
+            <Stat label="Avg tx fee">{fmtTokenAmount(block.averageTransactionFeeWei, tokenSymbol)}</Stat>
+            <Stat label="Avg tx gas">{fmtInteger(block.averageTransactionGasUsed)}</Stat>
+            <Stat label="Avg tx input data">{fmtBytes(block.averageTransactionInputDataSizeBytes)}</Stat>
+            <Stat label="Avg tx input zstd">{fmtBytes(block.averageTransactionInputDataCompressedSizeBytes)}</Stat>
+            <Stat label="Avg priority fee">{fmtGasPrice(block.averagePriorityFeeWei)}</Stat>
+            <Stat label="Gas-weighted priority">{fmtGasPrice(block.averagePriorityFeeWeightedWei)}</Stat>
             {noBatcher ? null : (
               <>
-                <Metric label="Batcher queue" value={fmtInteger(block.batcherQueueSize)} />
-                <Metric label="Batcher intensity" value={fmtInteger(block.batcherIntensity)} />
-                <Metric label="Batcher lower" value={fmtInteger(block.batcherLowerThreshold)} />
-                <Metric label="Batcher upper" value={fmtInteger(block.batcherUpperThreshold)} />
-                <Metric label="Batcher max block" value={fmtInteger(block.batcherMaxBlockSize)} />
-                <Metric label="Batcher max tx" value={fmtInteger(block.batcherMaxTxSize)} />
+                <Stat label="Batcher queue">{fmtInteger(block.batcherQueueSize)}</Stat>
+                <Stat label="Batcher intensity">{fmtInteger(block.batcherIntensity)}</Stat>
+                <Stat label="Batcher lower">{fmtInteger(block.batcherLowerThreshold)}</Stat>
+                <Stat label="Batcher upper">{fmtInteger(block.batcherUpperThreshold)}</Stat>
+                <Stat label="Batcher max block">{fmtInteger(block.batcherMaxBlockSize)}</Stat>
+                <Stat label="Batcher max tx">{fmtInteger(block.batcherMaxTxSize)}</Stat>
               </>
             )}
-          </dl>
+          </StatGrid>
 
           {data.transactionLoadError ? (
-            <p className="summary error">Transactions unavailable: {data.transactionLoadError}</p>
+            <p className="text-xs text-destructive">Transactions unavailable: {data.transactionLoadError}</p>
           ) : null}
 
-          <div className="table-wrap">
-            <table className="data-table tx-table block-transactions-table">
-              <thead>
-                <tr>
-                {columns.map((column) => (
-                  <th key={column.key} scope="col" className={column.className}>
+          <div className="overflow-x-auto border border-border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  {columns.map((column) => (
+                    <TableHead key={column.key} className={column.className}>
                       {renderTableHeader(column.label)}
-                  </th>
-                ))}
-                </tr>
-              </thead>
-              <tbody>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {block.transactions.map((row) => (
-                  <tr key={`${row.position}:${row.hash}`}>
+                  <TableRow key={`${row.position}:${row.hash}`}>
                     {columns.map((column) => (
-                      <td key={column.key} className={column.className} data-label={column.label}>
+                      <TableCell key={column.key} className={column.className} data-label={column.label}>
                         {column.render(row)}
-                      </td>
+                      </TableCell>
                     ))}
-                  </tr>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </>
       ) : loading ? (
@@ -301,30 +298,15 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
 function BlockDetailSkeleton({ rows }: { rows: number }) {
   return (
     <div role="status" aria-label="Loading block details">
-      <dl className="block-summary" aria-hidden="true">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" aria-hidden="true">
         {Array.from({ length: rows }, (_, index) => (
-          <div key={index}>
-            <dt>
-              <span className="skeleton-bar skeleton-label" />
-            </dt>
-            <dd>
-              <span className="skeleton-bar skeleton-value" />
-            </dd>
+          <div key={index} className="border border-border bg-muted/40 px-3 py-2">
+            <div className="h-2.5 w-16 animate-pulse rounded-none bg-muted-foreground/20" />
+            <div className="mt-2 h-3 w-20 animate-pulse rounded-none bg-muted-foreground/20" />
           </div>
         ))}
-      </dl>
-      <div className="table-wrap" aria-hidden="true">
-        <div className="skeleton-table" />
       </div>
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
+      <div className="mt-4 h-48 animate-pulse border border-border bg-muted/40" aria-hidden="true" />
     </div>
   );
 }
@@ -334,7 +316,7 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     {
       key: "position",
       label: "Pos",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => row.position,
     },
     {
@@ -345,18 +327,7 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     {
       key: "arkivOps",
       label: "Arkiv ops",
-      render: (row) =>
-        row.operationsSummary?.length ? (
-          <span className="op-badge-list">
-            {row.operationsSummary.map((entry) => (
-              <span key={entry.operationType} className={`op-badge op-${entry.operation}`}>
-                {entry.count > 1 ? `${entry.operation} ×${entry.count}` : entry.operation}
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="tx-muted">—</span>
-        ),
+      render: (row) => <OpBadgeList operations={row.operationsSummary} />,
     },
     {
       key: "from",
@@ -366,37 +337,37 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     {
       key: "nonce",
       label: "Nonce",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => row.nonce ?? "-",
     },
     {
       key: "gasUsed",
       label: "Gas (used / limit)",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => `${fmtInteger(row.gasUsed)} / ${fmtInteger(row.gasLimit)}`,
     },
     {
       key: "inputDataSizeBytes",
       label: "Input data",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtBytes(row.inputDataSizeBytes),
     },
     {
       key: "inputDataCompressedSizeBytes",
       label: "Input zstd",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtBytes(row.inputDataCompressedSizeBytes),
     },
     {
       key: "effectiveGasPriceWei",
       label: "Effective fee",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtGasPrice(row.effectiveGasPriceWei),
     },
     {
       key: "transactionFeeWei",
       label: "Tx fee",
-      className: "num",
+      className: "text-right font-mono tabular-nums",
       render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
     },
   ];

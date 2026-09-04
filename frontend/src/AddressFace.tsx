@@ -9,7 +9,7 @@ type AddressFaceProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt">
 export function AddressFace({
   address,
   alt = "",
-  className = "guzzler-icon",
+  className = "block size-10 rounded-sm border border-border",
   width = 40,
   height = 40,
   ...props

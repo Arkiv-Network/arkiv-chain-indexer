@@ -1,3 +1,4 @@
+import { AlertTriangle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
@@ -34,6 +35,10 @@ import {
   normalizeHomeBlocksResponse,
   recentHomeBlocksParams,
 } from "./homeBlocks";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { ChartCard } from "@/components/chart-card";
+import { cn } from "@/lib/utils";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -351,27 +356,28 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
   };
 
   return (
-    <section className="home-view">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-8 px-3 py-6 md:px-6">
       {blocksError ? (
-        <div className="home-connection-alert" role="alert" aria-live="polite">
-          <span className="home-connection-alert__icon" aria-hidden="true">
-            ⚠
-          </span>
-          <div className="home-connection-alert__body">
-            <strong>No connection to the scanner</strong>
-            <span>Showing the last received data — automatic retry in progress.</span>
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-start gap-3 border border-destructive/30 bg-destructive/5 px-4 py-3"
+        >
+          <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+          <div className="flex flex-col gap-0.5 text-xs">
+            <strong className="font-medium text-destructive">No connection to the scanner</strong>
+            <span className="text-muted-foreground">
+              Showing the last received data — automatic retry in progress.
+            </span>
           </div>
         </div>
       ) : null}
 
-      <div>
-        <div className="home-section-head">
-          <div>
-            <p className="home-kicker">network at a glance</p>
-            <h3>{settings.chainName} live statistics</h3>
-          </div>
-        </div>
-        <div className="home-stats home-stats--summary">
+      <div className="flex flex-col gap-3">
+        <h3 className="font-heading text-lg font-black tracking-tight">
+          {settings.chainName} live statistics
+        </h3>
+        <div className="grid gap-3 sm:grid-cols-2">
           <MetricCard
             label="Current base fee"
             value={latestBlock ? fmtGasPrice(latestBlock.baseBlockFeeWei) : "—"}
@@ -381,62 +387,66 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
             value={lastMinuteAvgGas !== null ? fmtGasBillions(lastMinuteAvgGas) : "—"}
           />
         </div>
-        <p className="home-llms-note">
-          Machine-readable API and data notes are available at <a href="/llms.txt">llms.txt</a>.
+        <p className="text-xs text-muted-foreground">
+          Machine-readable API and data notes are available at{" "}
+          <a className="text-primary hover:underline" href="/llms.txt">
+            llms.txt
+          </a>
+          .
         </p>
       </div>
 
-      <div>
-        <div className="home-section-head">
-          <div>
-            <p className="home-kicker">live feed</p>
-            <h3>Latest blocks &amp; most active wallets</h3>
-          </div>
-        </div>
-        <div className="home-feed-grid">
-          <div className="home-feed-panel-wrap">
+      <div className="flex flex-col gap-3">
+        <h3 className="font-heading text-lg font-black tracking-tight">
+          Latest blocks &amp; most active wallets
+        </h3>
+        <div className="grid items-stretch gap-3 lg:grid-cols-2">
+          <div className="relative flex min-w-0">
             <Cedric progress={latestBlock?.blockNumber ?? null} />
-            <section className="home-feed-panel" aria-labelledby="home-latest-blocks">
-            <div className="home-panel-heading">
-              <h3 id="home-latest-blocks" className="home-panel-heading-title">
-                <span className="home-panel-heading-icon" aria-hidden="true">
-                  <BlockList size={40} />
-                </span>
-                Latest blocks
-              </h3>
-              <div className="home-panel-heading-meta">
-                {latestBlockBehindLabel ? (
-                  <span className="home-panel-latest-time">{latestBlockBehindLabel}</span>
-                ) : null}
-                <span>{blocksData ? `${blockSlots.length} shown` : blocksLoading ? "Loading" : "No data"}</span>
-                <a className="home-panel-link" href={blocksHref} onClick={openBlocksView}>
-                  All blocks
-                </a>
+            <Card
+              className="relative z-10 flex min-w-0 flex-1 flex-col gap-0 overflow-hidden py-0"
+              aria-labelledby="home-latest-blocks"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+                <h3 id="home-latest-blocks" className="flex items-center gap-2 font-heading text-sm">
+                  <BlockList size={18} className="text-primary" />
+                  Latest blocks
+                </h3>
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  {latestBlockBehindLabel ? <span>{latestBlockBehindLabel}</span> : null}
+                  <span>
+                    {blocksData ? `${blockSlots.length} shown` : blocksLoading ? "Loading" : "No data"}
+                  </span>
+                  <a className="text-primary hover:underline" href={blocksHref} onClick={openBlocksView}>
+                    All blocks
+                  </a>
+                </div>
               </div>
-            </div>
-            {blocksError && blocks.length === 0 ? (
-              <div className="home-feed-empty-state">
-                <strong>Unable to load blocks right now.</strong>
-                <span>
-                  We can't reach the scanner. The page will refresh automatically once the
-                  connection is restored.
-                </span>
-              </div>
-            ) : (
-              <div className="home-feed-list">
-                {blockSlots.map((slot, idx) => (
-                  <BlockFeedItem
-                    key={`slot-${idx}`}
-                    slot={slot}
-                    onLocationChange={onLocationChange}
-                    timeZone={timeZone}
-                    tokenSymbol={settings.tokenSymbol}
-                  />
-                ))}
-                {!blocksLoading && blocks.length === 0 ? <p className="home-empty">No stored blocks yet.</p> : null}
-              </div>
-            )}
-            </section>
+              {blocksError && blocks.length === 0 ? (
+                <div className="flex flex-col gap-1 px-4 py-6 text-xs">
+                  <strong className="font-medium text-foreground">Unable to load blocks right now.</strong>
+                  <span className="text-muted-foreground">
+                    We can't reach the scanner. The page will refresh automatically once the connection
+                    is restored.
+                  </span>
+                </div>
+              ) : (
+                <div className="max-h-[26rem] overflow-y-auto">
+                  {blockSlots.map((slot, idx) => (
+                    <BlockFeedItem
+                      key={`slot-${idx}`}
+                      slot={slot}
+                      onLocationChange={onLocationChange}
+                      timeZone={timeZone}
+                      tokenSymbol={settings.tokenSymbol}
+                    />
+                  ))}
+                  {!blocksLoading && blocks.length === 0 ? (
+                    <p className="px-4 py-4 text-xs text-muted-foreground">No stored blocks yet.</p>
+                  ) : null}
+                </div>
+              )}
+            </Card>
           </div>
 
           <HomeWalletActivityPanel
@@ -450,19 +460,7 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
         </div>
       </div>
 
-      <div>
-        <div className="home-section-head">
-          <div>
-            <p className="home-kicker">charts</p>
-          </div>
-        </div>
-        <LiveHistograms
-          blocks={blocks}
-          error={blocksError}
-          loaded={blocksData !== null}
-          settings={settings}
-        />
-      </div>
+      <LiveHistograms blocks={blocks} error={blocksError} loaded={blocksData !== null} settings={settings} />
 
       {adminModeActive ? <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} /> : null}
     </section>
@@ -485,55 +483,56 @@ function HomeWalletActivityPanel({
   tokenSymbol: string;
 }) {
   return (
-    <section className="home-feed-panel" aria-labelledby="home-active-wallets">
-      <div className="home-panel-heading">
+    <Card
+      className="flex min-w-0 flex-col gap-0 overflow-hidden py-0"
+      aria-labelledby="home-active-wallets"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <div>
-          <h3 id="home-active-wallets">Most active wallets</h3>
-          <p className="home-activity-note">
-            Last hour, ranked by total gas used.
-          </p>
+          <h3 id="home-active-wallets" className="font-heading text-sm">
+            Most active wallets
+          </h3>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">Last hour, ranked by total gas used.</p>
         </div>
-        <a className="home-panel-link" href={guzzlersHref} onClick={onOpenGuzzlersView}>
+        <a className="text-[10px] text-primary hover:underline" href={guzzlersHref} onClick={onOpenGuzzlersView}>
           Explore activity
         </a>
       </div>
       {guzzlersUnavailable ? (
-        <p className="home-empty">Wallet activity tracking is not enabled.</p>
+        <p className="px-4 py-6 text-xs text-muted-foreground">Wallet activity tracking is not enabled.</p>
       ) : topGuzzlers === null ? (
-        <p className="home-empty">Loading most active wallets…</p>
+        <p className="px-4 py-6 text-xs text-muted-foreground">Loading most active wallets…</p>
       ) : topGuzzlers.length === 0 ? (
-        <p className="home-empty">No wallet activity in the last hour.</p>
+        <p className="px-4 py-6 text-xs text-muted-foreground">No wallet activity in the last hour.</p>
       ) : (
-        <div className="home-feed-list">
+        <div className="max-h-[26rem] overflow-y-auto">
           {topGuzzlers.map((guzzler, index) => {
             const display = addressDisplay(guzzler.address);
             return (
               <a
                 key={guzzler.address}
-                className="home-feed-item home-wallet-item"
+                className="flex items-center gap-3 border-b border-border px-4 py-2 text-left transition-colors last:border-b-0 hover:bg-accent"
                 href={buildPermalinkHref("guzzlers", { address: guzzler.address })}
                 onClick={(event) => onOpenGuzzler(event, guzzler.address)}
                 title={`View activity for ${display.title ?? guzzler.address}`}
               >
                 <AddressFace address={guzzler.address} loading="lazy" />
-                <div className="home-feed-main">
-                  <div className="home-feed-title">
-                    <span className="mono">
-                      {index + 1}. {display.label}
-                    </span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-xs">
+                    {index + 1}. {display.label}
                   </div>
-                  <div className="home-feed-meta">
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
                     <span>
-                      <b>{fmtInteger(guzzler.transactionCount)}</b> txns
+                      <b className="font-medium text-foreground">{fmtInteger(guzzler.transactionCount)}</b> txns
                     </span>
                     <span>
-                      <b>{fmtGasBillions(guzzler.totalGasUsed)}</b> gas
+                      <b className="font-medium text-foreground">{fmtGasBillions(guzzler.totalGasUsed)}</b> gas
                     </span>
                   </div>
                 </div>
-                <div className="home-feed-side">
-                  <strong>#{index + 1}</strong>
-                  <span>
+                <div className="flex shrink-0 flex-col items-end gap-0.5 font-mono text-[11px] tabular-nums">
+                  <strong className="text-xs font-medium text-foreground">#{index + 1}</strong>
+                  <span className="text-muted-foreground">
                     {fmtTokenAmount(guzzler.totalFeeWei, tokenSymbol)} fees
                   </span>
                 </div>
@@ -542,7 +541,7 @@ function HomeWalletActivityPanel({
           })}
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -554,16 +553,22 @@ function HomeDebugSummary({
   stats: HomeDebugStats;
 }) {
   return (
-    <aside className="home-debug-summary" aria-label="Home request debug summary">
-      <div className="home-debug-summary__head">
-        <span>debug summary</span>
-        <strong>{fmtInteger(localBlockCount)} local blocks</strong>
-      </div>
-      <div className="home-debug-summary__grid">
-        <HomeDebugRequestSummary label="Range requests" stats={stats.range} />
-        <HomeDebugRequestSummary label="Block requests" stats={stats.block} />
-      </div>
-    </aside>
+    <Card aria-label="Home request debug summary">
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+            debug summary
+          </span>
+          <strong className="font-mono text-xs font-medium text-foreground">
+            {fmtInteger(localBlockCount)} local blocks
+          </strong>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <HomeDebugRequestSummary label="Range requests" stats={stats.range} />
+          <HomeDebugRequestSummary label="Block requests" stats={stats.block} />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -576,29 +581,21 @@ function HomeDebugRequestSummary({
 }) {
   const averageMs = stats.requests === 0 ? null : stats.totalDurationMs / stats.requests;
   return (
-    <section className="home-debug-request">
-      <h4>{label}</h4>
-      <dl>
-        <div>
-          <dt>Requests</dt>
-          <dd>{fmtInteger(stats.requests)}</dd>
-        </div>
-        <div>
-          <dt>Successful</dt>
-          <dd>{fmtInteger(stats.successful)}</dd>
-        </div>
-        <div>
-          <dt>Failed</dt>
-          <dd>{fmtInteger(stats.failed)}</dd>
-        </div>
-        <div>
-          <dt>Transferred</dt>
-          <dd>{fmtBytes(stats.transferredBytes)}</dd>
-        </div>
-        <div>
-          <dt>Avg response</dt>
-          <dd>{averageMs === null ? "—" : `${Math.round(averageMs)} ms`}</dd>
-        </div>
+    <section className="border border-border p-3">
+      <h4 className="text-xs font-medium text-foreground">{label}</h4>
+      <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[11px]">
+        <dt className="text-muted-foreground">Requests</dt>
+        <dd className="text-right font-mono tabular-nums">{fmtInteger(stats.requests)}</dd>
+        <dt className="text-muted-foreground">Successful</dt>
+        <dd className="text-right font-mono tabular-nums">{fmtInteger(stats.successful)}</dd>
+        <dt className="text-muted-foreground">Failed</dt>
+        <dd className="text-right font-mono tabular-nums">{fmtInteger(stats.failed)}</dd>
+        <dt className="text-muted-foreground">Transferred</dt>
+        <dd className="text-right font-mono tabular-nums">{fmtBytes(stats.transferredBytes)}</dd>
+        <dt className="text-muted-foreground">Avg response</dt>
+        <dd className="text-right font-mono tabular-nums">
+          {averageMs === null ? "—" : `${Math.round(averageMs)} ms`}
+        </dd>
       </dl>
     </section>
   );
@@ -623,24 +620,33 @@ function fmtGasBillions(gasStr: string): string {
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="home-stat">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <Card className="gap-1 py-3">
+      <CardContent className="flex flex-col gap-1 px-4">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <strong className="font-mono text-2xl font-medium tabular-nums text-foreground">{value}</strong>
+      </CardContent>
+    </Card>
   );
 }
 
 function BlockMorphIcon({ filled }: { filled: boolean }) {
   return (
-    <div
-      className={`home-feed-icon home-feed-icon--block${filled ? " is-filled" : ""}`}
-      aria-hidden="true"
-    >
-      <span className="home-feed-icon__layer home-feed-icon__layer--empty">
-        <BlockEmpty size={40} />
+    <div className="relative flex size-8 shrink-0 items-center justify-center text-primary" aria-hidden="true">
+      <span
+        className={cn(
+          "absolute inset-0 flex items-center justify-center transition-opacity duration-500",
+          filled ? "opacity-0" : "opacity-100",
+        )}
+      >
+        <BlockEmpty size={28} />
       </span>
-      <span className="home-feed-icon__layer home-feed-icon__layer--filled">
-        <BlockFilled size={40} />
+      <span
+        className={cn(
+          "absolute inset-0 flex items-center justify-center transition-opacity duration-500",
+          filled ? "opacity-100" : "opacity-0",
+        )}
+      >
+        <BlockFilled size={28} />
       </span>
     </div>
   );
@@ -659,45 +665,48 @@ function BlockFeedItem({
 }) {
   if (slot.kind === "stub") {
     return (
-      <article className="home-feed-item home-feed-item--stub" aria-busy="true">
+      <article
+        className="flex items-center gap-3 border-b border-border px-4 py-2 opacity-70 last:border-b-0"
+        aria-busy="true"
+      >
         <BlockMorphIcon filled={false} />
-        <div className="home-feed-main">
-          <div className="home-feed-title">
-            <span className="mono">{slot.blockNumber}</span>
-            <span>~{fmtDate(slot.estimatedDate, timeZone)}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2 font-mono text-xs">
+            <span className="tabular-nums">{slot.blockNumber}</span>
+            <span className="text-[11px] text-muted-foreground">~{fmtDate(slot.estimatedDate, timeZone)}</span>
           </div>
-          <div className="home-feed-meta">
+          <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
             <span>{slot.pinging ? "Loading metadata" : "Next block"}</span>
           </div>
         </div>
-        <div className="home-feed-side">
-          <span className="home-stub-tag">{slot.pinging ? "loading" : "next"}</span>
-        </div>
+        <Badge variant="outline" className="shrink-0 font-mono text-[10px] tracking-wider uppercase">
+          {slot.pinging ? "loading" : "next"}
+        </Badge>
       </article>
     );
   }
 
   const { block } = slot;
   return (
-    <article className="home-feed-item">
+    <article className="flex items-center gap-3 border-b border-border px-4 py-2 transition-colors last:border-b-0 hover:bg-accent">
       <BlockMorphIcon filled={true} />
-      <div className="home-feed-main">
-        <div className="home-feed-title">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 font-mono text-xs">
           <BlockNumberLink blockNumber={block.blockNumber} onLocationChange={onLocationChange} />
-          <span>{fmtDate(block.blockDate, timeZone)}</span>
+          <span className="text-[11px] text-muted-foreground">{fmtDate(block.blockDate, timeZone)}</span>
         </div>
-        <div className="home-feed-meta">
+        <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
           <span>
-            <b>{fmtInteger(block.transactionCount)}</b> txns
+            <b className="font-medium text-foreground">{fmtInteger(block.transactionCount)}</b> txns
           </span>
           <span>
-            <b>{fmtGasPrice(block.averageFeePriceWei)}</b> avg fee
+            <b className="font-medium text-foreground">{fmtGasPrice(block.averageFeePriceWei)}</b> avg fee
           </span>
         </div>
       </div>
-      <div className="home-feed-side">
-        <strong>{fmtGasPrice(block.baseBlockFeeWei)}</strong>
-        <span>{fmtTokenAmount(block.burntFeesWei ?? "0", tokenSymbol)} burnt</span>
+      <div className="flex shrink-0 flex-col items-end gap-0.5 font-mono text-[11px] tabular-nums">
+        <strong className="text-xs font-medium text-foreground">{fmtGasPrice(block.baseBlockFeeWei)}</strong>
+        <span className="text-muted-foreground">{fmtTokenAmount(block.burntFeesWei ?? "0", tokenSymbol)} burnt</span>
       </div>
     </article>
   );
@@ -750,14 +759,14 @@ function LiveHistograms({
   }, [settings.histogramClockTickMs]);
 
   return (
-    <div className="home-histograms">
+    <div className="grid gap-3 sm:grid-cols-2">
       <MinAvgMaxPanel
         title="Network usage"
         unitLabel="gas"
         blocks={blocks}
         currentMinuteMs={currentMinuteMs}
         histogramWindowMinutes={settings.histogramWindowMinutes}
-        colorVar="--ark-blue"
+        colorVar="--chart-1"
         colorFallback="#181ea9"
         extractValue={(block) => {
           const gas = Number(block.totalGasUsed);
@@ -793,8 +802,8 @@ function LiveHistograms({
           blocks={blocks}
           currentMinuteMs={currentMinuteMs}
           histogramWindowMinutes={settings.histogramWindowMinutes}
-          colorVar="--ok"
-          colorFallback="#1f7a4d"
+          colorVar="--chart-3"
+          colorFallback="#4b52c7"
           extractValue={(block) => {
             if (block.batcherQueueSize === undefined || block.batcherQueueSize === null) return null;
             try {
@@ -834,7 +843,7 @@ function LiveHistograms({
         blocks={blocks}
         currentMinuteMs={currentMinuteMs}
         histogramWindowMinutes={settings.histogramWindowMinutes}
-        colorVar="--ark-orange"
+        colorVar="--chart-2"
         colorFallback="#fe7446"
         extractValue={(block) => weiToGasPriceNumber(block.baseBlockFeeWei, baseFeeUnit)}
         hoverLabel="Base fee"
@@ -910,8 +919,8 @@ function MinAvgMaxPanel({
   loaded,
 }: MinAvgMaxPanelProps) {
   const baseColor = getCssColor(colorVar, colorFallback);
-  const gridColor = getCssColor("--line-strong", "#1111111a");
-  const textColor = getCssColor("--ink-muted", "#6b6b6b");
+  const gridColor = getCssColor("--border", "#e9e6de");
+  const textColor = getCssColor("--muted-foreground", "#64625d");
 
   const { traces, layout, hasData } = useMemo<{
     traces: Partial<Plotly.PlotData>[];
@@ -983,9 +992,9 @@ function MinAvgMaxPanel({
       showlegend: false,
       hovermode: "x unified",
       hoverlabel: {
-        bgcolor: getCssColor("--sand", "#f6f4ef"),
+        bgcolor: getCssColor("--card", "#ffffff"),
         bordercolor: gridColor,
-        font: { color: getCssColor("--ink", "#111111"), size: 12 },
+        font: { color: getCssColor("--foreground", "#111111"), size: 12 },
       },
       xaxis: {
         type: "date",
@@ -1024,44 +1033,40 @@ function MinAvgMaxPanel({
   ]);
 
   return (
-    <section className="home-feed-panel home-histogram-panel">
-      <div className="home-panel-heading">
-        <h3 className="home-panel-heading-title home-histogram-title">
-          <span
-            className="home-histogram-swatch"
-            aria-hidden="true"
-            style={{ background: baseColor }}
-          />
+    <ChartCard
+      title={
+        <>
+          <span className="size-2.5 shrink-0 rounded-sm" aria-hidden="true" style={{ background: baseColor }} />
           {title}
           <InfoTooltip label={infoLabel}>
             <strong>{infoTitle}</strong>
             {infoBody}
           </InfoTooltip>
-        </h3>
-        <span>{`${unitLabel} · last ${histogramWindowMinutes} min`}</span>
-      </div>
-      <div className="home-histogram-chart">
-        {error && !loaded ? (
-          <div className="home-feed-empty-state">
-            <strong>Unable to load chart.</strong>
-            <span>{error}</span>
-          </div>
-        ) : loaded && !hasData ? (
-          <div className="home-feed-empty-state">
-            <strong>No chart data.</strong>
-            <span>{emptyLabel ?? "No values are available in this window."}</span>
-          </div>
-        ) : (
-          <Plot
-            data={traces}
-            layout={layout}
-            useResizeHandler
-            style={{ width: "100%", height: "100%" }}
-            config={{ displayModeBar: false, responsive: true, staticPlot: false }}
-          />
-        )}
-      </div>
-    </section>
+        </>
+      }
+      meta={`${unitLabel} · last ${histogramWindowMinutes} min`}
+      contentClassName="h-[260px]"
+    >
+      {error && !loaded ? (
+        <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-xs">
+          <strong className="font-medium text-foreground">Unable to load chart.</strong>
+          <span className="text-muted-foreground">{error}</span>
+        </div>
+      ) : loaded && !hasData ? (
+        <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-xs">
+          <strong className="font-medium text-foreground">No chart data.</strong>
+          <span className="text-muted-foreground">{emptyLabel ?? "No values are available in this window."}</span>
+        </div>
+      ) : (
+        <Plot
+          data={traces}
+          layout={layout}
+          useResizeHandler
+          style={{ width: "100%", height: "100%" }}
+          config={{ displayModeBar: false, responsive: true, staticPlot: false }}
+        />
+      )}
+    </ChartCard>
   );
 }
 
