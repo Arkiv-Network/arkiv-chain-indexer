@@ -64,6 +64,8 @@ describe("baseload task helpers", () => {
       singleCreateStringArgumentCount: 2,
       singleCreateNumberArgumentCount: 1,
       ttlSeconds: 120,
+      dailyWindow: null,
+      hourlyWindow: null,
     });
 
     const input = createBaseloadEntityInput(worker, fixedRandomBytes);
@@ -188,6 +190,7 @@ describe("baseload task helpers", () => {
 function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfig {
   return {
     id: "wallet-1",
+    name: "",
     behavior: "create",
     maxGasPriceGwei: 1000,
     opsPerMinute: 1,
@@ -203,6 +206,8 @@ function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfi
     endBlock: null,
     durationSeconds: null,
     ttlSeconds: 3600,
+    dailyWindow: null,
+    hourlyWindow: null,
     ...patch,
   };
 }

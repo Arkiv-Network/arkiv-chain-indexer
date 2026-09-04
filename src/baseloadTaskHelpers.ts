@@ -2,6 +2,7 @@ import {
   MAX_BASELOAD_ENTITIES_PER_REQUEST,
   type BaseloadWorkerConfig,
 } from "./baseloadConfig";
+import { isBaseloadScheduleActive } from "./baseloadSchedule";
 
 export const BASELOAD_PROJECT_ATTRIBUTE = {
   key: "project",
@@ -12,6 +13,7 @@ export type BaseloadTaskLimitState =
   | { type: "before-start"; currentBlock: number }
   | { type: "after-end"; currentBlock: number }
   | { type: "duration-ended" }
+  | { type: "outside-schedule"; currentBlock: number }
   | { type: "active"; currentBlock: number };
 
 export interface BaseloadCreateInput {
@@ -148,6 +150,11 @@ export function getBaseloadLimitState(
   }
   if (worker.durationSeconds !== null && nowMs - runStartedAtMs >= worker.durationSeconds * 1000) {
     return { type: "duration-ended" };
+  }
+  // The schedule pauses rather than ends the run, so it comes after the
+  // terminal checks: a worker outside its window still finishes on time.
+  if (!isBaseloadScheduleActive(worker, nowMs)) {
+    return { type: "outside-schedule", currentBlock };
   }
   return { type: "active", currentBlock };
 }

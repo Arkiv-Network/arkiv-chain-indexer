@@ -297,6 +297,7 @@ if (!hasPostgresForTests()) {
         workers: [
           {
             id: "wallet-0",
+            name: "",
             behavior: "create",
             maxGasPriceGwei: 0.1,
             opsPerMinute: 1,
@@ -312,6 +313,8 @@ if (!hasPostgresForTests()) {
             endBlock: null,
             durationSeconds: null,
             ttlSeconds: 3600,
+            dailyWindow: null,
+            hourlyWindow: null,
           },
         ],
       });

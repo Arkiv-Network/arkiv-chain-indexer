@@ -819,6 +819,8 @@ export type BaseloadWorkerBehavior = (typeof BASELOAD_WORKER_BEHAVIORS)[number];
 
 export interface BaseloadWorkerConfig {
   id: string;
+  /** Free-form label for humans; empty means "wallet #N". */
+  name: string;
   behavior: BaseloadWorkerBehavior;
   maxGasPriceGwei: number;
   opsPerMinute: number;
@@ -834,6 +836,10 @@ export interface BaseloadWorkerConfig {
   endBlock: number | null;
   durationSeconds: number | null;
   ttlSeconds: number;
+  /** "HH:MM-HH:MM" in UTC, end exclusive, may wrap midnight; null = every hour of the day. */
+  dailyWindow: string | null;
+  /** "MM-MM" minutes of every hour, end exclusive, may wrap; null = every minute of the hour. */
+  hourlyWindow: string | null;
 }
 
 export interface BaseloadConfig {

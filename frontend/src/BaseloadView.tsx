@@ -4,14 +4,20 @@ import {
   BASELOAD_WORKER_BEHAVIORS,
   behaviorUsesPool,
   createBaseloadWorkerDraft,
+  createBaseloadWorkerDraftFromWorker,
   createBaseloadWorkerFromDraft,
+  describeBaseloadWorkerName,
   getAvailableWalletNumbers,
+  isSameBaseloadWorkerDraft,
   MAX_BASELOAD_ENTITIES_PER_REQUEST,
+  MAX_WORKER_NAME_LENGTH,
   moveDraftToNextAvailableWallet,
   normalizeBaseloadConfig,
   parseBaseloadConfigJson,
+  parseBaseloadWorkerJson,
   removeBaseloadWorker,
   serializeBaseloadConfig,
+  serializeBaseloadWorker,
   updateBaseloadWorker,
   type BaseloadConfig,
   type BaseloadWorkerBehavior,
@@ -19,18 +25,17 @@ import {
   type BaseloadWorkerDraft,
 } from "./baseloadConfig";
 import {
+  describeBaseloadSchedule,
+  normalizeDailyWindow,
+  normalizeHourlyWindow,
+} from "./baseloadSchedule";
+import {
   type BaseloadTaskStatus,
   type BaseloadWorkerBalance,
   type StoredBaseloadConfigSummary,
 } from "./api";
 import { fmtEth } from "./format";
-import {
-  readStoredString,
-  readStoredStringRecord,
-  removeStoredValue,
-  writeStoredString,
-  writeStoredStringRecord,
-} from "./localStorage";
+import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 
 interface BaseloadViewProps {
   config: BaseloadConfig;
@@ -51,6 +56,7 @@ interface BaseloadViewProps {
 
 const DRAFT_STORAGE_KEY = "baseload.workerDraft";
 const DRAFT_KEYS = [
+  "name",
   "behavior",
   "maxGasPriceGwei",
   "opsPerMinute",
@@ -65,21 +71,12 @@ const DRAFT_KEYS = [
   "endBlock",
   "durationSeconds",
   "ttlSeconds",
+  "dailyWindow",
+  "hourlyWindow",
 ] as const;
-const EDITABLE_WORKER_KEYS = [
-  "maxGasPriceGwei",
-  "opsPerMinute",
-  "entitiesPerRequest",
-  "singleCreatePayloadSize",
-  "singleCreateStringArgumentCount",
-  "singleCreateNumberArgumentCount",
-  "entityPoolSize",
-  "timeBombOffsetSeconds",
-  "startBlock",
-  "endBlock",
-  "durationSeconds",
-  "ttlSeconds",
-] as const;
+
+/** Which operator the editor shows: a not-yet-added draft, or an existing worker. */
+type EditorSelection = { kind: "new" } | { kind: "worker"; id: string };
 
 export function BaseloadView({
   config,
@@ -98,7 +95,8 @@ export function BaseloadView({
   tokenSymbol,
 }: BaseloadViewProps) {
   const availableWallets = useMemo(() => getAvailableWalletNumbers(config.workers), [config.workers]);
-  const [draft, setDraft] = useState<BaseloadWorkerDraft>(() =>
+  const [selection, setSelection] = useState<EditorSelection>({ kind: "new" });
+  const [newDraft, setNewDraft] = useState<BaseloadWorkerDraft>(() =>
     readStoredStringRecord(
       DRAFT_STORAGE_KEY,
       createBaseloadWorkerDraft(availableWallets[0] ?? 0),
@@ -106,28 +104,32 @@ export function BaseloadView({
     ),
   );
   const [error, setError] = useState<string | null>(null);
-  const [downloadStatus, setDownloadStatus] = useState("");
+  const [notice, setNotice] = useState("");
   const [configName, setConfigName] = useState("");
   const [selectedConfigName, setSelectedConfigName] = useState("");
   const [managerError, setManagerError] = useState<string | null>(null);
   const [managerStatus, setManagerStatus] = useState("");
   const displayedConfigManagerError = managerError || configManagerError;
-  const draftBehavior: BaseloadWorkerBehavior = (
-    BASELOAD_WORKER_BEHAVIORS as readonly string[]
-  ).includes(draft.behavior)
-    ? (draft.behavior as BaseloadWorkerBehavior)
-    : "create";
+
+  const selectedWorker =
+    selection.kind === "worker"
+      ? config.workers.find((worker) => worker.id === selection.id) ?? null
+      : null;
+
+  useEffect(() => {
+    if (selection.kind === "worker" && !selectedWorker) setSelection({ kind: "new" });
+  }, [selection, selectedWorker]);
 
   useEffect(() => {
     if (availableWallets.length === 0) return;
-    if (!availableWallets.includes(Number(draft.walletNumber))) {
-      setDraft((current) => ({ ...current, walletNumber: String(availableWallets[0]) }));
+    if (!availableWallets.includes(Number(newDraft.walletNumber))) {
+      setNewDraft((current) => ({ ...current, walletNumber: String(availableWallets[0]) }));
     }
-  }, [availableWallets, draft.walletNumber]);
+  }, [availableWallets, newDraft.walletNumber]);
 
   useEffect(() => {
-    writeStoredStringRecord(DRAFT_STORAGE_KEY, draft, DRAFT_KEYS);
-  }, [draft]);
+    writeStoredStringRecord(DRAFT_STORAGE_KEY, newDraft, DRAFT_KEYS);
+  }, [newDraft]);
 
   useEffect(() => {
     if (savedConfigs.length === 0) {
@@ -139,15 +141,21 @@ export function BaseloadView({
     }
   }, [savedConfigs, selectedConfigName]);
 
-  const onDraftChange = (key: keyof BaseloadWorkerDraft) => (
-    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-  ) => {
-    setDraft((current) => ({ ...current, [key]: event.target.value }));
+  const report = (fn: () => void | Promise<void>, doneNotice = "") => {
+    void (async () => {
+      try {
+        await fn();
+        setError(null);
+        setNotice(doneNotice);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        setNotice("");
+      }
+    })();
   };
 
-  const addWorker = (event: React.FormEvent) => {
-    event.preventDefault();
-    try {
+  const addWorker = (draft: BaseloadWorkerDraft) =>
+    report(async () => {
       const worker = createBaseloadWorkerFromDraft(draft);
       if (config.workers.some((existing) => existing.walletNumber === worker.walletNumber)) {
         throw new Error(`Wallet ${worker.walletNumber} is already attached to another worker`);
@@ -156,41 +164,71 @@ export function BaseloadView({
         ...config,
         workers: [...config.workers, worker],
       });
-      void onConfigChange(nextConfig);
-      setDraft((current) => moveDraftToNextAvailableWallet(current, nextConfig.workers));
-      setError(null);
-      setDownloadStatus("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
+      await onConfigChange(nextConfig);
+      setNewDraft((current) => moveDraftToNextAvailableWallet(current, nextConfig.workers));
+      setSelection({ kind: "worker", id: worker.id });
+    }, `Added ${describeBaseloadWorkerName(createBaseloadWorkerFromDraft(draft))}`);
 
-  const updateWorker = (worker: BaseloadWorkerConfig, patch: Partial<BaseloadWorkerConfig>) => {
-    try {
-      void onConfigChange(updateBaseloadWorker(config, worker.id, patch));
-      setError(null);
-      setDownloadStatus("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
+  const applyWorker = (worker: BaseloadWorkerConfig, draft: BaseloadWorkerDraft) =>
+    report(async () => {
+      const parsed = createBaseloadWorkerFromDraft(draft);
+      await onConfigChange(
+        updateBaseloadWorker(config, worker.id, { ...parsed, id: worker.id, walletAddress: worker.walletAddress }),
+      );
+    }, `Applied changes to ${describeBaseloadWorkerName(worker)}`);
 
-  const deleteWorker = (workerId: string) => {
-    clearEditableStorage(workerId);
-    void onConfigChange(removeBaseloadWorker(config, workerId));
-    setError(null);
-    setDownloadStatus("");
-  };
+  const deleteWorker = (worker: BaseloadWorkerConfig) =>
+    report(async () => {
+      await onConfigChange(removeBaseloadWorker(config, worker.id));
+      setSelection({ kind: "new" });
+    }, `Deleted ${describeBaseloadWorkerName(worker)}`);
 
-  const downloadConfig = () => {
-    const blob = new Blob([serializeBaseloadConfig(config)], { type: "application/json" });
+  const downloadJson = (text: string, filename: string) => {
+    const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "baseload-workers.json";
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
-    setDownloadStatus("Downloaded");
+  };
+
+  const downloadConfig = () =>
+    report(() => {
+      downloadJson(serializeBaseloadConfig(config), "baseload-workers.json");
+    }, "Downloaded fleet config");
+
+  const exportWorker = (draft: BaseloadWorkerDraft) =>
+    report(() => {
+      const worker = createBaseloadWorkerFromDraft(draft);
+      downloadJson(serializeBaseloadWorker(worker), `baseload-${workerFileStem(worker)}.json`);
+    }, "Exported worker");
+
+  const importWorkerFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const text = await file.text();
+    report(() => {
+      const worker = parseBaseloadWorkerJson(text);
+      const draft = createBaseloadWorkerDraftFromWorker(worker);
+      const walletTaken = config.workers.some((existing) => existing.walletNumber === worker.walletNumber);
+      setNewDraft(walletTaken ? moveDraftToNextAvailableWallet(draft, config.workers) : draft);
+      setSelection({ kind: "new" });
+    }, `Imported ${file.name} into the editor; review and add it`);
+  };
+
+  const loadConfigFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const text = await file.text();
+    report(async () => {
+      const nextConfig = parseBaseloadConfigJson(text);
+      await onConfigChange(nextConfig);
+      setNewDraft(createBaseloadWorkerDraft(getAvailableWalletNumbers(nextConfig.workers)[0] ?? 0));
+      setSelection({ kind: "new" });
+    }, `Loaded ${file.name}`);
   };
 
   const runConfigManagerAction = async (action: () => Promise<void>, status: string) => {
@@ -199,7 +237,7 @@ export function BaseloadView({
       setManagerError(null);
       setManagerStatus(status);
       setError(null);
-      setDownloadStatus("");
+      setNotice("");
     } catch (err) {
       setManagerError(err instanceof Error ? err.message : String(err));
       setManagerStatus("");
@@ -243,22 +281,6 @@ export function BaseloadView({
     );
   };
 
-  const loadConfigFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
-    try {
-      const nextConfig = parseBaseloadConfigJson(await file.text());
-      await onConfigChange(nextConfig);
-      setDraft(createBaseloadWorkerDraft(getAvailableWalletNumbers(nextConfig.workers)[0] ?? 0));
-      setError(null);
-      setDownloadStatus("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
   return (
     <section className="view baseload-view">
       <div className="view-heading-row">
@@ -283,178 +305,12 @@ export function BaseloadView({
         </div>
       </div>
 
-      <form className="add-worker-panel" data-behavior={draftBehavior} onSubmit={addWorker} noValidate>
-        <header className="add-worker-head">
-          <h3>Add worker</h3>
-          <span className="add-worker-hint">{BASELOAD_BEHAVIOR_LABELS[draftBehavior]}</span>
-        </header>
-
-        <div className="behavior-picker" role="radiogroup" aria-label="Worker behavior">
-          {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
-            <label
-              key={behavior}
-              className="behavior-option"
-              data-behavior={behavior}
-              title={BASELOAD_BEHAVIOR_LABELS[behavior]}
-            >
-              <input
-                type="radio"
-                name="draft-behavior"
-                value={behavior}
-                checked={draftBehavior === behavior}
-                onChange={onDraftChange("behavior")}
-              />
-              <span>{BEHAVIOR_BADGES[behavior]}</span>
-            </label>
-          ))}
-        </div>
-
-        <div className="add-worker-fields">
-          <Field label="Wallet">
-            <select
-              value={draft.walletNumber}
-              onChange={onDraftChange("walletNumber")}
-              disabled={availableWallets.length === 0}
-            >
-              {availableWallets.map((wallet) => (
-                <option key={wallet} value={wallet}>
-                  #{wallet}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Max gas gwei">
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={draft.maxGasPriceGwei}
-              onChange={onDraftChange("maxGasPriceGwei")}
-            />
-          </Field>
-          <Field label="Ops / min">
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={draft.opsPerMinute}
-              onChange={onDraftChange("opsPerMinute")}
-            />
-          </Field>
-          <Field label="Entities / req">
-            <input
-              type="number"
-              min="1"
-              max={MAX_BASELOAD_ENTITIES_PER_REQUEST}
-              step="1"
-              value={draft.entitiesPerRequest}
-              onChange={onDraftChange("entitiesPerRequest")}
-            />
-          </Field>
-          <Field label="Payload bytes">
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={draft.singleCreatePayloadSize}
-              onChange={onDraftChange("singleCreatePayloadSize")}
-            />
-          </Field>
-          <Field label="String args">
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={draft.singleCreateStringArgumentCount}
-              onChange={onDraftChange("singleCreateStringArgumentCount")}
-            />
-          </Field>
-          <Field label="Number args">
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={draft.singleCreateNumberArgumentCount}
-              onChange={onDraftChange("singleCreateNumberArgumentCount")}
-            />
-          </Field>
-          {behaviorUsesPool(draftBehavior) ? (
-            <Field label="Pool size">
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={draft.entityPoolSize}
-                onChange={onDraftChange("entityPoolSize")}
-              />
-            </Field>
-          ) : null}
-          {draftBehavior === "time-bomb" ? (
-            <Field label="Bomb offset s">
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={draft.timeBombOffsetSeconds}
-                onChange={onDraftChange("timeBombOffsetSeconds")}
-              />
-            </Field>
-          ) : null}
-          <Field label="Start block">
-            <input type="number" min="0" step="1" value={draft.startBlock} onChange={onDraftChange("startBlock")} />
-          </Field>
-          <Field label="End block">
-            <input
-              type="number"
-              min="0"
-              step="1"
-              placeholder="Infinity"
-              value={draft.endBlock}
-              onChange={onDraftChange("endBlock")}
-            />
-          </Field>
-          <Field label="Duration s">
-            <input
-              type="number"
-              min="1"
-              step="1"
-              placeholder="Forever"
-              value={draft.durationSeconds}
-              onChange={onDraftChange("durationSeconds")}
-            />
-          </Field>
-          {draftBehavior === "time-bomb" ? (
-            <Field label="TTL s">
-              <span className="wfield-static" title="TTL targets the detonation moment automatically">
-                auto
-              </span>
-            </Field>
-          ) : (
-            <Field label="TTL s">
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={draft.ttlSeconds}
-                onChange={onDraftChange("ttlSeconds")}
-              />
-            </Field>
-          )}
-        </div>
-
-        <div className="add-worker-actions">
-          <button type="submit" className="add-worker-submit" disabled={availableWallets.length === 0}>
-            ✚ Add worker{availableWallets.length === 0 ? "" : ` #${draft.walletNumber}`}
-          </button>
-        </div>
-      </form>
-
       <p className={`summary${error || backendError || displayedConfigManagerError ? " error" : ""}`}>
         {error ||
           backendError ||
           displayedConfigManagerError ||
           managerStatus ||
-          downloadStatus ||
+          notice ||
           `${config.workers.length} workers configured`}
       </p>
 
@@ -517,23 +373,67 @@ export function BaseloadView({
 
       <FleetSummary workers={config.workers} taskStatuses={taskStatuses} />
 
-      <div className="worker-grid">
-        {config.workers.length === 0 ? (
-          <div className="worker-card worker-card-empty">
-            No baseload workers configured. Add one with the form above.
+      <div className="baseload-workbench">
+        <aside className="worker-list" aria-label="Workers">
+          <div className="worker-list-actions">
+            <button
+              type="button"
+              className="worker-list-new"
+              data-selected={selection.kind === "new" ? "true" : undefined}
+              onClick={() => setSelection({ kind: "new" })}
+            >
+              ✚ New worker
+            </button>
+            <label className="secondary file-button" title="Load one exported worker into the editor">
+              Import worker
+              <input type="file" accept="application/json,.json" onChange={importWorkerFile} />
+            </label>
           </div>
+          {config.workers.length === 0 ? (
+            <div className="worker-list-empty">No workers yet. Fill in the editor and add one.</div>
+          ) : (
+            <ul className="worker-list-items">
+              {config.workers.map((worker) => (
+                <WorkerRow
+                  key={worker.id}
+                  worker={worker}
+                  status={taskStatuses[worker.id]}
+                  balance={balances[worker.id]}
+                  tokenSymbol={tokenSymbol}
+                  selected={selection.kind === "worker" && selection.id === worker.id}
+                  onSelect={() => setSelection({ kind: "worker", id: worker.id })}
+                />
+              ))}
+            </ul>
+          )}
+        </aside>
+
+        {selectedWorker ? (
+          <WorkerEditor
+            key={selectedWorker.id}
+            worker={selectedWorker}
+            status={taskStatuses[selectedWorker.id]}
+            balance={balances[selectedWorker.id]}
+            tokenSymbol={tokenSymbol}
+            availableWallets={availableWallets}
+            onApply={(draft) => applyWorker(selectedWorker, draft)}
+            onDelete={() => deleteWorker(selectedWorker)}
+            onExport={exportWorker}
+          />
         ) : (
-          config.workers.map((worker) => (
-            <WorkerCard
-              key={worker.id}
-              worker={worker}
-              status={taskStatuses[worker.id]}
-              balance={balances[worker.id]}
-              tokenSymbol={tokenSymbol}
-              onUpdate={(patch) => updateWorker(worker, patch)}
-              onDelete={() => deleteWorker(worker.id)}
-            />
-          ))
+          <WorkerEditor
+            key="new"
+            worker={null}
+            draft={newDraft}
+            onDraftChange={setNewDraft}
+            availableWallets={availableWallets}
+            onAdd={addWorker}
+            onExport={exportWorker}
+            onReset={() =>
+              setNewDraft(createBaseloadWorkerDraft(availableWallets[0] ?? 0))
+            }
+            tokenSymbol={tokenSymbol}
+          />
         )}
       </div>
     </section>
@@ -547,6 +447,434 @@ const BEHAVIOR_BADGES: Record<BaseloadWorkerBehavior, string> = {
   "time-bomb": "✸ time bomb",
   "create-update-delete": "♻ full churn",
 };
+
+function workerFileStem(worker: BaseloadWorkerConfig): string {
+  const slug = worker.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug ? `${slug}-wallet-${worker.walletNumber}` : `wallet-${worker.walletNumber}`;
+}
+
+function isOutsideSchedule(status: BaseloadTaskStatus | undefined): boolean {
+  return status?.status === "waiting" && (status.message?.startsWith("Outside schedule") ?? false);
+}
+
+function WorkerRow({
+  worker,
+  status,
+  balance,
+  tokenSymbol,
+  selected,
+  onSelect,
+}: {
+  worker: BaseloadWorkerConfig;
+  status: BaseloadTaskStatus | undefined;
+  balance: BaseloadWorkerBalance | undefined;
+  tokenSymbol: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const schedule = describeBaseloadSchedule(worker);
+  return (
+    <li>
+      <button
+        type="button"
+        className="worker-row"
+        data-behavior={worker.behavior}
+        data-selected={selected ? "true" : undefined}
+        onClick={onSelect}
+      >
+        <span className="worker-row-title">
+          <strong className="worker-row-name">{describeBaseloadWorkerName(worker)}</strong>
+          {worker.name ? <span className="worker-row-wallet">#{worker.walletNumber}</span> : null}
+        </span>
+        <span className="worker-row-meta">
+          <span className="behavior-badge" title={BASELOAD_BEHAVIOR_LABELS[worker.behavior]}>
+            {BEHAVIOR_BADGES[worker.behavior]}
+          </span>
+          <StatusChip status={status} />
+          {schedule ? (
+            <span
+              className="worker-row-schedule"
+              data-active={isOutsideSchedule(status) ? "false" : "true"}
+              title={schedule}
+            >
+              ⏱
+            </span>
+          ) : null}
+        </span>
+        <span className="worker-row-foot">
+          <span className="worker-row-rate">
+            {worker.opsPerMinute} ops/min × {worker.entitiesPerRequest}
+          </span>
+          <span className="worker-card-balance">
+            <BalanceCell balance={balance} tokenSymbol={tokenSymbol} />
+          </span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+type WorkerEditorProps =
+  | {
+      worker: BaseloadWorkerConfig;
+      status: BaseloadTaskStatus | undefined;
+      balance: BaseloadWorkerBalance | undefined;
+      tokenSymbol: string;
+      availableWallets: number[];
+      onApply: (draft: BaseloadWorkerDraft) => void;
+      onDelete: () => void;
+      onExport: (draft: BaseloadWorkerDraft) => void;
+    }
+  | {
+      worker: null;
+      draft: BaseloadWorkerDraft;
+      onDraftChange: (draft: BaseloadWorkerDraft) => void;
+      availableWallets: number[];
+      onAdd: (draft: BaseloadWorkerDraft) => void;
+      onExport: (draft: BaseloadWorkerDraft) => void;
+      onReset: () => void;
+      tokenSymbol: string;
+    };
+
+function WorkerEditor(props: WorkerEditorProps) {
+  const { availableWallets } = props;
+  // Existing workers edit a local copy and commit with "Apply", so a run is not
+  // restarted on every keystroke; the new-worker draft lives in the parent so
+  // it survives navigation.
+  const [localDraft, setLocalDraft] = useState<BaseloadWorkerDraft>(() =>
+    props.worker ? createBaseloadWorkerDraftFromWorker(props.worker) : props.draft,
+  );
+  const [base, setBase] = useState<BaseloadWorkerDraft | null>(() =>
+    props.worker ? createBaseloadWorkerDraftFromWorker(props.worker) : null,
+  );
+
+  const worker = props.worker;
+  useEffect(() => {
+    if (!worker) return;
+    const fresh = createBaseloadWorkerDraftFromWorker(worker);
+    // Follow external config changes unless the user is mid-edit.
+    setLocalDraft((current) => (base && isSameBaseloadWorkerDraft(current, base) ? fresh : current));
+    setBase(fresh);
+  }, [worker]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const draft = props.worker ? localDraft : props.draft;
+  const setDraft = (next: BaseloadWorkerDraft) => {
+    if (props.worker) setLocalDraft(next);
+    else props.onDraftChange(next);
+  };
+  const dirty = props.worker !== null && base !== null && !isSameBaseloadWorkerDraft(draft, base);
+
+  const behavior: BaseloadWorkerBehavior = (
+    BASELOAD_WORKER_BEHAVIORS as readonly string[]
+  ).includes(draft.behavior)
+    ? (draft.behavior as BaseloadWorkerBehavior)
+    : "create";
+
+  const onChange = (key: keyof BaseloadWorkerDraft) => (
+    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
+    setDraft({ ...draft, [key]: event.target.value });
+  };
+
+  const schedulePreview = useMemo(() => describeScheduleDraft(draft), [draft.dailyWindow, draft.hourlyWindow]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (props.worker) props.onApply(draft);
+    else props.onAdd(draft);
+  };
+
+  const walletOptions = props.worker
+    ? [props.worker.walletNumber]
+    : availableWallets;
+  const title = props.worker ? describeBaseloadWorkerName(props.worker) : "New worker";
+
+  return (
+    <form className="worker-editor" data-behavior={behavior} onSubmit={submit} noValidate>
+      <header className="worker-editor-head">
+        <div>
+          <h3>{title}</h3>
+          <span className="add-worker-hint">{BASELOAD_BEHAVIOR_LABELS[behavior]}</span>
+        </div>
+        {props.worker ? (
+          <div className="worker-editor-live">
+            <StatusChip status={props.status} />
+            <span className="worker-card-balance">
+              <BalanceCell balance={props.balance} tokenSymbol={props.tokenSymbol} />
+            </span>
+          </div>
+        ) : null}
+      </header>
+
+      {props.worker ? (
+        <>
+          <div className="worker-card-address" title={props.worker.walletAddress}>
+            {props.worker.walletAddress || "address pending"}
+          </div>
+          <WorkerMetrics status={props.status} />
+          {props.status?.detonationAt ? (
+            <div className="worker-card-detonation">✸ detonation @ {props.status.detonationAt}</div>
+          ) : null}
+          {props.status?.status === "error" && props.status.message ? (
+            <ErrorDetail
+              className="cell-error-message"
+              message={props.status.message}
+              maxLength={CELL_ERROR_SUMMARY_MAX_LENGTH}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      <fieldset className="editor-section">
+        <legend>Identity</legend>
+        <div className="add-worker-fields">
+          <Field label="Name" wide>
+            <input
+              type="text"
+              maxLength={MAX_WORKER_NAME_LENGTH}
+              placeholder={`wallet #${draft.walletNumber}`}
+              value={draft.name}
+              onChange={onChange("name")}
+            />
+          </Field>
+          <Field label="Wallet">
+            <select
+              value={draft.walletNumber}
+              onChange={onChange("walletNumber")}
+              disabled={props.worker !== null || walletOptions.length === 0}
+              title={props.worker ? "The wallet is fixed once a worker exists; export and re-import to move it" : undefined}
+            >
+              {walletOptions.map((wallet) => (
+                <option key={wallet} value={wallet}>
+                  #{wallet}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="behavior-picker" role="radiogroup" aria-label="Worker behavior">
+          {BASELOAD_WORKER_BEHAVIORS.map((option) => (
+            <label
+              key={option}
+              className="behavior-option"
+              data-behavior={option}
+              title={BASELOAD_BEHAVIOR_LABELS[option]}
+            >
+              <input
+                type="radio"
+                name="editor-behavior"
+                value={option}
+                checked={behavior === option}
+                onChange={onChange("behavior")}
+              />
+              <span>{BEHAVIOR_BADGES[option]}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="editor-section">
+        <legend>Load</legend>
+        <div className="add-worker-fields">
+          <Field label="Ops / min">
+            <input type="number" min="0" step="1" value={draft.opsPerMinute} onChange={onChange("opsPerMinute")} />
+          </Field>
+          <Field label="Entities / req">
+            <input
+              type="number"
+              min="1"
+              max={MAX_BASELOAD_ENTITIES_PER_REQUEST}
+              step="1"
+              value={draft.entitiesPerRequest}
+              onChange={onChange("entitiesPerRequest")}
+            />
+          </Field>
+          <Field label="Max gas gwei">
+            <input type="number" min="0" step="0.1" value={draft.maxGasPriceGwei} onChange={onChange("maxGasPriceGwei")} />
+          </Field>
+          {behaviorUsesPool(behavior) ? (
+            <Field label="Pool size">
+              <input type="number" min="1" step="1" value={draft.entityPoolSize} onChange={onChange("entityPoolSize")} />
+            </Field>
+          ) : null}
+          {behavior === "time-bomb" ? (
+            <Field label="Bomb offset s">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={draft.timeBombOffsetSeconds}
+                onChange={onChange("timeBombOffsetSeconds")}
+              />
+            </Field>
+          ) : null}
+        </div>
+      </fieldset>
+
+      <fieldset className="editor-section">
+        <legend>Entity</legend>
+        <div className="add-worker-fields">
+          <Field label="Payload bytes">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.singleCreatePayloadSize}
+              onChange={onChange("singleCreatePayloadSize")}
+            />
+          </Field>
+          <Field label="String args">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.singleCreateStringArgumentCount}
+              onChange={onChange("singleCreateStringArgumentCount")}
+            />
+          </Field>
+          <Field label="Number args">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.singleCreateNumberArgumentCount}
+              onChange={onChange("singleCreateNumberArgumentCount")}
+            />
+          </Field>
+          {behavior === "time-bomb" ? (
+            <Field label="TTL s">
+              <span className="wfield-static" title="TTL targets the detonation moment automatically">
+                auto
+              </span>
+            </Field>
+          ) : (
+            <Field label="TTL s">
+              <input type="number" min="1" step="1" value={draft.ttlSeconds} onChange={onChange("ttlSeconds")} />
+            </Field>
+          )}
+        </div>
+      </fieldset>
+
+      <fieldset className="editor-section">
+        <legend>Run window</legend>
+        <div className="add-worker-fields">
+          <Field label="Start block">
+            <input type="number" min="0" step="1" value={draft.startBlock} onChange={onChange("startBlock")} />
+          </Field>
+          <Field label="End block">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              placeholder="Infinity"
+              value={draft.endBlock}
+              onChange={onChange("endBlock")}
+            />
+          </Field>
+          <Field label="Duration s">
+            <input
+              type="number"
+              min="1"
+              step="1"
+              placeholder="Forever"
+              value={draft.durationSeconds}
+              onChange={onChange("durationSeconds")}
+            />
+          </Field>
+        </div>
+      </fieldset>
+
+      <fieldset className="editor-section">
+        <legend>Schedule</legend>
+        <div className="add-worker-fields">
+          <Field label="Daily (UTC)">
+            <input
+              type="text"
+              placeholder="always"
+              title="Active hours of the day in UTC, end exclusive, e.g. 04:30-18:30 (may wrap midnight)"
+              value={draft.dailyWindow}
+              onChange={onChange("dailyWindow")}
+            />
+          </Field>
+          <Field label="Hourly minutes">
+            <input
+              type="text"
+              placeholder="always"
+              title="Active minutes of every hour, end exclusive, e.g. 24-58 (may wrap)"
+              value={draft.hourlyWindow}
+              onChange={onChange("hourlyWindow")}
+            />
+          </Field>
+        </div>
+        <p className="schedule-preview" data-error={schedulePreview.error ? "true" : undefined}>
+          {schedulePreview.error
+            ? schedulePreview.error
+            : schedulePreview.text
+              ? `Active ${schedulePreview.text}; both windows must hold.`
+              : "Always active; set a daily window like 04:30-18:30 or hourly minutes like 24-58."}
+        </p>
+      </fieldset>
+
+      <div className="editor-actions">
+        {props.worker ? (
+          <>
+            <button type="submit" className="add-worker-submit" disabled={!dirty}>
+              Apply changes
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={!dirty}
+              onClick={() => {
+                if (base) setLocalDraft(base);
+              }}
+            >
+              Revert
+            </button>
+            <button type="button" className="secondary" onClick={() => props.onExport(draft)}>
+              Export worker
+            </button>
+            <button type="button" className="secondary danger" onClick={props.onDelete}>
+              Delete worker
+            </button>
+            {dirty ? <span className="editor-dirty">unsaved changes</span> : null}
+          </>
+        ) : (
+          <>
+            <button type="submit" className="add-worker-submit" disabled={availableWallets.length === 0}>
+              ✚ Add worker{availableWallets.length === 0 ? "" : ` #${draft.walletNumber}`}
+            </button>
+            <button type="button" className="secondary" onClick={() => props.onExport(draft)}>
+              Export worker
+            </button>
+            <button type="button" className="secondary" onClick={props.onReset}>
+              Reset form
+            </button>
+          </>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function describeScheduleDraft(
+  draft: Pick<BaseloadWorkerDraft, "dailyWindow" | "hourlyWindow">,
+): { text: string | null; error: string | null } {
+  try {
+    return {
+      text: describeBaseloadSchedule({
+        dailyWindow: normalizeDailyWindow(draft.dailyWindow),
+        hourlyWindow: normalizeHourlyWindow(draft.hourlyWindow),
+      }),
+      error: null,
+    };
+  } catch (err) {
+    return { text: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 function FleetSummary({
   workers,
@@ -571,7 +899,6 @@ function FleetSummary({
   const errorCount = workers.filter(
     (worker) => taskStatuses[worker.id]?.status === "error",
   ).length;
-
   return (
     <div className="fleet-summary">
       <span className="fleet-chip">
@@ -605,236 +932,9 @@ function FleetSummary({
   );
 }
 
-function WorkerCard({
-  worker,
-  status,
-  balance,
-  tokenSymbol,
-  onUpdate,
-  onDelete,
-}: {
-  worker: BaseloadWorkerConfig;
-  status: BaseloadTaskStatus | undefined;
-  balance: BaseloadWorkerBalance | undefined;
-  tokenSymbol: string;
-  onUpdate: (patch: Partial<BaseloadWorkerConfig>) => void;
-  onDelete: () => void;
-}) {
+function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
   return (
-    <article className="worker-card" data-behavior={worker.behavior}>
-      <header className="worker-card-head">
-        <span className="worker-card-wallet">
-          wallet <strong>#{worker.walletNumber}</strong>
-        </span>
-        <span className="behavior-badge" title={BASELOAD_BEHAVIOR_LABELS[worker.behavior]}>
-          {BEHAVIOR_BADGES[worker.behavior]}
-        </span>
-        <button type="button" className="worker-card-delete" title="Delete worker" onClick={onDelete}>
-          ×
-        </button>
-      </header>
-
-      <div className="worker-card-address" title={worker.walletAddress}>
-        {worker.walletAddress || "address pending"}
-      </div>
-
-      <div className="worker-card-status-row">
-        <StatusChip status={status} />
-        <span className="worker-card-balance">
-          <BalanceCell balance={balance} tokenSymbol={tokenSymbol} />
-        </span>
-      </div>
-
-      <WorkerMetrics status={status} />
-
-      {status?.detonationAt ? (
-        <div className="worker-card-detonation">✸ detonation @ {status.detonationAt}</div>
-      ) : null}
-
-      {status?.status === "error" && status.message ? (
-        <ErrorDetail
-          className="cell-error-message"
-          message={status.message}
-          maxLength={CELL_ERROR_SUMMARY_MAX_LENGTH}
-        />
-      ) : null}
-
-      <div className="worker-card-fields">
-        <label className="wfield wfield-wide">
-          <span>Behavior</span>
-          <select
-            value={worker.behavior}
-            onChange={(event) =>
-              onUpdate({ behavior: event.target.value as BaseloadWorkerBehavior })
-            }
-          >
-            {BASELOAD_WORKER_BEHAVIORS.map((behavior) => (
-              <option key={behavior} value={behavior}>
-                {BASELOAD_BEHAVIOR_LABELS[behavior]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Field label="Max gas gwei">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "maxGasPriceGwei")}
-            value={worker.maxGasPriceGwei}
-            min={0}
-            step="0.1"
-            onChange={(value) => {
-              if (value !== null) onUpdate({ maxGasPriceGwei: value });
-            }}
-          />
-        </Field>
-        <Field label="Ops / min">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "opsPerMinute")}
-            value={worker.opsPerMinute}
-            min={0}
-            step="1"
-            onChange={(value) => {
-              if (value !== null) onUpdate({ opsPerMinute: value });
-            }}
-          />
-        </Field>
-        <Field label="Entities / req">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "entitiesPerRequest")}
-            value={worker.entitiesPerRequest}
-            min={1}
-            max={MAX_BASELOAD_ENTITIES_PER_REQUEST}
-            step="1"
-            integer
-            onChange={(value) => {
-              if (value !== null) onUpdate({ entitiesPerRequest: value });
-            }}
-          />
-        </Field>
-        <Field label="Payload bytes">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "singleCreatePayloadSize")}
-            value={worker.singleCreatePayloadSize}
-            min={0}
-            step="1"
-            integer
-            onChange={(value) => {
-              if (value !== null) onUpdate({ singleCreatePayloadSize: value });
-            }}
-          />
-        </Field>
-        <Field label="String args">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "singleCreateStringArgumentCount")}
-            value={worker.singleCreateStringArgumentCount}
-            min={0}
-            step="1"
-            integer
-            onChange={(value) => {
-              if (value !== null) onUpdate({ singleCreateStringArgumentCount: value });
-            }}
-          />
-        </Field>
-        <Field label="Number args">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "singleCreateNumberArgumentCount")}
-            value={worker.singleCreateNumberArgumentCount}
-            min={0}
-            step="1"
-            integer
-            onChange={(value) => {
-              if (value !== null) onUpdate({ singleCreateNumberArgumentCount: value });
-            }}
-          />
-        </Field>
-        {behaviorUsesPool(worker.behavior) ? (
-          <Field label="Pool size">
-            <EditableNumber
-              storageKey={editableStorageKey(worker.id, "entityPoolSize")}
-              value={worker.entityPoolSize}
-              min={1}
-              step="1"
-              integer
-              onChange={(value) => {
-                if (value !== null) onUpdate({ entityPoolSize: value });
-              }}
-            />
-          </Field>
-        ) : null}
-        {worker.behavior === "time-bomb" ? (
-          <Field label="Bomb offset s">
-            <EditableNumber
-              storageKey={editableStorageKey(worker.id, "timeBombOffsetSeconds")}
-              value={worker.timeBombOffsetSeconds}
-              min={1}
-              step="1"
-              integer
-              onChange={(value) => {
-                if (value !== null) onUpdate({ timeBombOffsetSeconds: value });
-              }}
-            />
-          </Field>
-        ) : null}
-        <Field label="Start block">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "startBlock")}
-            value={worker.startBlock}
-            min={0}
-            step="1"
-            integer
-            onChange={(value) => {
-              if (value !== null) onUpdate({ startBlock: value });
-            }}
-          />
-        </Field>
-        <Field label="End block">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "endBlock")}
-            value={worker.endBlock}
-            min={0}
-            step="1"
-            integer
-            placeholder="Infinity"
-            onChange={(value) => onUpdate({ endBlock: value })}
-          />
-        </Field>
-        <Field label="Duration s">
-          <EditableNumber
-            storageKey={editableStorageKey(worker.id, "durationSeconds")}
-            value={worker.durationSeconds}
-            min={1}
-            step="1"
-            integer
-            onChange={(value) => onUpdate({ durationSeconds: value })}
-          />
-        </Field>
-        {worker.behavior === "time-bomb" ? (
-          <Field label="TTL s">
-            <span className="wfield-static" title="TTL targets the detonation moment automatically">
-              auto
-            </span>
-          </Field>
-        ) : (
-          <Field label="TTL s">
-            <EditableNumber
-              storageKey={editableStorageKey(worker.id, "ttlSeconds")}
-              value={worker.ttlSeconds}
-              min={1}
-              step="1"
-              integer
-              onChange={(value) => {
-                if (value !== null) onUpdate({ ttlSeconds: value });
-              }}
-            />
-          </Field>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="wfield">
+    <label className={`wfield${wide ? " wfield-wide" : ""}`}>
       <span>{label}</span>
       {children}
     </label>
@@ -874,6 +974,7 @@ function WorkerMetrics({ status }: { status: BaseloadTaskStatus | undefined }) {
     items.push({ label: "block", value: String(status.currentBlock) });
   }
   if (status.txHash) items.push({ label: "tx", value: shortHash(status.txHash) });
+  if (status.message && status.status !== "error") items.push({ label: "state", value: status.message });
   if (items.length === 0) return null;
   return (
     <dl className="worker-card-metrics">
@@ -952,12 +1053,13 @@ function ErrorBanner({
   balances: Record<string, BaseloadWorkerBalance>;
 }) {
   const workerErrors = workers.flatMap((worker) => {
-    const entries: { workerId: string; walletNumber: number; source: string; message: string; updatedAt?: string }[] = [];
+    const entries: { workerId: string; label: string; source: string; message: string; updatedAt?: string }[] = [];
+    const label = describeBaseloadWorkerName(worker);
     const status = taskStatuses[worker.id];
     if (status && status.status === "error" && status.message) {
       entries.push({
         workerId: worker.id,
-        walletNumber: worker.walletNumber,
+        label,
         source: "task",
         message: status.message,
         updatedAt: status.updatedAt,
@@ -967,7 +1069,7 @@ function ErrorBanner({
     if (balance?.error) {
       entries.push({
         workerId: worker.id,
-        walletNumber: worker.walletNumber,
+        label,
         source: "balance RPC",
         message: balance.error,
         updatedAt: balance.updatedAt,
@@ -999,7 +1101,7 @@ function ErrorBanner({
         ) : null}
         {workerErrors.map((entry, index) => (
           <li key={`${entry.workerId}-${entry.source}-${index}`}>
-            <strong>Wallet {entry.walletNumber}</strong> ({entry.source}
+            <strong>{entry.label}</strong> ({entry.source}
             {entry.updatedAt ? ` @ ${entry.updatedAt}` : ""}):{" "}
             <ErrorDetail message={entry.message} />
           </li>
@@ -1011,85 +1113,4 @@ function ErrorBanner({
 
 function shortHash(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-
-function editableStorageKey(workerId: string, field: keyof BaseloadWorkerConfig): string {
-  return `baseload.workerEdit.${workerId}.${field}`;
-}
-
-function clearEditableStorage(workerId: string): void {
-  for (const field of EDITABLE_WORKER_KEYS) {
-    removeStoredValue(editableStorageKey(workerId, field));
-  }
-}
-
-function EditableNumber({
-  storageKey,
-  value,
-  min,
-  max,
-  step,
-  integer = false,
-  placeholder,
-  onChange,
-}: {
-  storageKey: string;
-  value: number | null;
-  min: number;
-  max?: number;
-  step: string;
-  integer?: boolean;
-  placeholder?: string;
-  onChange: (value: number | null) => void;
-}) {
-  const [text, setText] = useState(() => readStoredString(storageKey, value === null ? "" : String(value)));
-
-  useEffect(() => {
-    setText(readStoredString(storageKey, value === null ? "" : String(value)));
-  }, [storageKey, value]);
-
-  const commit = () => {
-    if (text.trim() === "") {
-      removeStoredValue(storageKey);
-      onChange(null);
-      return;
-    }
-    const next = Number(text);
-    if (
-      !Number.isFinite(next) ||
-      next < min ||
-      (max !== undefined && next > max) ||
-      (integer && !Number.isInteger(next))
-    ) {
-      removeStoredValue(storageKey);
-      setText(value === null ? "" : String(value));
-      return;
-    }
-    removeStoredValue(storageKey);
-    onChange(next);
-  };
-
-  const updateText = (value: string) => {
-    setText(value);
-    writeStoredString(storageKey, value);
-  };
-
-  return (
-    <input
-      className="table-input"
-      type="number"
-      min={min}
-      max={max}
-      step={step}
-      placeholder={placeholder}
-      value={text}
-      onChange={(event) => updateText(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        }
-      }}
-    />
-  );
 }

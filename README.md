@@ -349,6 +349,7 @@ Expected file shape:
   "workers": [
     {
       "walletNumber": 0,
+      "name": "Office hours",
       "behavior": "create",
       "maxGasPriceGwei": 1000,
       "opsPerMinute": 1,
@@ -361,7 +362,9 @@ Expected file shape:
       "startBlock": 0,
       "endBlock": null,
       "durationSeconds": null,
-      "ttlSeconds": 3600
+      "ttlSeconds": 3600,
+      "dailyWindow": "04:30-18:30",
+      "hourlyWindow": "24-58"
     }
   ]
 }
@@ -385,6 +388,8 @@ Worker behaviors (`behavior` field):
 Worker mechanics:
 
 - Each configured worker runs on the backend within its configured start block, optional end block, and optional duration.
+- `name` is a free-form label (up to 64 characters) shown in the panel instead of the wallet number.
+- `dailyWindow` (`"HH:MM-HH:MM"`, UTC) and `hourlyWindow` (`"MM-MM"`, minutes of every hour) pause the worker outside the given ranges without ending its run. Ends are exclusive and ranges may wrap (`"22:00-04:00"`, `"50-10"`); when both are set the worker is active only while both hold, so `"04:30-18:30"` plus `"24-58"` means minutes 24 to 57 of every hour between 04:30 and 18:30 UTC. Leave either `null` for "always".
 - `entitiesPerRequest` is currently normalized to at most `1`; increase load with `opsPerMinute` or multiple worker wallets instead of multi-entity mutation batches.
 - Each worker targets up to its configured operations per minute. Each operation submits one Arkiv mutation request for up to `entitiesPerRequest` entities. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
 - Each worker performs one request at a time and waits for the transaction receipt before submitting the next one (`create-ownership` sends one create batch and then one ownership-change batch because ownership changes need the newly created entity keys).

@@ -17,6 +17,7 @@ describe("baseload config helpers", () => {
 
     expect(worker).toEqual({
       id: "wallet-7",
+      name: "",
       behavior: "create",
       maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
       opsPerMinute: 1,
@@ -32,6 +33,8 @@ describe("baseload config helpers", () => {
       endBlock: null,
       durationSeconds: null,
       ttlSeconds: 3600,
+      dailyWindow: null,
+      hourlyWindow: null,
     });
   });
 
@@ -40,6 +43,7 @@ describe("baseload config helpers", () => {
       workers: [
         {
           walletNumber: "1",
+          name: "  Night shift  ",
           behavior: "create-update",
           maxGasPriceGwei: "5.5",
           opsPerMinute: "2.25",
@@ -53,6 +57,8 @@ describe("baseload config helpers", () => {
           endBlock: "20",
           durationSeconds: "60",
           ttlSeconds: "120",
+          dailyWindow: "4:30-18:30",
+          hourlyWindow: "24-58",
         },
       ],
     });
@@ -62,6 +68,7 @@ describe("baseload config helpers", () => {
       workers: [
         {
           id: "wallet-1",
+          name: "Night shift",
           behavior: "create-update",
           maxGasPriceGwei: 5.5,
           opsPerMinute: 2.25,
@@ -77,6 +84,8 @@ describe("baseload config helpers", () => {
           endBlock: 20,
           durationSeconds: 60,
           ttlSeconds: 120,
+          dailyWindow: "04:30-18:30",
+          hourlyWindow: "24-58",
         },
       ],
     });
@@ -157,6 +166,8 @@ describe("baseload config helpers", () => {
       endBlock: "456",
       durationSeconds: "789",
       ttlSeconds: "321",
+      dailyWindow: "",
+      hourlyWindow: "",
     };
     const config = normalizeBaseloadConfig({
       workers: [{ walletNumber: 0 }, { walletNumber: 2 }],
@@ -180,6 +191,7 @@ describe("baseload config helpers", () => {
       workers: [
         {
           id: "wallet-4",
+          name: "",
           behavior: "create",
           maxGasPriceGwei: DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei,
           opsPerMinute: 1,
@@ -195,6 +207,8 @@ describe("baseload config helpers", () => {
           endBlock: null,
           durationSeconds: null,
           ttlSeconds: 3600,
+          dailyWindow: null,
+          hourlyWindow: null,
         },
       ],
     });

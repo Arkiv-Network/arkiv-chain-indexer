@@ -17,6 +17,7 @@ import {
   type BaseloadRpcEndpoint,
 } from "./baseloadRpcKeys";
 import { RpcKeyRing, attachRpcKeyRing } from "./rpcKeyRing";
+import { describeBaseloadSchedule } from "./baseloadSchedule";
 import {
   BASELOAD_DERIVATION_PATH_PREFIX,
   EMPTY_BASELOAD_CONFIG,
@@ -509,6 +510,18 @@ class BaseloadWorkerTask {
               ...statusCounts(),
             });
             break;
+          }
+
+          if (limitState.type === "outside-schedule") {
+            this.postStatus("waiting", {
+              currentBlock: limitState.currentBlock,
+              message: `Outside schedule (${describeBaseloadSchedule(worker)})`,
+              ...statusCounts(),
+            });
+            // Windows are minute-granular; a short sleep keeps the status
+            // fresh and the wake-up inside the first few seconds of a window.
+            await sleep(5_000, this.abortController.signal);
+            continue;
           }
 
           if (
