@@ -2,7 +2,9 @@
  * Worker activity windows. A worker may carry a daily window ("04:30-18:30")
  * and an hourly window ("24-58"); when both are set the worker is active only
  * while both hold. Times are UTC, ends are exclusive, and a window whose end is
- * not after its start wraps around midnight or the top of the hour.
+ * not after its start wraps around midnight or the top of the hour. An hourly
+ * end may also run past 60 ("50-70" = minute 50 to minute 10 of the next hour)
+ * so a window crossing the hour reads naturally; it may not exceed one hour.
  *
  * This file is mirrored verbatim in frontend/src/baseloadSchedule.ts.
  */
@@ -22,6 +24,8 @@ export interface BaseloadScheduleFields {
 
 export const MINUTES_PER_DAY = 24 * 60;
 export const MINUTES_PER_HOUR = 60;
+/** An hourly window may end in the following hour, so the end runs to 120. */
+export const MAX_HOURLY_WINDOW_END = 2 * MINUTES_PER_HOUR;
 
 export function parseDailyWindow(value: string): BaseloadTimeWindow {
   const [rawStart, rawEnd] = splitWindow("Daily window", value);
@@ -32,8 +36,11 @@ export function parseDailyWindow(value: string): BaseloadTimeWindow {
 
 export function parseHourlyWindow(value: string): BaseloadTimeWindow {
   const [rawStart, rawEnd] = splitWindow("Hourly window", value);
-  const start = parseMinute("Hourly window", rawStart);
-  const end = parseMinute("Hourly window", rawEnd);
+  const start = parseMinute("Hourly window", rawStart, MINUTES_PER_HOUR - 1);
+  const end = parseMinute("Hourly window", rawEnd, MAX_HOURLY_WINDOW_END);
+  if (end - start > MINUTES_PER_HOUR) {
+    throw new Error("Hourly window may not be longer than an hour");
+  }
   return checkWindow("Hourly window", start, end, MINUTES_PER_HOUR);
 }
 
@@ -112,10 +119,10 @@ function parseClock(label: string, value: string): number {
   return hours * 60 + minutes;
 }
 
-function parseMinute(label: string, value: string): number {
-  if (!/^\d{1,2}$/.test(value)) throw new Error(`${label} minutes must be whole numbers`);
+function parseMinute(label: string, value: string, max: number): number {
+  if (!/^\d{1,3}$/.test(value)) throw new Error(`${label} minutes must be whole numbers`);
   const minute = Number(value);
-  if (minute > MINUTES_PER_HOUR) throw new Error(`${label} minutes must be between 0 and 60`);
+  if (minute > max) throw new Error(`${label} minutes must be between 0 and ${max}`);
   return minute;
 }
 

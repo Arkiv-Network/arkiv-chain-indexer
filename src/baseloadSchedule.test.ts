@@ -27,6 +27,8 @@ describe("baseload schedule windows", () => {
     expect(parseHourlyWindow("24-58")).toEqual({ start: 24, end: 58 });
     expect(normalizeHourlyWindow("5-9")).toBe("05-09");
     expect(normalizeHourlyWindow("30-60")).toBe("30-60");
+    expect(normalizeHourlyWindow("50-70")).toBe("50-70");
+    expect(normalizeHourlyWindow("5-65")).toBe("05-65");
     expect(normalizeHourlyWindow("  ")).toBeNull();
   });
 
@@ -35,7 +37,9 @@ describe("baseload schedule windows", () => {
     expect(() => normalizeDailyWindow("25:00-26:00")).toThrow("between 00:00 and 24:00");
     expect(() => normalizeDailyWindow("10:00-10:00")).toThrow("must differ");
     expect(() => normalizeDailyWindow("24:00-06:00")).toThrow("start must be before");
-    expect(() => normalizeHourlyWindow("10-70")).toThrow("between 0 and 60");
+    expect(() => normalizeHourlyWindow("10-121")).toThrow("between 0 and 120");
+    expect(() => normalizeHourlyWindow("60-70")).toThrow("between 0 and 59");
+    expect(() => normalizeHourlyWindow("10-75")).toThrow("longer than an hour");
     expect(() => normalizeHourlyWindow("a-b")).toThrow("whole numbers");
     expect(() => normalizeHourlyWindow(12)).toThrow("must be a string");
   });
@@ -58,6 +62,14 @@ describe("baseload schedule windows", () => {
     expect(isBaseloadScheduleActive(wrap, utc("2026-09-04T12:55:00Z"))).toBe(true);
     expect(isBaseloadScheduleActive(wrap, utc("2026-09-04T12:05:00Z"))).toBe(true);
     expect(isBaseloadScheduleActive(wrap, utc("2026-09-04T12:30:00Z"))).toBe(false);
+
+    const acrossHour = { dailyWindow: null, hourlyWindow: "50-70" };
+    expect(isBaseloadScheduleActive(acrossHour, utc("2026-09-04T12:55:00Z"))).toBe(true);
+    expect(isBaseloadScheduleActive(acrossHour, utc("2026-09-04T13:09:59Z"))).toBe(true);
+    expect(isBaseloadScheduleActive(acrossHour, utc("2026-09-04T13:10:00Z"))).toBe(false);
+    const fullHour = { dailyWindow: null, hourlyWindow: "10-70" };
+    expect(isBaseloadScheduleActive(fullHour, utc("2026-09-04T13:10:00Z"))).toBe(true);
+    expect(isBaseloadScheduleActive(fullHour, utc("2026-09-04T13:09:00Z"))).toBe(true);
 
     const toEnd = { dailyWindow: null, hourlyWindow: "30-60" };
     expect(isBaseloadScheduleActive(toEnd, utc("2026-09-04T12:59:00Z"))).toBe(true);

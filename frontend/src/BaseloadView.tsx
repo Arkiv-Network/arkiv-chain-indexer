@@ -803,7 +803,7 @@ function WorkerEditor(props: WorkerEditorProps) {
             <input
               type="text"
               placeholder="always"
-              title="Active minutes of every hour, end exclusive, e.g. 24-58 (may wrap)"
+              title="Active minutes of every hour, end exclusive, e.g. 24-58; cross the hour with an end past 60, e.g. 50-70"
               value={draft.hourlyWindow}
               onChange={onChange("hourlyWindow")}
             />
