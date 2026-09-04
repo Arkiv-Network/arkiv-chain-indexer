@@ -59,7 +59,8 @@ describe("baseload traffic projection", () => {
     );
     expect(minutes).toHaveLength(60);
     expect(minutes[5]).toEqual({ minute: 5, txCount: 1, payloadBytes: 1000, activeWorkers: 1 });
-    expect(minutes[12]).toEqual({ minute: 12, txCount: 60, payloadBytes: 60_000, activeWorkers: 1 });
+    // "15-75" wraps, so minute 12 is inside it as well as inside "10-20".
+    expect(minutes[12]).toEqual({ minute: 12, txCount: 61, payloadBytes: 61_000, activeWorkers: 2 });
     expect(minutes[17]!.txCount).toBe(61);
     expect(minutes[30]!.activeWorkers).toBe(1);
     expect(projectBaseloadMinutes([{ ...base, dailyWindow: "12:00-13:00" }], 3)[30]!.activeWorkers).toBe(0);

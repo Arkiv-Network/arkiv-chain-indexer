@@ -593,7 +593,9 @@ class BaseloadWorkerTask {
           // The cap is a promise not to pay more than this. Sending under the
           // base fee would either be refused or sit in the mempool until the
           // fee drops, so hold the batch back and say why.
-          const baseFeeWei = await this.baseFees.read(clients.rpc);
+          // A failed reading must not stop the fleet: fall through to the send,
+          // which the node will refuse on its own if the cap really is too low.
+          const baseFeeWei = await this.baseFees.read(clients.rpc).catch(() => null);
           if (isOutpriced(baseFeeWei, maxFeePerGas)) {
             this.postStatus("outpriced", {
               currentBlock,
@@ -1007,6 +1009,7 @@ function createRpcClient(
     },
     getBaseFeeWei: async () => {
       const result = await callRpc(endpoint, "eth_getBlockByNumber", ["latest", false], ring);
+      if (result === null) return null;
       if (!isRecord(result)) {
         throw new Error("RPC eth_getBlockByNumber returned a non-object block");
       }
