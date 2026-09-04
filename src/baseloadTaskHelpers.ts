@@ -265,3 +265,47 @@ export function isFeeCapBelowBaseFeeError(error: unknown): boolean {
 
 const FEE_CAP_TOO_LOW_PATTERN =
   /cannot be lower than the block base fee|max fee per gas less than block base fee|fee cap less than block base fee/i;
+
+export interface BaseFeeSource {
+  getBaseFeeWei: () => Promise<bigint | null>;
+}
+
+/**
+ * One base-fee reading shared by every worker. The fleet only needs the
+ * value about once per block, so concurrent readers share a single in-flight
+ * call and a fresh value is served from memory. Failures are not cached.
+ */
+export class BaseFeeCache {
+  private value: bigint | null = null;
+  private fetchedAtMs = Number.NEGATIVE_INFINITY;
+  private inFlight: Promise<bigint | null> | null = null;
+
+  constructor(
+    private readonly ttlMs: number,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  read(source: BaseFeeSource): Promise<bigint | null> {
+    if (this.now() - this.fetchedAtMs < this.ttlMs) return Promise.resolve(this.value);
+    if (this.inFlight) return this.inFlight;
+    this.inFlight = source
+      .getBaseFeeWei()
+      .then((value) => {
+        this.value = value;
+        this.fetchedAtMs = this.now();
+        return value;
+      })
+      .finally(() => {
+        this.inFlight = null;
+      });
+    return this.inFlight;
+  }
+}
+
+export function formatGweiShort(wei: bigint): string {
+  return (Number(wei) / 1e9).toFixed(3).replace(/\.?0+$/, "");
+}
+
+export function isOutpriced(baseFeeWei: bigint | null, maxFeePerGas: bigint): boolean {
+  return baseFeeWei !== null && baseFeeWei > maxFeePerGas;
+}
