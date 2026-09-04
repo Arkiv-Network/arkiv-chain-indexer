@@ -850,7 +850,16 @@ export interface BaseloadConfig {
 export interface BaseloadTaskStatus {
   workerId: string;
   walletNumber: number;
-  status: "starting" | "ready" | "updated" | "running" | "waiting" | "completed" | "error" | "stopped";
+  status:
+    | "starting"
+    | "ready"
+    | "updated"
+    | "running"
+    | "waiting"
+    | "outpriced"
+    | "completed"
+    | "error"
+    | "stopped";
   updatedAt: string;
   currentBlock?: number;
   message?: string;

@@ -896,12 +896,12 @@ function FleetSummary({
     behavior,
     count: workers.filter((worker) => worker.behavior === behavior).length,
   })).filter((entry) => entry.count > 0);
-  const activeCount = workers.filter((worker) =>
-    ["running", "waiting", "ready", "updated"].includes(taskStatuses[worker.id]?.status ?? ""),
-  ).length;
-  const errorCount = workers.filter(
-    (worker) => taskStatuses[worker.id]?.status === "error",
-  ).length;
+  const countWhere = (names: readonly string[]) =>
+    workers.filter((worker) => names.includes(taskStatuses[worker.id]?.status ?? "")).length;
+  const runningCount = countWhere(["running", "ready", "updated"]);
+  const waitingCount = countWhere(["waiting"]);
+  const outpricedCount = countWhere(["outpriced"]);
+  const errorCount = countWhere(["error"]);
   return (
     <div className="fleet-summary">
       <span className="fleet-chip">
@@ -913,8 +913,14 @@ function FleetSummary({
       <span className="fleet-chip">
         <strong>{totalEntities}</strong> entities/min
       </span>
-      <span className="fleet-chip">
-        <strong>{activeCount}</strong> active
+      <span className="fleet-chip fleet-chip-running" title="Sending or just sent a batch">
+        <strong>{runningCount}</strong> running
+      </span>
+      <span className="fleet-chip fleet-chip-waiting" title="Outside its schedule, before its start block, or between minutes">
+        <strong>{waitingCount}</strong> waiting
+      </span>
+      <span className="fleet-chip fleet-chip-outpriced" title="Fee cap below the current base fee">
+        <strong>{outpricedCount}</strong> outpriced
       </span>
       {errorCount > 0 ? (
         <span className="fleet-chip fleet-chip-error">

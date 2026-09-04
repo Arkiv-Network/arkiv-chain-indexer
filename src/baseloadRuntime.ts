@@ -54,6 +54,8 @@ export type BaseloadWorkerStatusName =
   | "updated"
   | "running"
   | "waiting"
+  /** Priced out: the worker's fee cap is below the current base fee. */
+  | "outpriced"
   | "completed"
   | "error"
   | "stopped";
@@ -812,7 +814,7 @@ class BaseloadWorkerTask {
         } catch (error) {
           if (this.abortController.signal.aborted) break;
           if (isFeeCapBelowBaseFeeError(error)) {
-            this.postStatus("waiting", {
+            this.postStatus("outpriced", {
               currentBlock: lastKnownBlock,
               message: `Base fee above the ${worker.maxGasPriceGwei} gwei cap, waiting for gas to drop`,
               ...statusCounts(),

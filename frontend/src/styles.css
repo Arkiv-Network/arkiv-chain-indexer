@@ -2771,6 +2771,11 @@ td.num {
   border-color: color-mix(in oklab, var(--op-amber) 45%, transparent);
 }
 
+.status-chip[data-status="outpriced"] {
+  color: var(--op-purple);
+  border-color: color-mix(in oklab, var(--op-purple) 45%, transparent);
+}
+
 .status-chip[data-status="error"] {
   color: var(--op-red);
   border-color: color-mix(in oklab, var(--op-red) 45%, transparent);
@@ -6573,4 +6578,19 @@ form select {
   margin-top: 0.2rem;
   font-size: 0.78rem;
   color: var(--muted);
+}
+
+.fleet-chip-running,
+.fleet-chip-running strong {
+  color: var(--ok);
+}
+
+.fleet-chip-waiting,
+.fleet-chip-waiting strong {
+  color: var(--op-amber);
+}
+
+.fleet-chip-outpriced,
+.fleet-chip-outpriced strong {
+  color: var(--op-purple);
 }
