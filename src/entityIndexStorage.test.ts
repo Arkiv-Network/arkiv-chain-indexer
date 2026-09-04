@@ -650,7 +650,7 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect((await errorOf("arkiv_getEntity", [KEY_A, 200])).code).toBe(-32006);
   });
 
-  test("arkiv_getBlockTiming describes the scanner head", async () => {
+  test("arkiv_getBlockTiming describes the projection head", async () => {
     expect(await result<unknown>("arkiv_getBlockTiming")).toEqual({
       current_block: 105,
       current_block_time: Math.floor(Date.UTC(2026, 8, 3, 0, 0, 210) / 1000),
@@ -698,9 +698,13 @@ describeWithPostgres("entity index (Postgres)", () => {
         },
       ],
     );
+    // Scanned but not yet projected: the timing head stays where the index is,
+    // so a caller pinning reads to it lands on a block the index can answer.
+    expect((await result<{ current_block: number }>("arkiv_getBlockTiming")).current_block).toBe(105);
     const projector = new EntityProjector(index, { log: () => {} });
     const tick = await projector.runOnce();
     expect(tick.projectedThroughBlock).toBe(106n);
+    expect((await result<{ current_block: number }>("arkiv_getBlockTiming")).current_block).toBe(106);
     expect(await keysOf("project = str('new')")).toEqual([high, low]);
     expect((await keysOf("*")).slice(0, 2)).toEqual([high, low]);
     // A cursor between the two resumes at the lower key.

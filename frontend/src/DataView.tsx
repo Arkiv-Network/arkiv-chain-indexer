@@ -45,6 +45,7 @@ import {
 } from "./dataRpc";
 import {
   compareEntityPages,
+  pickComparisonBlock,
   speedupFactor,
   type ComparisonReport,
   type ComparisonSide,
@@ -222,7 +223,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
    * Sends the same query to the node's relay and to the experimental index and
    * reports where they part company. Both calls are pinned to the lower of the
    * two heads: the index runs a little behind the node, and an unpinned pair
-   * would read as a wall of differences that is really just that lag.
+   * would read as a wall of differences that is really just that lag. An index
+   * far behind is not followed down (see {@link pickComparisonBlock}): the
+   * node's head is used and the index side fails, which is the honest report.
    */
   const runComparison = useCallback(async (rawQuery: string, size: PageSize) => {
     const normalized = normalizeQueryInput(rawQuery);
@@ -253,10 +256,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         cancelled();
         return;
       }
-      const heads = [nodeTiming?.currentBlock, indexTiming?.currentBlock].filter(
-        (block): block is number => typeof block === "number",
-      );
-      const atBlock = heads.length > 0 ? Math.min(...heads) : undefined;
+      const atBlock = pickComparisonBlock(nodeTiming?.currentBlock, indexTiming?.currentBlock);
       const params = buildQueryParams({
         query: normalized,
         pageSize: Number(size),

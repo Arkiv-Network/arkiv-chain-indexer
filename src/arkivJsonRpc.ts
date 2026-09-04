@@ -541,11 +541,13 @@ export function createArkivIndexMethods(
       if (params.length !== 0) {
         throw invalidParams(`invalid params: expected 0 parameter(s), got ${params.length}`);
       }
-      const progress = await chain.getScannerProgress();
-      const head = progress.lastSuccessfulBlock;
+      // The projection head, as `latest` is: a caller that pins a read to
+      // `current_block` must land on a block the index can answer for, and
+      // the chain head the scanner has reached may be a few blocks ahead.
+      const head = (await index.getProgress()).projectedThroughBlock;
       const block = head === undefined ? undefined : await chain.getBlockByNumber(head);
       if (head === undefined || !block) {
-        throw new JsonRpcError(JSON_RPC_SERVER_ERROR, "no block has been indexed yet");
+        throw new JsonRpcError(JSON_RPC_SERVER_ERROR, "the entity index has not projected any block yet");
       }
       const currentBlockTime = Math.floor(Date.parse(block.blockDate) / 1000);
       const previous = head > 0n ? await chain.getBlockByNumber(head - 1n) : undefined;
