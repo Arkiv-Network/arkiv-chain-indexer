@@ -223,7 +223,12 @@ function loadFilters(locationSearch: string, lockedAddress: string | null): Tran
     return { ...fromSearch, address: lockedAddress };
   }
   const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
-  return readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
+  const filters = readFiltersFromSearch(locationSearch, FILTER_KEYS, stored);
+  // A first visit (nothing in the query, nothing stored) would otherwise land
+  // on the empty "enter an address…" prompt. Fall back to the same block > 0
+  // baseline "Clear all" uses, so the page opens on the latest transactions.
+  if (!hasScopedFilters(filters)) return { ...filters, blockGt: BASELINE_BLOCK_GT };
+  return filters;
 }
 
 export function TransactionsView({
