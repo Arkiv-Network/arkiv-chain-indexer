@@ -384,8 +384,11 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS,
   );
 
-  const entityQueryIndex = coerceBoolean("--entity-query-index", cli.value("entity-query-index")!);
-  const metricsEnabled = coerceBoolean("--metrics-enabled", cli.value("metrics-enabled")!);
+  // Same compose `${VAR:-}` rule as intOrDefault: an empty string means "default".
+  const boolOrDefault = (flag: string, raw: string | undefined, fallback: boolean) =>
+    raw ? coerceBoolean(flag, raw) : fallback;
+  const entityQueryIndex = boolOrDefault("--entity-query-index", cli.value("entity-query-index"), false);
+  const metricsEnabled = boolOrDefault("--metrics-enabled", cli.value("metrics-enabled"), true);
   const metricsBearerToken = cli.value("metrics-bearer-token");
   const entityIndexFloorBlockValue = cli.value("entity-index-floor-block")?.trim();
   const entityIndexFloorBlock = entityIndexFloorBlockValue

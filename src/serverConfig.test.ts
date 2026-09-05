@@ -205,3 +205,27 @@ describe("parseServerConfig", () => {
     expect(() => parseServerConfig(["--help"], BASE_ENV)).toThrow(ServerHelpRequested);
   });
 });
+
+describe("boolean flags from compose-style empty env values", () => {
+  test("empty ENTITY_QUERY_INDEX and METRICS_ENABLED fall back to their defaults", () => {
+    const config = parseServerConfig([], {
+      DATABASE_URL: "postgres://x",
+      ENTITY_QUERY_INDEX: "",
+      METRICS_ENABLED: "",
+    });
+    expect(config.entityQueryIndex).toBe(false);
+    expect(config.metricsEnabled).toBe(true);
+  });
+
+  test("explicit values still apply", () => {
+    const config = parseServerConfig([], {
+      DATABASE_URL: "postgres://x",
+      ENTITY_QUERY_INDEX: "true",
+      METRICS_ENABLED: "false",
+      METRICS_BEARER_TOKEN: "tok",
+    });
+    expect(config.entityQueryIndex).toBe(true);
+    expect(config.metricsEnabled).toBe(false);
+    expect(config.metricsBearerToken).toBe("tok");
+  });
+});
