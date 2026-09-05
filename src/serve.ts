@@ -189,7 +189,10 @@ async function main(): Promise<void> {
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);
     console.log(
       config.metricsEnabled
-        ? `Prometheus metrics: GET /metrics (${config.metricsBearerToken ? "bearer token required" : "open"})`
+        ? `Prometheus metrics: GET /metrics (${config.metricsBearerToken ? "bearer token required" : "open"}), ` +
+            `GET /admin/metrics (${
+              config.baseloadAdminBearerToken ? "admin bearer token required" : "503, no admin token configured"
+            })`
         : "Prometheus metrics: disabled",
     );
     console.log(
