@@ -112,7 +112,7 @@ docker compose up --build
   in `serve.ts` and refreshed at scrape time. The nginx site configs return 404 for `/api/metrics`; scrape the
   loopback backend port, or set `METRICS_BEARER_TOKEN`. `GET /admin/metrics` renders the same registry for
   off-host scrapers and is proxied publicly, so it always demands `BASELOAD_ADMIN_BEARER_TOKEN` and answers 503
-  when none is set — never let that path fall open. Both scrape paths are excluded from the traffic metrics.
+  when none is set — never let that path fall open. Successful scrapes of either path are excluded from the traffic metrics; rejected ones are counted so admin-token probing is visible.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
   once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
   data — the only path to a node is the opt-in passthrough below. `latest` means the indexed head (`scanner_state.last_successful_block`);

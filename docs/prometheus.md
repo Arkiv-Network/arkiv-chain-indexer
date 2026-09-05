@@ -114,7 +114,9 @@ indexer_lag_blocks > 50 or indexer_head_age_seconds > 120
 
 ## Notes
 
-- Scrapes of `/metrics` and `/admin/metrics` are excluded from the traffic metrics.
+- Successful scrapes of `/metrics` and `/admin/metrics` are excluded from the traffic metrics;
+  rejected ones are counted, so `http_requests_rejected_total{route="/admin/metrics"}` shows anyone
+  probing the admin token.
 - Routes are templates (`/transaction/:hash`), never raw paths; unknown paths are `other`, unknown
   JSON-RPC method names are `unknown`. Query strings are never labels.
 - `cache_requests_total` and `cache_evictions_total` mirror the caches' own counters at scrape time,

@@ -993,7 +993,7 @@ the public origin (`https://<host>/api/admin/metrics`). It always requires `Auth
 `BASELOAD_ADMIN_BEARER_TOKEN`, the same token the `/baseload` admin routes use, and it answers `503` rather
 than serving anything when no admin token is configured. `METRICS_BEARER_TOKEN` does not apply to it.
 
-`METRICS_ENABLED=false` removes both. Scrapes of either path are never counted as traffic.
+`METRICS_ENABLED=false` removes both. A successful scrape of either path is never counted as traffic; a rejected one is, so a run of 401s against the admin path is visible in `http_requests_rejected_total`.
 
 Every traffic metric is labelled by *route template* (`/transaction/:hash`, `/blocks/:number`, …) and never by
 the raw path or query string; unknown paths land on `other`, and unknown JSON-RPC method names on `unknown`, so

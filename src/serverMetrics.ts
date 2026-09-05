@@ -295,8 +295,10 @@ function rejectionReason(status: number): string | undefined {
 
 /**
  * Handle `request` through `handler` while recording the traffic metrics.
- * The scrape endpoints themselves are passed through unrecorded so scrapes
- * never show up as traffic. Throws propagate after being counted as a 500.
+ * A successful scrape is passed through unrecorded, so a scrape never shows up
+ * as the traffic it then reports; a *rejected* one is still counted, because
+ * `/admin/metrics` is reachable from the public origin and a run of 401s there
+ * is worth seeing. Throws propagate after being counted as a 500.
  */
 export async function observeHttpRequest(
   request: Request,
@@ -304,7 +306,13 @@ export async function observeHttpRequest(
 ): Promise<Response> {
   const route = routeTemplate(new URL(request.url).pathname);
   if (SCRAPE_ROUTES.has(route)) {
-    return handler();
+    const response = await handler();
+    if (response.status >= 400) {
+      httpRequestsTotal.inc({ route, method: request.method, status: String(response.status) });
+      const reason = rejectionReason(response.status);
+      if (reason) httpRequestsRejectedTotal.inc({ route, reason });
+    }
+    return response;
   }
   const method = request.method;
   const routeLabels = { route };

@@ -123,6 +123,15 @@ describe("observeHttpRequest", () => {
     await observeHttpRequest(new Request("http://x/admin/metrics"), async () => new Response("ok"));
     expect(httpRequestsTotal.get({ route: "/admin/metrics", method: "GET", status: "200" })).toBe(0);
   });
+
+  test("but a rejected scrape is counted, so token probing is visible", async () => {
+    await observeHttpRequest(
+      new Request("http://x/admin/metrics"),
+      async () => new Response("no", { status: 401 }),
+    );
+    expect(httpRequestsTotal.get({ route: "/admin/metrics", method: "GET", status: "401" })).toBe(1);
+    expect(httpRequestsRejectedTotal.get({ route: "/admin/metrics", reason: "unauthorized" })).toBe(1);
+  });
 });
 
 describe("GET /metrics", () => {
