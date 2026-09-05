@@ -993,6 +993,10 @@ the public origin (`https://<host>/api/admin/metrics`). It always requires `Auth
 `BASELOAD_ADMIN_BEARER_TOKEN`, the same token the `/baseload` admin routes use, and it answers `503` rather
 than serving anything when no admin token is configured. `METRICS_BEARER_TOKEN` does not apply to it.
 
+The frontend's `/health` page ends with a **Server metrics** panel that renders this registry — traffic by
+route with its Postgres share, JSON-RPC by method, cache hit rates, process totals, and the raw text on
+demand. It reads `/api/admin/metrics`, so it appears only in admin mode and says so otherwise.
+
 `METRICS_ENABLED=false` removes both. A successful scrape of either path is never counted as traffic; a rejected one is, so a run of 401s against the admin path is visible in `http_requests_rejected_total`.
 
 Every traffic metric is labelled by *route template* (`/transaction/:hash`, `/blocks/:number`, …) and never by
