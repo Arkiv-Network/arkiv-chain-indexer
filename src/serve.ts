@@ -12,6 +12,7 @@ import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import { EntityProjector } from "./entityProjector";
 import type { GuzzlerStore } from "./guzzlers";
+import { collectIndexerProgress, collectResponseCache, collectValueCache } from "./serverMetrics";
 
 async function main(): Promise<void> {
   let storage: ScannerStorage | undefined;
@@ -155,6 +156,13 @@ async function main(): Promise<void> {
       });
       entityProjector.start();
     }
+    // Prometheus collectors: refreshed at scrape time from the caches' own
+    // counters and the scanner progress row.
+    const storageForMetrics = storage;
+    collectResponseCache("entity_history", () => entityHistoryCache.stats());
+    collectResponseCache("list", () => listCache.stats());
+    collectValueCache("transaction_count", () => transactionCountCache.stats());
+    collectIndexerProgress(() => storageForMetrics.getScannerProgress());
     const server = createBlockServer(storage, {
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
@@ -172,9 +180,18 @@ async function main(): Promise<void> {
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
       ...(entityIndex ? { entityIndex } : {}),
+      metricsEnabled: config.metricsEnabled,
+      ...(config.metricsBearerToken !== undefined
+        ? { metricsBearerToken: config.metricsBearerToken }
+        : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);
+    console.log(
+      config.metricsEnabled
+        ? `Prometheus metrics: GET /metrics (${config.metricsBearerToken ? "bearer token required" : "open"})`
+        : "Prometheus metrics: disabled",
+    );
     console.log(
       entityHistoryCache.enabled
         ? `Entity history cache: up to ${config.entityCacheMaxEntries} entries / ` +

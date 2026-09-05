@@ -30,6 +30,12 @@ import {
   type PayloadProviderPaymentBreakdown,
 } from "./payloadProviderPayments";
 import { ResponseCache, type CachedResponse } from "./responseCache";
+import {
+  PROMETHEUS_CONTENT_TYPE,
+  metricsRegistry,
+  observeHttpRequest,
+  recordResponseBytes,
+} from "./serverMetrics";
 import { ValueCache } from "./valueCache";
 import {
   DEFAULT_ENTITY_HISTORY_LIMIT,
@@ -61,6 +67,13 @@ import {
 } from "./storage";
 
 export interface BlockServerOptions {
+  /**
+   * Bearer token required on `GET /metrics`. Unset leaves the endpoint open,
+   * which is fine when it is only reachable inside the compose network.
+   */
+  metricsBearerToken?: string;
+  /** Set to false to disable `GET /metrics` entirely. Defaults to true. */
+  metricsEnabled?: boolean;
   port?: number;
   hostname?: string;
   transactionDataEnabled?: boolean;
@@ -613,6 +626,10 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
+        ...(options.metricsBearerToken !== undefined
+          ? { metricsBearerToken: options.metricsBearerToken }
+          : {}),
+        ...(options.metricsEnabled !== undefined ? { metricsEnabled: options.metricsEnabled } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -626,7 +643,9 @@ export async function handleRequest(
   storage: ScannerStorage,
   options: BlockServerOptions = {},
 ): Promise<Response> {
-  return applyConditionalGet(request, await routeRequest(request, storage, options));
+  return observeHttpRequest(request, async () =>
+    applyConditionalGet(request, await routeRequest(request, storage, options)),
+  );
 }
 
 /**
@@ -658,7 +677,7 @@ function applyConditionalGet(request: Request, response: Response): Response {
       headers.set(name, value);
     }
   }
-  return new Response(null, { status: 304, headers });
+  return recordResponseBytes(new Response(null, { status: 304, headers }), 0);
 }
 
 async function routeRequest(
@@ -670,7 +689,11 @@ async function routeRequest(
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return recordResponseBytes(new Response(null, { status: 204, headers: CORS_HEADERS }), 0);
+  }
+
+  if (url.pathname === "/metrics") {
+    return handleGetMetrics(request, options);
   }
 
   if (url.pathname === "/admin/verify") {
@@ -1094,14 +1117,52 @@ async function handleJsonRpcRequest(
   const body = await handleJsonRpcText(text, storage, {
     transactionDataEnabled,
     clientVersion: await readClientVersion(),
+    path,
     ...(passthrough ? { passthrough } : {}),
     ...(localOverrides ? { localOverrides } : {}),
   });
-  return new Response(JSON.stringify(body), {
+  const payload = JSON.stringify(body);
+  return recordResponseBytes(
+    new Response(payload, {
+      status: 200,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json;charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    }),
+    payload.length,
+  );
+}
+
+/**
+ * Prometheus scrape endpoint. Never counted in the traffic metrics (see
+ * observeHttpRequest), optionally gated by a bearer token so it can sit
+ * behind the public nginx without leaking build/traffic details.
+ */
+async function handleGetMetrics(request: Request, options: BlockServerOptions): Promise<Response> {
+  if (options.metricsEnabled === false) {
+    return jsonError(404, "Not found: /metrics");
+  }
+  if (request.method !== "GET") {
+    return jsonError(405, `Method ${request.method} is not allowed`);
+  }
+  if (options.metricsBearerToken !== undefined) {
+    const header = request.headers.get("Authorization") ?? "";
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      return jsonError(401, "Bearer token required");
+    }
+    if (match[1] !== options.metricsBearerToken) {
+      return jsonError(403, "Bearer token is invalid");
+    }
+  }
+  const body = await metricsRegistry.render();
+  return new Response(body, {
     status: 200,
     headers: {
       ...CORS_HEADERS,
-      "Content-Type": "application/json;charset=utf-8",
+      "Content-Type": PROMETHEUS_CONTENT_TYPE,
       "Cache-Control": "no-store",
     },
   });
@@ -1110,12 +1171,15 @@ async function handleJsonRpcRequest(
 async function handleGetLlmsTxt(): Promise<Response> {
   try {
     const body = await readFile(LLMS_TXT_FILE, "utf8");
-    return new Response(body, {
-      headers: {
-        ...CORS_HEADERS,
-        "Content-Type": "text/plain; charset=utf-8",
-      },
-    });
+    return recordResponseBytes(
+      new Response(body, {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "text/plain; charset=utf-8",
+        },
+      }),
+      Buffer.byteLength(body),
+    );
   } catch (error) {
     return jsonError(500, error instanceof Error ? error.message : String(error));
   }
@@ -2058,7 +2122,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
     headers.ETag = etagForBody(payload);
     headers["Cache-Control"] = "no-cache";
   }
-  return new Response(payload, { ...init, headers });
+  return recordResponseBytes(new Response(payload, { ...init, headers }), payload.length);
 }
 
 /** Build an HTTP response from a cached/precomputed serialized body. */
@@ -2072,14 +2136,17 @@ function responseFromCached(cached: CachedResponse): Response {
           cached.body.byteOffset,
           cached.body.byteOffset + cached.body.byteLength,
         ) as ArrayBuffer);
-  return new Response(body, {
-    status: cached.status,
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/json;charset=utf-8",
-      ...(cached.headers ?? {}),
-    },
-  });
+  return recordResponseBytes(
+    new Response(body, {
+      status: cached.status,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json;charset=utf-8",
+        ...(cached.headers ?? {}),
+      },
+    }),
+    typeof cached.body === "string" ? cached.body.length : cached.body.byteLength,
+  );
 }
 
 /**
@@ -2138,17 +2205,20 @@ async function compressedJsonResponse(request: Request, body: unknown): Promise<
     compressed.byteOffset,
     compressed.byteOffset + compressed.byteLength,
   ) as ArrayBuffer;
-  return new Response(responseBody, {
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/json;charset=utf-8",
-      "Content-Encoding": encoding,
-      "Content-Length": String(compressed.byteLength),
-      Vary: "Accept-Encoding",
-      ETag: etagForBody(compressed),
-      "Cache-Control": "no-cache",
-    },
-  });
+  return recordResponseBytes(
+    new Response(responseBody, {
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json;charset=utf-8",
+        "Content-Encoding": encoding,
+        "Content-Length": String(compressed.byteLength),
+        Vary: "Accept-Encoding",
+        ETag: etagForBody(compressed),
+        "Cache-Control": "no-cache",
+      },
+    }),
+    compressed.byteLength,
+  );
 }
 
 /** Response encodings this server can produce, best ratio first. */

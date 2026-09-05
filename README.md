@@ -979,6 +979,40 @@ a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run an
 The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
 `rpc=index` in shared links) when `/health` reports it enabled.
 
+### `GET /metrics`
+
+Prometheus text exposition for the backend process. Scrape it from the host on the loopback backend port
+(`http://127.0.0.1:3000/metrics`); the bundled nginx site configs answer `404` for the public `/api/metrics`.
+Set `METRICS_BEARER_TOKEN` to require `Authorization: Bearer <token>` when the port is reachable from further
+away, or `METRICS_ENABLED=false` to remove the endpoint. Scrapes are never counted as traffic.
+
+Every traffic metric is labelled by *route template* (`/transaction/:hash`, `/blocks/:number`, …) and never by
+the raw path or query string; unknown paths land on `other`, and unknown JSON-RPC method names on `unknown`, so
+series cardinality stays bounded whatever clients send.
+
+| Metric | Type | Labels | What it tells you |
+| --- | --- | --- | --- |
+| `http_requests_total` | counter | `route`, `method`, `status` | Request rate and error ratio per endpoint. |
+| `http_request_duration_seconds` | histogram | `route`, `method` | Latency percentiles per endpoint. |
+| `http_response_bytes_total` | counter | `route`, `encoding` | Egress per endpoint, split by wire encoding (`zstd`, `gzip`, `identity`). |
+| `http_requests_in_flight` | gauge | `route` | Which endpoint is queueing right now. |
+| `http_requests_rejected_total` | counter | `route`, `reason` | 4xx by reason (`bad_request`, `unauthorized`, `not_found`, …). |
+| `jsonrpc_requests_total` | counter | `path`, `rpc_method`, `source`, `outcome` | Per-method call rate on `/shadow-rpc` and `/shadow-rpc/experimental`; `source` is `stored`, `upstream` (passthrough) or `override` (entity index). |
+| `jsonrpc_request_duration_seconds` | histogram | `path`, `rpc_method` | Per-method latency. |
+| `jsonrpc_batch_size` | histogram | `path` | Calls per JSON-RPC HTTP request. |
+| `jsonrpc_get_logs_blocks_total`, `jsonrpc_get_logs_returned_total` | counter | — | How wide `eth_getLogs` queries are and how much they return. |
+| `cache_requests_total` | counter | `cache`, `result` | Hit/miss/coalesced per cache (`entity_history`, `list`, `transaction_count`). |
+| `cache_entries`, `cache_bytes` | gauge | `cache` | Current cache occupancy. |
+| `cache_evictions_total` | counter | `cache`, `reason` | Drops by `invalidation` (NOTIFY), `ttl`, or `capacity`. |
+| `db_query_duration_seconds` | histogram | `route` | Postgres time attributed to the route that issued the query. |
+| `db_queries_total` | counter | `route`, `outcome` | Query rate and failures per route. |
+| `db_queries_in_flight` | gauge | — | Queries awaiting a result. |
+| `indexer_head_block`, `chain_head_block`, `indexer_lag_blocks`, `indexer_head_age_seconds` | gauge | — | How far the index trails the chain. |
+| `process_start_time_seconds`, `process_resident_memory_bytes`, `process_heap_used_bytes` | gauge | — | Process basics. |
+| `build_info` | gauge | `commit`, `built_at` | Always `1`; identifies the running build. |
+
+A scrape config and starter queries are in [`docs/prometheus.md`](docs/prometheus.md).
+
 ### Server configuration
 
 | CLI flag | Environment variable | Default | Description |
@@ -987,6 +1021,8 @@ The frontend's `/data` page offers the index as a third RPC source ("Indexer ent
 | `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
 | `--entity-query-index` | `ENTITY_QUERY_INDEX` | `false` | Build the experimental entity index and serve `POST /shadow-rpc/experimental`. |
+| `--metrics-enabled` | `METRICS_ENABLED` | `true` | Serve Prometheus metrics on `GET /metrics`. |
+| `--metrics-bearer-token` | `METRICS_BEARER_TOKEN` | unset | Require `Authorization: Bearer <token>` on `GET /metrics`. |
 | `--entity-index-floor-block` | `ENTITY_INDEX_FLOOR_BLOCK` | detected | Pin the index floor instead of detecting the first keyed create. |
 
 ```sh

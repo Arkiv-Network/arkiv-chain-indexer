@@ -59,6 +59,10 @@ export interface ServerConfig {
    * node, and the index is a second, independent source to check against it.
    */
   entityQueryIndex: boolean;
+  /** Serve Prometheus metrics on GET /metrics. Defaults to true. */
+  metricsEnabled: boolean;
+  /** Bearer token required on GET /metrics; unset leaves it open. */
+  metricsBearerToken?: string;
   /** Pins the first block the entity index folds; detected from the data when unset. */
   entityIndexFloorBlock?: bigint;
 }
@@ -113,6 +117,19 @@ const SPEC: CliSpec = {
       description:
         "Optional Baseload worker config JSON file to load once at backend startup. Defaults to BASELOAD_INITIAL_CONFIG_PATH.",
       env: ["BASELOAD_INITIAL_CONFIG_PATH"],
+    },
+    {
+      flags: "--metrics-enabled <bool>",
+      description:
+        "Serve Prometheus metrics on GET /metrics. Defaults to true (or METRICS_ENABLED).",
+      env: ["METRICS_ENABLED"],
+      default: "true",
+    },
+    {
+      flags: "--metrics-bearer-token <token>",
+      description:
+        "Bearer token required on GET /metrics. Defaults to METRICS_BEARER_TOKEN. If unset, the endpoint is open.",
+      env: ["METRICS_BEARER_TOKEN"],
     },
     {
       flags: "--redis-url <url>",
@@ -368,6 +385,8 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   );
 
   const entityQueryIndex = coerceBoolean("--entity-query-index", cli.value("entity-query-index")!);
+  const metricsEnabled = coerceBoolean("--metrics-enabled", cli.value("metrics-enabled")!);
+  const metricsBearerToken = cli.value("metrics-bearer-token");
   const entityIndexFloorBlockValue = cli.value("entity-index-floor-block")?.trim();
   const entityIndexFloorBlock = entityIndexFloorBlockValue
     ? BigInt(coerceInt("--entity-index-floor-block", entityIndexFloorBlockValue))
@@ -437,6 +456,8 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     transactionCountCacheTtlMs,
     ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
     entityQueryIndex,
+    metricsEnabled,
+    ...(metricsBearerToken ? { metricsBearerToken } : {}),
     ...(entityIndexFloorBlock !== undefined ? { entityIndexFloorBlock } : {}),
   };
 }

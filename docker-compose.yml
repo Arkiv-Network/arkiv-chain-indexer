@@ -359,6 +359,11 @@ services:
       ARKIV_PROTOCOL_SCHEDULE_URL: ${ARKIV_PROTOCOL_SCHEDULE_URL:-}
       ARKIV_PROTOCOL_SCHEDULE_PATH: ${ARKIV_PROTOCOL_SCHEDULE_PATH:-}
       PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: ${PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS:-}
+      # Prometheus text metrics on GET /metrics (see docs/prometheus.md). The
+      # nginx site configs return 404 for /api/metrics, so the scrape target is
+      # the loopback backend port; set a token if the port is reachable further.
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
     ports:
       - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
     volumes:

@@ -1,4 +1,5 @@
 import { SQL } from "bun";
+import { currentRoute, dbQueriesInFlight, dbQueriesTotal, dbQueryDurationSeconds } from "./serverMetrics";
 
 /**
  * Thin adapter over Bun's built-in Postgres client exposing the
@@ -48,8 +49,21 @@ type UnsafeCapable = { unsafe(text: string, params?: unknown[]): Promise<unknown
 function queryableFrom(sql: UnsafeCapable): DbQueryable {
   return {
     async query<R>(text: string, params: unknown[] = []): Promise<DbResult<R>> {
-      const result = (await sql.unsafe(text, params)) as R[] & { count?: number };
-      return { rows: [...result], rowCount: result.count ?? 0 };
+      // Attribute the query to the HTTP route being served (see
+      // src/serverMetrics.ts); outside a request the route is "none".
+      const route = currentRoute();
+      dbQueriesInFlight.inc();
+      const stopTimer = dbQueryDurationSeconds.startTimer({ route });
+      let outcome = "error";
+      try {
+        const result = (await sql.unsafe(text, params)) as R[] & { count?: number };
+        outcome = "ok";
+        return { rows: [...result], rowCount: result.count ?? 0 };
+      } finally {
+        stopTimer();
+        dbQueriesInFlight.dec();
+        dbQueriesTotal.inc({ route, outcome });
+      }
     },
   };
 }

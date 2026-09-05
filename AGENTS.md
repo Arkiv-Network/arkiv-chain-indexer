@@ -101,6 +101,16 @@ docker compose up --build
   count. This matters more than it looks: an unfiltered `COUNT(*)` scans every transaction row, and load
   testing showed it single-handedly capping the whole backend — every other Postgres-backed endpoint queues
   behind it. Keep the key free of `limit`/`page`/`order`, and prefer fixing the count over adding indexes.
+- `src/prometheus.ts` is a dependency-free Prometheus client (Counter/Gauge/Histogram/Registry + text
+  renderer); `src/serverMetrics.ts` defines the backend's metrics on a process-global registry and serves them at
+  `GET /metrics`. `handleRequest` wraps every request in `observeHttpRequest`, which labels traffic by a *route
+  template* from `ROUTE_TEMPLATES` (never the raw path or query) — add a line there when adding a route, or it
+  is counted under `other`. Response constructors in `src/server.ts` call `recordResponseBytes` so egress can be
+  counted without re-reading bodies. `src/db.ts` times every query and attributes it to the current route via
+  `AsyncLocalStorage`. JSON-RPC calls are counted per method in `handleSingle`; unknown method names are labelled
+  `unknown` so clients cannot mint series. Cache stats and scanner progress are mirrored by collectors registered
+  in `serve.ts` and refreshed at scrape time. The nginx site configs return 404 for `/api/metrics`; scrape the
+  loopback backend port, or set `METRICS_BEARER_TOKEN`.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
   once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
   data — the only path to a node is the opt-in passthrough below. `latest` means the indexed head (`scanner_state.last_successful_block`);
