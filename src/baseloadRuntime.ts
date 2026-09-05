@@ -167,6 +167,11 @@ function jitteredDelay(baseMs: number): number {
   return Math.round(baseMs * (0.75 + Math.random() * 0.5));
 }
 
+export interface BaseloadRuntimeHooks {
+  /** Called with every applied config so the fleet can be restored after a restart. */
+  persistConfig?: (config: BaseloadConfig) => void | Promise<void>;
+}
+
 export class BaseloadRuntime {
   private config: BaseloadConfig = EMPTY_BASELOAD_CONFIG;
   private readonly tasks = new Map<string, BaseloadWorkerTask>();
@@ -180,7 +185,10 @@ export class BaseloadRuntime {
   private readonly rpcKeys: BaseloadRpcKeyPool | null;
   private rpcKeyRing: RpcKeyRing | null = null;
 
-  constructor(private readonly runtimeConfig: BaseloadRuntimeConfig) {
+  constructor(
+    private readonly runtimeConfig: BaseloadRuntimeConfig,
+    private readonly hooks: BaseloadRuntimeHooks = {},
+  ) {
     this.faucet = runtimeConfig.faucet ? new BaseloadFaucetClient(runtimeConfig.faucet) : null;
     this.rpcKeys = runtimeConfig.rpcKeys ? new BaseloadRpcKeyPool(runtimeConfig.rpcKeys) : null;
     // Load the shared rotating pool in the background; workers fall back to the
@@ -212,6 +220,12 @@ export class BaseloadRuntime {
     this.pruneBalances();
     if (this.runtimeConfig.rpcUrl && !this.balancePollTimer && !this.balancePollInFlight) {
       this.scheduleBalancePoll(0);
+    }
+    if (this.hooks.persistConfig) {
+      const config = this.config;
+      void Promise.resolve()
+        .then(() => this.hooks.persistConfig?.(config))
+        .catch((error) => console.error(`[baseload] could not persist the live config: ${describeError(error)}`));
     }
     return this.getState();
   }

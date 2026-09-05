@@ -1,3 +1,4 @@
+import type { BaseloadConfig } from "./baseloadConfig";
 import { describe, expect, test } from "bun:test";
 import { createWalletClient, ENTITY_EVENTS_ABI, ExpirationTime } from "@arkiv-network/sdk";
 import { defineChain, encodeAbiParameters, encodeEventTopics, http } from "viem";
@@ -432,6 +433,24 @@ function entityCreatedLog(entityKey: string) {
     ),
   };
 }
+
+describe("baseload live config persistence", () => {
+  test("hands every applied config to the persist hook", async () => {
+    const persisted: BaseloadConfig[] = [];
+    const runtime = new BaseloadRuntime(
+      { rpcUrl: null, mnemonic: TEST_MNEMONIC },
+      { persistConfig: (config) => { persisted.push(config); } },
+    );
+    try {
+      runtime.updateConfig({ workers: [{ walletNumber: 3, behavior: "create" }] });
+      runtime.updateConfig({ workers: [] });
+      await Promise.resolve();
+      expect(persisted.map((config) => config.workers.map((worker) => worker.walletNumber))).toEqual([[3], []]);
+    } finally {
+      runtime.stop();
+    }
+  });
+});
 
 describe("baseload worker loop RPC budget", () => {
   test(

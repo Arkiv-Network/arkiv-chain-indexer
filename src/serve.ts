@@ -95,8 +95,24 @@ async function main(): Promise<void> {
       }
     }
     const baseloadRuntimeConfig = parseBaseloadRuntimeConfig();
-    baseloadRuntime = new BaseloadRuntime(baseloadRuntimeConfig);
-    if (config.baseloadInitialConfigPath) {
+    const storageForBaseload = storage;
+    baseloadRuntime = new BaseloadRuntime(baseloadRuntimeConfig, {
+      persistConfig: (liveConfig) => storageForBaseload.saveBaseloadLiveConfig(liveConfig),
+    });
+    // The fleet that was running before the restart wins over the startup
+    // file; the file only seeds a database that has never seen a fleet.
+    const storedBaseloadConfig = await storage.loadBaseloadLiveConfig();
+    let restoredBaseload = false;
+    if (storedBaseloadConfig !== undefined) {
+      try {
+        const restored = baseloadRuntime.updateConfig(storedBaseloadConfig);
+        console.log(`Restored the live Baseload config from the database (${restored.config.workers.length} workers)`);
+        restoredBaseload = true;
+      } catch (error) {
+        console.warn("Stored live Baseload config could not be applied; starting without it:", error);
+      }
+    }
+    if (!restoredBaseload && config.baseloadInitialConfigPath) {
       const initialBaseloadConfig = await readBaseloadConfigFile(
         config.baseloadInitialConfigPath,
         baseloadRuntimeConfig.mnemonic,

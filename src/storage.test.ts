@@ -333,6 +333,18 @@ if (!hasPostgresForTests()) {
       expect(await storage.deleteBaseloadConfig("low gas")).toBe(true);
       expect(await storage.getBaseloadConfig("low gas")).toBeUndefined();
     });
+
+    test("keeps one live baseload config snapshot across saves", async () => {
+      const storage = await withStorage();
+
+      expect(await storage.loadBaseloadLiveConfig()).toBeUndefined();
+      await storage.saveBaseloadLiveConfig({ version: 2, workers: [{ id: "a" }] });
+      await storage.saveBaseloadLiveConfig({ version: 2, workers: [{ id: "b" }, { id: "c" }] });
+      expect(await storage.loadBaseloadLiveConfig()).toEqual({
+        version: 2,
+        workers: [{ id: "b" }, { id: "c" }],
+      });
+    });
   });
 
   describe("ScannerStorage.queryBlocks", () => {

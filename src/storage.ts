@@ -417,6 +417,7 @@ export class ScannerStorage {
   private readonly qTransactionRecords: string;
   private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
+  private readonly qBaseloadLiveConfig: string;
 
   private constructor(
     private readonly db: Db,
@@ -433,6 +434,7 @@ export class ScannerStorage {
     this.qTransactionRecords = `${quoteIdent(this.schema)}.transaction_records`;
     this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
+    this.qBaseloadLiveConfig = `${quoteIdent(this.schema)}.baseload_live_config`;
   }
 
   static async open(
@@ -572,6 +574,15 @@ export class ScannerStorage {
         name TEXT PRIMARY KEY,
         config_json JSONB NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    // Single-row snapshot of the running Baseload fleet so a restart brings
+    // it back. Loose JSON on purpose: the runtime re-normalizes it on load.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qBaseloadLiveConfig} (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        config_json JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
@@ -1084,6 +1095,11 @@ export class ScannerStorage {
         name: "baseload_configs",
         qualifiedName: this.qBaseloadConfigs,
         regclassName: regclassName(this.schema, "baseload_configs"),
+      },
+      {
+        name: "baseload_live_config",
+        qualifiedName: this.qBaseloadLiveConfig,
+        regclassName: regclassName(this.schema, "baseload_live_config"),
       },
     ];
 
@@ -2829,6 +2845,24 @@ export class ScannerStorage {
   async deleteBaseloadConfig(name: string): Promise<boolean> {
     const result = await this.db.query(`DELETE FROM ${this.qBaseloadConfigs} WHERE name = $1`, [name]);
     return (result.rowCount ?? 0) > 0;
+  }
+
+  /** Snapshot of the running fleet; whatever JSON the runtime last applied. */
+  async saveBaseloadLiveConfig(config: unknown): Promise<void> {
+    await this.db.query(
+      `INSERT INTO ${this.qBaseloadLiveConfig} (id, config_json, updated_at)
+       VALUES (1, $1::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET config_json = EXCLUDED.config_json, updated_at = NOW()`,
+      [config],
+    );
+  }
+
+  async loadBaseloadLiveConfig(): Promise<unknown | undefined> {
+    const result = await this.db.query<{ config_json: string }>(
+      `SELECT config_json::text AS config_json FROM ${this.qBaseloadLiveConfig} WHERE id = 1`,
+    );
+    const row = result.rows[0];
+    return row ? JSON.parse(row.config_json) : undefined;
   }
 
   async aggregateRangeIfComplete(
