@@ -27,12 +27,19 @@ export const metricsRegistry = new Registry();
 export const OTHER_ROUTE = "other";
 
 /**
+ * The scrape endpoints. Their own requests are left out of the traffic
+ * metrics so a scrape never shows up as traffic it then reports.
+ */
+const SCRAPE_ROUTES: ReadonlySet<string> = new Set(["/metrics", "/admin/metrics"]);
+
+/**
  * Known routes as `[regex, template]`, first match wins. Keep this in step
  * with `routeRequest` in src/server.ts; an unlisted route is still counted,
  * just under `other`.
  */
 const ROUTE_TEMPLATES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/metrics$/, "/metrics"],
+  [/^\/admin\/metrics$/, "/admin/metrics"],
   [/^\/health$/, "/health"],
   [/^\/sync$/, "/sync"],
   [/^\/llms\.txt$/, "/llms.txt"],
@@ -288,15 +295,15 @@ function rejectionReason(status: number): string | undefined {
 
 /**
  * Handle `request` through `handler` while recording the traffic metrics.
- * `/metrics` itself is passed through unrecorded so scrapes never show up as
- * traffic. Throws propagate after being counted as a 500.
+ * The scrape endpoints themselves are passed through unrecorded so scrapes
+ * never show up as traffic. Throws propagate after being counted as a 500.
  */
 export async function observeHttpRequest(
   request: Request,
   handler: () => Promise<Response>,
 ): Promise<Response> {
   const route = routeTemplate(new URL(request.url).pathname);
-  if (route === "/metrics") {
+  if (SCRAPE_ROUTES.has(route)) {
     return handler();
   }
   const method = request.method;

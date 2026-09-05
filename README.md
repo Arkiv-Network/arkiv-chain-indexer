@@ -979,12 +979,21 @@ a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run an
 The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
 `rpc=index` in shared links) when `/health` reports it enabled.
 
-### `GET /metrics`
+### `GET /metrics` and `GET /admin/metrics`
 
-Prometheus text exposition for the backend process. Scrape it from the host on the loopback backend port
-(`http://127.0.0.1:3000/metrics`); the bundled nginx site configs answer `404` for the public `/api/metrics`.
-Set `METRICS_BEARER_TOKEN` to require `Authorization: Bearer <token>` when the port is reachable from further
-away, or `METRICS_ENABLED=false` to remove the endpoint. Scrapes are never counted as traffic.
+Prometheus text exposition for the backend process, on two paths that differ only in how they are guarded.
+
+`GET /metrics` is the local scrape target: scrape it from the host on the loopback backend port
+(`http://127.0.0.1:3000/metrics`), since the bundled nginx site configs answer `404` for the public
+`/api/metrics`. Set `METRICS_BEARER_TOKEN` to require `Authorization: Bearer <token>` when the port is
+reachable from further away.
+
+`GET /admin/metrics` renders the same registry for a scraper that cannot reach loopback, and it is proxied to
+the public origin (`https://<host>/api/admin/metrics`). It always requires `Authorization: Bearer <token>` with
+`BASELOAD_ADMIN_BEARER_TOKEN`, the same token the `/baseload` admin routes use, and it answers `503` rather
+than serving anything when no admin token is configured. `METRICS_BEARER_TOKEN` does not apply to it.
+
+`METRICS_ENABLED=false` removes both. Scrapes of either path are never counted as traffic.
 
 Every traffic metric is labelled by *route template* (`/transaction/:hash`, `/blocks/:number`, …) and never by
 the raw path or query string; unknown paths land on `other`, and unknown JSON-RPC method names on `unknown`, so

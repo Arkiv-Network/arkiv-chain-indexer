@@ -14,8 +14,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Prometheus scrapes the backend directly on 127.0.0.1:3000; keep the
-    # traffic/build details off the public origin.
+    # The open scrape target stays on loopback (127.0.0.1:3000); the public
+    # origin serves the same registry only at /api/admin/metrics, behind the
+    # admin bearer token.
     location = /api/metrics {
         return 404;
     }

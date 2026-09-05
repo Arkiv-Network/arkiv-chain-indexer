@@ -31,6 +31,34 @@ Check it by hand:
 curl -s http://127.0.0.1:3000/metrics | head -40
 ```
 
+### From off the host
+
+A scraper that cannot reach loopback uses `GET /admin/metrics`, which the nginx sites do proxy. It
+serves the same registry and always requires the admin bearer token
+(`BASELOAD_ADMIN_BEARER_TOKEN`), so there is no unauthenticated path to the metrics on the public
+origin:
+
+```yaml
+scrape_configs:
+  - job_name: arkiv-chain-indexer-kalarepa
+    scheme: https
+    metrics_path: /api/admin/metrics
+    authorization:
+      credentials: "<BASELOAD_ADMIN_BEARER_TOKEN>"
+    static_configs:
+      - targets: ["kalarepa.arkiv-global.net"]
+        labels:
+          network: tiramisu
+```
+
+```sh
+curl -s -H "authorization: Bearer $BASELOAD_ADMIN_BEARER_TOKEN" \
+  https://kalarepa.arkiv-global.net/api/admin/metrics | head -40
+```
+
+Prefer the loopback target where you have it: it keeps the admin token off the wire, and it is not
+subject to the CDN in front of the public origin.
+
 ## Starter queries
 
 Requests per second by endpoint:
@@ -86,7 +114,7 @@ indexer_lag_blocks > 50 or indexer_head_age_seconds > 120
 
 ## Notes
 
-- Scrapes of `/metrics` are excluded from the traffic metrics.
+- Scrapes of `/metrics` and `/admin/metrics` are excluded from the traffic metrics.
 - Routes are templates (`/transaction/:hash`), never raw paths; unknown paths are `other`, unknown
   JSON-RPC method names are `unknown`. Query strings are never labels.
 - `cache_requests_total` and `cache_evictions_total` mirror the caches' own counters at scrape time,

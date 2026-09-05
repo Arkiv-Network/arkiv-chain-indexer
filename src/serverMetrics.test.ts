@@ -47,6 +47,7 @@ describe("routeTemplate", () => {
     expect(routeTemplate("/baseload/configs/night")).toBe("/baseload/configs/:name");
     expect(routeTemplate("/shadow-rpc/experimental")).toBe("/shadow-rpc/experimental");
     expect(routeTemplate("/metrics")).toBe("/metrics");
+    expect(routeTemplate("/admin/metrics")).toBe("/admin/metrics");
   });
 
   test("collapses anything unknown to other", () => {
@@ -117,6 +118,11 @@ describe("observeHttpRequest", () => {
     await observeHttpRequest(new Request("http://x/metrics"), async () => new Response("ok"));
     expect(httpRequestsTotal.get({ route: "/metrics", method: "GET", status: "200" })).toBe(0);
   });
+
+  test("scrapes of /admin/metrics are not traffic either", async () => {
+    await observeHttpRequest(new Request("http://x/admin/metrics"), async () => new Response("ok"));
+    expect(httpRequestsTotal.get({ route: "/admin/metrics", method: "GET", status: "200" })).toBe(0);
+  });
 });
 
 describe("GET /metrics", () => {
@@ -168,6 +174,57 @@ describe("GET /metrics", () => {
 
   test("only answers GET", async () => {
     const response = await handleRequest(new Request("http://x/metrics", { method: "POST" }), storage);
+    expect(response.status).toBe(405);
+  });
+});
+
+describe("GET /admin/metrics", () => {
+  const storage = {} as ScannerStorage;
+  const options = { baseloadAdminBearerToken: "adm1n" };
+
+  const get = (headers?: Record<string, string>, extra?: Record<string, unknown>) =>
+    handleRequest(new Request("http://x/admin/metrics", headers ? { headers } : undefined), storage, {
+      ...options,
+      ...extra,
+    });
+
+  test("serves the same registry as /metrics to an authorised caller", async () => {
+    httpRequestsTotal.inc({ route: "/blocks", method: "GET", status: "200" }, 5);
+    const response = await get({ Authorization: "Bearer adm1n" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/plain");
+    const body = await response.text();
+    expect(body).toContain('http_requests_total{route="/blocks",method="GET",status="200"} 5');
+    // The scrape itself never shows up in the traffic counters.
+    expect(httpRequestsTotal.get({ route: "/admin/metrics", method: "GET", status: "200" })).toBe(0);
+  });
+
+  test("demands the admin bearer token", async () => {
+    expect((await get()).status).toBe(401);
+    expect((await get({ Authorization: "adm1n" })).status).toBe(401);
+    expect((await get({ Authorization: "Bearer wrong" })).status).toBe(403);
+  });
+
+  test("never opens up when no admin token is configured", async () => {
+    const response = await handleRequest(new Request("http://x/admin/metrics"), storage, {});
+    expect(response.status).toBe(503);
+  });
+
+  test("ignores METRICS_BEARER_TOKEN, which gates the loopback path only", async () => {
+    const response = await get({ Authorization: "Bearer adm1n" }, { metricsBearerToken: "s3cret" });
+    expect(response.status).toBe(200);
+  });
+
+  test("is removed with the rest of the metrics when disabled", async () => {
+    expect((await get({ Authorization: "Bearer adm1n" }, { metricsEnabled: false })).status).toBe(404);
+  });
+
+  test("only answers GET", async () => {
+    const response = await handleRequest(
+      new Request("http://x/admin/metrics", { method: "POST", headers: { Authorization: "Bearer adm1n" } }),
+      storage,
+      options,
+    );
     expect(response.status).toBe(405);
   });
 });

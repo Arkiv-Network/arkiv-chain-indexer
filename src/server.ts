@@ -696,6 +696,10 @@ async function routeRequest(
     return handleGetMetrics(request, options);
   }
 
+  if (url.pathname === "/admin/metrics") {
+    return handleGetMetrics(request, options, { requireAdminToken: true });
+  }
+
   if (url.pathname === "/admin/verify") {
     return handleAdminVerifyRequest(request, options.baseloadAdminBearerToken);
   }
@@ -1140,14 +1144,33 @@ async function handleJsonRpcRequest(
  * observeHttpRequest), optionally gated by a bearer token so it can sit
  * behind the public nginx without leaking build/traffic details.
  */
-async function handleGetMetrics(request: Request, options: BlockServerOptions): Promise<Response> {
+/**
+ * Render the Prometheus registry.
+ *
+ * Two paths reach here. `GET /metrics` is the loopback scrape target, gated by
+ * the optional `METRICS_BEARER_TOKEN` and left open when that is unset, because
+ * the public nginx sites 404 it. `GET /admin/metrics` is proxied to the public
+ * origin, so it always demands the admin bearer token and answers 503 rather
+ * than serving anything when no token is configured.
+ */
+async function handleGetMetrics(
+  request: Request,
+  options: BlockServerOptions,
+  { requireAdminToken = false }: { requireAdminToken?: boolean } = {},
+): Promise<Response> {
   if (options.metricsEnabled === false) {
-    return jsonError(404, "Not found: /metrics");
+    return jsonError(404, `Not found: ${new URL(request.url).pathname}`);
   }
   if (request.method !== "GET") {
     return jsonError(405, `Method ${request.method} is not allowed`);
   }
-  if (options.metricsBearerToken !== undefined) {
+  if (requireAdminToken) {
+    if (!options.baseloadAdminBearerToken) {
+      return jsonError(503, "Admin bearer token is not configured on the backend");
+    }
+    const authError = requireAdminBearerToken(request, options.baseloadAdminBearerToken);
+    if (authError) return authError;
+  } else if (options.metricsBearerToken !== undefined) {
     const header = request.headers.get("Authorization") ?? "";
     const match = header.match(/^Bearer\s+(.+)$/i);
     if (!match) {
