@@ -6594,3 +6594,50 @@ form select {
 .fleet-chip-outpriced strong {
   color: var(--op-purple);
 }
+
+.server-metrics-panel {
+  margin-top: 1rem;
+}
+
+.server-metrics-panel h4 {
+  margin: 1.25rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.server-metrics-panel .view-heading-row {
+  margin-bottom: 0.5rem;
+}
+
+.server-metrics-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.server-metrics-caption {
+  margin: 0;
+}
+
+.server-metrics-panel .muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.server-metrics-panel td.num.error {
+  color: var(--op-red);
+}
+
+.server-metrics-raw {
+  margin-top: 1.25rem;
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--stone);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: pre;
+}

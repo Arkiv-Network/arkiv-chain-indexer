@@ -690,7 +690,10 @@ export function App() {
             onToggleSimulateOffline={() => setSimulateOffline((value) => !value)}
           />
         ) : (
-          <HealthView timeZone={timeZone} />
+          <HealthView
+            timeZone={timeZone}
+            {...(adminBearerToken() ? { adminToken: adminBearerToken() as string } : {})}
+          />
         )}
       </main>
       <footer>

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth, type HealthResponse } from "./api";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtInteger, fmtUtcDate } from "./format";
+import { ServerMetricsPanel } from "./ServerMetricsPanel";
 import { SyncDetails } from "./SyncStatusBanner";
 import { describeSync } from "./syncStatus";
 
 interface HealthViewProps {
   timeZone: string;
+  /** The verified admin token, or undefined when admin mode is off. */
+  adminToken?: string;
 }
 
-export function HealthView({ timeZone }: HealthViewProps) {
+export function HealthView({ timeZone, adminToken }: HealthViewProps) {
   const [data, setData] = useState<HealthResponse | null>(null);
   const [browserNow, setBrowserNow] = useState(() => new Date());
   const [error, setError] = useState<string | null>(null);
@@ -170,6 +173,8 @@ export function HealthView({ timeZone }: HealthViewProps) {
             </table>
           </div>
         </section>
+
+      <ServerMetricsPanel {...(adminToken ? { adminToken } : {})} />
     </section>
   );
 }

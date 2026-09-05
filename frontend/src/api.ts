@@ -1661,6 +1661,24 @@ export async function verifyAdminToken(bearerToken: string): Promise<AdminVerify
   return response.json() as Promise<AdminVerifyResponse>;
 }
 
+/**
+ * The Prometheus registry as text, from the admin-gated scrape path. The
+ * loopback `/metrics` is not reachable from a browser on the public origin, so
+ * the health page always uses this one and always sends the admin token.
+ */
+export async function fetchServerMetricsText(bearerToken?: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  if (bearerToken) {
+    headers.authorization = `Bearer ${bearerToken}`;
+  }
+  const response = await fetch("/api/admin/metrics", { headers });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.text();
+}
+
 export function fetchBaseloadState(): Promise<BaseloadStateResponse> {
   return getJson<BaseloadStateResponse>("/baseload", new URLSearchParams());
 }
