@@ -55,6 +55,8 @@ import { SendersView } from "./SendersView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
 import { TransactionView } from "./TransactionView";
+import { OmniSearch } from "./OmniSearch";
+import { SearchView } from "./SearchView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
@@ -446,6 +448,10 @@ export function App() {
   };
 
   const mainClassName = activeView === "charts" ? "fullscreen" : "contained";
+  const navigateSearch = (href: string) => {
+    window.history.pushState({}, "", href);
+    refreshFromLocation();
+  };
 
   if (chartFullscreen) {
     return (
@@ -566,12 +572,15 @@ export function App() {
           </div>
         </div>
       </header>
+      {activeView !== "search" ? <div className="global-search"><OmniSearch onNavigate={navigateSearch} /></div> : null}
       <SyncStatusBanner
         timeZone={timeZone}
         minLagSeconds={pageSettings.scannerDelayWarningAgeMs / 1000}
       />
       <main className={mainClassName}>
-        {activeView === "home" ? (
+        {activeView === "search" ? (
+          <SearchView locationSearch={locationSearch} onNavigate={navigateSearch} onLocationChange={refreshFromLocation} />
+        ) : activeView === "home" ? (
           <HomeView
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}

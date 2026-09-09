@@ -1,5 +1,6 @@
 export type View =
   | "home"
+  | "search"
   | "blocks"
   | "block"
   | "transactions"
@@ -21,6 +22,7 @@ export type View =
 const VIEW_PARAM = "view";
 const VIEW_PATHS: Record<View, string> = {
   home: "/",
+  search: "/search",
   blocks: "/blocks",
   block: "/block",
   transactions: "/transactions",
@@ -42,6 +44,7 @@ const VIEW_PATHS: Record<View, string> = {
 
 const VIEW_PATH_ALIASES: Record<string, View> = {
   "/": "home",
+  "/search": "search",
   "/blocks": "blocks",
   "/block": "block",
   "/transactions": "transactions",
@@ -102,6 +105,7 @@ export function readViewFromSearch(search: string): View {
   const params = new URLSearchParams(search);
   const value = params.get(VIEW_PARAM);
   if (value === "home") return "home";
+  if (value === "search") return "search";
   if (value === "blocks") return "blocks";
   if (value === "block") return "block";
   if (value === "transactions") return "transactions";

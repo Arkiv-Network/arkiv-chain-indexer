@@ -39,6 +39,7 @@ import {
   recordResponseBytes,
 } from "./serverMetrics";
 import { ValueCache } from "./valueCache";
+import { parseSearchInput, SearchInputError, SearchBusyError, type SearchReader } from "./omniSearch";
 import {
   DEFAULT_ENTITY_HISTORY_LIMIT,
   MAX_BALANCES_PER_QUERY,
@@ -69,6 +70,8 @@ import {
 } from "./storage";
 
 export interface BlockServerOptions {
+  /** Read-only bounded omni search, with an independent small connection pool. */
+  search?: SearchReader;
   /**
    * Bearer token required on `GET /metrics`. Unset leaves the endpoint open,
    * which is fine when it is only reachable inside the compose network.
@@ -670,6 +673,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
+        ...(options.search ? { search: options.search } : {}),
         ...(options.metricsBearerToken !== undefined
           ? { metricsBearerToken: options.metricsBearerToken }
           : {}),
@@ -789,6 +793,20 @@ async function routeRequest(
 
   if (url.pathname === "/llms.txt") {
     return handleGetLlmsTxt();
+  }
+
+  if (url.pathname === "/search" || url.pathname === "/search/suggest") {
+    try {
+      const input = parseSearchInput(url.searchParams, url.pathname.endsWith("/suggest"));
+      if (!options.search) return jsonError(503, "Search is unavailable");
+      const body = await options.search.search(input, transactionDataEnabled);
+      return compressedJsonResponse(request, body);
+    } catch (error) {
+      if (error instanceof SearchInputError) return jsonError(400, error.message);
+      if (error instanceof SearchBusyError) return jsonResponse({ error: error.message }, { status: 429, headers: { "Retry-After": "1" } });
+      console.warn("Search lookup failed:", error);
+      return jsonError(503, "Search is temporarily unavailable. Please retry.");
+    }
   }
 
   if (url.pathname === "/health") {
