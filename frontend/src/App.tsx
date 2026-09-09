@@ -139,8 +139,9 @@ export function App() {
 
   useEffect(() => {
     const network = pageSettings.networkName ? ` · ${pageSettings.networkName}` : "";
-    document.title = `${pageSettings.chainName} BlockExplorer${network}`;
-  }, [pageSettings.chainName, pageSettings.networkName]);
+    const screen = activeView === "data" ? "Data (experimental, use with caution) · " : "";
+    document.title = `${screen}${pageSettings.chainName} BlockExplorer${network}`;
+  }, [activeView, pageSettings.chainName, pageSettings.networkName]);
 
   useEffect(() => {
     const onPopState = () => setClientLocation(getCurrentLocation());

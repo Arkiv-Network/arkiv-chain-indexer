@@ -461,6 +461,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
           onLocationChange={onLocationChange}
         />
         <h2>Data</h2>
+        <p className="page-caution" role="note">
+          Experimental — use with caution
+        </p>
       </div>
 
       <p className="summary">

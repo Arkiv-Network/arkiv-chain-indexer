@@ -665,6 +665,16 @@ main.chart-fullscreen-main {
   margin: 0;
 }
 
+/* The line under a page title that flags the whole screen, in the breadcrumb's voice. */
+.page-caution {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ark-orange);
+}
+
 .page-breadcrumbs {
   min-width: 0;
   display: flex;
