@@ -4,7 +4,7 @@ Consolidated on **2026-09-09** from Claude's 23 project memory notes, the parent
 Arkiv workspace's RPC quota note, repository documentation, and local Git history.
 Implementation checks refer to **`b473873491e698ce842506d23c4095cdfa066683` on `main`**
 (package version `0.4.0`); the paragraphs marked **September 9, evening** cover the
-commits through **`8baf173`**, tagged **`v0.5.0`**. This is a durable handoff: what was
+commits through **`8baf173`**, tagged **`v0.5.0`**, and **`9dcfed4`**, tagged **`v0.5.1`**. This is a durable handoff: what was
 built, why it works this way, operational lessons, and unfinished work.
 
 **Evidence boundaries:** “code” describes files inspected at that commit;
@@ -171,6 +171,7 @@ local history; infrastructure incidents are dated memory observations.
 | September 8 | Retired Cheesecake stack and pooled proxy; moved Kalarepa checkout here; paused fleet/backfill pending direct bouncer credentials. | `kalarepa-single-stack-2026-09-08.md` |
 | September 9 | Bounded omni search/typeahead (PR #99); seeded-chain genesis import (PR #100); frontend shared build context; prefill-owned indexer recipe. | `3776af9`, `3223a05`, `ab65dd1`, `b473873` |
 | September 9, evening | Genesis checks completed on the Sourcify seed; the app image ships `scripts/` after the offline importer failed with “Module not found” in the container; the genesis walk stops between batches on shutdown; release v0.5.0, deployed to Kalarepa at 20:00 UTC. arkiv-prefill committed its Sourcify run and the indexer integration. | `eef3514`, `5f10367`, `8baf173`, `243a51b`; prefill `024b780` |
+| September 9, night | The Data screen is titled “HOME >> DATA / EXPERIMENTAL — USE WITH CAUTION” (also in the browser title); release v0.5.1. Draft PRs to run it on Tiramisu: db-chain-mgr #387 adds `spec.indexer.entityQueryIndex` / `shadowRpc` (chart 0.25.0), db-chain-deployments #25 pins v0.5.1 with both on. | `b8d2f7f`, `9dcfed4` |
 
 ## Deployment and neighboring repositories
 
@@ -213,6 +214,7 @@ historical network identities, not an inventory of networks still running.
 | `/home/ubuntu/arkiv-network/api-key-generator` | Historical pooled proxy/key minter and quota calibration tooling. |
 | `/home/ubuntu/arkiv-network/data-explorer` | Reference for the Data page port and CodeMirror integration. |
 | `/home/ubuntu/arkiv-network/arkiv-prefill` | Seeded devnets, Sourcify fixture run, watcher, and its own included indexer Compose stack. |
+| `/home/ubuntu/arkiv-network/db-chain-deployments` (cloned September 9) | The manifests themselves; Tiramisu is `testnet/tiramisu.yaml`. |
 
 `web3_clientVersion` historically reported upstream `reth/v2.2.0-88505c7` while
 the Arkiv deployment manifest pinned `rethVersion: v0.1.0@sha256:…`. A manifest
@@ -231,6 +233,11 @@ usable push timestamps when correlating the August 24 incident.
 - Kubernetes uses the indexer-published **decoder** package. Compose defaults to
   the upstream `arkiv-transaction-decoder:v0.2.1` package. Indexer decoder release
   tags are indexer versions, not upstream decoder versions.
+- The db-chain chart (through 0.24.0) renders the backend with a fixed environment:
+  no entity index and no shadow RPC upstream. db-chain-mgr #387 (draft, September 9)
+  adds `spec.indexer.entityQueryIndex` and `spec.indexer.shadowRpc` for chart 0.25.0,
+  the relay pointed at `scannerRpcNode` with the scanner's key; db-chain-deployments
+  #25 (draft) is Tiramisu's first use, with indexer v0.5.1. Neither is merged.
 - The published decoder is built from pinned upstream commit
   `9239c4d89c3d9b1b27e10abd3e8d4458f5508fa7` with `PORT=28884`. The deployment chart
   probes 28884 and does not supply `PORT`; losing that baked-in value previously
@@ -347,32 +354,31 @@ An entity query measured ~2.8 ms locally versus ~427 ms relayed; entity count
 ~3 ms versus ~96 ms. These are dated measurements, not service guarantees.
 See [docs/prometheus.md](docs/prometheus.md).
 
-### Omni search (PR #99)
+### Omni search (PR #99, narrowed to identifiers)
 
-The latest feature is documented in [docs/omni-search.md](docs/omni-search.md).
-`GET /search` and `/search/suggest` reuse existing block/hash/address/entity and
-attribute indexes. No new search table, DDL on search startup, scanner write,
-payload-provider call, node call, or search backfill is required.
+The feature is documented in [docs/omni-search.md](docs/omni-search.md).
+`GET /search` and `/search/suggest` reuse existing block/hash/address/entity
+indexes. Attribute names, attribute values, payloads, log topics, and general
+text are not searched; unsupported text receives HTTP 400 before database
+access. The former attribute lookup and recent metadata sample were removed.
+No new search table, DDL, scanner write, provider/node call or backfill is needed.
 
 - Query length ≤256 characters, result limit 1–30; defaults 20 search / 8 suggest.
-  Hex prefixes start at six digits. Identifier storage is normalized lowercase.
-- `key=value` uses the ready optional entity projection; `name=Ali*` is a literal
-  case-sensitive prefix, while a quoted trailing `*` is literal. General words
-  search only a bounded recent sample: up to 64 operations, 64 transactions, and
-  64 logs. No chain-wide substring/fuzzy/recipient-only index is implied.
-- Attribute matches use latest undeleted projected versions and can include
-  expired entities; `coverage.attributeHead` identifies the projection snapshot.
-  Recent operation matches may include reverted requests.
+  Decimal blocks (including single digits) support suggestions; hex prefixes
+  start at six digits and are normalized lowercase.
+- With the optional entity projection enabled, only its entity keys and
+  owner/creator addresses participate. Attributes remain excluded. Recipient-only
+  addresses are not indexed by search; a full address can be opened directly.
 - At most two distinct searches run concurrently; equal requests coalesce and
   overflow returns 429. Suggestions debounce 220 ms and abort obsolete requests.
 - Read-only transactions disable JIT/parallel workers; statement timeout 200 ms,
   lock timeout 50 ms, request budget 800 ms between queries. Bounded results
   report `partial`/`truncated` rather than claiming exhaustive absence.
-- Cache: 128 entries / 2 MiB / two seconds, plus a five-second recent sample.
-  Partial results are not cached. Disabled transaction data yields blocks only.
-- Historical plan checks used ~1.3 million transactions and 6.5 million attribute
-  rows, with individual checked queries below 1 ms; that is evidence about those
-  access paths, not a terabyte-scale latency promise.
+- Cache: 128 entries / 2 MiB / two seconds. Partial results are not cached.
+  Disabled transaction data yields blocks only. Legacy `coverage` fields remain
+  false/null/zero for older clients.
+- Historical query-plan checks established identifier access paths, not a
+  terabyte-scale latency or concurrent-traffic guarantee.
 
 ## Shadow Ethereum JSON-RPC and balances
 
