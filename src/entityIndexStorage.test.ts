@@ -987,6 +987,26 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(await keysOf("*", { atBlock: "0x0" })).toEqual([6, 5, 4, 3, 2, 1, 0].map(keyOf));
   });
 
+  test("stop() ends the walk after the batch in flight, and the next start resumes it", async () => {
+    await index.reset();
+    const source = createFakeGenesisSource(SEVEN);
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 3, pageSize: 3 }, log: () => {} });
+    const tick = projector.runOnce();
+    await projector.stop(); // returns once the batch in flight is committed, not after the whole walk
+    expect((await tick).genesisStatus).toBe("running");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "running", phase: "walk", imported: 3, cursor: "c:3" });
+    expect(source.pages).toBe(2); // the page prefetched during the commit is dropped
+
+    const restarted = new EntityProjector(index, { genesis: { source, batchEntities: 3, pageSize: 3 }, log: () => {} });
+    const resumed = await restarted.runOnce();
+    expect(resumed.genesisStatus).toBe("done");
+    expect(resumed.genesisEntitiesImported).toBe(4);
+    expect(source.pages).toBe(4);
+    const rows = await db.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM "${schema}".entity_versions`);
+    expect(rows.rows[0]!.count).toBe("7");
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([6, 5, 4, 3, 2, 1, 0].map(keyOf));
+  });
+
   test("operations on genesis entities fold on top of their genesis state", async () => {
     await index.reset();
     // Block 2 patches G2, extends G1 and transfers G0; block 3 deletes G1.

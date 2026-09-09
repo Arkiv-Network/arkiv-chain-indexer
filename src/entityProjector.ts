@@ -617,7 +617,8 @@ export class EntityProjector {
         );
         this.publishGenesis({ ...state, imported: pendingImported, cursor: last ? null : pendingCursor, ...(last ? { phase: "repair" } : {}) });
         if (last) break;
-        if (outOfTime) {
+        if (outOfTime || this.stopped) {
+          if (this.stopped) this.log("entity index: stopping; the genesis walk resumes from its cursor on the next start");
           await walk.return();
           return { ...blocked, imported: importedNow };
         }
@@ -724,7 +725,7 @@ export class EntityProjector {
         return { ...GENESIS_IDLE, status: "done", repaired };
       }
       after = keys[keys.length - 1]!;
-      if (Date.now() - startedAt >= this.maxTickMs) return { ...blocked, repaired };
+      if (this.stopped || Date.now() - startedAt >= this.maxTickMs) return { ...blocked, repaired };
     }
   }
 }

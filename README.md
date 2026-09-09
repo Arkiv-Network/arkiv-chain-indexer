@@ -991,7 +991,8 @@ refolds the genesis keys that already have operations (`phase` `walk`, then `rep
 `waiting` when the node holds more than `ENTITY_INDEX_GENESIS_RPC_LIMIT` (1,000,000) of them — the node collects
 every matching id before slicing a page, so each page costs O(N) and a 100-million-entity genesis cannot be walked
 over RPC. Folding pauses while an import runs, so an operation on a genesis key is never folded before its base
-exists, and a restart resumes from the stored cursor. The node is `ENTITY_INDEX_GENESIS_RPC`, defaulting to
+exists; a shutdown ends the walk after the batch in flight, and a restart resumes from the stored cursor. The
+node is `ENTITY_INDEX_GENESIS_RPC`, defaulting to
 `SHADOW_RPC_UPSTREAM`; `ENTITY_INDEX_GENESIS=off` never asks (an offline import is still finished). Entities
 imported over RPC have `payloadSize` 0: the payload is never fetched, and the column never reaches the wire.
 
