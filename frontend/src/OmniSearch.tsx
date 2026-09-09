@@ -45,18 +45,9 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
   const choose = (suggestion: SearchSuggestion) => {
     setSuggestions([]);
     setActive(-1);
-    if (suggestion.href) {
-      setDismissed(true);
-      input.current?.blur();
-      onNavigate(suggestion.href);
-    } else if (suggestion.query.endsWith("=")) {
-      setQuery(suggestion.query);
-      input.current?.focus();
-    } else {
-      setQuery(suggestion.query);
-      setDismissed(true);
-      onNavigate(searchHref(suggestion.query));
-    }
+    setDismissed(true);
+    input.current?.blur();
+    onNavigate(suggestion.href);
   };
   const open = focused && !dismissed && (suggestions.length > 0 || loading || !!error);
 
@@ -77,7 +68,7 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
           aria-autocomplete="list" aria-expanded={open} aria-controls={listId}
           aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
           autoComplete="off" spellCheck={false} maxLength={256} autoFocus={autofocus}
-          placeholder="Block, address, hash, key=value…" value={query}
+          placeholder="Block number, address, hash or entity key…" value={query}
           onFocus={() => { setFocused(true); setDismissed(false); }}
           onChange={(event) => { setQuery(event.target.value); setDismissed(false); }}
           onKeyDown={(event) => {

@@ -1,4 +1,4 @@
-import type { SearchResponse } from "../../src/omniSearchTypes";
+import { isIndexedSearchQuery, type SearchResponse } from "../../src/omniSearchTypes";
 export type { SearchResponse, SearchResult, SearchSuggestion } from "../../src/omniSearchTypes";
 
 export function searchHref(query: string): string {
@@ -6,12 +6,7 @@ export function searchHref(query: string): string {
 }
 
 export function canSuggest(query: string): boolean {
-  const text = query.trim();
-  if (text.length < 2 || text.length > 256) return false;
-  if (/^(?:0x)?[0-9a-f]+$/i.test(text) || /^0x$/i.test(text)) {
-    return text.replace(/^0x/i, "").length >= 6;
-  }
-  return true;
+  return isIndexedSearchQuery(query);
 }
 
 export async function fetchSearch(query: string, suggest: boolean, signal: AbortSignal): Promise<SearchResponse> {

@@ -42,24 +42,23 @@ export function SearchView({ locationSearch, onNavigate, onLocationChange }: {
     <PageBreadcrumbs items={[{ view: "home", label: "Home" }, { view: "search", label: "Search" }]} onLocationChange={onLocationChange} />
     <h2>Search the indexer</h2>
     <OmniSearch initialQuery={query} onNavigate={submit} autofocus={!query} />
-    <p className="search-help">Find a block number, an address, a transaction hash or an entity key. Use <code>status=active</code> for an attribute, <code>name=Ali*</code> for a value prefix, or words to search recent metadata.</p>
+    <p className="search-help">Find a block number, an address, a block or transaction hash, or an entity key. Identifier prefixes need at least six hex digits. Search covers stored identifiers; attributes, attribute values, and payloads are not searched.</p>
     {loading ? <p role="status">Searching…</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     {result ? <>
-      <p role="status">{result.results.length} matches{result.truncated ? " · More may match; narrow your search" : ""}{result.partial ? " · Some lookups timed out" : ""}</p>
+      <p role="status">{result.results.length} {result.results.length === 1 ? "match" : "matches"}{result.truncated ? " · More may match; narrow your search" : ""}{result.partial ? " · Some lookups timed out" : ""}</p>
       <ul className="search-results">
         {result.results.map((item) => <li key={`${item.kind}-${item.href}-${item.label}`}>
           <a href={item.href} onClick={click}>
-            <span className="search-result-meta"><strong>{item.kind}</strong><span>{item.scope === "recent" ? "Recent metadata" : "Indexed lookup"}</span></span>
+            <span className="search-result-meta"><strong>{item.kind}</strong><span>Indexed lookup</span></span>
             <span className="mono search-result-label">{item.label}</span>
             <small>{item.detail}</small>
           </a>
         </li>)}
       </ul>
-      {!result.results.length ? <p>No matches in the searched data. Try a longer identifier or a key=value query.</p> : null}
+      {!result.results.length && !result.partial ? <p>No matching stored identifiers. Check the block number or try a longer identifier.</p> : null}
       {address ? <p><a href={`/address/${address}`} onClick={click}>Open address {address}</a></p> : null}
       <div className="search-coverage">
-        {result.coverage.attributeHead ? <p>Attribute projection through block {result.coverage.attributeHead}. Attribute matches can include expired entities.</p> : null}
         {result.notes.map((note) => <p key={note}>{note}</p>)}
       </div>
     </> : null}

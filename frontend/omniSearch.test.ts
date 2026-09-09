@@ -11,9 +11,14 @@ test("search links preserve special characters and resolve the search page", () 
   expect(url.searchParams.get("q")).toBe(query);
   expect(readViewFromLocation(url)).toBe("search");
 });
-test("typeahead avoids empty, short and oversized prefixes", () => {
-  for (const text of ["", " ", "a", "0x", "0xabc", "abcde", "x".repeat(257)]) expect(canSuggest(text)).toBe(false);
-  for (const text of ["0xabcdef", "abcdef", "name", "name="]) expect(canSuggest(text)).toBe(true);
+test("typeahead only offers indexed identifiers and block numbers", () => {
+  for (const text of ["", " ", "a", "0x", "0xabc", "abcde", "x".repeat(257),
+    "name", "name=", "name=Alice", "Alice Smith", "$payload=hello", "create", `0x${"a".repeat(65)}`]) {
+    expect(canSuggest(text)).toBe(false);
+  }
+  for (const text of ["0", "1", "123", "0xabcdef", "abcdef", "0XABCDEF", " 238364 ", "9007199254740993"]) {
+    expect(canSuggest(text)).toBe(true);
+  }
 });
 test("search requests carry an abort signal and encode input as a parameter", async () => {
   const abort = new AbortController();
