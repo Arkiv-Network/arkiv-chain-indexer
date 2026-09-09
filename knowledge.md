@@ -170,7 +170,7 @@ local history; infrastructure incidents are dated memory observations.
 | September 5 | Persistent live fleet, Prometheus metrics, protected off-host scraping, health-page metrics panel; comparison pinned to projection head. | `3419a76`, `4a91998`, `682b8e5`, `a2eacb6`, `ccb35be`, `4445998` |
 | September 8 | Retired Cheesecake stack and pooled proxy; moved Kalarepa checkout here; paused fleet/backfill pending direct bouncer credentials. | `kalarepa-single-stack-2026-09-08.md` |
 | September 9 | Bounded omni search/typeahead (PR #99); seeded-chain genesis import (PR #100); frontend shared build context; prefill-owned indexer recipe. | `3776af9`, `3223a05`, `ab65dd1`, `b473873` |
-| September 9, evening | Genesis checks completed on the Sourcify seed; the app image ships `scripts/` after the offline importer failed with “Module not found” in the container; the genesis walk stops between batches on shutdown; release v0.5.0. arkiv-prefill committed its Sourcify run and the indexer integration. | `eef3514`, `5f10367`, `8baf173`; prefill `024b780` |
+| September 9, evening | Genesis checks completed on the Sourcify seed; the app image ships `scripts/` after the offline importer failed with “Module not found” in the container; the genesis walk stops between batches on shutdown; release v0.5.0, deployed to Kalarepa at 20:00 UTC. arkiv-prefill committed its Sourcify run and the indexer integration. | `eef3514`, `5f10367`, `8baf173`, `243a51b`; prefill `024b780` |
 
 ## Deployment and neighboring repositories
 
@@ -185,7 +185,7 @@ local history; infrastructure incidents are dated memory observations.
 | Node RPC | `https://rpc.tiramisu.db-chain.testnet.arkiv.network`, direct bouncer path. |
 | Proxy | Retired; `COMPOSE_PROFILES` cleared. Old `rpcproxypool` volume retained. |
 | Fleet / backfill | Empty live fleet persisted; `backfill-scanner` stopped to preserve the anonymous RPC budget for tip scanning. |
-| Last recorded deployed build | `ab65dd1`, September 9 around 17:36 UTC; genesis status `none` on unseeded Tiramisu. Local HEAD is `8baf173` (`v0.5.0`), not deployed yet; its two code changes since `ab65dd1` (scripts in the image, stop between genesis batches) do not affect an unseeded network. |
+| Last recorded deployed build | `243a51b` (the v0.5.0 code plus this document), September 9 around 20:00 UTC: `docker compose build` with the exit checked, `up -d --wait --no-deps` for the running app services, `up --no-start backfill-scanner` so the paused backfill was recreated on the new image but not started. `/health` ok, genesis status `none` on unseeded Tiramisu, no errors in the backend log. |
 | Retired stack | Cheesecake/Pietruszka removed; backup at `/home/ubuntu/backups/arkiv-chain-indexer-cheesecake-2026-09-08`. Its nginx site was still enabled and returning 502 at the time. |
 
 The Tiramisu admin token needed to provision direct keys was still unavailable in
@@ -249,7 +249,10 @@ usable push timestamps when correlating the August 24 incident.
   frontend/container build before investigating application logic. Historical
   instructions to redeploy Pietruszka now apply to the surviving Kalarepa stack.
 - A general Compose `up` can restart the intentionally stopped backfill service.
-  Preserve the recorded paused state until the RPC budget issue is resolved.
+  Preserve the recorded paused state until the RPC budget issue is resolved: deploy
+  with `up -d --wait --no-deps <running services>` and then
+  `up --no-start --no-deps backfill-scanner`, which recreates it on the new image
+  without starting it (used September 9, evening).
 
 ## Decoder and Arkiv metadata
 
