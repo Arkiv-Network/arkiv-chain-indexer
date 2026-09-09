@@ -200,7 +200,9 @@ docker compose up --build
 ## Docker Compose
 
 - `Dockerfile` (root) builds a single Bun image used by `scanner`, `aggregator`, and `backend` services. The
-  service-specific entry point is picked via `command:` in `docker-compose.yml`.
+  service-specific entry point is picked via `command:` in `docker-compose.yml`. The image carries `src/` and
+  `scripts/`, so the offline genesis importer runs in it (`docker compose run --rm backend bun run
+  scripts/importGenesisState.ts ...`).
 - `frontend/Dockerfile` builds the static UI and serves it with `frontend/server.js`. Its build context is
   `frontend/` plus a second context named `shared` for the repository's `src/` (declared in
   `docker-compose.yml` and `.github/workflows/publish-images.yml`), because `frontend/src` imports shared

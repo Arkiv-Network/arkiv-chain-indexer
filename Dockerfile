@@ -11,6 +11,9 @@ RUN bun install
 COPY tsconfig.json ./
 COPY llms.txt ./
 COPY src ./src
+# The scripts run inside the container too: the offline genesis importer
+# (scripts/importGenesisState.ts) is started with `docker compose run --rm backend ...`.
+COPY scripts ./scripts
 
 ENV NODE_ENV=production
 ENV BUILD_COMMIT=${BUILD_COMMIT}
