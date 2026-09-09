@@ -857,6 +857,38 @@ function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
       </span>
     );
   }
+  const genesis = index.genesis;
+  if (genesis?.status === "running") {
+    return (
+      <span className="rpc-source-option-status warn">
+        Importing genesis entities: {genesis.imported.toLocaleString("en-US")} /{" "}
+        {genesis.total.toLocaleString("en-US")}
+        {genesis.phase === "repair"
+          ? " are in; refolding the ones with later operations"
+          : genesis.source === "dump"
+            ? " (offline import from the seed's state dump)"
+            : " (from the node)"}
+        . Results are incomplete until the import is done.
+      </span>
+    );
+  }
+  if (genesis?.status === "waiting") {
+    return (
+      <span className="rpc-source-option-status warn">
+        {genesis.total.toLocaleString("en-US")} genesis entities are waiting for the offline import
+        (<span className="mono">scripts/importGenesisState.ts</span>); until then entities created before
+        block {index.floorBlock ?? "?"} are not indexed.
+      </span>
+    );
+  }
+  if (genesis?.status === "failed") {
+    return (
+      <span className="rpc-source-option-status warn">
+        The genesis import failed: {genesis.error ?? "no reason recorded"}. Entities created before block{" "}
+        {index.floorBlock ?? "?"} are not indexed.
+      </span>
+    );
+  }
   if (index.projectedThroughBlock === null) {
     return (
       <span className="rpc-source-option-status warn">
@@ -867,11 +899,17 @@ function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
   }
   const lag = index.lagBlocks === null ? "" : `, ${index.lagBlocks} blocks behind the scanner`;
   const live = index.liveEntities === null ? "" : `; ${index.liveEntities.toLocaleString("en-US")} live entities`;
+  const coverage =
+    genesis?.status === "done" && index.floorBlock === "0"
+      ? `Every entity is indexed, including the ${genesis.total.toLocaleString("en-US")} from the genesis state.`
+      : genesis?.status === "unavailable"
+        ? `Entities created before block ${index.floorBlock ?? "?"} are not indexed, and the node could not say whether the genesis state holds any.`
+        : `Entities created before block ${index.floorBlock ?? "?"} are not indexed.`;
   return (
     <span className="rpc-source-option-status ok">
       Projected through block {index.projectedThroughBlock}
       {lag}
-      {live}. Entities created before block {index.floorBlock ?? "?"} are not indexed.
+      {live}. {coverage}
     </span>
   );
 }

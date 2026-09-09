@@ -207,6 +207,31 @@ export const indexerHeadAgeSeconds = metricsRegistry.gauge(
   "Seconds since the last stored block was sealed on chain.",
 );
 
+export const entityIndexFloorBlock = metricsRegistry.gauge(
+  "entity_index_floor_block",
+  "First block the experimental entity index vouches for.",
+);
+
+export const entityIndexProjectedThroughBlock = metricsRegistry.gauge(
+  "entity_index_projected_through_block",
+  "Newest block folded into the experimental entity index (what /shadow-rpc/experimental calls latest).",
+);
+
+export const entityIndexLiveEntities = metricsRegistry.gauge(
+  "entity_index_live_entities",
+  "Entities live at the entity index's projection head, as of the projector's last count.",
+);
+
+export const entityIndexGenesisEntitiesTotal = metricsRegistry.gauge(
+  "entity_index_genesis_entities_total",
+  "Entities the node counted at block 0 for the genesis import.",
+);
+
+export const entityIndexGenesisEntitiesImported = metricsRegistry.gauge(
+  "entity_index_genesis_entities_imported",
+  "Genesis entities written into the entity index so far.",
+);
+
 export const processStartTimeSeconds = metricsRegistry.gauge(
   "process_start_time_seconds",
   "Unix time the server process started.",
@@ -380,6 +405,35 @@ export interface IndexerProgressSnapshot {
   /** ISO timestamp (as stored) or a Date. */
   lastSuccessfulBlockDate?: string | Date;
   latestObservedBlock?: bigint;
+}
+
+export interface EntityIndexProgressSnapshot {
+  floorBlock: bigint | undefined;
+  projectedThroughBlock: bigint | undefined;
+}
+
+export interface EntityIndexStatsSnapshot {
+  liveEntities: number | null;
+  genesis: { total: number; imported: number } | undefined;
+}
+
+/** Refresh the entity index gauges from its progress rows at scrape time. */
+export function collectEntityIndex(
+  progress: () => Promise<EntityIndexProgressSnapshot>,
+  stats: () => Promise<EntityIndexStatsSnapshot>,
+): () => void {
+  return metricsRegistry.collect(async () => {
+    const [where, counts] = await Promise.all([progress(), stats()]);
+    if (where.floorBlock !== undefined) entityIndexFloorBlock.set(undefined, Number(where.floorBlock));
+    if (where.projectedThroughBlock !== undefined) {
+      entityIndexProjectedThroughBlock.set(undefined, Number(where.projectedThroughBlock));
+    }
+    if (counts.liveEntities !== null) entityIndexLiveEntities.set(undefined, counts.liveEntities);
+    if (counts.genesis) {
+      entityIndexGenesisEntitiesTotal.set(undefined, counts.genesis.total);
+      entityIndexGenesisEntitiesImported.set(undefined, counts.genesis.imported);
+    }
+  });
 }
 
 /** Refresh the indexer head/lag gauges from scanner progress at scrape time. */

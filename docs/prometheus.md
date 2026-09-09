@@ -123,3 +123,5 @@ indexer_lag_blocks > 50 or indexer_head_age_seconds > 120
   so they reset with the process like any counter.
 - The scanner, aggregator and gap-filler processes do not expose metrics yet; `indexer_*` gauges are
   read from `scanner_state` by the backend.
+- With `ENTITY_QUERY_INDEX` on, `entity_index_*` gauges report the index floor and projection head, the
+  last live-entity count, and the genesis import's `total` / `imported`.

@@ -1,0 +1,41 @@
+# Overlay for indexing a local arkiv-prefill devnet (a chain seeded at genesis;
+# see README, "Index a local prefill devnet"). The prefill node publishes its
+# RPC on 127.0.0.1 only, so the services that talk to the node join the prefill
+# compose network and reach it by container name; the backend also mounts the
+# prefill run's artifacts so the offline genesis importer can read the seed's
+# state.jsonl and both importers can write the progress file where the
+# prefill dashboard looks for such files.
+#
+#   docker compose --env-file .env.sourcify.local -f docker-compose.yml -f docker-compose.prefill.yml up -d --build
+#
+# Variables (all optional):
+#   PREFILL_NETWORK    the prefill node's compose network (default arkiv-sourcify_default)
+#   PREFILL_ARTIFACTS  the prefill run directory holding seed/state.jsonl
+#                      (default ../arkiv-prefill/artifacts/sourcify-run, next to this checkout)
+# The RPC URLs themselves come from the env file: SCANNER_RPC_FULL_NODE and
+# SHADOW_RPC_UPSTREAM pointing at http://<node container>:8545, for example
+# http://arkiv-sourcify-node-1:8545.
+
+x-prefill-network: &prefill-network
+  networks:
+    - default
+    - prefill
+
+services:
+  scanner:
+    <<: *prefill-network
+  backfill-scanner:
+    <<: *prefill-network
+  gap-filler:
+    <<: *prefill-network
+  backend:
+    <<: *prefill-network
+    volumes:
+      - ${PREFILL_ARTIFACTS:-../arkiv-prefill/artifacts/sourcify-run}:/prefill
+    environment:
+      ENTITY_INDEX_GENESIS_PROGRESS_FILE: ${ENTITY_INDEX_GENESIS_PROGRESS_FILE:-/prefill/index/genesis-import-progress.json}
+
+networks:
+  prefill:
+    name: ${PREFILL_NETWORK:-arkiv-sourcify_default}
+    external: true

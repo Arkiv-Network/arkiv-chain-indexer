@@ -274,7 +274,9 @@ from them on a **separate path**, `POST /shadow-rpc/experimental` (`/api/shadow-
 `/shadow-rpc` is untouched and keeps relaying those methods to the node, so the two paths are two independent
 sources for the same questions, and either can be checked against the other. The path answers `404` when the
 feature is off; `GET /health` reports it under `features.entityQueryIndex` as `false` or as
-`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, lastFoldAtUtc }`.
+`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, liveEntitiesAtUtc, lastFoldAtUtc,
+genesis }`, where `genesis` is `null` or the genesis import's `{ status, phase, source, total, imported,
+startedAtUtc, finishedAtUtc, updatedAtUtc, error }`.
 
 The wire contract is the node's (`arkiv-reth-rpc` / `arkiv-rpc-types` in the 0.8 engine): the same parameter
 shapes and defaults (`atBlock` hex or `latest`, `limit` 1–200 default 100, `select` with `attributes` as a
@@ -299,6 +301,17 @@ Where the index cannot honour something the node does, it says so rather than ap
 | `creationFlags` | Always known. | `null` for entities created before receipt logs were stored (the flags travel in the `EntityCreated` event, not the calldata). |
 | Cursors | Resume below an internal entity id. | Resume below a creation position. Both are opaque, bound to the query, block and `select`, and reject a cursor from another request with the node's own messages — but a cursor from one source cannot be handed to the other: the index answers a node's cursor with `-32005` and a message saying so. |
 | `arkiv_getBlockTiming` | The node's clock. | The scanner head's block and its timestamp. |
+
+Genesis entities (a chain seeded at block 0 with arkiv-prefill; no transaction created them) are imported
+once as version-0 rows with `createdAt = 0` in the node's entity-id order, and later operations fold on top.
+`ENTITY_INDEX_GENESIS=auto` (default) asks the node once and walks `arkiv_query` at block 0 when it holds at
+most `ENTITY_INDEX_GENESIS_RPC_LIMIT` (1,000,000) entities, else reports `waiting`; `off` never asks. Bigger
+seeds load offline with `scripts/importGenesisState.ts --dump state.jsonl [--rpc <node>]`, which verifies the
+records' id order against the system account's slots, resumes from its last batch, prints one JSON document
+per line, and hands the repair to the backend. `ENTITY_INDEX_GENESIS_PROGRESS_FILE` / `--progress-file` receive
+a snake_case progress document (`phase`, `percent`, `elapsed_s`, `entities`, `dump`, `rpc`, `database`,
+`repair`, `error`, `pid`, `updated_at`) on every change. `docker-compose.prefill.yml` joins a local prefill
+node's network and mounts its artifacts at `/prefill`. Entities imported over RPC have `payloadSize` 0.
 
 The projection is kept up to date by an in-process projector: every few seconds it folds the operations of the
 blocks the scanner has stored since its last pass (per entity key, replaying the key's whole history, so a
@@ -516,7 +529,9 @@ delete, expire) in chain order — ordered by block number, transaction position
 ascending — capped at the configured history limit (`ENTITY_HISTORY_LIMIT`, default 100).
 `totalOperations` always carries the full stored count; `truncated` is true when older operations
 were cut off, and `firstOperation` (present only then) carries the earliest stored operation so the
-create stays reachable. Returns `404` when no operations are stored for the key.
+create stays reachable. Returns `404` when no operations are stored for the key — unless the entity index
+knows the key from the chain's genesis state, in which case `genesis` (`{ owner, creator, expiresAt,
+contentType, creationFlags, payloadSize, attributes }`) is added and an empty `operations` is `200`.
 Creates are linked to their entity key from the EntityCreated receipt log, so rows scanned before
 that link existed may be missing from a key's history until their blocks are re-scanned.
 

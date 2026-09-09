@@ -11,8 +11,9 @@ import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import { EntityProjector } from "./entityProjector";
+import { createRpcGenesisSource } from "./entityGenesis";
 import type { GuzzlerStore } from "./guzzlers";
-import { collectIndexerProgress, collectResponseCache, collectValueCache } from "./serverMetrics";
+import { collectEntityIndex, collectIndexerProgress, collectResponseCache, collectValueCache } from "./serverMetrics";
 
 async function main(): Promise<void> {
   let storage: ScannerStorage | undefined;
@@ -149,12 +150,43 @@ async function main(): Promise<void> {
       : undefined;
     // Experimental: the entity index behind /shadow-rpc/experimental. Its own
     // small pool, so a long initial fold never starves the API's connections.
+    let genesisImportDescription = "off";
     if (config.entityQueryIndex) {
       entityIndex = await EntityIndexStorage.open(config.databaseUrl, { max: 4 });
+      // The entities a seeded chain was born with come from the node, since
+      // no operation ever created them; without a node only an offline
+      // import (scripts/importGenesisState.ts) can bring them in.
+      const genesisSource =
+        config.entityIndexGenesis === "auto" && config.entityIndexGenesisRpc
+          ? createRpcGenesisSource({
+              url: config.entityIndexGenesisRpc.url,
+              ...(config.entityIndexGenesisRpc.apiKey ? { apiKey: config.entityIndexGenesisRpc.apiKey } : {}),
+              log: (message) => console.log(message),
+            })
+          : undefined;
+      genesisImportDescription =
+        config.entityIndexGenesis === "off"
+          ? "off (ENTITY_INDEX_GENESIS=off; an offline import is still finished)"
+          : genesisSource
+            ? `auto, from the node at ${config.entityIndexGenesisRpc?.url.replace(/\/\/[^/]*@/, "//")} ` +
+              `(up to ${config.entityIndexGenesisRpcLimit} entities over RPC)`
+            : "auto, but no node is configured (set SHADOW_RPC_UPSTREAM or ENTITY_INDEX_GENESIS_RPC); only an offline import is finished";
+      if (config.entityIndexGenesisProgressFile) genesisImportDescription += `; progress file ${config.entityIndexGenesisProgressFile}`;
       entityProjector = new EntityProjector(entityIndex, {
         ...(config.entityIndexFloorBlock !== undefined ? { floorBlock: config.entityIndexFloorBlock } : {}),
+        genesis: {
+          ...(genesisSource ? { source: genesisSource } : {}),
+          mode: config.entityIndexGenesis,
+          rpcLimit: config.entityIndexGenesisRpcLimit,
+          ...(config.entityIndexGenesisProgressFile ? { progressFile: config.entityIndexGenesisProgressFile } : {}),
+        },
       });
       entityProjector.start();
+      const entityIndexForMetrics = entityIndex;
+      collectEntityIndex(
+        () => entityIndexForMetrics.getProgress(),
+        () => entityIndexForMetrics.getStats(),
+      );
     }
     // Prometheus collectors: refreshed at scrape time from the caches' own
     // counters and the scanner progress row.
@@ -226,6 +258,7 @@ async function main(): Promise<void> {
         ? "Entity index (experimental): projector running; arkiv_* reads answered from the index at /shadow-rpc/experimental"
         : "Entity index (experimental): disabled (set ENTITY_QUERY_INDEX=true to build it)",
     );
+    if (entityIndex) console.log(`Entity index genesis import: ${genesisImportDescription}`);
     console.log(
       transactionCountCache.enabled
         ? `Transaction count cache: up to ${config.transactionCountCacheMaxEntries} filters, ` +

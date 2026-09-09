@@ -356,6 +356,13 @@ services:
       # those methods to the node, so the two can be checked against each other.
       ENTITY_QUERY_INDEX: ${ENTITY_QUERY_INDEX:-}
       ENTITY_INDEX_FLOOR_BLOCK: ${ENTITY_INDEX_FLOOR_BLOCK:-}
+      # Genesis-seeded chains (arkiv-prefill): import the block-0 entities from
+      # the node (auto, up to the RPC limit) or wait for the offline importer;
+      # the progress file is for a watcher (see docker-compose.prefill.yml).
+      ENTITY_INDEX_GENESIS: ${ENTITY_INDEX_GENESIS:-}
+      ENTITY_INDEX_GENESIS_RPC: ${ENTITY_INDEX_GENESIS_RPC:-}
+      ENTITY_INDEX_GENESIS_RPC_LIMIT: ${ENTITY_INDEX_GENESIS_RPC_LIMIT:-}
+      ENTITY_INDEX_GENESIS_PROGRESS_FILE: ${ENTITY_INDEX_GENESIS_PROGRESS_FILE:-}
       ARKIV_PROTOCOL_SCHEDULE_URL: ${ARKIV_PROTOCOL_SCHEDULE_URL:-}
       ARKIV_PROTOCOL_SCHEDULE_PATH: ${ARKIV_PROTOCOL_SCHEDULE_PATH:-}
       PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: ${PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS:-}

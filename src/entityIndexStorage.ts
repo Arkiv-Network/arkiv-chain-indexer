@@ -88,8 +88,57 @@ export interface EntityQueryPage {
 export interface EntityIndexStats {
   /** Planner estimate of `entity_versions` rows. */
   versionRowsEstimate: number;
-  /** Entities live at the projection head, or null when nothing is projected yet. */
+  /** Entities live at the projection head as of the last count, or null before the first. */
   liveEntities: number | null;
+  /** When that count was taken; the projector refreshes it, never a request. */
+  liveEntitiesAtUtc: string | null;
+  /** The projection head the count was taken at. */
+  liveEntitiesBlock: string | null;
+  /** The genesis import's state, or undefined when no import was ever considered. */
+  genesis: GenesisImportState | undefined;
+}
+
+export type GenesisImportStatus = "none" | "waiting" | "running" | "done" | "unavailable" | "failed";
+
+/**
+ * Where the import of the chain's genesis entities stands (see
+ * `entityGenesis.ts`). One row, `genesis_import`, in the state table:
+ *
+ * - `none`: the chain has no genesis entities (or its node cannot say);
+ * - `waiting`: too many for the RPC walk; `scripts/importGenesisState.ts` must load them;
+ * - `running`/`walk`: rows are being written, by the projector (`source: "rpc"`) or the script (`"dump"`);
+ * - `running`/`repair`: every row is in; keys that also have operations are being refolded on top;
+ * - `done`, `unavailable` (the node holds no block-0 state), `failed` (with `error`).
+ */
+export interface GenesisImportState {
+  status: GenesisImportStatus;
+  phase: "walk" | "repair" | null;
+  source: "rpc" | "dump" | null;
+  chainId: string | null;
+  genesisHash: string | null;
+  /** Entities the source counted at block 0. */
+  total: number;
+  /** Entities written so far. */
+  imported: number;
+  /** The walk's resume point; null before the first page and after the last. */
+  cursor: string | null;
+  /** The repair's resume point: the last entity key refolded. */
+  repairAfterKey: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  error: string | null;
+  /** When the row last changed (the table's clock). */
+  updatedAt?: string;
+}
+
+export interface LiveEntitiesReading {
+  count: number;
+  /** The projection head the count was taken at. */
+  block: string;
+  /** ISO timestamp of the reading. */
+  at: string;
+  /** How long the count took, so the next one can be spaced accordingly. */
+  ms: number;
 }
 
 /** The read surface the JSON-RPC handlers need; `EntityIndexStorage` satisfies it. */
@@ -104,10 +153,56 @@ const STATE_FLOOR = "floor_block";
 const STATE_PROJECTED_THROUGH = "projected_through_block";
 const STATE_LATE_SCAN_WATERMARK = "late_scan_watermark";
 const STATE_LAST_FOLD_AT = "last_fold_at";
+const STATE_GENESIS_IMPORT = "genesis_import";
+const STATE_LIVE_ENTITIES = "live_entities";
 
 const REGISTRY_ADDRESS = "0x4400000000000000000000000000000000000044";
 /** Blocks inspected per chunk plan; bounds one planning query. */
 const CHUNK_PLAN_BLOCKS = 5_000;
+
+/** Indexes built for earlier result orders and address lookups; dropped on start. */
+const LEGACY_INDEXES = [
+  "entity_versions_live_order_idx",
+  "entity_versions_created_idx",
+  "entity_versions_live_owner_idx",
+  "entity_versions_live_creator_idx",
+];
+
+/**
+ * The secondary indexes of the two projection tables. Head-state reads only
+ * touch latest, undeleted versions, so half of them are partial: the liveness
+ * bound on expires_at, the newest-first result order, and the $owner /
+ * $creator point lookups. An address keeps every entity it ever owned, and
+ * on a busy chain almost all of them have expired, so a bare owner lookup
+ * reads a hundred times more rows than it returns; pairing the address with
+ * the expiry bound lets one index range answer "what did this address hold
+ * at block B". Historical reads bound the candidates by creation block and
+ * by expiry over every version, live or not — at a past block B only
+ * versions with expires_at > B can be live, a small slice of a table where
+ * most rows belong to entities long gone. The attribute indexes use
+ * text_pattern_ops so a LIKE 'prefix%' (STARTSWITH) walks the index too;
+ * `current` covers the head only, so the same two exist over every row.
+ *
+ * Listed here rather than inline so a bulk load can drop them and rebuild.
+ */
+const SECONDARY_INDEXES: ReadonlyArray<{ name: string; table: "versions" | "attributes"; definition: string }> = [
+  { name: "entity_versions_live_expiry_idx", table: "versions", definition: "(expires_at) WHERE to_block IS NULL AND NOT deleted" },
+  {
+    name: "entity_versions_live_order_key_idx",
+    table: "versions",
+    definition: "(created_at DESC, created_position DESC, entity_key DESC) WHERE to_block IS NULL AND NOT deleted",
+  },
+  { name: "entity_versions_live_owner_expiry_idx", table: "versions", definition: "(owner, expires_at) WHERE to_block IS NULL AND NOT deleted" },
+  { name: "entity_versions_live_creator_expiry_idx", table: "versions", definition: "(creator, expires_at) WHERE to_block IS NULL AND NOT deleted" },
+  { name: "entity_versions_created_key_idx", table: "versions", definition: "(created_at DESC, created_position DESC, entity_key DESC)" },
+  { name: "entity_versions_expiry_idx", table: "versions", definition: "(expires_at)" },
+  { name: "entity_versions_owner_expiry_idx", table: "versions", definition: "(owner, expires_at)" },
+  { name: "entity_versions_creator_expiry_idx", table: "versions", definition: "(creator, expires_at)" },
+  { name: "entity_version_attributes_live_text_idx", table: "attributes", definition: "(name, type_id, value_text text_pattern_ops) WHERE current" },
+  { name: "entity_version_attributes_live_num_idx", table: "attributes", definition: "(name, type_id, value_num) WHERE current" },
+  { name: "entity_version_attributes_text_idx", table: "attributes", definition: "(name, type_id, value_text text_pattern_ops)" },
+  { name: "entity_version_attributes_num_idx", table: "attributes", definition: "(name, type_id, value_num)" },
+];
 
 function quoteIdent(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -211,6 +306,52 @@ function mapVersionRow(row: VersionRow): EntityVersion {
   };
 }
 
+/** The `entity_versions` rows for versions, in the table's column order. */
+function versionRows(versions: readonly EntityVersion[]) {
+  return versions.map((version) => ({
+    entity_key: version.entityKey,
+    version: version.version,
+    from_block: version.fromBlock,
+    from_position: version.fromPosition,
+    from_op_index: version.fromOpIndex,
+    to_block: version.toBlock,
+    deleted: version.deleted,
+    owner: version.owner,
+    creator: version.creator,
+    created_at: version.createdAt,
+    created_position: version.createdPosition,
+    created_op_index: version.createdOpIndex,
+    updated_at: version.updatedAt,
+    expires_at: version.expiresAt,
+    creation_flags: version.creationFlags,
+    content_type: version.contentType,
+    payload_size: version.payloadSize,
+    attributes: version.attributes.map(
+      (attribute): StoredAttributeJson => ({
+        name: attribute.name,
+        typeId: attribute.typeId,
+        valueText: attribute.valueText,
+        valueNum: attribute.valueNum === null ? null : attribute.valueNum.toString(),
+      }),
+    ),
+  }));
+}
+
+/** The `entity_version_attributes` rows for versions. */
+function attributeRows(versions: readonly EntityVersion[]) {
+  return versions.flatMap((version) =>
+    version.attributes.map((attribute) => ({
+      entity_key: version.entityKey,
+      version: version.version,
+      name: attribute.name,
+      type_id: attribute.typeId,
+      value_text: attribute.valueText,
+      value_num: attribute.valueNum,
+      current: version.toBlock === null && !version.deleted,
+    })),
+  );
+}
+
 export class EntityIndexStorage implements EntityIndexReader {
   readonly schema: string;
   private readonly qState: string;
@@ -294,58 +435,12 @@ export class EntityIndexStorage implements EntityIndexReader {
         PRIMARY KEY (entity_key, version)
       )
     `);
-    // Head-state reads only touch latest, undeleted versions, so those indexes
-    // are partial: the liveness bound on expires_at, the newest-first result
-    // order, and the $owner / $creator point lookups.
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_expiry_idx")}
-       ON ${this.qVersions} (expires_at) WHERE to_block IS NULL AND NOT deleted`,
-    );
     // The result order changed from operation index to entity key as the
-    // in-transaction tie-break; the indexes built for the old order go.
-    await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent("entity_versions_live_order_idx")}`);
-    await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent("entity_versions_created_idx")}`);
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_order_key_idx")}
-       ON ${this.qVersions} (created_at DESC, created_position DESC, entity_key DESC)
-       WHERE to_block IS NULL AND NOT deleted`,
-    );
-    // An address keeps every entity it ever owned, and on a busy chain almost
-    // all of them have expired, so a bare owner lookup reads a hundred times
-    // more rows than it returns. Pairing the address with the expiry bound
-    // lets one index range answer "what did this address hold at block B".
-    await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent("entity_versions_live_owner_idx")}`);
-    await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent("entity_versions_live_creator_idx")}`);
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_owner_expiry_idx")}
-       ON ${this.qVersions} (owner, expires_at) WHERE to_block IS NULL AND NOT deleted`,
-    );
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_live_creator_expiry_idx")}
-       ON ${this.qVersions} (creator, expires_at) WHERE to_block IS NULL AND NOT deleted`,
-    );
-    // Historical reads bound the candidates by creation block, and by expiry:
-    // at a past block B only versions with expires_at > B can be live, which
-    // is a small slice of a table where most rows belong to entities long
-    // gone — without this index a read at a past block scans the whole table.
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_created_key_idx")}
-       ON ${this.qVersions} (created_at DESC, created_position DESC, entity_key DESC)`,
-    );
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_expiry_idx")}
-       ON ${this.qVersions} (expires_at)`,
-    );
-    // The partial pair above stops at the head; a read at a past block needs
-    // the same range over every version, live or not.
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_owner_expiry_idx")}
-       ON ${this.qVersions} (owner, expires_at)`,
-    );
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_versions_creator_expiry_idx")}
-       ON ${this.qVersions} (creator, expires_at)`,
-    );
+    // in-transaction tie-break, and the address indexes gained the expiry
+    // bound; the indexes built for the old shapes go.
+    for (const name of LEGACY_INDEXES) {
+      await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent(name)}`);
+    }
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qAttributes} (
         entity_key TEXT NOT NULL,
@@ -358,31 +453,39 @@ export class EntityIndexStorage implements EntityIndexReader {
         PRIMARY KEY (entity_key, version, name)
       )
     `);
-    // text_pattern_ops so a LIKE 'prefix%' (STARTSWITH) walks the index too.
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_version_attributes_live_text_idx")}
-       ON ${this.qAttributes} (name, type_id, value_text text_pattern_ops) WHERE current`,
-    );
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_version_attributes_live_num_idx")}
-       ON ${this.qAttributes} (name, type_id, value_num) WHERE current`,
-    );
-    // `current` covers the head only. A read at a past block matches whichever
-    // version was valid then, so without the same two indexes over every row
-    // an attribute predicate falls back to scanning the whole table.
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_version_attributes_text_idx")}
-       ON ${this.qAttributes} (name, type_id, value_text text_pattern_ops)`,
-    );
-    await this.db.query(
-      `CREATE INDEX IF NOT EXISTS ${quoteIdent("entity_version_attributes_num_idx")}
-       ON ${this.qAttributes} (name, type_id, value_num)`,
-    );
+    await this.ensureIndexes();
     // Late arrivals (gap fills, rescans) are found by when they were written.
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_scanned_at_idx")}
        ON ${this.qOperations} (scanned_at)`,
     );
+  }
+
+  /** Create every secondary index that is missing. */
+  async ensureIndexes(): Promise<void> {
+    for (const index of SECONDARY_INDEXES) {
+      const table = index.table === "versions" ? this.qVersions : this.qAttributes;
+      await this.db.query(`CREATE INDEX IF NOT EXISTS ${quoteIdent(index.name)} ON ${table} ${index.definition}`);
+    }
+  }
+
+  /**
+   * Drop the secondary indexes so a bulk load pays for them once, at the end,
+   * instead of on every row; {@link ensureIndexes} puts them back. Only
+   * sensible while the index is otherwise idle — reads scan without them.
+   */
+  async dropSecondaryIndexes(): Promise<void> {
+    for (const index of SECONDARY_INDEXES) {
+      await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent(index.name)}`);
+    }
+  }
+
+  /** Whether the projection tables hold no rows at all. */
+  async isEmpty(): Promise<boolean> {
+    const result = await this.db.query<{ any: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM ${this.qVersions} LIMIT 1) AS any`,
+    );
+    return !result.rows[0]?.any;
   }
 
   // -------------------------------------------------------------------------
@@ -421,6 +524,60 @@ export class EntityIndexStorage implements EntityIndexReader {
     }
   }
 
+  async getGenesisImport(client: DbQueryable = this.db): Promise<GenesisImportState | undefined> {
+    const result = await client.query<{ value: string; updated_at: string | Date }>(
+      `SELECT value, updated_at::text AS updated_at FROM ${this.qState} WHERE key = $1`,
+      [STATE_GENESIS_IMPORT],
+    );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    const state = JSON.parse(row.value) as GenesisImportState;
+    const updatedAt = row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at;
+    return { ...state, updatedAt };
+  }
+
+  async setGenesisImport(state: GenesisImportState, client: DbQueryable = this.db): Promise<void> {
+    const { updatedAt: _updatedAt, ...stored } = state;
+    await client.query(
+      `INSERT INTO ${this.qState} (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [STATE_GENESIS_IMPORT, JSON.stringify(stored)],
+    );
+  }
+
+  async getLiveEntitiesReading(): Promise<LiveEntitiesReading | undefined> {
+    const result = await this.db.query<{ value: string }>(`SELECT value FROM ${this.qState} WHERE key = $1`, [
+      STATE_LIVE_ENTITIES,
+    ]);
+    const value = result.rows[0]?.value;
+    return value === undefined ? undefined : (JSON.parse(value) as LiveEntitiesReading);
+  }
+
+  /**
+   * Count the entities live at `block` and remember the reading. A count over
+   * the live rows is cheap on a small index and seconds on a big one, so the
+   * projector takes it on its own schedule and `/health` only reads it back.
+   */
+  async refreshLiveEntities(block: bigint): Promise<LiveEntitiesReading> {
+    const started = Date.now();
+    const live = await this.db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM ${this.qVersions} v WHERE ${this.liveFilter(true)}`,
+      [block.toString()],
+    );
+    const reading: LiveEntitiesReading = {
+      count: Number(live.rows[0]?.count ?? 0),
+      block: block.toString(),
+      at: new Date().toISOString(),
+      ms: Date.now() - started,
+    };
+    await this.db.query(
+      `INSERT INTO ${this.qState} (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [STATE_LIVE_ENTITIES, JSON.stringify(reading)],
+    );
+    return reading;
+  }
+
   /** Drop the projection and its bookkeeping so the next fold starts over. */
   async reset(): Promise<void> {
     await this.db.transaction(async (client) => {
@@ -437,6 +594,33 @@ export class EntityIndexStorage implements EntityIndexReader {
     );
     const value = result.rows[0]?.value;
     return value === undefined ? undefined : BigInt(value);
+  }
+
+  /** The chain id the scanner recorded at startup, or undefined before its first run. */
+  async getScannerChainId(): Promise<bigint | undefined> {
+    const result = await this.db.query<{ value: string }>(`SELECT value FROM ${this.qScannerState} WHERE key = 'chain_id'`);
+    const value = result.rows[0]?.value;
+    return value === undefined || value === "" ? undefined : BigInt(value);
+  }
+
+  /** The hash the scanner stored for a block, or undefined when the block or its hash is not stored. */
+  async getStoredBlockHash(blockNumber: bigint): Promise<string | undefined> {
+    const result = await this.db.query<{ block_hash: string | null }>(
+      `SELECT block_hash FROM ${quoteIdent(this.schema)}.blocks WHERE block_number = $1::bigint`,
+      [blockNumber.toString()],
+    );
+    const hash = result.rows[0]?.block_hash;
+    return hash ? hash.toLowerCase() : undefined;
+  }
+
+  /** Create operations below `block` whose entity key is unknown: entities the index can never attribute. */
+  async countKeylessCreatesBelow(block: bigint): Promise<number> {
+    const result = await this.db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM ${this.qOperations}
+       WHERE operation_type = 1 AND entity_key IS NULL AND block_number < $1::bigint`,
+      [block.toString()],
+    );
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   /** The database clock, so watermarks never depend on this host's clock. */
@@ -502,6 +686,26 @@ export class EntityIndexStorage implements EntityIndexReader {
       `SELECT DISTINCT entity_key FROM ${this.qOperations}
        WHERE scanned_at > $1::timestamptz AND block_number <= $2::bigint AND entity_key IS NOT NULL`,
       [since, throughBlock.toString()],
+    );
+    return result.rows.map((row) => row.entity_key);
+  }
+
+  /**
+   * Genesis entities (a version-0 row at block 0) that also have an operation
+   * at or below `throughBlock`, in key order after `afterKey`: the keys whose
+   * histories must be refolded on top of their genesis base once the base is
+   * in. Keyset-paged so a repair of any size resumes where it stopped.
+   */
+  async genesisKeysWithOperations(throughBlock: bigint, afterKey: string | null, limit: number): Promise<string[]> {
+    const result = await this.db.query<{ entity_key: string }>(
+      `SELECT DISTINCT lower(o.entity_key) AS entity_key FROM ${this.qOperations} o
+       WHERE o.entity_key IS NOT NULL AND o.block_number <= $1::bigint AND lower(o.entity_key) > $2
+         AND EXISTS (
+           SELECT 1 FROM ${this.qVersions} v
+           WHERE v.entity_key = lower(o.entity_key) AND v.version = 0 AND v.from_block = 0
+         )
+       ORDER BY 1 LIMIT $3`,
+      [throughBlock.toString(), afterKey ?? "", limit],
     );
     return result.rows.map((row) => row.entity_key);
   }
@@ -601,8 +805,9 @@ export class EntityIndexStorage implements EntityIndexReader {
 
   /**
    * Replace the stored versions of the given entities with the ones folded
-   * from their operations up to `throughBlock`. Runs on `client` so a caller
-   * can wrap it in the fold transaction.
+   * from their operations up to `throughBlock` — on top of their genesis
+   * state where they have one. Runs on `client` so a caller can wrap it in
+   * the fold transaction.
    */
   async refoldEntities(
     keys: readonly string[],
@@ -610,14 +815,53 @@ export class EntityIndexStorage implements EntityIndexReader {
     client: DbQueryable = this.db,
   ): Promise<{ entities: number; versions: number }> {
     if (keys.length === 0) return { entities: 0, versions: 0 };
-    const opsByKey = await this.loadEntityOps(keys, throughBlock);
+    const [opsByKey, bases] = await Promise.all([this.loadEntityOps(keys, throughBlock), this.loadGenesisBases(keys, client)]);
     const versions: EntityVersion[] = [];
     for (const key of keys) {
       const lower = key.toLowerCase();
-      versions.push(...foldEntityVersions(lower, opsByKey.get(lower) ?? []));
+      versions.push(...foldEntityVersions(lower, opsByKey.get(lower) ?? [], bases.get(lower)));
     }
     await this.replaceVersions(client, keys, versions);
     return { entities: keys.length, versions: versions.length };
+  }
+
+  /**
+   * The genesis state of the given entities — the version-0 rows at block 0
+   * an import wrote — which a refold starts from, since no operation carries
+   * that state. Read before a refold deletes the keys' rows.
+   */
+  async loadGenesisBases(keys: readonly string[], client: DbQueryable = this.db): Promise<Map<string, EntityVersion>> {
+    const bases = new Map<string, EntityVersion>();
+    if (keys.length === 0) return bases;
+    const result = await client.query<VersionRow>(
+      `SELECT ${VERSION_COLUMNS} FROM ${this.qVersions} v
+       WHERE v.entity_key = ANY($1::text[]) AND v.version = 0 AND v.from_block = 0`,
+      [textArrayLiteral(keys.map((key) => key.toLowerCase()))],
+    );
+    for (const row of result.rows) bases.set(row.entity_key, mapVersionRow(row));
+    return bases;
+  }
+
+  /**
+   * Write genesis versions (see `entityGenesis.ts`). A row that is already
+   * there is left alone, so a batch that is committed twice — a walk resumed
+   * from a cursor it had already passed — changes nothing.
+   */
+  async insertGenesisVersions(versions: readonly EntityVersion[], client: DbQueryable = this.db): Promise<void> {
+    if (versions.length === 0) return;
+    await client.query(
+      `INSERT INTO ${this.qVersions} SELECT * FROM json_populate_recordset(NULL::${this.qVersions}, $1::text::json)
+       ON CONFLICT (entity_key, version) DO NOTHING`,
+      [jsonWithBigints(versionRows(versions))],
+    );
+    const attributes = attributeRows(versions);
+    if (attributes.length > 0) {
+      await client.query(
+        `INSERT INTO ${this.qAttributes} SELECT * FROM json_populate_recordset(NULL::${this.qAttributes}, $1::text::json)
+         ON CONFLICT (entity_key, version, name) DO NOTHING`,
+        [jsonWithBigints(attributes)],
+      );
+    }
   }
 
   private async replaceVersions(client: DbQueryable, keys: readonly string[], versions: readonly EntityVersion[]): Promise<void> {
@@ -625,57 +869,19 @@ export class EntityIndexStorage implements EntityIndexReader {
     await client.query(`DELETE FROM ${this.qAttributes} WHERE entity_key = ANY($1::text[])`, [keyList]);
     await client.query(`DELETE FROM ${this.qVersions} WHERE entity_key = ANY($1::text[])`, [keyList]);
     if (versions.length === 0) return;
-
-    const versionRows = versions.map((version) => ({
-      entity_key: version.entityKey,
-      version: version.version,
-      from_block: version.fromBlock,
-      from_position: version.fromPosition,
-      from_op_index: version.fromOpIndex,
-      to_block: version.toBlock,
-      deleted: version.deleted,
-      owner: version.owner,
-      creator: version.creator,
-      created_at: version.createdAt,
-      created_position: version.createdPosition,
-      created_op_index: version.createdOpIndex,
-      updated_at: version.updatedAt,
-      expires_at: version.expiresAt,
-      creation_flags: version.creationFlags,
-      content_type: version.contentType,
-      payload_size: version.payloadSize,
-      attributes: version.attributes.map(
-        (attribute): StoredAttributeJson => ({
-          name: attribute.name,
-          typeId: attribute.typeId,
-          valueText: attribute.valueText,
-          valueNum: attribute.valueNum === null ? null : attribute.valueNum.toString(),
-        }),
-      ),
-    }));
-    const attributeRows = versions.flatMap((version) =>
-      version.attributes.map((attribute) => ({
-        entity_key: version.entityKey,
-        version: version.version,
-        name: attribute.name,
-        type_id: attribute.typeId,
-        value_text: attribute.valueText,
-        value_num: attribute.valueNum,
-        current: version.toBlock === null && !version.deleted,
-      })),
-    );
     // One statement per table however many rows: the rows travel as a JSON
     // document and json_populate_recordset types them against the table. The
     // parameter is declared text and cast afterwards, because Bun.sql would
     // otherwise re-encode the already-serialised document as a JSON string.
     await client.query(
       `INSERT INTO ${this.qVersions} SELECT * FROM json_populate_recordset(NULL::${this.qVersions}, $1::text::json)`,
-      [jsonWithBigints(versionRows)],
+      [jsonWithBigints(versionRows(versions))],
     );
-    if (attributeRows.length > 0) {
+    const attributes = attributeRows(versions);
+    if (attributes.length > 0) {
       await client.query(
         `INSERT INTO ${this.qAttributes} SELECT * FROM json_populate_recordset(NULL::${this.qAttributes}, $1::text::json)`,
-        [jsonWithBigints(attributeRows)],
+        [jsonWithBigints(attributes)],
       );
     }
   }
@@ -761,21 +967,20 @@ export class EntityIndexStorage implements EntityIndexReader {
   }
 
   async getStats(): Promise<EntityIndexStats> {
-    const [estimate, progress] = await Promise.all([
+    const [estimate, reading, genesis] = await Promise.all([
       this.db.query<{ estimate: string }>(
         `SELECT GREATEST(reltuples, 0)::bigint::text AS estimate FROM pg_class WHERE oid = $1::regclass`,
         [this.qVersions],
       ),
-      this.getProgress(),
+      this.getLiveEntitiesReading(),
+      this.getGenesisImport(),
     ]);
-    let liveEntities: number | null = null;
-    if (progress.projectedThroughBlock !== undefined) {
-      const live = await this.db.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM ${this.qVersions} v WHERE ${this.liveFilter(true)}`,
-        [progress.projectedThroughBlock.toString()],
-      );
-      liveEntities = Number(live.rows[0]?.count ?? 0);
-    }
-    return { versionRowsEstimate: Number(estimate.rows[0]?.estimate ?? 0), liveEntities };
+    return {
+      versionRowsEstimate: Number(estimate.rows[0]?.estimate ?? 0),
+      liveEntities: reading?.count ?? null,
+      liveEntitiesAtUtc: reading?.at ?? null,
+      liveEntitiesBlock: reading?.block ?? null,
+      genesis,
+    };
   }
 }

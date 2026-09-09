@@ -45,7 +45,7 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
     fetchEntityByKey(entityKey)
       .then((body) => {
         if (cancelled) return;
-        if (!body || body.operations.length === 0) {
+        if (!body || (body.operations.length === 0 && !body.genesis)) {
           setStatus("notfound");
           return;
         }
@@ -115,7 +115,7 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
           No operations for entity <span className="mono">{entityKey}</span> were found in storage.
           Blocks scanned before entity keys were indexed may not be linked to their entity yet.
         </p>
-      ) : history && history.operations.length > 0 ? (
+      ) : history && (history.operations.length > 0 || history.genesis) ? (
         <EntityDetail
           entityKey={entityKey}
           history={history}
@@ -153,12 +153,16 @@ function EntityDetail({
   const created =
     operations.find((operation) => operation.operation === "create") ??
     (firstOperation?.operation === "create" ? firstOperation : null);
-  const latest = operations[operations.length - 1]!;
-  const lifecycle = lifecycleInfo(latest);
+  // An entity the chain was born with (a seeded genesis) has no create and
+  // may have no operations at all; the backend then sends its genesis state.
+  const genesis = history.genesis ?? null;
+  const latest = operations.length > 0 ? operations[operations.length - 1]! : null;
+  const lifecycle = latest ? lifecycleInfo(latest) : { label: "Active", tone: "ok" as const };
   const newestFirst = [...operations].reverse();
   const latestContent = newestFirst.find((operation) => operation.contentType !== null) ?? null;
   const latestExpiry = newestFirst.find((operation) => operation.expiresAtBlocks > 0) ?? null;
   const lastTransfer = newestFirst.find((operation) => operation.newOwner !== null) ?? null;
+  const contentType = latestContent?.contentType ?? genesis?.contentType ?? null;
 
   return (
     <div className="tx-detail-card">
@@ -185,9 +189,7 @@ function EntityDetail({
             >
               {fmtInteger(totalOperations)}
             </Row>
-            {latestContent?.contentType ? (
-              <Row label="Content type">{latestContent.contentType}</Row>
-            ) : null}
+            {contentType ? <Row label="Content type">{contentType}</Row> : null}
             {latestContent && latestContent.payloadSizeBytes > 0 ? (
               <Row
                 label="Payload"
@@ -195,10 +197,18 @@ function EntityDetail({
               >
                 {fmtBytes(latestContent.payloadSizeBytes)}
               </Row>
+            ) : genesis && genesis.payloadSize > 0 ? (
+              <Row label="Payload" title={`${fmtInteger(genesis.payloadSize)} bytes in the genesis state`}>
+                {fmtBytes(genesis.payloadSize)}
+              </Row>
             ) : null}
             {lastTransfer?.newOwner ? (
               <Row label="Owner (last transfer)">
                 <AddressCell address={lastTransfer.newOwner} />
+              </Row>
+            ) : genesis ? (
+              <Row label="Owner">
+                <AddressCell address={genesis.owner} />
               </Row>
             ) : null}
           </dl>
@@ -221,6 +231,21 @@ function EntityDetail({
                 <TransactionHashLink hash={created.hash} onLocationChange={onLocationChange} />
               </Row>
             </dl>
+          ) : genesis ? (
+            <dl className="tx-detail-grid">
+              <Row label="Block" title="Part of the chain's genesis state; no transaction created it">
+                <BlockNumberLink blockNumber="0" onLocationChange={onLocationChange} /> (genesis state)
+              </Row>
+              <Row label="Creator">
+                <AddressCell address={genesis.creator} />
+              </Row>
+              <Row label="Expires" title={`Absolute expiry block ${genesis.expiresAt}`}>
+                {genesis.expiresAt === NEVER_EXPIRES ? "never" : `block ${fmtInteger(Number(genesis.expiresAt))}`}
+              </Row>
+              {genesis.creationFlags ? (
+                <Row label="Flags">{describeCreationFlags(genesis.creationFlags)}</Row>
+              ) : null}
+            </dl>
           ) : (
             <p className="tx-detail-note">
               The create operation is outside the stored history — older than the scanned range or
@@ -231,6 +256,9 @@ function EntityDetail({
 
         <section className="tx-detail-group">
           <h3>Last activity</h3>
+          {latest === null ? (
+            <p className="tx-detail-note">No operations since the genesis state.</p>
+          ) : (
           <dl className="tx-detail-grid">
             <Row label="Operation">
               <span className="op-badge-list">
@@ -263,8 +291,35 @@ function EntityDetail({
               </Row>
             ) : null}
           </dl>
+          )}
         </section>
       </div>
+
+      {genesis && genesis.attributes.length > 0 ? (
+        <section className="tx-detail-group tx-detail-operations">
+          <h3>Genesis attributes ({fmtInteger(genesis.attributes.length)})</h3>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {genesis.attributes.map((attribute) => (
+                  <tr key={attribute.name}>
+                    <td className="mono">{attribute.name}</td>
+                    <td>{attribute.type}</td>
+                    <td className="mono">{String(attribute.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="tx-detail-group tx-detail-operations">
         <h3>
@@ -279,6 +334,11 @@ function EntityDetail({
             Only the {fmtInteger(operations.length)} most recent operations are listed —{" "}
             {fmtInteger(hiddenOperations)} older{" "}
             {hiddenOperations === 1 ? "operation is" : "operations are"} not shown.
+          </p>
+        ) : null}
+        {operations.length === 0 && genesis ? (
+          <p className="tx-detail-note">
+            No transaction has touched this entity: it was part of the chain&apos;s genesis state.
           </p>
         ) : null}
         <div className="table-wrap">
@@ -341,6 +401,17 @@ function EntityDetail({
  * means the entity is gone; a trailing expire means the chain reaped it;
  * anything else leaves it active as far as the stored history knows.
  */
+const NEVER_EXPIRES = "18446744073709551615";
+
+function describeCreationFlags(flags: number): string {
+  const names: string[] = [];
+  if (flags & 1) names.push("readonly");
+  if (flags & 2) names.push("permissionless extension");
+  const rest = flags & ~3;
+  if (rest) names.push(`other bits 0x${rest.toString(16)}`);
+  return names.join(", ");
+}
+
 function lifecycleInfo(latest: StoredEntityOperation): {
   label: string;
   tone: "ok" | "fail" | "unknown";

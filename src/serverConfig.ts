@@ -12,6 +12,7 @@ import {
   DEFAULT_RESPONSE_CACHE_TTL_MS,
 } from "./responseCache";
 import { DEFAULT_ENTITY_HISTORY_LIMIT } from "./storage";
+import { DEFAULT_GENESIS_RPC_LIMIT } from "./entityProjector";
 import {
   DEFAULT_PASSTHROUGH_METHODS,
   DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE,
@@ -65,6 +66,18 @@ export interface ServerConfig {
   metricsBearerToken?: string;
   /** Pins the first block the entity index folds; detected from the data when unset. */
   entityIndexFloorBlock?: bigint;
+  /**
+   * Whether the entity index asks the node for the entities the chain was
+   * born with (a seeded genesis) and imports them. `off` never asks; an
+   * import the offline importer started is finished either way.
+   */
+  entityIndexGenesis: "auto" | "off";
+  /** The node the genesis import reads; defaults to the shadow-RPC upstream. */
+  entityIndexGenesisRpc?: { url: string; apiKey?: string };
+  /** The largest genesis the RPC walk takes on; beyond it the import waits for the offline importer. */
+  entityIndexGenesisRpcLimit: number;
+  /** Where the genesis import writes its progress document; unset writes none. */
+  entityIndexGenesisProgressFile?: string;
 }
 
 const DEFAULT_PORT = 3000;
@@ -237,6 +250,32 @@ const SPEC: CliSpec = {
       description:
         "First block the entity index folds. Defaults to the first stored create operation that carries an entity key (or ENTITY_INDEX_FLOOR_BLOCK).",
       env: ["ENTITY_INDEX_FLOOR_BLOCK"],
+    },
+    {
+      flags: "--entity-index-genesis <auto|off>",
+      description:
+        "Whether the entity index imports the entities the chain was born with (a seeded genesis) from the node: auto asks the node once and imports what block 0 holds; off never asks. Defaults to auto (or ENTITY_INDEX_GENESIS).",
+      env: ["ENTITY_INDEX_GENESIS"],
+      default: "auto",
+    },
+    {
+      flags: "--entity-index-genesis-rpc <url>",
+      description:
+        "JSON-RPC node the genesis import reads block 0 from. Defaults to the shadow-RPC upstream (or ENTITY_INDEX_GENESIS_RPC); the upstream's API key is sent with it.",
+      env: ["ENTITY_INDEX_GENESIS_RPC"],
+    },
+    {
+      flags: "--entity-index-genesis-rpc-limit <n>",
+      description:
+        "Most genesis entities the import walks over RPC; a bigger genesis waits for scripts/importGenesisState.ts, since the node's paging costs O(N) per page. Defaults to 1000000 (or ENTITY_INDEX_GENESIS_RPC_LIMIT).",
+      env: ["ENTITY_INDEX_GENESIS_RPC_LIMIT"],
+      default: DEFAULT_GENESIS_RPC_LIMIT.toString(),
+    },
+    {
+      flags: "--entity-index-genesis-progress-file <path>",
+      description:
+        "Write the genesis import's progress document (phase, percent, counts, rates, ETA; see docs) to this file on every change, for a watcher such as arkiv-prefill's dashboard. Unset by default (or ENTITY_INDEX_GENESIS_PROGRESS_FILE).",
+      env: ["ENTITY_INDEX_GENESIS_PROGRESS_FILE"],
     },
     {
       flags: "--shadow-rpc-upstream <url>",
@@ -436,6 +475,33 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     };
   }
 
+  const genesisModeValue = cli.value("entity-index-genesis")?.trim().toLowerCase() || "auto";
+  if (genesisModeValue !== "auto" && genesisModeValue !== "off") {
+    throw new Error(`--entity-index-genesis must be auto or off, got ${genesisModeValue}`);
+  }
+  const entityIndexGenesis: "auto" | "off" = genesisModeValue;
+  const genesisRpcUrl = cli.value("entity-index-genesis-rpc")?.trim() || passthroughUrl;
+  let entityIndexGenesisRpc: { url: string; apiKey?: string } | undefined;
+  if (genesisRpcUrl) {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(genesisRpcUrl);
+    } catch {
+      throw new Error(`--entity-index-genesis-rpc must be a URL: ${genesisRpcUrl}`);
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new Error("--entity-index-genesis-rpc must be an http(s) URL");
+    }
+    const apiKey = cli.value("shadow-rpc-upstream-api-key")?.trim();
+    entityIndexGenesisRpc = { url: genesisRpcUrl, ...(apiKey ? { apiKey } : {}) };
+  }
+  const entityIndexGenesisRpcLimit = intOrDefault(
+    "--entity-index-genesis-rpc-limit",
+    cli.value("entity-index-genesis-rpc-limit"),
+    DEFAULT_GENESIS_RPC_LIMIT,
+  );
+  const entityIndexGenesisProgressFile = cli.value("entity-index-genesis-progress-file")?.trim() || undefined;
+
   return {
     databaseUrl,
     port,
@@ -462,5 +528,9 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     metricsEnabled,
     ...(metricsBearerToken ? { metricsBearerToken } : {}),
     ...(entityIndexFloorBlock !== undefined ? { entityIndexFloorBlock } : {}),
+    entityIndexGenesis,
+    ...(entityIndexGenesisRpc ? { entityIndexGenesisRpc } : {}),
+    entityIndexGenesisRpcLimit,
+    ...(entityIndexGenesisProgressFile ? { entityIndexGenesisProgressFile } : {}),
   };
 }

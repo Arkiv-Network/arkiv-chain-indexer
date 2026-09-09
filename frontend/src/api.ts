@@ -288,6 +288,24 @@ export interface StoredEntityOperation extends ArkivOperation {
   hash: string;
 }
 
+/**
+ * The state an entity was born with when the chain's genesis carried it (a
+ * seeded devnet): no transaction created it, so the backend reports what its
+ * entity index imported from block 0.
+ */
+export interface EntityGenesisRecord {
+  owner: string;
+  creator: string;
+  /** Absolute expiry block as a decimal string; 18446744073709551615 means never. */
+  expiresAt: string;
+  contentType: string;
+  /** Raw creation flag bits (1 readonly, 2 permissionless extension); null when unknown. */
+  creationFlags: number | null;
+  /** Payload bytes at genesis; 0 when the import never fetched the payload. */
+  payloadSize: number;
+  attributes: Array<{ name: string; type: string; value: unknown }>;
+}
+
 export interface EntityByKeyResponse {
   entityKey: string;
   /** Number of operations in `operations` (the returned slice). */
@@ -300,6 +318,8 @@ export interface EntityByKeyResponse {
   operations: StoredEntityOperation[];
   /** Earliest stored operation; present only on truncated histories. */
   firstOperation?: StoredEntityOperation;
+  /** Present for an entity created in the genesis state; `operations` may then be empty. */
+  genesis?: EntityGenesisRecord;
 }
 
 export const ENTITY_OPERATION_RESPONSE_NAMES = [
@@ -341,6 +361,7 @@ interface CompactEntityByKeyResponse {
   names: string[];
   operations: EntityOperationResponseRow[];
   firstOperation?: EntityOperationResponseRow;
+  genesis?: EntityGenesisRecord;
 }
 
 export interface ArkivOperationSummaryEntry {
@@ -804,7 +825,23 @@ export interface EntityQueryIndexHealth {
   /** How far the projection trails the scanner head. */
   lagBlocks: string | null;
   liveEntities: number | null;
+  /** When `liveEntities` was counted; null until the first count. */
+  liveEntitiesAtUtc: string | null;
   lastFoldAtUtc: string | null;
+  /** The genesis import (a chain seeded at block 0); null when none was ever considered. */
+  genesis: EntityGenesisImportHealth | null;
+}
+
+export interface EntityGenesisImportHealth {
+  status: "none" | "waiting" | "running" | "done" | "unavailable" | "failed";
+  phase: "walk" | "repair" | null;
+  source: "rpc" | "dump" | null;
+  total: number;
+  imported: number;
+  startedAtUtc: string;
+  finishedAtUtc: string | null;
+  updatedAtUtc: string | null;
+  error: string | null;
 }
 
 export const BASELOAD_WORKER_BEHAVIORS = [
@@ -1113,6 +1150,7 @@ function expandEntityByKeyResponse(response: CompactEntityByKeyResponse): Entity
     ...(response.firstOperation
       ? { firstOperation: decodeEntityOperationResponseRow(response.firstOperation, names) }
       : {}),
+    ...(response.genesis ? { genesis: response.genesis } : {}),
   };
 }
 
