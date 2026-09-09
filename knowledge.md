@@ -4,7 +4,7 @@ Consolidated on **2026-09-09** from Claude's 23 project memory notes, the parent
 Arkiv workspace's RPC quota note, repository documentation, and local Git history.
 Implementation checks refer to **`b473873491e698ce842506d23c4095cdfa066683` on `main`**
 (package version `0.4.0`); the paragraphs marked **September 9, evening** cover the
-commits through **`8baf173`**, tagged **`v0.5.0`**, and **`9dcfed4`**, tagged **`v0.5.1`**. This is a durable handoff: what was
+commits through **`8baf173`**, tagged **`v0.5.0`**, and **`9dcfed4`**, tagged **`v0.5.1`**. The later September 9 search release is **`6499cf7`**, tagged **`v0.5.2`**, deployed to Kalarepa around 20:36 UTC. This is a durable handoff: what was
 built, why it works this way, operational lessons, and unfinished work.
 
 **Evidence boundaries:** “code” describes files inspected at that commit;
@@ -172,6 +172,7 @@ local history; infrastructure incidents are dated memory observations.
 | September 9 | Bounded omni search/typeahead (PR #99); seeded-chain genesis import (PR #100); frontend shared build context; prefill-owned indexer recipe. | `3776af9`, `3223a05`, `ab65dd1`, `b473873` |
 | September 9, evening | Genesis checks completed on the Sourcify seed; the app image ships `scripts/` after the offline importer failed with “Module not found” in the container; the genesis walk stops between batches on shutdown; release v0.5.0, deployed to Kalarepa at 20:00 UTC. arkiv-prefill committed its Sourcify run and the indexer integration. | `eef3514`, `5f10367`, `8baf173`, `243a51b`; prefill `024b780` |
 | September 9, night | The Data screen is titled “HOME >> DATA / EXPERIMENTAL — USE WITH CAUTION” (also in the browser title); release v0.5.1. Draft PRs to run it on Tiramisu: db-chain-mgr #387 adds `spec.indexer.entityQueryIndex` / `shadowRpc` (chart 0.25.0), db-chain-deployments #25 pins v0.5.1 with both on. | `b8d2f7f`, `9dcfed4` |
+| September 9, 20:36 UTC | Search narrowed to existing block/hash/entity/address indexes; attributes, values, payloads and recent metadata are excluded. Released and deployed v0.5.2 to Kalarepa; live checks passed and paused backfill was preserved. | `6499cf7` |
 
 ## Deployment and neighboring repositories
 
@@ -186,7 +187,7 @@ local history; infrastructure incidents are dated memory observations.
 | Node RPC | `https://rpc.tiramisu.db-chain.testnet.arkiv.network`, direct bouncer path. |
 | Proxy | Retired; `COMPOSE_PROFILES` cleared. Old `rpcproxypool` volume retained. |
 | Fleet / backfill | Empty live fleet persisted; `backfill-scanner` stopped to preserve the anonymous RPC budget for tip scanning. |
-| Last recorded deployed build | `243a51b` (the v0.5.0 code plus this document), September 9 around 20:00 UTC: `docker compose build` with the exit checked, `up -d --wait --no-deps` for the running app services, `up --no-start backfill-scanner` so the paused backfill was recreated on the new image but not started. `/health` ok, genesis status `none` on unseeded Tiramisu, no errors in the backend log. |
+| Last recorded deployed build | `6499cf7` (`v0.5.2`), September 9 around 20:36 UTC. Built all app images with `BUILD_COMMIT` / `BUILD_DATE`, verified the build exit and backend-image search tests, then used `up -d --wait --no-deps --no-build` for the seven running app services and `up --no-start --no-deps --no-build backfill-scanner`. Public health and `web3_clientVersion` confirmed v0.5.2; live browser/API checks passed for indexed identifiers and rejection of attribute/value/text/payload queries. Scanner at the safe head; backfill stayed created/stopped. |
 | Retired stack | Cheesecake/Pietruszka removed; backup at `/home/ubuntu/backups/arkiv-chain-indexer-cheesecake-2026-09-08`. Its nginx site was still enabled and returning 502 at the time. |
 
 The Tiramisu admin token needed to provision direct keys was still unavailable in
