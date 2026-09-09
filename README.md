@@ -1050,7 +1050,12 @@ bytes read, walking by entities, 100 at `done`), `phases` holds the seconds each
 process that last wrote the file — the script hands it to the backend at `repairing`. `pid` is that process, so a
 watcher can tell a stalled run from a finished one.
 
-**Index a local prefill devnet.** The prefill node publishes its RPC on `127.0.0.1` only, so a stack that indexes
+**Index a local prefill devnet.** arkiv-prefill runs this indexer itself: its `docker-compose.indexer.yml`,
+included by both of its compose files, starts the published images next to the seeded node (the explorer on
+port 3021, or 3031 for its Sourcify run) and shows the import as the "Index" stage of its watcher page, so a
+plain `docker compose up` there is enough. The recipe below runs a stack built from this checkout against
+such a node instead, for developing the indexer; not alongside the prefill project's own indexer, which keeps
+the same progress file. The prefill node publishes its RPC on `127.0.0.1` only, so a stack that indexes
 it joins the node's compose network through `docker-compose.prefill.yml` (`PREFILL_NETWORK`, default
 `arkiv-sourcify_default`), which also mounts the run's artifacts at `/prefill` (`PREFILL_ARTIFACTS`, default
 `../arkiv-prefill/artifacts/sourcify-run` next to this checkout) and points the progress file into them. A third
