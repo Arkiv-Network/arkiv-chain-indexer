@@ -11,6 +11,7 @@ import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import { EntityProjector } from "./entityProjector";
+import { OmniSearch } from "./omniSearch";
 import type { GuzzlerStore } from "./guzzlers";
 import { collectIndexerProgress, collectResponseCache, collectValueCache } from "./serverMetrics";
 
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
   let syncPrecomputer: PrecomputedResponse | undefined;
   let entityIndex: EntityIndexStorage | undefined;
   let entityProjector: EntityProjector | undefined;
+  let search: OmniSearch | undefined;
 
   try {
     const config = parseServerConfig(process.argv.slice(2));
@@ -163,7 +165,9 @@ async function main(): Promise<void> {
     collectResponseCache("list", () => listCache.stats());
     collectValueCache("transaction_count", () => transactionCountCache.stats());
     collectIndexerProgress(() => storageForMetrics.getScannerProgress());
+    search = OmniSearch.open(config.databaseUrl, config.entityQueryIndex);
     const server = createBlockServer(storage, {
+      search,
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
       transactionDataEnabled: config.transactionDataEnabled,
@@ -239,6 +243,7 @@ async function main(): Promise<void> {
       syncPrecomputer?.stop();
       await entityProjector?.stop();
       await server.stop();
+      await search?.close();
       await entityIndex?.close();
       await stopEntityInvalidationListener?.();
       await stopStoredBlockListener?.();
@@ -256,6 +261,7 @@ async function main(): Promise<void> {
     }
 
     console.error(error);
+    await search?.close();
     baseloadRuntime?.stop();
     syncPrecomputer?.stop();
     await entityProjector?.stop();
