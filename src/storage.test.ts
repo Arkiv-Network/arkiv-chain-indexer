@@ -261,6 +261,7 @@ if (!hasPostgresForTests()) {
         "sender_stats",
         "scanner_state",
         "baseload_configs",
+        "baseload_live_config",
       ]);
       expect(byName.get("blocks")?.rowCount).toBe("2");
       expect(byName.get("transactions")?.rowCount).toBe("2");
