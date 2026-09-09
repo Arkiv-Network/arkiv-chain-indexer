@@ -202,7 +202,7 @@ export function App() {
   }, [activeView]);
 
   useEffect(() => {
-    if (activeView !== "baseload") return;
+    if (activeView !== "baseload" || !adminModeIsActive) return;
 
     let cancelled = false;
 
