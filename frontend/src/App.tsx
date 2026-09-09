@@ -483,6 +483,7 @@ export function App() {
               </span>
             ) : null}
           </h1>
+          {activeView !== "search" ? <div className="header-search"><OmniSearch onNavigate={navigateSearch} /></div> : null}
           {adminMode !== "hidden" ? (
             <button
               type="button"
@@ -573,7 +574,6 @@ export function App() {
           </div>
         </div>
       </header>
-      {activeView !== "search" ? <div className="global-search"><OmniSearch onNavigate={navigateSearch} /></div> : null}
       <SyncStatusBanner
         timeZone={timeZone}
         minLagSeconds={pageSettings.scannerDelayWarningAgeMs / 1000}

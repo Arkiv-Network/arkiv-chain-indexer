@@ -26,7 +26,6 @@
     U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-.global-search { max-width: 1200px; margin: 18px auto 0; padding: 0 24px; }
 .omni-search { position: relative; width: 100%; max-width: 820px; margin: 0; }
 .omni-search-field { display: flex; gap: 8px; }
 .omni-search-field input { flex: 1; min-width: 0; width: 100%; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--sand); color: var(--ink); }
@@ -48,7 +47,6 @@
 .search-result-label { font-size: 14px; }
 .search-coverage { font-size: 13px; line-height: 1.6; border-top: 1px solid var(--line); margin-top: 24px; }
 @media (max-width: 600px) {
-  .global-search { padding: 0 12px; }
   .omni-search-field input { font-size: 16px; }
   .search-result-label { font-size: 12px; }
 }
@@ -238,8 +236,37 @@ header {
   padding: 0 1.5rem;
   min-height: 64px;
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   align-items: center;
+}
+
+.header-search {
+  order: 1;
+  flex: 1 0 100%;
+  min-width: 0;
+  padding-bottom: 12px;
+}
+
+.header-search .omni-search { max-width: none; }
+
+/* Keep the navigation row at its usual height when search uses a second row. */
+.header-inner:has(.header-search) { padding-top: 12px; gap: 12px 16px; }
+
+@media (min-width: 1024px) {
+  .header-inner:has(.header-search) { padding-top: 0; flex-wrap: nowrap; }
+  .header-search {
+    order: 0;
+    flex: 1 1 0;
+    min-width: 260px;
+    max-width: 640px;
+    margin-left: auto;
+    padding-bottom: 0;
+  }
+  .header-search .omni-search-field input { padding: 8px 12px; }
+  .header-search .omni-search-field button { padding: 8px 12px; }
+  .header-inner:has(.header-search) .header-menu { margin-left: 0; }
+  .header-inner:has(.header-search) .admin-mode-indicator { flex-shrink: 0; }
 }
 
 header h1 {
