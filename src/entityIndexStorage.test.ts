@@ -9,7 +9,18 @@ import { handleJsonRpcBody, type JsonRpcResponse } from "./jsonRpc";
 import { createBlockServer, type HealthResponseBody } from "./server";
 import type { ScannerStorage } from "./storage";
 import type { BlockMetrics } from "./types";
-import { closeTestPools, createIsolatedStorage, hasPostgresForTests } from "./testPostgres";
+import { TEST_DATABASE_URL, closeTestPools, createIsolatedStorage, hasPostgresForTests } from "./testPostgres";
+import { openDb, type Db } from "./db";
+import { GenesisSourceUnavailable } from "./entityGenesis";
+import { FAKE_GENESIS_OWNER, createFakeGenesisSource, fakeWireEntity } from "./testGenesisSource";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { GenesisEntityError } from "./entityGenesis";
+import { fileDumpSource } from "./entityGenesisDump";
+import { GenesisImportRefused, GenesisImportStopped, importGenesisDump, type GenesisDumpManifest } from "./entityGenesisDumpImport";
+import { GenesisProgressTracker, type GenesisProgressDocument } from "./genesisProgress";
+import { DUMP_OWNER, buildDump, dumpKey, encodeAttributeValue, seederSystemStorage } from "./testGenesisDump";
 
 const REGISTRY = "0x4400000000000000000000000000000000000044";
 const ALICE = `0x${"aa".repeat(20)}`;
@@ -757,7 +768,9 @@ describeWithPostgres("entity index (Postgres)", () => {
         projectedThroughBlock: "106",
         lagBlocks: "0",
         liveEntities: 6,
+        liveEntitiesAtUtc: expect.any(String),
         lastFoldAtUtc: expect.any(String),
+        genesis: null,
       });
     } finally {
       await server.stop();
@@ -793,5 +806,646 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect((await keysOf("*")).at(-1)).toBe(key);
     expect((await index.getProgress()).projectedThroughBlock).toBe(106n);
     expect(await result<number>("arkiv_getEntityCount")).toBe(7);
+  });
+});
+
+describeWithPostgres("genesis import (Postgres)", () => {
+  let storage: ScannerStorage;
+  let index: EntityIndexStorage;
+  let db: Db;
+  let schema: string;
+  let cleanup: () => Promise<void>;
+  let methods: ReturnType<typeof createArkivIndexMethods>;
+  const OWNER = FAKE_GENESIS_OWNER;
+  const keyOf = (id: number) => fakeWireEntity(id).key as string;
+  const SEVEN = Array.from({ length: 7 }, (_, id) => fakeWireEntity(id));
+  // Four entities, the last of which lapses at block 1: live at block 0 only.
+  const FOUR = [fakeWireEntity(0), fakeWireEntity(1), fakeWireEntity(2), fakeWireEntity(3, { expiresAt: "0x1" })];
+  const attributesOf = (versions: { attributes: { name: string; typeId: number; valueText: string }[] }) =>
+    versions.attributes.map((attribute) => `${attribute.name}:${attribute.typeId}=${attribute.valueText}`);
+
+  const call = async (method: string, params: unknown[] = []): Promise<JsonRpcResponse> =>
+    (await handleJsonRpcBody({ jsonrpc: "2.0", id: 1, method, params }, storage, { localOverrides: methods })) as JsonRpcResponse;
+  const result = async <T = unknown>(method: string, params: unknown[] = []): Promise<T> => {
+    const response = await call(method, params);
+    if (response.error) throw new Error(`${method} failed: ${JSON.stringify(response.error)}`);
+    return response.result as T;
+  };
+  const keysOf = async (query: string, options: Record<string, unknown> = {}) =>
+    (await result<{ data: Array<{ key: string }> }>("arkiv_query", [query, { limit: 50, ...options }])).data.map((entity) => entity.key);
+
+  beforeAll(async () => {
+    const isolated = await createIsolatedStorage("entity_genesis");
+    storage = isolated.storage;
+    schema = isolated.schema;
+    cleanup = isolated.cleanup;
+    db = openDb(TEST_DATABASE_URL!, { max: 2 });
+    index = await EntityIndexStorage.fromDb(db, { schema });
+    methods = createArkivIndexMethods(index, storage);
+    await storage.saveChainId(7733102n);
+    // A stored block gives the projector a head; the genesis entities need no transactions.
+    await storeBlock(storage, { blockNumber: 1, transactions: [], operations: [] });
+  });
+
+  afterAll(async () => {
+    await cleanup();
+    await db.close();
+    await closeTestPools();
+  });
+
+  test("a seeded genesis is imported once, vouched for from block 0, and paged in the node's order", async () => {
+    const source = createFakeGenesisSource(SEVEN);
+    const logs: string[] = [];
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 4, pageSize: 3 }, log: (line) => logs.push(line) });
+    const tick = await projector.runOnce();
+    expect(tick.genesisStatus).toBe("done");
+    expect(tick.genesisEntitiesImported).toBe(7);
+    expect(tick.genesisKeysRepaired).toBe(0);
+    expect(tick.projectedThroughBlock).toBe(1n);
+    expect(source.pages).toBe(3);
+    expect((await index.getProgress()).floorBlock).toBe(0n);
+    const state = await index.getGenesisImport();
+    expect(state).toMatchObject({
+      status: "done",
+      phase: null,
+      source: "rpc",
+      chainId: "7733102",
+      total: 7,
+      imported: 7,
+      cursor: null,
+      repairAfterKey: null,
+      error: null,
+    });
+    expect(state!.finishedAt).toBeTruthy();
+    expect(state!.updatedAt).toBeTruthy();
+    expect(logs.some((line) => line.includes("importing 7 genesis entities"))).toBe(true);
+    expect(logs.some((line) => line.includes("floor set to block 0"))).toBe(true);
+    expect(logs.some((line) => line.includes("genesis import done"))).toBe(true);
+
+    // Newest first is descending entity id, at block 0 and at the head alike.
+    const ids = [6, 5, 4, 3, 2, 1, 0].map(keyOf);
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual(ids);
+    expect(await keysOf("*")).toEqual(ids);
+    expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(7);
+    expect(await result<number>("arkiv_getEntityCount")).toBe(7);
+    expect(await keysOf("n >= u64(5)")).toEqual([keyOf(6), keyOf(5)]);
+    expect(await keysOf(`$owner = addr(${OWNER}) AND kind = str('seed')`, { limit: 2 })).toEqual([keyOf(6), keyOf(5)]);
+
+    // The index's own cursor walks the set once, without a repeat.
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await result<{ data: { key: string }[]; cursor?: string }>("arkiv_query", [
+        "*",
+        { atBlock: "0x0", limit: 2, ...(cursor ? { cursor } : {}) },
+      ]);
+      seen.push(...page.data.map((entity) => entity.key));
+      cursor = page.cursor;
+    } while (cursor);
+    expect(seen).toEqual(ids);
+
+    // Everything the node says about a genesis entity, except the payload.
+    expect(await result<Record<string, unknown>>("arkiv_getEntity", [keyOf(5), 0])).toEqual({
+      key: keyOf(5),
+      owner: OWNER,
+      creator: OWNER,
+      createdAt: "0x0",
+      updatedAt: "0x0",
+      expiresAt: "0xffffffffffffffff",
+      creationFlags: { readonly: false, permissionlessExtension: false, raw: 0 },
+      contentType: "application/json",
+      attributes: [
+        { name: "kind", type: "str", value: "seed" },
+        { name: "n", type: "u64", value: "0x5" },
+      ],
+    });
+
+    const server = createBlockServer(storage, { port: 0, entityIndex: index });
+    try {
+      const health = (await (await fetch(`http://${server.hostname}:${server.port}/health`)).json()) as HealthResponseBody;
+      expect(health.features.entityQueryIndex).toMatchObject({
+        floorBlock: "0",
+        projectedThroughBlock: "1",
+        liveEntities: 7,
+        liveEntitiesAtUtc: expect.any(String),
+        genesis: { status: "done", phase: null, source: "rpc", total: 7, imported: 7, error: null, updatedAtUtc: expect.any(String) },
+      });
+      // The entity page: a genesis entity has no operations, so the index's block-0 version answers for it.
+      const page = await fetch(`http://${server.hostname}:${server.port}/entity/${keyOf(5)}`);
+      expect(page.status).toBe(200);
+      expect(await page.json()).toMatchObject({
+        entityKey: keyOf(5),
+        count: 0,
+        totalOperations: 0,
+        operations: [],
+        genesis: {
+          owner: OWNER,
+          creator: OWNER,
+          expiresAt: "18446744073709551615",
+          contentType: "application/json",
+          creationFlags: 0,
+          payloadSize: 0,
+          attributes: [
+            { name: "kind", type: "str", value: "seed" },
+            { name: "n", type: "u64", value: "0x5" },
+          ],
+        },
+      });
+      const unknown = await fetch(`http://${server.hostname}:${server.port}/entity/0x${"ab".repeat(32)}`);
+      expect(unknown.status).toBe(404);
+    } finally {
+      await server.stop();
+    }
+
+    // A second tick has nothing left to import.
+    const again = await projector.runOnce();
+    expect(again.genesisStatus).toBe("done");
+    expect(again.genesisEntitiesImported).toBe(0);
+    expect(source.pages).toBe(3);
+  });
+
+  test("an interrupted walk resumes from its cursor without duplicating rows", async () => {
+    await index.reset();
+    const source = createFakeGenesisSource(SEVEN);
+    source.failPage(2, new Error("boom"));
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 3, pageSize: 3 }, log: () => {} });
+    await expect(projector.runOnce()).rejects.toThrow("boom");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "running", phase: "walk", imported: 3, cursor: "c:3" });
+    expect(await index.getEntityVersions(keyOf(6))).toHaveLength(1);
+    expect(await index.getEntityVersions(keyOf(3))).toHaveLength(0);
+    // Nothing is served while the import owns the index.
+    expect((await call("arkiv_getEntityCount")).error?.message).toMatch(/not projected any block yet/);
+
+    const tick = await projector.runOnce();
+    expect(tick.genesisStatus).toBe("done");
+    expect(tick.genesisEntitiesImported).toBe(4);
+    expect(source.pages).toBe(4);
+    const rows = await db.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM "${schema}".entity_versions`);
+    expect(rows.rows[0]!.count).toBe("7");
+    const positions = await Promise.all([6, 5, 4, 3, 2, 1, 0].map(async (id) => (await index.getEntityVersions(keyOf(id)))[0]!.createdPosition));
+    expect(positions).toEqual([6, 5, 4, 3, 2, 1, 0]);
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([6, 5, 4, 3, 2, 1, 0].map(keyOf));
+  });
+
+  test("operations on genesis entities fold on top of their genesis state", async () => {
+    await index.reset();
+    // Block 2 patches G2, extends G1 and transfers G0; block 3 deletes G1.
+    await storeBlock(storage, {
+      blockNumber: 2,
+      transactions: [
+        registryTx(2, 0, OWNER, { logs: [patchedLog(0, keyOf(2), OWNER)] }),
+        registryTx(2, 1, OWNER, { logs: [extendedLog(0, keyOf(1), OWNER, 500)] }),
+        registryTx(2, 2, OWNER, { logs: [transferredLog(0, keyOf(0), OWNER, BOB)] }),
+      ],
+      operations: [
+        {
+          position: 0,
+          hash: registryTx(2, 0, OWNER).hash,
+          operations: [operation({ opIndex: 0, operationType: 2, entityKey: keyOf(2), attributes: [i32("rank", "7"), tombstone("kind")] })],
+        },
+        {
+          position: 1,
+          hash: registryTx(2, 1, OWNER).hash,
+          operations: [operation({ opIndex: 0, operationType: 3, entityKey: keyOf(1), expiresAtBlocks: 500 })],
+        },
+        {
+          position: 2,
+          hash: registryTx(2, 2, OWNER).hash,
+          operations: [operation({ opIndex: 0, operationType: 4, entityKey: keyOf(0), newOwner: BOB })],
+        },
+      ],
+    });
+    await storeBlock(storage, {
+      blockNumber: 3,
+      transactions: [registryTx(3, 0, OWNER, { logs: [deletedLog(0, keyOf(1), OWNER)] })],
+      operations: [{ position: 0, hash: registryTx(3, 0, OWNER).hash, operations: [operation({ opIndex: 0, operationType: 5, entityKey: keyOf(1) })] }],
+    });
+
+    const source = createFakeGenesisSource(FOUR);
+    const projector = new EntityProjector(index, { genesis: { source }, log: () => {} });
+    const tick = await projector.runOnce();
+    expect(tick.genesisStatus).toBe("done");
+    expect(tick.projectedThroughBlock).toBe(3n);
+
+    // G2: the base keeps the block-0 state; the head shows the patch on top of it.
+    const g2 = await index.getEntityVersions(keyOf(2));
+    expect(g2.map((version) => [version.version, version.fromBlock, version.toBlock])).toEqual([
+      [0, 0, 2],
+      [1, 2, null],
+    ]);
+    expect(attributesOf(g2[0]!)).toEqual(["kind:8=seed", "n:3=2"]);
+    expect(attributesOf(g2[1]!)).toEqual(["n:3=2", "rank:2=7"]);
+    expect(g2[1]).toMatchObject({ createdAt: 0, createdPosition: 2, updatedAt: 2, owner: OWNER, creator: OWNER, expiresAt: 2n ** 64n - 1n });
+    expect(await result<{ attributes: unknown }>("arkiv_getEntity", [keyOf(2), 0])).toMatchObject({
+      updatedAt: "0x0",
+      attributes: [
+        { name: "kind", type: "str", value: "seed" },
+        { name: "n", type: "u64", value: "0x2" },
+      ],
+    });
+    expect(await result<{ attributes: unknown }>("arkiv_getEntity", [keyOf(2)])).toMatchObject({
+      updatedAt: "0x2",
+      attributes: [
+        { name: "n", type: "u64", value: "0x2" },
+        { name: "rank", type: "i32", value: 7 },
+      ],
+    });
+    // G1: extended at 2, deleted at 3.
+    const g1 = await index.getEntityVersions(keyOf(1));
+    expect(g1.map((version) => [version.version, version.expiresAt, version.deleted])).toEqual([
+      [0, 2n ** 64n - 1n, false],
+      [1, 500n, false],
+      [2, 500n, true],
+    ]);
+    expect(await result("arkiv_getEntity", [keyOf(1)])).toBeNull();
+    expect(await result("arkiv_getEntity", [keyOf(1), 2])).toMatchObject({ expiresAt: "0x1f4" });
+    // G0: a new owner, the same creator.
+    expect(await result("arkiv_getEntity", [keyOf(0)])).toMatchObject({ owner: BOB, creator: OWNER });
+    // G3 lapsed at block 1: counted at block 0, gone at the head.
+    expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(4);
+    expect(await result<number>("arkiv_getEntityCount")).toBe(2);
+    expect(await keysOf("*")).toEqual([keyOf(2), keyOf(0)]);
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(3), keyOf(2), keyOf(1), keyOf(0)]);
+    expect(await keysOf("*", { atBlock: "0x1" })).toEqual([keyOf(2), keyOf(1), keyOf(0)]);
+
+    // A refold of G0 for a later block rebuilds it from the base again.
+    await storeBlock(storage, {
+      blockNumber: 4,
+      transactions: [registryTx(4, 0, BOB, { logs: [patchedLog(0, keyOf(0), BOB)] })],
+      operations: [
+        { position: 0, hash: registryTx(4, 0, BOB).hash, operations: [operation({ opIndex: 0, operationType: 2, entityKey: keyOf(0), attributes: [str("kind", "patched")] })] },
+      ],
+    });
+    await projector.runOnce();
+    const g0 = await index.getEntityVersions(keyOf(0));
+    expect(g0.map((version) => [version.version, version.fromBlock, version.owner])).toEqual([
+      [0, 0, OWNER],
+      [1, 2, BOB],
+      [2, 4, BOB],
+    ]);
+    expect(attributesOf(g0[0]!)).toEqual(["kind:8=seed", "n:3=0"]);
+    expect(attributesOf(g0[2]!)).toEqual(["kind:8=patched", "n:3=0"]);
+  });
+
+  test("an index that folded before the import repairs its genesis histories", async () => {
+    await index.reset();
+    // Block 5 creates an on-chain entity, which sets the floor at 5; block 6
+    // patches G2 above that floor, and with no base that folds to nothing.
+    await storeBlock(storage, {
+      blockNumber: 5,
+      transactions: [registryTx(5, 0, ALICE, { logs: [createdLog(0, KEY_A, ALICE, 900)] })],
+      operations: [
+        {
+          position: 0,
+          hash: registryTx(5, 0, ALICE).hash,
+          operations: [operation({ opIndex: 0, operationType: 1, entityKey: KEY_A, expiresAtBlocks: 900, attributes: [str("project", "onchain")] })],
+        },
+      ],
+    });
+    await storeBlock(storage, {
+      blockNumber: 6,
+      transactions: [registryTx(6, 0, OWNER, { logs: [patchedLog(0, keyOf(2), OWNER)] })],
+      operations: [{ position: 0, hash: registryTx(6, 0, OWNER).hash, operations: [operation({ opIndex: 0, operationType: 2, entityKey: keyOf(2), attributes: [str("late", "yes")] })] }],
+    });
+    const blind = new EntityProjector(index, { genesis: { mode: "off" }, log: () => {} });
+    const first = await blind.runOnce();
+    expect(first.genesisStatus).toBeUndefined();
+    expect(await index.getGenesisImport()).toBeUndefined();
+    expect((await index.getProgress()).floorBlock).toBe(5n);
+    expect((await index.getProgress()).projectedThroughBlock).toBe(6n);
+    expect(await index.getEntityVersions(keyOf(2))).toEqual([]);
+    expect(await keysOf("*")).toEqual([KEY_A]);
+
+    const source = createFakeGenesisSource(FOUR);
+    const logs: string[] = [];
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 2 }, log: (line) => logs.push(line) });
+    const tick = await projector.runOnce();
+    expect(tick.genesisStatus).toBe("done");
+    expect(tick.genesisEntitiesImported).toBe(4);
+    expect(tick.genesisKeysRepaired).toBe(3);
+    expect((await index.getProgress()).floorBlock).toBe(0n);
+    expect((await index.getProgress()).projectedThroughBlock).toBe(6n);
+    expect(logs.some((line) => line.includes("floor set to block 0"))).toBe(true);
+    expect(logs.some((line) => line.includes("3 of them refolded"))).toBe(true);
+    const g2 = await index.getEntityVersions(keyOf(2));
+    expect(g2.map((version) => [version.version, version.fromBlock])).toEqual([
+      [0, 0],
+      [1, 2],
+      [2, 6],
+    ]);
+    expect(attributesOf(g2[2]!)).toEqual(["late:8=yes", "n:3=2", "rank:2=7"]);
+    expect(await keysOf("*")).toEqual([KEY_A, keyOf(2), keyOf(0)]);
+    expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(4);
+    expect(await keysOf("project = str('onchain')", { atBlock: "0x4" })).toEqual([]);
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(3), keyOf(2), keyOf(1), keyOf(0)]);
+  });
+
+  test("a probe that finds no genesis entities leaves the floor to the first keyed create", async () => {
+    await index.reset();
+    const source = createFakeGenesisSource([]);
+    const logs: string[] = [];
+    const tick = await new EntityProjector(index, { genesis: { source }, log: (line) => logs.push(line) }).runOnce();
+    expect(tick.genesisStatus).toBe("none");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "none", total: 0, imported: 0 });
+    expect((await index.getProgress()).floorBlock).toBe(5n);
+    expect(logs.some((line) => line.includes("holds no genesis entities"))).toBe(true);
+    expect(source.pages).toBe(0);
+  });
+
+  test("a node that cannot answer, a genesis too big for RPC, a different chain, or a pinned floor", async () => {
+    await index.reset();
+    let source = createFakeGenesisSource(FOUR, {
+      count: async () => {
+        throw new GenesisSourceUnavailable(-32006, "arkiv_getEntityCount: block 0 is unavailable: state for this block is not retained");
+      },
+    });
+    let tick = await new EntityProjector(index, { genesis: { source }, log: () => {} }).runOnce();
+    expect(tick.genesisStatus).toBe("unavailable");
+    expect((await index.getGenesisImport())!.error).toContain("not retained");
+    expect((await index.getProgress()).floorBlock).toBe(5n);
+
+    await index.reset();
+    source = createFakeGenesisSource(FOUR);
+    tick = await new EntityProjector(index, { genesis: { source, rpcLimit: 3 }, log: () => {} }).runOnce();
+    expect(tick.genesisStatus).toBe("waiting");
+    expect(source.pages).toBe(0);
+    expect(await index.getGenesisImport()).toMatchObject({ status: "waiting", total: 4, imported: 0, source: null });
+    expect((await index.getProgress()).floorBlock).toBe(5n);
+
+    await index.reset();
+    source = createFakeGenesisSource(FOUR, { describeError: new Error("ECONNREFUSED") });
+    const logs: string[] = [];
+    const unreachable = (lines: string[]) => lines.filter((line) => line.includes("could not reach the node")).length;
+    let projector = new EntityProjector(index, { genesis: { source, probeRetryMs: 60_000 }, log: (line) => logs.push(line) });
+    tick = await projector.runOnce();
+    expect(tick.genesisStatus).toBeUndefined();
+    expect(await index.getGenesisImport()).toBeUndefined();
+    expect((await index.getProgress()).floorBlock).toBe(5n);
+    expect(unreachable(logs)).toBe(1);
+    await projector.runOnce();
+    expect(unreachable(logs)).toBe(1);
+    projector = new EntityProjector(index, { genesis: { source, probeRetryMs: 0 }, log: (line) => logs.push(line) });
+    await projector.runOnce();
+    await projector.runOnce();
+    expect(unreachable(logs)).toBe(3);
+
+    await index.reset();
+    source = createFakeGenesisSource(FOUR, { chain: { chainId: 1337n } });
+    tick = await new EntityProjector(index, { genesis: { source }, log: () => {} }).runOnce();
+    expect(tick.genesisStatus).toBe("failed");
+    expect((await index.getGenesisImport())!.error).toMatch(/chain 1337.*chain 7733102/);
+    expect(source.pages).toBe(0);
+
+    await index.reset();
+    source = createFakeGenesisSource(FOUR);
+    const pinned: string[] = [];
+    tick = await new EntityProjector(index, { floorBlock: 5n, genesis: { source }, log: (line) => pinned.push(line) }).runOnce();
+    expect(tick.genesisStatus).toBeUndefined();
+    expect(await index.getGenesisImport()).toBeUndefined();
+    expect(source.pages).toBe(0);
+    expect(pinned.some((line) => line.includes("pinned at block 5"))).toBe(true);
+  });
+
+  test("the import stands down while another projector holds the lock, and a reset imports again", async () => {
+    await index.reset();
+    const source = createFakeGenesisSource(FOUR);
+    const projector = new EntityProjector(index, { genesis: { source }, log: () => {} });
+    await db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`entity-index:${schema}`]);
+      const held = await projector.runOnce();
+      expect(held.lockHeldElsewhere).toBe(true);
+      expect(await index.getGenesisImport()).toBeUndefined();
+    });
+    const tick = await projector.runOnce();
+    expect(tick.genesisStatus).toBe("done");
+    expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(4);
+
+    await index.reset();
+    expect(await index.getGenesisImport()).toBeUndefined();
+    const again = await new EntityProjector(index, { genesis: { source }, log: () => {} }).runOnce();
+    expect(again.genesisStatus).toBe("done");
+    expect(again.genesisEntitiesImported).toBe(4);
+    expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(4);
+  });
+});
+
+describeWithPostgres("offline genesis import (Postgres)", () => {
+  let storage: ScannerStorage;
+  let index: EntityIndexStorage;
+  let db: Db;
+  let cleanup: () => Promise<void>;
+  let methods: ReturnType<typeof createArkivIndexMethods>;
+  let dir: string;
+
+  const call = async (method: string, params: unknown[] = []): Promise<JsonRpcResponse> =>
+    (await handleJsonRpcBody({ jsonrpc: "2.0", id: 1, method, params }, storage, { localOverrides: methods })) as JsonRpcResponse;
+  const result = async <T = unknown>(method: string, params: unknown[] = []): Promise<T> => {
+    const response = await call(method, params);
+    if (response.error) throw new Error(`${method} failed: ${JSON.stringify(response.error)}`);
+    return response.result as T;
+  };
+
+  // Five entities in seed order; G3 carries the attributes a patch will touch.
+  const ENTITIES = [0, 1, 2, 3, 4].map((n) => ({
+    key: dumpKey(0x100 + n),
+    owner: DUMP_OWNER,
+    payload: new Uint8Array(n + 1),
+    expiresAt: 5_000n + BigInt(n),
+    attributes: [
+      { name: "kind", type: "str" as const, value: encodeAttributeValue("str", "seed") },
+      { name: "n", type: "u64" as const, value: encodeAttributeValue("u64", BigInt(n)) },
+    ],
+  }));
+  const MANIFEST: GenesisDumpManifest = { chainId: 7733102n, count: 5, stateRoot: null };
+  const keyOf = (n: number) => ENTITIES[n]!.key;
+
+  const writeDump = async (name: string, text: string): Promise<string> => {
+    const path = join(dir, name);
+    await writeFile(path, text);
+    return path;
+  };
+  const runImport = async (
+    path: string,
+    overrides: Partial<Parameters<typeof importGenesisDump>[0]> = {},
+  ): Promise<{ result: Awaited<ReturnType<typeof importGenesisDump>>; events: Array<[string, GenesisProgressDocument]> }> => {
+    const events: Array<[string, GenesisProgressDocument]> = [];
+    const result = await importGenesisDump({
+      storage: index,
+      source: fileDumpSource(path),
+      dumpPath: path,
+      manifest: MANIFEST,
+      batchEntities: 2,
+      onProgress: (event, doc) => events.push([event, doc]),
+      progressIntervalMs: 0,
+      sleep: async () => {},
+      ...overrides,
+    });
+    return { result, events };
+  };
+
+  beforeAll(async () => {
+    const isolated = await createIsolatedStorage("entity_genesis_dump");
+    storage = isolated.storage;
+    cleanup = isolated.cleanup;
+    db = openDb(TEST_DATABASE_URL!, { max: 2 });
+    index = await EntityIndexStorage.fromDb(db, { schema: isolated.schema });
+    methods = createArkivIndexMethods(index, storage);
+    dir = await mkdtemp(join(tmpdir(), "genesis-dump-"));
+    await storage.saveChainId(7733102n);
+    // Block 2 patches G3 before any import: the fold after the import must apply it on top of the genesis base.
+    await storeBlock(storage, {
+      blockNumber: 2,
+      transactions: [registryTx(2, 0, DUMP_OWNER, { logs: [patchedLog(0, keyOf(3), DUMP_OWNER)] })],
+      operations: [
+        {
+          position: 0,
+          hash: registryTx(2, 0, DUMP_OWNER).hash,
+          operations: [operation({ opIndex: 0, operationType: 2, entityKey: keyOf(3), attributes: [i32("rank", "7"), tombstone("kind")] })],
+        },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await cleanup();
+    await db.close();
+    await closeTestPools();
+  });
+
+  test("loads a dump in batches, proves the id order, and hands the projector a repair", async () => {
+    const path = await writeDump("state.jsonl", buildDump(ENTITIES));
+    const { result: outcome, events } = await runImport(path);
+    expect(outcome).toMatchObject({ imported: 5, resumedFrom: 0, total: 5 });
+    expect(outcome.state).toMatchObject({ status: "running", phase: "repair", source: "dump", total: 5, imported: 5, cursor: null, chainId: "7733102" });
+    expect(await index.getGenesisImport()).toMatchObject({ status: "running", phase: "repair", source: "dump", imported: 5 });
+    expect(events.filter(([event]) => event === "phase").map(([, doc]) => doc.phase)).toEqual([
+      "checking",
+      "loading",
+      "verifying",
+      "indexing",
+      "repairing",
+    ]);
+    const last = events[events.length - 1]![1];
+    expect(last).toMatchObject({
+      writer: "import-script",
+      status: "running",
+      phase: "repairing",
+      percent: 95,
+      source: "dump",
+      chain_id: 7733102,
+      entities: { total: 5, imported: 5, skipped: 0, attributes: 10, payload_bytes: 15 },
+      dump: { path, lines: 13, records: 5, system_account: { seen: true, ids: 5, entity_count: 5 }, verification: "passed" },
+      database: { batch_size: 2, batches: 3, indexes: "rebuilt" },
+    });
+    expect(last.dump!.bytes_read).toBe(last.dump!.bytes_total);
+    expect(last.state_root).toBe("0x1d97c1c7db8b54a02eece8de8ec381ae1276faa57972bb61260e6130c13dc01b");
+    expect(last.database!.index_rebuild_s).not.toBeNull();
+
+    // The projector finishes: floor 0, G3 refolded with its block-2 patch, the file handed over.
+    const progressFile = join(dir, "index", "progress.json");
+    const projector = new EntityProjector(index, { genesis: { mode: "off", progressFile }, log: () => {} });
+    const tick = await projector.runOnce();
+    expect(tick.genesisStatus).toBe("done");
+    // Block 2 was never folded before the import, so the forward fold (base-aware) applies it; the repair has nothing to redo.
+    expect(tick.genesisKeysRepaired).toBe(0);
+    expect(tick.projectedThroughBlock).toBe(2n);
+    expect((await index.getProgress()).floorBlock).toBe(0n);
+    const keys = (await result<{ data: Array<{ key: string }> }>("arkiv_query", ["*", { atBlock: "0x0", limit: 10 }])).data.map((e) => e.key);
+    expect(keys).toEqual([keyOf(4), keyOf(3), keyOf(2), keyOf(1), keyOf(0)]);
+    expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(5);
+    const atGenesis = await result<Record<string, unknown>>("arkiv_getEntity", [keyOf(3), 0]);
+    expect(atGenesis).toMatchObject({ key: keyOf(3), owner: DUMP_OWNER, createdAt: "0x0", expiresAt: "0x138b" });
+    expect((atGenesis.attributes as Array<{ name: string }>).map((a) => a.name)).toEqual(["kind", "n"]);
+    const atHead = await result<Record<string, unknown>>("arkiv_getEntity", [keyOf(3)]);
+    expect((atHead.attributes as Array<{ name: string; value: unknown }>).map((a) => [a.name, a.value])).toEqual([
+      ["n", "0x3"],
+      ["rank", 7],
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const written = JSON.parse(await readFile(progressFile, "utf8")) as GenesisProgressDocument;
+    expect(written).toMatchObject({
+      writer: "backend",
+      status: "done",
+      phase: "done",
+      percent: 100,
+      source: "dump",
+      entities: { total: 5, imported: 5 },
+      repair: { keys_refolded: 0, batches: 1 },
+    });
+    expect(written.finished_at).not.toBeNull();
+
+    // Nothing to do twice.
+    await expect(runImport(path)).rejects.toThrow("already imported");
+  });
+
+  test("an interrupted run resumes from its last batch without duplicating rows", async () => {
+    await index.reset();
+    const path = await writeDump("resume.jsonl", buildDump(ENTITIES));
+    const controller = new AbortController();
+    await expect(
+      runImport(path, {
+        signal: controller.signal,
+        onProgress: (_event, doc) => {
+          if (doc.database?.batches === 1) controller.abort();
+        },
+      }),
+    ).rejects.toThrow(GenesisImportStopped);
+    const stopped = await index.getGenesisImport();
+    expect(stopped).toMatchObject({ status: "running", phase: "walk", source: "dump", imported: 2 });
+    const cursor = JSON.parse(stopped!.cursor!) as { offset: number; line: number; ledger: { records: number }; indexes: string };
+    expect(cursor).toMatchObject({ line: 6, ledger: { records: 2 }, indexes: "dropped" });
+    expect(cursor.offset).toBeGreaterThan(0);
+
+    const { result: outcome, events } = await runImport(path);
+    expect(outcome).toMatchObject({ imported: 5, resumedFrom: 2 });
+    expect(events[events.length - 1]![1].entities).toMatchObject({ imported: 5, skipped: 2 });
+    const rows = await db.query<{ n: string }>(`SELECT count(*)::text AS n FROM ${index.schema}.entity_versions`);
+    expect(rows.rows[0]!.n).toBe("5");
+    expect((await new EntityProjector(index, { genesis: { mode: "off" }, log: () => {} }).runOnce()).genesisStatus).toBe("done");
+  });
+
+  test("refuses to run over another import, a different chain, or a node that disagrees", async () => {
+    const path = await writeDump("refuse.jsonl", buildDump(ENTITIES));
+    await expect(runImport(path)).rejects.toThrow(GenesisImportRefused); // still done from the previous test
+    await index.reset();
+    await expect(runImport(path, { manifest: { ...MANIFEST, chainId: 1337n } })).rejects.toThrow("follows chain 7733102");
+    await expect(runImport(path, { expected: { chainId: 7733102n, count: 6 } })).rejects.toThrow("holds 6 entities at block 0");
+    await expect(runImport(path, { expected: { chainId: 7733102n, stateRoot: "0x" + "11".repeat(32) } })).rejects.toThrow("state root");
+    expect(await index.getGenesisImport()).toBeUndefined();
+    await index.setGenesisImport({
+      status: "running",
+      phase: "walk",
+      source: "rpc",
+      chainId: "7733102",
+      genesisHash: null,
+      total: 5,
+      imported: 0,
+      cursor: null,
+      repairAfterKey: null,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      error: null,
+    });
+    await expect(runImport(path)).rejects.toThrow("importing genesis from the node");
+    await index.reset();
+  });
+
+  test("a dump that does not add up leaves a failed import, not rows that lie", async () => {
+    const swapped = seederSystemStorage([keyOf(1), keyOf(0), keyOf(2), keyOf(3), keyOf(4)]);
+    const path = await writeDump("swapped.jsonl", buildDump(ENTITIES, { systemStorage: swapped }));
+    const { promise, events } = (() => {
+      const events: Array<[string, GenesisProgressDocument]> = [];
+      return { events, promise: runImport(path, { onProgress: (event, doc) => events.push([event, doc]) }) };
+    })();
+    await expect(promise).rejects.toThrow(GenesisEntityError);
+    expect(await index.getGenesisImport()).toMatchObject({ status: "failed", phase: null, source: "dump", error: expect.stringContaining("not in entity-id order") });
+    expect(events[events.length - 1]![1]).toMatchObject({ phase: "failed", status: "failed", dump: { verification: "failed" } });
+    await expect(runImport(path)).rejects.toThrow("previous genesis import failed");
+    await index.reset();
+
+    const short = await writeDump("short.jsonl", buildDump(ENTITIES.slice(0, 4), { entityCount: 4 }));
+    await expect(runImport(short)).rejects.toThrow("holds 4 entity records but the manifest counts 5");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "failed" });
+    await index.reset();
   });
 });

@@ -704,7 +704,12 @@ characters and is normalized to lowercase. Operations are ordered by block numbe
 operation index ascending, capped at **1,000 rows**, and each carries its transaction context (`blockNumber`,
 `blockNumberDecimal`, `blockDate`, `position`, `hash`) alongside the same operation fields as
 `/transaction/:hash`. Returns `404` when no operations are stored for the key or transaction data is disabled.
-The frontend serves this history at `/entity/<key>`, linked from every entity key on a transaction page.
+When the entity index is enabled and the key was part of the chain's genesis state, the response also carries
+`genesis` — `{ owner, creator, expiresAt, contentType, creationFlags, payloadSize, attributes: [{ name, type,
+value }] }`, `expiresAt` the absolute block as a decimal string — and a genesis entity without operations answers
+`200` with an empty `operations` instead of `404` (a `404` cached before a late import stays cached until the
+history cache's TTL). The frontend serves this history at `/entity/<key>`, linked from every entity key on a
+transaction page.
 
 ### `GET /senders`
 
@@ -935,7 +940,9 @@ from them on a **separate path**, `POST /shadow-rpc/experimental` (`/api/shadow-
 `/shadow-rpc` is untouched and keeps relaying those methods to the node, so the two paths are two independent
 sources for the same questions, and either can be checked against the other. The path answers `404` when the
 feature is off; `GET /health` reports it under `features.entityQueryIndex` as `false` or as
-`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, lastFoldAtUtc }`.
+`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, liveEntitiesAtUtc, lastFoldAtUtc,
+genesis }`, where `genesis` is `null` or the genesis import's `{ status, phase, source, total, imported,
+startedAtUtc, finishedAtUtc, updatedAtUtc, error }` (see "Genesis entities" below).
 
 The wire contract is the node's (`arkiv-reth-rpc` / `arkiv-rpc-types` in the 0.8 engine): the same parameter
 shapes and defaults (`atBlock` hex or `latest`, `limit` 1–200 default 100, `select` with `attributes` as a
@@ -956,6 +963,7 @@ Where the index cannot honour something the node does, it says so rather than ap
 | --- | --- | --- |
 | `latest` | The chain head. | The **projection head** (`projectedThroughBlock` in `/health`): the newest block folded, a few blocks behind the scanner head, itself behind the chain. `blockNumber` in every reply says which block answered. |
 | History | Any block the node keeps state for. | Blocks between the **floor** and the projection head; anything else is `-32006` with `{ requested, latest }`. The floor is the first block whose stored creates carry entity keys (`floorBlock` in `/health`); entities created before it are unknown, so counts count what the index holds. A backfill that writes older blocks lowers the floor as it goes; `ENTITY_INDEX_FLOOR_BLOCK` pins it instead. |
+| Genesis entities | Part of the block-0 state on a seeded chain. | Imported once, from the node or from the seed's state dump (see "Genesis entities" below); until that import is `done` the floor stays above 0 and they are unknown. `payloadSize` is 0 for ones imported over RPC. |
 | `select.payload` | The bytes. | Refused with `-32000`: payload bytes are never stored (the calldata invariant). `arkiv_getEntity` leaves `payload` out. |
 | `creationFlags` | Always known. | `null` for entities created before receipt logs were stored (the flags travel in the `EntityCreated` event, not the calldata). |
 | Cursors | Resume below an internal entity id. | Resume below a creation position. Both are opaque, bound to the query, block and `select`, and reject a cursor from another request with the node's own messages — but a cursor from one source cannot be handed to the other: the index answers a node's cursor with `-32005` and a message saying so. |
@@ -967,6 +975,109 @@ refold is idempotent), and once a minute it looks for operation rows written *be
 fill, a rescan, the backfill scanner — and refolds those keys too. A first build walks the whole stored
 history in chunks and takes minutes for a few hundred thousand blocks. All writes run under an advisory lock,
 so two backends on one database never fold on top of each other.
+
+**Genesis entities (seeded chains).** A devnet built with
+[arkiv-prefill](https://github.com/Arkiv-Network/arkiv-prefill) carries its dataset in the block-0 state:
+`arkiv-cli seed-genesis` writes a reth `init-state` dump, the node starts on it, and no transaction, receipt or
+decoded operation ever mentions those entities, so the fold above never sees them. The index imports them once
+instead, as version-0 rows with `createdAt = 0` (block 0 never carries a transaction, so that is the genesis
+marker) in the node's entity-id order (`arkiv_query` at block 0 pages newest-first by id, and ids are allocated in
+seed order), and later operations on a genesis key fold on top of that base. With `ENTITY_INDEX_GENESIS=auto`
+(the default) the projector asks the node once — `eth_chainId`, block 0's hash, `arkiv_getEntityCount` at block 0 —
+and records the answer in `/health` → `entityQueryIndex.genesis`: `none` (no genesis entities), `unavailable`
+(the node cannot answer for block 0), `running` while it pages `arkiv_query("*", { atBlock: "0x0" })` in and then
+refolds the genesis keys that already have operations (`phase` `walk`, then `repair`), `done` with the floor at 0,
+`failed` with the reason (a chain-id or genesis-hash mismatch, an entity it would have to guess about), or
+`waiting` when the node holds more than `ENTITY_INDEX_GENESIS_RPC_LIMIT` (1,000,000) of them — the node collects
+every matching id before slicing a page, so each page costs O(N) and a 100-million-entity genesis cannot be walked
+over RPC. Folding pauses while an import runs, so an operation on a genesis key is never folded before its base
+exists, and a restart resumes from the stored cursor. The node is `ENTITY_INDEX_GENESIS_RPC`, defaulting to
+`SHADOW_RPC_UPSTREAM`; `ENTITY_INDEX_GENESIS=off` never asks (an offline import is still finished). Entities
+imported over RPC have `payloadSize` 0: the payload is never fetched, and the column never reaches the wire.
+
+Big seeds are loaded offline from the dump itself by `scripts/importGenesisState.ts`, the only script in the
+repository that writes to Postgres. It streams `state.jsonl` once (records decoded, payloads only measured), proves
+that the records' file order is the node's id order against the system account's `id2key` slots and entity count
+(two keccak chains; no key is kept in memory), writes batches of 5,000 under the index's fold lock with a resume
+point in the state row (an interrupted run continues from its last batch), drops the secondary indexes for the
+load on an empty index and rebuilds them after, and hands the import to the running backend, whose projector does
+the repair and marks it `done`. With `--rpc <node>` it first checks the chain id, genesis hash, block-0 state root
+and entity count against the node. Run it in the backend's container, where Postgres and the mounted seed are
+reachable:
+
+```sh
+docker compose --env-file .env.sourcify.local -f docker-compose.yml -f docker-compose.prefill.yml \
+  run --rm backend bun run scripts/importGenesisState.ts \
+    --dump /prefill/seed/state.jsonl --rpc http://arkiv-sourcify-node-1:8545 \
+    --progress-file /prefill/index/genesis-import-progress.json
+```
+
+It prints one JSON document per line (`--log text` for prose): the progress document below plus an `event` field
+(`start`, `phase`, `progress`, `done`, `stopped`, `error`), so `tail -1 | jq .percent` works on the log. Exit
+status 0 means handed off, 1 failed, 2 usage, 130 stopped by a signal (resumable). To import again after `done`
+or `failed`, reset the index: stop the backend, `TRUNCATE entity_versions, entity_version_attributes; DELETE FROM
+entity_index_state;`, start it again.
+
+**Progress file.** Both importers write the same document — `ENTITY_INDEX_GENESIS_PROGRESS_FILE` for the
+backend, `--progress-file` (defaulting to that variable) for the script — atomically on every change, in the style
+of arkiv-prefill's `seed-progress.json` and `init-state-progress.json`, so its dashboard can follow the whole
+import from one file. Abridged:
+
+```json
+{
+  "tool": "arkiv-chain-indexer", "format": 1, "writer": "import-script",
+  "status": "running", "phase": "loading", "percent": 41.3, "source": "dump", "pid": 8,
+  "started_at": 1788909600.2, "updated_at": 1788909651.9, "finished_at": null,
+  "elapsed_s": 51.7, "phase_elapsed_s": 49.1, "phases": { "starting": 0.1, "checking": 2.5 }, "error": null,
+  "chain_id": 7733102, "genesis_hash": "0x70d9…0279", "state_root": "0x1d97…c01b",
+  "entities": { "total": 28825, "imported": 15000, "skipped": 0, "attributes": 111602,
+                "payload_bytes": 107221120, "rate_per_s": 305.2, "eta_s": 45 },
+  "dump": { "path": "/prefill/seed/state.jsonl", "bytes_total": 529266475, "bytes_read": 251400000,
+            "bytes_per_s": 5120000, "eta_s": 54, "lines": 30001, "records": 15000,
+            "system_account": { "seen": false, "ids": 0, "entity_count": null }, "verification": "pending" },
+  "rpc": null,
+  "database": { "schema": "public", "batch_size": 5000, "batches": 3, "last_batch_ms": 812,
+                "indexes": "dropped", "index_rebuild_s": null },
+  "repair": null
+}
+```
+
+`phase` runs `starting` → `checking` → `loading` → `verifying` → `indexing` → `repairing` → `done` for the script
+and `walking` → `repairing` → `done` for the backend's node walk (`waiting`, `unavailable` and `failed` as in
+`/health`; `stopped` for a run interrupted at a batch boundary), `percent` covers the whole import (loading by
+bytes read, walking by entities, 100 at `done`), `phases` holds the seconds each finished phase took, `rpc` /
+`dump` / `database` / `repair` carry the detail of whichever source and stage apply, and `writer` names the
+process that last wrote the file — the script hands it to the backend at `repairing`. `pid` is that process, so a
+watcher can tell a stalled run from a finished one.
+
+**Index a local prefill devnet.** The prefill node publishes its RPC on `127.0.0.1` only, so a stack that indexes
+it joins the node's compose network through `docker-compose.prefill.yml` (`PREFILL_NETWORK`, default
+`arkiv-sourcify_default`), which also mounts the run's artifacts at `/prefill` (`PREFILL_ARTIFACTS`, default
+`../arkiv-prefill/artifacts/sourcify-run` next to this checkout) and points the progress file into them. A third
+stack from this checkout, with its own env file:
+
+```sh
+# .env.sourcify.local
+COMPOSE_PROJECT_NAME=arkiv-chain-indexer-sourcify
+BACKEND_PORT=3002
+FRONTEND_PORT=23562
+SCANNER_RPC_FULL_NODE=http://arkiv-sourcify-node-1:8545
+SHADOW_RPC_UPSTREAM=http://arkiv-sourcify-node-1:8545
+SCANNER_OLDEST_BACKFILL_BLOCK=0
+SCANNER_DISABLE_BACKFILL=false
+SAVE_TRANSACTION_DATA=true
+ENTITY_QUERY_INDEX=true
+VITE_NETWORK_NAME=Sourcify
+# compose checks this while parsing, even though the rpc-proxy profile is off
+RPC_PROXY_UPSTREAM=http://arkiv-sourcify-node-1:8545
+```
+
+```sh
+docker compose --env-file .env.sourcify.local -f docker-compose.yml -f docker-compose.prefill.yml up -d --build
+curl -s http://127.0.0.1:3002/health | jq .features.entityQueryIndex.genesis
+bun run scripts/compareEntityQuery.ts --node http://127.0.0.1:8645 \
+  --index http://127.0.0.1:3002/shadow-rpc/experimental --at-block 0 --since-block 0
+```
 
 Two scripts turn the pair into a test rig. `scripts/compareEntityQuery.ts --node <url> --index <url>` walks
 the same queries on both sides at the same block — discovering them from the data, plus any fixture manifest —
@@ -1021,6 +1132,7 @@ series cardinality stays bounded whatever clients send.
 | `db_queries_total` | counter | `route`, `outcome` | Query rate and failures per route. |
 | `db_queries_in_flight` | gauge | — | Queries awaiting a result. |
 | `indexer_head_block`, `chain_head_block`, `indexer_lag_blocks`, `indexer_head_age_seconds` | gauge | — | How far the index trails the chain. |
+| `entity_index_floor_block`, `entity_index_projected_through_block`, `entity_index_live_entities`, `entity_index_genesis_entities_total`, `entity_index_genesis_entities_imported` | gauge | — | The entity index's floor and head, its last live-entity count, and the genesis import's progress; only with `ENTITY_QUERY_INDEX` on. |
 | `process_start_time_seconds`, `process_resident_memory_bytes`, `process_heap_used_bytes` | gauge | — | Process basics. |
 | `build_info` | gauge | `commit`, `built_at` | Always `1`; identifies the running build. |
 
@@ -1037,6 +1149,10 @@ A scrape config and starter queries are in [`docs/prometheus.md`](docs/prometheu
 | `--metrics-enabled` | `METRICS_ENABLED` | `true` | Serve Prometheus metrics on `GET /metrics`. |
 | `--metrics-bearer-token` | `METRICS_BEARER_TOKEN` | unset | Require `Authorization: Bearer <token>` on `GET /metrics`. |
 | `--entity-index-floor-block` | `ENTITY_INDEX_FLOOR_BLOCK` | detected | Pin the index floor instead of detecting the first keyed create. |
+| `--entity-index-genesis` | `ENTITY_INDEX_GENESIS` | `auto` | `auto` asks the node once whether block 0 holds entities and imports them; `off` never asks (an offline import is still finished). |
+| `--entity-index-genesis-rpc` | `ENTITY_INDEX_GENESIS_RPC` | `SHADOW_RPC_UPSTREAM` | The node the genesis import reads (with `SHADOW_RPC_UPSTREAM_API_KEY`). |
+| `--entity-index-genesis-rpc-limit` | `ENTITY_INDEX_GENESIS_RPC_LIMIT` | `1000000` | Most genesis entities imported over RPC; a bigger genesis waits for `scripts/importGenesisState.ts`. |
+| `--entity-index-genesis-progress-file` | `ENTITY_INDEX_GENESIS_PROGRESS_FILE` | unset | Write the genesis import's progress document here on every change. |
 
 ```sh
 bun run serve -- --help

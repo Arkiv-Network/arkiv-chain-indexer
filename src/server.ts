@@ -22,7 +22,9 @@ import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import { handleJsonRpcText, type JsonRpcForwarder, type JsonRpcMethodHandler } from "./jsonRpc";
 import { ARKIV_INDEX_METHODS, createArkivIndexMethods } from "./arkivJsonRpc";
-import type { EntityIndexReader, EntityIndexStats } from "./entityIndexStorage";
+import type { EntityVersion } from "./entityIndex";
+import type { EntityIndexReader, EntityIndexStats, GenesisImportStatus } from "./entityIndexStorage";
+import { TYPE_TAGS_BY_ID, wireAttributeValue } from "./entityValues";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
 import {
   buildPayloadProviderPaymentBreakdown,
@@ -186,6 +188,25 @@ export interface TransactionByHashResponseBody {
   };
 }
 
+/**
+ * The state an entity was born with when the chain's genesis carried it: no
+ * transaction created it, so this is what the entity index knows from the
+ * genesis import (see README, "Genesis entities").
+ */
+export interface EntityGenesisRecordBody {
+  owner: string;
+  creator: string;
+  /** Absolute expiry block as a decimal string; 18446744073709551615 means never. */
+  expiresAt: string;
+  contentType: string;
+  /** Raw creation flag bits (1 readonly, 2 permissionless extension); null when the import did not learn them. */
+  creationFlags: number | null;
+  /** Bytes of payload at genesis; 0 when imported over RPC, which never fetches the payload. */
+  payloadSize: number;
+  /** Typed attributes in the node's wire encoding, sorted by name. */
+  attributes: Array<{ name: string; type: string; value: unknown }>;
+}
+
 export interface EntityByKeyResponseBody {
   entityKey: string;
   /** Number of operations in `operations` (the returned slice). */
@@ -200,6 +221,8 @@ export interface EntityByKeyResponseBody {
   operations: EntityOperationResponseRow[];
   /** Earliest stored operation; present only when `truncated`. */
   firstOperation?: EntityOperationResponseRow;
+  /** Present when the entity was created in the genesis state (block 0); `operations` may then be empty. */
+  genesis?: EntityGenesisRecordBody;
 }
 
 export interface TransactionRecordsResponseBody {
@@ -326,9 +349,30 @@ export interface EntityQueryIndexHealth {
   projectedThroughBlock: string | null;
   /** How far the projection trails the scanner head. */
   lagBlocks: string | null;
-  /** Entities live at the projection head. */
+  /** Entities live at the projection head, as of the projector's last count. */
   liveEntities: number | null;
+  /** When that count was taken; the projector refreshes it on its own schedule, never a request. */
+  liveEntitiesAtUtc: string | null;
   lastFoldAtUtc: string | null;
+  /** The import of the entities the chain was born with; null when no import was ever considered. */
+  genesis: EntityGenesisImportHealth | null;
+}
+
+export interface EntityGenesisImportHealth {
+  status: GenesisImportStatus;
+  /** `walk` while rows are written, `repair` while genesis entities with later operations are refolded. */
+  phase: "walk" | "repair" | null;
+  /** `rpc` for the projector's walk of the node, `dump` for scripts/importGenesisState.ts. */
+  source: "rpc" | "dump" | null;
+  /** Entities the node counted at block 0. */
+  total: number;
+  /** Entities written so far. */
+  imported: number;
+  startedAtUtc: string;
+  finishedAtUtc: string | null;
+  /** When the import last made progress. */
+  updatedAtUtc: string | null;
+  error: string | null;
 }
 
 export const BLOCK_RESPONSE_NAMES = [
@@ -1080,6 +1124,7 @@ async function readEntityIndexHealth(
 ): Promise<EntityQueryIndexHealth> {
   const [progress, stats] = await Promise.all([entityIndex.getProgress(), entityIndex.getStats()]);
   const projected = progress.projectedThroughBlock;
+  const genesis = stats.genesis;
   return {
     path: JSON_RPC_EXPERIMENTAL_PATH,
     methods: [...ARKIV_INDEX_METHODS],
@@ -1088,7 +1133,21 @@ async function readEntityIndexHealth(
     lagBlocks:
       projected !== undefined && scannerHead !== undefined ? clampLag(scannerHead - projected) : null,
     liveEntities: stats.liveEntities,
+    liveEntitiesAtUtc: stats.liveEntitiesAtUtc,
     lastFoldAtUtc: progress.lastFoldAt ?? null,
+    genesis: genesis
+      ? {
+          status: genesis.status,
+          phase: genesis.phase,
+          source: genesis.source,
+          total: genesis.total,
+          imported: genesis.imported,
+          startedAtUtc: genesis.startedAt,
+          finishedAtUtc: genesis.finishedAt,
+          updatedAtUtc: genesis.updatedAt ?? null,
+          error: genesis.error,
+        }
+      : null,
   };
 }
 
@@ -1488,7 +1547,7 @@ async function handleGetEntityByKey(
   // the storage NOTIFY payloads that drive invalidation are lowercase.
   const normalized = entityKey.toLowerCase();
   const limit = options.entityHistoryLimit ?? DEFAULT_ENTITY_HISTORY_LIMIT;
-  const loader = () => buildEntityByKeyResponse(normalized, storage, limit);
+  const loader = () => buildEntityByKeyResponse(normalized, storage, limit, options.entityIndex);
   // Not-found responses are cached too: the create NOTIFY evicts them the
   // moment the entity appears in storage.
   const cached = options.entityHistoryCache
@@ -1501,9 +1560,15 @@ async function buildEntityByKeyResponse(
   normalizedEntityKey: string,
   storage: ScannerStorage,
   limit: number,
+  entityIndex?: EntityIndexReader,
 ): Promise<CachedResponse> {
-  const history = await storage.getEntityOperationHistory(normalizedEntityKey, limit);
-  if (history.totalOperations === 0) {
+  // A genesis entity has no operations; the entity index's version at block 0
+  // (only a genesis import writes one) vouches for it instead.
+  const [history, genesis] = await Promise.all([
+    storage.getEntityOperationHistory(normalizedEntityKey, limit),
+    entityIndex ? entityIndex.getEntity(normalizedEntityKey, 0n, false) : Promise.resolve(undefined),
+  ]);
+  if (history.totalOperations === 0 && !genesis) {
     return {
       status: 404,
       body: JSON.stringify({
@@ -1521,8 +1586,24 @@ async function buildEntityByKeyResponse(
     ...(history.firstOperation
       ? { firstOperation: entityOperationToResponseRow(history.firstOperation) }
       : {}),
+    ...(genesis ? { genesis: genesisRecordBody(genesis) } : {}),
   };
   return withValidators({ status: 200, body: JSON.stringify(responseBody) });
+}
+
+function genesisRecordBody(version: EntityVersion): EntityGenesisRecordBody {
+  return {
+    owner: version.owner,
+    creator: version.creator,
+    expiresAt: version.expiresAt.toString(),
+    contentType: version.contentType,
+    creationFlags: version.creationFlags,
+    payloadSize: version.payloadSize,
+    attributes: version.attributes.flatMap((attribute) => {
+      const type = TYPE_TAGS_BY_ID.get(attribute.typeId);
+      return type ? [{ name: attribute.name, type, value: wireAttributeValue(type, attribute) }] : [];
+    }),
+  };
 }
 
 async function handleGetTransactionRecords(

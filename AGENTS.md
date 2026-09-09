@@ -161,7 +161,13 @@ docker compose up --build
   (`BTreeMap<EntityAddress, …>` in `arkiv-reth-statemanager`), so inside one transaction the operation index
   plays no part; across transactions it is creation order because a key can never be re-created); `entityProjector.ts` folds forward in chunks and
   refolds keys whose operations landed below the fold point (`transaction_operations.scanned_at`), lowering
-  the floor when a backfill brings keyed creates in below it; `arkivJsonRpc.ts` is the method layer
+  the floor when a backfill brings keyed creates in below it, and runs the genesis import for seeded chains
+  (arkiv-prefill): `entityGenesis.ts` walks the node at block 0, `entityGenesisDump.ts` +
+  `entityGenesisDumpImport.ts` load a seed's `state.jsonl` offline through `scripts/importGenesisState.ts` — the
+  only script that writes to Postgres — and `genesisProgress.ts` is the progress document both write; genesis
+  rows are version 0 with `created_at = 0` and `created_position` = entity id, `foldEntityVersions` takes such a
+  row as the base, one state row (`genesis_import`) tracks both importers, and the projector never folds while
+  an import is `running`; `arkivJsonRpc.ts` is the method layer
   (projection, cursors, options, errors) and plugs into `jsonRpc.ts` through `localOverrides`. Invariants:
   never store payload bytes (`select.payload` is refused); `latest` is the projection head, never the
   scanner or chain head; blocks outside `[floor, head]` are `-32006`, never a silently partial answer;
