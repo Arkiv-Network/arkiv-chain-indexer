@@ -42,6 +42,8 @@ const ROUTE_TEMPLATES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/admin\/metrics$/, "/admin/metrics"],
   [/^\/health$/, "/health"],
   [/^\/sync$/, "/sync"],
+  [/^\/search$/, "/search"],
+  [/^\/search\/suggest$/, "/search/suggest"],
   [/^\/llms\.txt$/, "/llms.txt"],
   [/^\/admin\/verify$/, "/admin/verify"],
   [/^\/baseload$/, "/baseload"],

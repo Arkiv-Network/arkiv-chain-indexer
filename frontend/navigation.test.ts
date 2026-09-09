@@ -9,6 +9,7 @@ describe("frontend navigation visibility", () => {
   test("hides admin-only pages when admin mode is not verified", () => {
     expect(visibleLabels(false, true)).toEqual([
       "Home",
+      "Search",
       "Blocks",
       "Data",
       "Block",
@@ -25,6 +26,7 @@ describe("frontend navigation visibility", () => {
   test("shows admin-only pages when admin mode is verified", () => {
     expect(visibleLabels(true, true)).toEqual([
       "Home",
+      "Search",
       "Blocks",
       "Data",
       "Block",
@@ -44,6 +46,7 @@ describe("frontend navigation visibility", () => {
   test("keeps transaction-data pages hidden until the backend feature is available", () => {
     expect(visibleLabels(true, false)).toEqual([
       "Home",
+      "Search",
       "Blocks",
       "Data",
       "Records",
