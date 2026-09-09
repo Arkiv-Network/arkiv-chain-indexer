@@ -391,6 +391,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # frontend/src imports shared modules from ../src; the Dockerfile copies them
+      # from this second context because the build context is frontend/ alone.
+      additional_contexts:
+        shared: ./src
       args:
         VITE_CHAIN_NAME: ${VITE_CHAIN_NAME:-Arkiv}
         VITE_NETWORK_NAME: ${VITE_NETWORK_NAME:-}

@@ -201,7 +201,10 @@ docker compose up --build
 
 - `Dockerfile` (root) builds a single Bun image used by `scanner`, `aggregator`, and `backend` services. The
   service-specific entry point is picked via `command:` in `docker-compose.yml`.
-- `frontend/Dockerfile` builds an nginx image serving the static UI.
+- `frontend/Dockerfile` builds the static UI and serves it with `frontend/server.js`. Its build context is
+  `frontend/` plus a second context named `shared` for the repository's `src/` (declared in
+  `docker-compose.yml` and `.github/workflows/publish-images.yml`), because `frontend/src` imports shared
+  modules such as `src/omniSearchTypes.ts` from `../src`.
 - The `decoder` image this repo publishes is built by `.github/workflows/publish-images.yml` from
   arkiv-transaction-decoder's source at a pinned commit, with `--build-arg PORT=28884`. Deployments probe that
   port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. Compose runs the

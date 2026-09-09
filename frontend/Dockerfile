@@ -1,5 +1,8 @@
 FROM node:22-alpine AS build
-WORKDIR /app
+# Mirror the repository layout: the UI lives in frontend/ and imports shared
+# modules from ../src (see frontend/src/searchApi.ts), so the build stage keeps
+# the same relative paths as the checkout.
+WORKDIR /repo/frontend
 
 ARG VITE_CHAIN_NAME=Arkiv
 ARG VITE_NETWORK_NAME=
@@ -44,6 +47,11 @@ RUN npm ci --no-audit --no-fund
 
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
+# Shared backend/frontend modules come from a second build context named
+# "shared" that points at the repository's src/ directory (docker-compose.yml
+# build.additional_contexts, build-push-action build-contexts). A plain
+# `docker build frontend` has no such context and fails on this line.
+COPY --from=shared . /repo/src
 COPY public ./public
 COPY scripts ./scripts
 RUN npm run build
@@ -51,7 +59,7 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 
-COPY --from=build /app/dist ./dist
+COPY --from=build /repo/frontend/dist ./dist
 COPY server.js ./
 
 ENV NODE_ENV=production

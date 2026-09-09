@@ -90,6 +90,9 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
+          # frontend/src imports shared modules from ../src (see frontend/Dockerfile).
+          build-contexts: |
+            shared=./src
           push: true
           tags: ${{ steps.frontend-meta.outputs.tags }}
           labels: ${{ steps.frontend-meta.outputs.labels }}
