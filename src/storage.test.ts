@@ -237,6 +237,52 @@ if (!hasPostgresForTests()) {
       expect((await storage.queryBalances({ blockNumber: 10n })).map((row) => row.balanceWei)).toEqual(["1"]);
     });
 
+    test("orders balances, logs and fee samples numerically across the 99999/100000 boundary", async () => {
+      // Regression: these queries select `block_number::text AS block_number`, and a
+      // bare `ORDER BY block_number` binds to that text alias, so "99999" sorted
+      // above "100000" and eth_getBalance answered from the wrong block.
+      const storage = await withStorage();
+      const holder = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const log = (logIndex: number) => ({ logIndex, address: "0xfeed" as const, topics: [], data: "0x" as const });
+      for (const [blockNumber, balance, fee] of [
+        [99_999n, 1n, "9"],
+        [100_000n, 2n, "1"],
+        [100_001n, 3n, "5"],
+      ] as const) {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber }),
+          { kind: "lastSuccessfulBlock" },
+          [transactionFixture({ hash: `0x${blockNumber}`, priorityFeeWei: fee, logs: [log(0)] })],
+          [],
+          undefined,
+          new Map([[holder, balance]]),
+        );
+      }
+
+      expect((await storage.getBalanceAt(holder, 100_001n))?.blockNumber).toBe("100001");
+      expect((await storage.queryBalances({})).map((row) => row.blockNumber)).toEqual(["100001", "100000", "99999"]);
+      expect((await storage.queryBalances({ order: "asc" })).map((row) => row.blockNumber)).toEqual([
+        "99999",
+        "100000",
+        "100001",
+      ]);
+      expect((await storage.queryLogs({ fromBlock: 99_999n, toBlock: 100_001n })).map((row) => row.blockNumber)).toEqual([
+        99_999n,
+        100_000n,
+        100_001n,
+      ]);
+      expect((await storage.getPriorityFeeSamples(99_999n, 100_001n)).map((row) => row.blockNumber)).toEqual([
+        99_999n,
+        100_000n,
+        100_001n,
+      ]);
+      expect((await storage.getMinPriorityFeePerBlock(99_999n, 100_001n)).map((row) => row.blockNumber)).toEqual([
+        99_999n,
+        100_000n,
+        100_001n,
+      ]);
+    });
+
     test("reports database and application table sizes", async () => {
       const storage = await withStorage();
       await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 0n }), { kind: "lastSuccessfulBlock" }, [

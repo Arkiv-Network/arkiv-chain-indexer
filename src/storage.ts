@@ -2024,7 +2024,7 @@ export class ScannerStorage {
       `SELECT block_number::text AS block_number, block_date, address, balance_wei
        FROM ${this.qAccountBalances}
        WHERE address = $1 AND block_number <= $2
-       ORDER BY block_number DESC
+       ORDER BY ${this.qAccountBalances}.block_number DESC
        LIMIT 1`,
       [address.toLowerCase(), upToBlock.toString()],
     );
@@ -2077,7 +2077,7 @@ export class ScannerStorage {
       `SELECT block_number::text AS block_number, block_date, address, balance_wei
        FROM ${this.qAccountBalances}
        ${where}
-       ORDER BY block_number ${order}, address ASC
+       ORDER BY ${this.qAccountBalances}.block_number ${order}, address ASC
        LIMIT $${params.length}`,
       params,
     );
@@ -2508,7 +2508,7 @@ export class ScannerStorage {
       `SELECT block_number::text AS block_number, priority_fee_wei, gas_used
        FROM ${this.qTransactions}
        WHERE block_number >= $1 AND block_number <= $2
-       ORDER BY block_number ASC, priority_fee_wei::numeric ASC, position ASC`,
+       ORDER BY ${this.qTransactions}.block_number ASC, priority_fee_wei::numeric ASC, position ASC`,
       [fromBlock.toString(), toBlock.toString()],
     );
     return result.rows.map((row) => ({
@@ -2535,7 +2535,7 @@ export class ScannerStorage {
        FROM ${this.qTransactions}
        WHERE block_number >= $1 AND block_number <= $2
        GROUP BY block_number
-       ORDER BY block_number ASC`,
+       ORDER BY ${this.qTransactions}.block_number ASC`,
       [fromBlock.toString(), toBlock.toString()],
     );
     return result.rows.map((row) => ({
@@ -2596,7 +2596,7 @@ export class ScannerStorage {
       `SELECT ${LOG_SELECT_COLUMNS}
        FROM ${this.qTransactionLogs}
        WHERE ${clauses.join(" AND ")}
-       ORDER BY block_number ASC, position ASC, log_index ASC
+       ORDER BY ${this.qTransactionLogs}.block_number ASC, position ASC, log_index ASC
        LIMIT $${params.length}`,
       params,
     );
