@@ -843,6 +843,11 @@ HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, 
 `/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
 under `features.jsonRpc`.
 
+It is an admin surface: every `POST` needs `Authorization: Bearer <token>` matching
+`BASELOAD_ADMIN_BEARER_TOKEN` (`401`/`403` otherwise, `503` when no token is configured), because the passthrough
+below spends the upstream node's quota and reaches its mempool. The experimental index path,
+`POST /shadow-rpc/experimental`, stays open to everyone.
+
 The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
 answers from what the scanner happened to store, so treat it as a fast read cache for indexed history rather
 than a source of truth — anything you would trust for consensus, settlement or proofs belongs on a real node.
@@ -927,6 +932,7 @@ Example:
 
 ```sh
 curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $BASELOAD_ADMIN_BEARER_TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 
@@ -1201,9 +1207,12 @@ are hidden:
   menu to query by that value only, add it to the current query, or copy it. "Load next page" resumes the
   node's cursor at the block the first page was read at; "Expiring within 24h" filters the loaded cards
   client-side. Syntax errors show the node's message with a caret at the reported position. Below the results
-  is a collapsed RPC endpoint switch: the **indexer backend** (`/api/shadow-rpc`, which forwards `arkiv_query`,
-  `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the node it is configured with, using the deployment's
-  key) or a **custom RPC URL** called straight from the browser. The choice is kept in browser local storage.
+  is a collapsed RPC endpoint switch: the **experimental entity index** (`/api/shadow-rpc/experimental`, the
+  default) or a **custom RPC URL** called straight from the browser; in admin mode the **indexer backend**
+  (`/api/shadow-rpc`, which forwards `arkiv_query`, `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the
+  node it is configured with, using the deployment's key and the admin token) and **Both (compare)** join the
+  list. The choice is kept in browser local storage; a remembered or linked `backend`/`both` is used as the
+  index outside admin mode.
   "Check connection" runs `eth_chainId`, `web3_clientVersion` and the three Arkiv reads against the selected
   endpoint and reports each call's verdict, latency and result, plus the node's head block, block time, live
   entity count and a sample entity key linked to its indexed history. The page also reads `/api/health` to warn

@@ -176,6 +176,11 @@ HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, 
 `/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
 under `features.jsonRpc`.
 
+It is an admin surface: every `POST` needs `Authorization: Bearer <token>` matching
+`BASELOAD_ADMIN_BEARER_TOKEN` (`401`/`403` otherwise, `503` when no token is configured), because the passthrough
+below spends the upstream node's quota and reaches its mempool. The experimental index path,
+`POST /shadow-rpc/experimental`, stays open to everyone.
+
 The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
 answers from what the scanner happened to store, so treat it as a fast read cache for indexed history rather
 than a source of truth — anything you would trust for consensus, settlement or proofs belongs on a real node.
@@ -260,6 +265,7 @@ Example:
 
 ```sh
 curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $BASELOAD_ADMIN_BEARER_TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 

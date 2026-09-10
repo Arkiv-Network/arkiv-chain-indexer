@@ -38,7 +38,7 @@ export const DEFAULT_RPC_TIMEOUT_MS = 15_000;
 const SOURCE_KIND_STORAGE_KEY = "data.rpcSourceKind";
 const CUSTOM_URL_STORAGE_KEY = "data.rpcCustomUrl";
 
-export const DEFAULT_RPC_SOURCE: RpcSource = { kind: "backend", customUrl: "" };
+export const DEFAULT_RPC_SOURCE: RpcSource = { kind: "index", customUrl: "" };
 
 export function isRpcSourceKind(value: string): value is RpcSourceKind {
   return value === "backend" || value === "index" || value === "custom";
@@ -88,6 +88,20 @@ export type RpcMode = RpcSourceKind | "both";
 
 /** The `rpc=` link value that asks for the side-by-side comparison. */
 export const COMPARE_RPC_LINK_VALUE = "both";
+
+/**
+ * Whether a mode talks to the backend's node relay, which the backend serves
+ * only with the admin bearer token: `backend` outright, `both` for one of its
+ * two sides. The experimental index and a custom node are open to everyone.
+ */
+export function rpcModeNeedsAdmin(mode: RpcMode): boolean {
+  return mode === "backend" || mode === "both";
+}
+
+/** The mode this browser may actually use: an admin's choice as made, anyone else's lowered to the index. */
+export function permittedRpcMode(mode: RpcMode, adminModeActive: boolean): RpcMode {
+  return !adminModeActive && rpcModeNeedsAdmin(mode) ? "index" : mode;
+}
 
 /** The two endpoints `both` compares, the node's relay first. */
 export const COMPARE_SOURCES: readonly [RpcSource, RpcSource] = [
@@ -187,6 +201,12 @@ export interface RpcCallDeps {
   timeoutMs?: number;
   /** Lets the caller cancel a call before the timeout does. */
   signal?: AbortSignal;
+  /**
+   * The admin bearer token, sent only to the backend's node relay
+   * (`/api/shadow-rpc`), which refuses calls without it. Never sent to a
+   * custom node or to the index.
+   */
+  bearerToken?: string | undefined;
 }
 
 /** One signal that fires when either input does, without relying on `AbortSignal.any`. */
@@ -227,11 +247,14 @@ export async function callRpc<T = unknown>(
   const id = nextRequestId++;
   const endpoint = rpcEndpointUrl(source);
 
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json" };
+  if (source.kind === "backend" && deps.bearerToken) headers.authorization = `Bearer ${deps.bearerToken}`;
+
   let response: Response;
   try {
     response = await fetchImpl(endpoint, {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers,
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       signal: combineSignals(AbortSignal.timeout(timeoutMs), deps.signal),
     });

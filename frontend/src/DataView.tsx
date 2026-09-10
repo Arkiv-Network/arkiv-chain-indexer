@@ -30,6 +30,7 @@ import {
   isAbortError,
   isValidRpcUrl,
   missingBackendMethods,
+  permittedRpcMode,
   readStoredRpcMode,
   readStoredRpcSource,
   rpcModeFromLinkValue,
@@ -74,6 +75,10 @@ interface DataViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  /** Whether the node relay (`backend`, `both`) may be offered; without it the page is index-only. */
+  adminModeActive: boolean;
+  /** The token the relay is called with in admin mode; undefined otherwise. */
+  adminToken: string | undefined;
 }
 
 type BackendForwarding =
@@ -116,13 +121,19 @@ const EMPTY_RESULTS: ResultState = {
   error: null,
 };
 
-export function DataView({ locationSearch, onLocationChange, timeZone }: DataViewProps) {
+export function DataView({ locationSearch, onLocationChange, timeZone, adminModeActive, adminToken }: DataViewProps) {
   const urlFilters = readFiltersFromSearch(locationSearch, DATA_FILTER_KEYS, EMPTY_DATA_FILTERS);
 
   // A link that names an endpoint wins over the remembered one, without overwriting it.
   const linkedSource = modeFromUrl(urlFilters.rpc);
-  const [source, setSource] = useState<RpcSource>(() => linkedSource?.source ?? readStoredRpcSource());
-  const [mode, setMode] = useState<RpcMode>(() => linkedSource?.mode ?? readStoredRpcMode());
+  const [chosenSource, setSource] = useState<RpcSource>(() => linkedSource?.source ?? readStoredRpcSource());
+  const [chosenMode, setMode] = useState<RpcMode>(() => linkedSource?.mode ?? readStoredRpcMode());
+  // The relay is an admin surface: outside admin mode a remembered or linked
+  // `backend`/`both` is used as `index`, and the choice itself is kept for
+  // when admin mode comes back.
+  const mode = permittedRpcMode(chosenMode, adminModeActive);
+  const source: RpcSource = mode === "both" || mode === chosenSource.kind ? chosenSource : { ...chosenSource, kind: mode };
+  const rpcDeps = { bearerToken: adminToken };
   const [backend, setBackend] = useState<BackendForwarding>({ status: "loading" });
   const [check, setCheck] = useState<CheckState>({ status: "idle" });
   const [comparison, setComparison] = useState<CompareState>({ status: "idle" });
@@ -187,7 +198,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
           pageSize: Number(size),
           ...(continueFrom ? { cursor: continueFrom.cursor, atBlock: continueFrom.atBlock } : {}),
         });
-        const deps = { signal: controller.signal };
+        const deps = { ...rpcDeps, signal: controller.signal };
         const [pageResult, timingResult] = await Promise.all([
           callRpc(via, "arkiv_query", params, deps),
           // Block timing turns heights into dates; a failure there is not a query failure.
@@ -240,7 +251,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     setResults({ ...EMPTY_RESULTS, executedQuery: normalized, running: "first" });
 
     const [nodeSource, indexSource] = COMPARE_SOURCES;
-    const deps = { signal: controller.signal };
+    const deps = { ...rpcDeps, signal: controller.signal };
     /** A cancelled run takes its own spinner down, unless a newer run owns it now. */
     const cancelled = () => {
       if (abortRef.current !== null && abortRef.current !== controller) return;
@@ -421,7 +432,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     }
     setFormError(null);
     setCheck({ status: "running", startedAt: Date.now() });
-    const report = await checkRpcSource(checkSource);
+    const report = await checkRpcSource(checkSource, rpcDeps);
     setCheck({ status: "done", report });
   };
 
@@ -467,8 +478,8 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       </div>
 
       <p className="summary">
-        Query the live entity state held by an Arkiv node. The index does not store entity state, so every result here
-        comes straight from the selected RPC endpoint.{" "}
+        Query entity state from the indexer&apos;s experimental entity index, or from any node you name; in admin mode
+        the deployment&apos;s own node relay is available too, so the two can be compared.{" "}
         <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
           Query language docs
         </a>
@@ -478,14 +489,16 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       <div className="rpc-mode-bar">
         <span className="rpc-mode-label">Query against</span>
         <div className="segmented rpc-mode-segmented" role="group" aria-label="RPC source">
-          <button
-            type="button"
-            className={mode === "backend" ? "active" : ""}
-            title={BACKEND_RPC_PATH}
-            onClick={() => updateMode("backend")}
-          >
-            Default node
-          </button>
+          {adminModeActive ? (
+            <button
+              type="button"
+              className={mode === "backend" ? "active" : ""}
+              title={BACKEND_RPC_PATH}
+              onClick={() => updateMode("backend")}
+            >
+              Default node
+            </button>
+          ) : null}
           <button
             type="button"
             className={mode === "index" ? "active" : ""}
@@ -494,9 +507,11 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
           >
             Experimental index
           </button>
-          <button type="button" className={mode === "both" ? "active" : ""} onClick={() => updateMode("both")}>
-            Both (compare)
-          </button>
+          {adminModeActive ? (
+            <button type="button" className={mode === "both" ? "active" : ""} onClick={() => updateMode("both")}>
+              Both (compare)
+            </button>
+          ) : null}
           {mode === "custom" || source.customUrl.trim() ? (
             <button
               type="button"
@@ -648,6 +663,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
             <div className="tx-detail-group">
               <h3>RPC endpoint</h3>
               <div className="rpc-source-options" role="radiogroup" aria-label="RPC endpoint">
+                {adminModeActive ? (
                 <label className={`rpc-source-option${mode === "backend" ? " selected" : ""}`}>
                   <input
                     type="radio"
@@ -665,6 +681,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                     <BackendForwardingNote backend={backend} missing={missing} />
                   </span>
                 </label>
+                ) : null}
                 <label className={`rpc-source-option${mode === "index" ? " selected" : ""}`}>
                   <input
                     type="radio"
@@ -714,6 +731,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                     />
                   </span>
                 </label>
+                {adminModeActive ? (
                 <label className={`rpc-source-option${mode === "both" ? " selected" : ""}`}>
                   <input
                     type="radio"
@@ -734,6 +752,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                     <IndexStatusNote backend={backend} />
                   </span>
                 </label>
+                ) : null}
               </div>
             </div>
             <div className="tx-detail-group rpc-check-actions">

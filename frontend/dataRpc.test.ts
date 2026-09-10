@@ -12,7 +12,9 @@ import {
   isValidRpcUrl,
   missingBackendMethods,
   isRpcMode,
+  permittedRpcMode,
   readStoredRpcMode,
+  rpcModeNeedsAdmin,
   readStoredRpcSource,
   rpcEndpointUrl,
   rpcLinkValue,
@@ -134,7 +136,7 @@ describe("rpc source selection", () => {
 
   test("the mode round-trips through storage and falls back to the remembered source kind", () => {
     const storage = memoryStorage();
-    expect(readStoredRpcMode(storage)).toBe("backend");
+    expect(readStoredRpcMode(storage)).toBe("index");
 
     // A browser that only ever stored the source kind keeps that as its mode.
     storage.setItem("gas-price-tracker:data.rpcSourceKind", "index");
@@ -167,9 +169,9 @@ describe("rpc source selection", () => {
     expect(describeRpcEndpoint({ kind: "custom", customUrl: "not a url" })).toBe("not a url");
   });
 
-  test("the choice round-trips through storage and falls back to the backend", () => {
+  test("the choice round-trips through storage and falls back to the index", () => {
     const storage = memoryStorage();
-    expect(readStoredRpcSource(storage)).toEqual({ kind: "backend", customUrl: "" });
+    expect(readStoredRpcSource(storage)).toEqual({ kind: "index", customUrl: "" });
 
     writeStoredRpcSource(CUSTOM, storage);
     expect(readStoredRpcSource(storage)).toEqual(CUSTOM);
@@ -178,8 +180,22 @@ describe("rpc source selection", () => {
     expect(readStoredRpcSource(storage).kind).toBe("index");
 
     storage.setItem("gas-price-tracker:data.rpcSourceKind", "bogus");
-    expect(readStoredRpcSource(storage).kind).toBe("backend");
+    expect(readStoredRpcSource(storage).kind).toBe("index");
     expect(readStoredRpcSource(storage).customUrl).toBe(CUSTOM.customUrl);
+  });
+
+  test("the node relay and the comparison are admin-only; everyone else is lowered to the index", () => {
+    expect(rpcModeNeedsAdmin("backend")).toBe(true);
+    expect(rpcModeNeedsAdmin("both")).toBe(true);
+    expect(rpcModeNeedsAdmin("index")).toBe(false);
+    expect(rpcModeNeedsAdmin("custom")).toBe(false);
+    for (const mode of ["backend", "index", "custom", "both"] as const) {
+      expect(permittedRpcMode(mode, true)).toBe(mode);
+    }
+    expect(permittedRpcMode("backend", false)).toBe("index");
+    expect(permittedRpcMode("both", false)).toBe("index");
+    expect(permittedRpcMode("index", false)).toBe("index");
+    expect(permittedRpcMode("custom", false)).toBe("custom");
   });
 
   test("missing backend methods are computed from the health feature list", () => {
@@ -199,6 +215,20 @@ describe("callRpc", () => {
     const result = await callRpc(CUSTOM, "eth_chainId", [], { fetchImpl });
     expect(result).toBe("0x7614d1");
     expect(calls).toEqual([{ url: CUSTOM.customUrl, method: "eth_chainId", params: [] }]);
+  });
+
+  test("the admin token goes to the backend relay only, never to a custom node or the index", async () => {
+    const seen: Array<string | undefined> = [];
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push((init?.headers as Record<string, string>).authorization);
+      return jsonResponse({ jsonrpc: "2.0", id: 1, result: "0x1" });
+    }) as unknown as typeof fetch;
+    const deps = { fetchImpl, bearerToken: "s3cret" };
+    await callRpc({ kind: "backend", customUrl: "" }, "eth_chainId", [], deps);
+    await callRpc({ kind: "index", customUrl: "" }, "eth_chainId", [], deps);
+    await callRpc(CUSTOM, "eth_chainId", [], deps);
+    await callRpc({ kind: "backend", customUrl: "" }, "eth_chainId", [], { fetchImpl });
+    expect(seen).toEqual(["Bearer s3cret", undefined, undefined, undefined]);
   });
 
   test("a node error becomes an RpcCallError carrying the code and method", async () => {

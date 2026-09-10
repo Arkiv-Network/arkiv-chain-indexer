@@ -254,12 +254,48 @@ describe("JSON-RPC body cap", () => {
     expect(Buffer.byteLength(body)).toBeGreaterThan(1024 * 1024);
     const request = new Request("http://example.test/shadow-rpc", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: "Bearer secret" },
       body,
     });
     request.headers.delete("content-length");
-    const response = await handleRequest(request, {} as ScannerStorage);
+    const response = await handleRequest(request, {} as ScannerStorage, { baseloadAdminBearerToken: "secret" });
     expect(response.status).toBe(413);
+  });
+});
+
+describe("POST /shadow-rpc is an admin surface", () => {
+  const storage = { getChainId: async () => 1337n } as unknown as ScannerStorage;
+  const post = (path: string, headers: Record<string, string> = {}, options = {}) =>
+    handleRequest(
+      new Request(`http://example.test${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+      }),
+      storage,
+      options,
+    );
+
+  test("answers with the admin bearer token and refuses without it", async () => {
+    const options = { baseloadAdminBearerToken: "secret" };
+    expect((await post("/shadow-rpc", {}, options)).status).toBe(401);
+    expect((await post("/shadow-rpc", { authorization: "Bearer wrong" }, options)).status).toBe(403);
+    const ok = await post("/shadow-rpc", { authorization: "Bearer secret" }, options);
+    expect(ok.status).toBe(200);
+    await expect(ok.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: "0x539" });
+  });
+
+  test("is unavailable when no admin token is configured", async () => {
+    const response = await post("/shadow-rpc");
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: "Admin bearer token is not configured on the backend" });
+  });
+
+  test("the experimental index path stays open", async () => {
+    const entityIndex = {} as never;
+    const response = await post("/shadow-rpc/experimental", {}, { entityIndex });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: "0x539" });
   });
 });
 

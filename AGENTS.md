@@ -116,7 +116,9 @@ docker compose up --build
   when none is set — never let that path fall open. Successful scrapes of either path are excluded from the traffic metrics; rejected ones are counted so admin-token probing is visible.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
   once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
-  data — the only path to a node is the opt-in passthrough below. `latest` means the indexed head (`scanner_state.last_successful_block`);
+  data — the only path to a node is the opt-in passthrough below. The path demands `BASELOAD_ADMIN_BEARER_TOKEN`
+  (it spends the upstream's quota), while `/shadow-rpc/experimental` is open; the Data tab offers only the
+  index and a custom node outside admin mode. `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
   calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns

@@ -787,6 +787,12 @@ async function routeRequest(
   }
 
   if (url.pathname === JSON_RPC_PATH) {
+    // The node relay spends the upstream's quota and reaches its mempool, so
+    // it is an admin surface; the entity index below answers anonymously.
+    if (request.method === "POST") {
+      const authError = requireAdminBearerToken(request, options.baseloadAdminBearerToken);
+      if (authError) return authError;
+    }
     return handleJsonRpcRequest(request, storage, transactionDataEnabled, options.jsonRpcPassthrough);
   }
 

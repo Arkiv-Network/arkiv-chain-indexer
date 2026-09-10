@@ -642,7 +642,13 @@ export function App() {
             lockedAddress={addressParam}
           />
         ) : activeView === "data" ? (
-          <DataView locationSearch={locationSearch} onLocationChange={refreshFromLocation} timeZone={timeZone} />
+          <DataView
+            locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+            adminModeActive={adminModeIsActive}
+            adminToken={adminBearerToken()}
+          />
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView
             onLocationChange={refreshFromLocation}
