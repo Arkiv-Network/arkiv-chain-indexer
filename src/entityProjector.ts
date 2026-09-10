@@ -117,6 +117,8 @@ const DEFAULT_LATE_SCAN_INTERVAL_MS = 60_000;
 const DEFAULT_LATE_SCAN_OVERLAP_MS = 120_000;
 const DEFAULT_MAX_TICK_MS = 30_000;
 const DEFAULT_LIVE_COUNT_INTERVAL_MS = 60_000;
+/** Longest wait between two attempts once ticks keep failing. */
+const MAX_RETRY_MS = 60_000;
 /** A count that took `t` waits at least this many `t` before the next: a slow count stays rare. */
 const LIVE_COUNT_DUTY_FACTOR = 20;
 export const DEFAULT_GENESIS_RPC_LIMIT = 1_000_000;
@@ -136,6 +138,18 @@ const GENESIS_IDLE: GenesisStageOutcome = { status: undefined, imported: 0, repa
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * How long to wait before the attempt that follows `failures` consecutive
+ * failed ticks: the poll interval, doubled per failure and capped. A tick that
+ * fails on something transient retries at the poll interval, while one that
+ * cannot succeed — a chunk whose fold the database refuses — backs off instead
+ * of replaying the same work every poll.
+ */
+export function retryDelayMs(failures: number, pollMs: number, capMs: number = MAX_RETRY_MS): number {
+  if (failures <= 0) return pollMs;
+  return Math.min(pollMs * 2 ** (failures - 1), capMs);
 }
 
 export class EntityProjector {
@@ -197,14 +211,24 @@ export class EntityProjector {
   /** Fold on a loop until {@link stop}. */
   start(): void {
     this.stopped = false;
+    let failures = 0;
     const tick = async () => {
       if (this.stopped) return;
+      let waitMs = this.pollMs;
       try {
         await this.runOnce();
+        failures = 0;
       } catch (error) {
-        this.onError(error);
+        failures += 1;
+        waitMs = retryDelayMs(failures, this.pollMs);
+        this.onError(
+          new Error(
+            `${describeError(error)} (${failures} consecutive failures, next attempt in ${waitMs}ms)`,
+            { cause: error },
+          ),
+        );
       }
-      if (!this.stopped) this.timer = setTimeout(tick, this.pollMs);
+      if (!this.stopped) this.timer = setTimeout(tick, waitMs);
     };
     this.timer = setTimeout(tick, 0);
   }
@@ -289,14 +313,7 @@ export class EntityProjector {
       const chunkStart = Date.now();
       const chunkEnd = await this.storage.planChunkEnd(through, head, this.maxOpsPerChunk);
       const keys = await this.storage.keysTouchedBetween(through, chunkEnd);
-      const folded = await this.storage.withFoldLock(async (client) => {
-        const refold = await this.storage.refoldEntities(keys, chunkEnd, client);
-        await this.storage.setProgress(
-          { projectedThroughBlock: chunkEnd, lastFoldAt: new Date().toISOString() },
-          client,
-        );
-        return refold;
-      });
+      const folded = await this.foldChunk(keys, through, chunkEnd);
       if (folded === undefined) {
         result.lockHeldElsewhere = true;
         break;
@@ -316,6 +333,37 @@ export class EntityProjector {
       result.chunksFolded > 0 || result.lateKeysRefolded > 0 || genesis.repaired > 0 || genesis.status === "done",
     );
     return result;
+  }
+
+  /**
+   * Refold one chunk's keys and record the fold point, both under the lock.
+   * Returns undefined when another projector held it.
+   *
+   * A failure carries the chunk it was folding. The fold point only moves on
+   * success, so the same chunk is attempted again on the next tick; its block
+   * range and key count are what identify the work that is stuck, and how much
+   * of it there is.
+   */
+  private async foldChunk(
+    keys: readonly string[],
+    after: bigint,
+    chunkEnd: bigint,
+  ): Promise<{ entities: number; versions: number } | undefined> {
+    try {
+      return await this.storage.withFoldLock(async (client) => {
+        const refold = await this.storage.refoldEntities(keys, chunkEnd, client);
+        await this.storage.setProgress(
+          { projectedThroughBlock: chunkEnd, lastFoldAt: new Date().toISOString() },
+          client,
+        );
+        return refold;
+      });
+    } catch (error) {
+      throw new Error(
+        `folding blocks ${after + 1n}..${chunkEnd} (${keys.length} entity keys) failed: ${describeError(error)}`,
+        { cause: error },
+      );
+    }
   }
 
   /**
