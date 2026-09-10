@@ -4,7 +4,7 @@ Consolidated on **2026-09-09** from Claude's 23 project memory notes, the parent
 Arkiv workspace's RPC quota note, repository documentation, and local Git history.
 Implementation checks refer to **`b473873491e698ce842506d23c4095cdfa066683` on `main`**
 (package version `0.4.0`); the paragraphs marked **September 9, evening** cover the
-commits through **`8baf173`**, tagged **`v0.5.0`**, and **`9dcfed4`**, tagged **`v0.5.1`**. The later September 9 search release is **`6499cf7`**, tagged **`v0.5.2`**, deployed to Kalarepa around 20:36 UTC. This is a durable handoff: what was
+commits through **`8baf173`**, tagged **`v0.5.0`**, and **`9dcfed4`**, tagged **`v0.5.1`**. The later September 9 search release is **`6499cf7`**, tagged **`v0.5.2`**, deployed to Kalarepa around 20:36 UTC; **`6d6fff2`** (`v0.5.3`, responsive header) followed it and is what Kalarepa runs; **`v0.5.4`** carries the first batch of fixes from the September 10 sweep (`docs/v0.5.3-sweep-triage.md`) and is not yet deployed. This is a durable handoff: what was
 built, why it works this way, operational lessons, and unfinished work.
 
 **Evidence boundaries:** “code” describes files inspected at that commit;
@@ -173,6 +173,8 @@ local history; infrastructure incidents are dated memory observations.
 | September 9, evening | Genesis checks completed on the Sourcify seed; the app image ships `scripts/` after the offline importer failed with “Module not found” in the container; the genesis walk stops between batches on shutdown; release v0.5.0, deployed to Kalarepa at 20:00 UTC. arkiv-prefill committed its Sourcify run and the indexer integration. | `eef3514`, `5f10367`, `8baf173`, `243a51b`; prefill `024b780` |
 | September 9, night | The Data screen is titled “HOME >> DATA / EXPERIMENTAL — USE WITH CAUTION” (also in the browser title); release v0.5.1. Draft PRs to run it on Tiramisu: db-chain-mgr #387 adds `spec.indexer.entityQueryIndex` / `shadowRpc` (chart 0.25.0), db-chain-deployments #25 pins v0.5.1 with both on. | `b8d2f7f`, `9dcfed4` |
 | September 9, 20:36 UTC | Search narrowed to existing block/hash/entity/address indexes; attributes, values, payloads and recent metadata are excluded. Released and deployed v0.5.2 to Kalarepa; live checks passed and paused backfill was preserved. | `6499cf7` |
+| September 9, late | Search fitted into the responsive navigation header; authenticated mobile navigation and admin layouts fixed. Released v0.5.3 and deployed it to Kalarepa (the `v0.5.2` tag was never pushed, so no `v0.5.2` images exist). | `d8ebe61`, `c38f0f7`, `6d6fff2` |
+| September 10 | Full sweep of v0.5.3 written up in `docs/v0.5.3-sweep-triage.md`. Batch 1 fixed and released as v0.5.4: `ORDER BY` bound to the `::text` alias (balances, logs and fee samples sorted lexicographically — wrong `eth_getBalance` past block 99999); `/api/%2e%2e/metrics` reaching the open `/metrics` (proxied requests are now refused when no token is set); admin auth failing open with no token; out-of-range block/nonce/date params answering 500 or inverting filters; NUL, `$createdAt` past 2^63 and forged cursors leaking driver text as `-32603`; the JSON-RPC body cap measured in UTF-16 units; the locked baseload view still polling `/baseload`; `0xFE` bytecode aborting a genesis import; the frontend test files never typechecked (now `bun run typecheck:frontend-tests`, wired into CI). B3 (refold cost), G6, G8 and the rough edges are still open. | `8e62519`..`19ab69b` |
 
 ## Deployment and neighboring repositories
 
