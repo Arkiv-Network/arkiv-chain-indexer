@@ -529,7 +529,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
       </div>
       {indexOff && (mode === "index" || mode === "both") ? (
         <p className="summary rpc-mode-warning">
-          This deployment has not enabled the entity index (<span className="mono">ENTITY_QUERY_INDEX</span>), so{" "}
+          This deployment has switched the entity index off (<span className="mono">ENTITY_QUERY_INDEX=false</span>), so{" "}
           <span className="mono">{BACKEND_INDEX_RPC_PATH}</span> answers 404.
         </p>
       ) : null}
@@ -874,7 +874,7 @@ function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
   if (index === false) {
     return (
       <span className="rpc-source-option-status warn">
-        This deployment has not enabled the entity index (<span className="mono">ENTITY_QUERY_INDEX</span>), so
+        This deployment has switched the entity index off (<span className="mono">ENTITY_QUERY_INDEX=false</span>), so
         this endpoint answers 404.
       </span>
     );

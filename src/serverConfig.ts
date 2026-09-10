@@ -24,7 +24,8 @@ import {
  * Present only when an upstream URL is configured; absent, nothing is forwarded.
  */
 export interface JsonRpcPassthroughConfig {
-  url: string;
+  /** Unset means "the node the scanner recorded" (`scanner_state.scanner_rpc_url`). */
+  url?: string;
   apiKey?: string;
   methods: string[];
   timeoutMs: number;
@@ -52,7 +53,7 @@ export interface ServerConfig {
   listCacheTtlMs: number;
   transactionCountCacheMaxEntries: number;
   transactionCountCacheTtlMs: number;
-  jsonRpcPassthrough?: JsonRpcPassthroughConfig;
+  jsonRpcPassthrough: JsonRpcPassthroughConfig;
   /**
    * Serve the Arkiv entity reads from the indexer's own experimental entity
    * index at `POST /shadow-rpc/experimental`, and run the projector that
@@ -241,9 +242,9 @@ const SPEC: CliSpec = {
     {
       flags: "--entity-query-index <bool>",
       description:
-        "Experimental: answer arkiv_query, arkiv_getEntity, arkiv_getEntityCount and arkiv_getBlockTiming from the indexer's own entity index at POST /shadow-rpc/experimental, and run the projector that builds it. Defaults to false (or ENTITY_QUERY_INDEX). /shadow-rpc keeps forwarding those methods to the upstream node.",
+        "Answer arkiv_query, arkiv_getEntity, arkiv_getEntityCount and arkiv_getBlockTiming from the indexer's own entity index at POST /shadow-rpc/experimental, and run the projector that builds it. Defaults to true (or ENTITY_QUERY_INDEX); false switches the index off. /shadow-rpc keeps forwarding those methods to the upstream node.",
       env: ["ENTITY_QUERY_INDEX"],
-      default: "false",
+      default: "true",
     },
     {
       flags: "--entity-index-floor-block <n>",
@@ -280,7 +281,7 @@ const SPEC: CliSpec = {
     {
       flags: "--shadow-rpc-upstream <url>",
       description:
-        "Real JSON-RPC node that POST /shadow-rpc forwards submission methods to. Unset (the default) keeps the endpoint node-free and those methods answer -32601.",
+        "Real JSON-RPC node that POST /shadow-rpc forwards the allowlisted methods to. Unset (the default) follows the scanner to the node it recorded in scanner_state, keyless; set it to relay elsewhere or with SHADOW_RPC_UPSTREAM_API_KEY.",
       env: ["SHADOW_RPC_UPSTREAM"],
     },
     {
@@ -426,7 +427,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   // Same compose `${VAR:-}` rule as intOrDefault: an empty string means "default".
   const boolOrDefault = (flag: string, raw: string | undefined, fallback: boolean) =>
     raw ? coerceBoolean(flag, raw) : fallback;
-  const entityQueryIndex = boolOrDefault("--entity-query-index", cli.value("entity-query-index"), false);
+  const entityQueryIndex = boolOrDefault("--entity-query-index", cli.value("entity-query-index"), true);
   const metricsEnabled = boolOrDefault("--metrics-enabled", cli.value("metrics-enabled"), true);
   const metricsBearerToken = cli.value("metrics-bearer-token");
   const entityIndexFloorBlockValue = cli.value("entity-index-floor-block")?.trim();
@@ -434,19 +435,22 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     ? BigInt(coerceInt("--entity-index-floor-block", entityIndexFloorBlockValue))
     : undefined;
 
-  // The upstream URL is the switch: no URL, no passthrough, and the rest of
-  // these settings never come into play.
+  // The passthrough is always on: with no URL it follows the scanner to the
+  // node recorded in scanner_state, so a deployment relays without being told
+  // the node twice.
   const passthroughUrl = cli.value("shadow-rpc-upstream")?.trim();
-  let jsonRpcPassthrough: JsonRpcPassthroughConfig | undefined;
-  if (passthroughUrl) {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(passthroughUrl);
-    } catch {
-      throw new Error(`--shadow-rpc-upstream must be a URL: ${passthroughUrl}`);
-    }
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      throw new Error("--shadow-rpc-upstream must be an http(s) URL");
+  let jsonRpcPassthrough: JsonRpcPassthroughConfig;
+  {
+    let parsedUrl: URL | undefined;
+    if (passthroughUrl) {
+      try {
+        parsedUrl = new URL(passthroughUrl);
+      } catch {
+        throw new Error(`--shadow-rpc-upstream must be a URL: ${passthroughUrl}`);
+      }
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        throw new Error("--shadow-rpc-upstream must be an http(s) URL");
+      }
     }
     const methods = parsePassthroughMethods(
       cli.value("shadow-rpc-upstream-methods")?.trim() || DEFAULT_PASSTHROUGH_METHODS.join(","),
@@ -467,7 +471,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     );
     const apiKey = cli.value("shadow-rpc-upstream-api-key")?.trim();
     jsonRpcPassthrough = {
-      url: passthroughUrl,
+      ...(passthroughUrl ? { url: passthroughUrl } : {}),
       ...(apiKey ? { apiKey } : {}),
       methods,
       timeoutMs,
@@ -523,7 +527,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     listCacheTtlMs,
     transactionCountCacheMaxEntries,
     transactionCountCacheTtlMs,
-    ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
+    jsonRpcPassthrough,
     entityQueryIndex,
     metricsEnabled,
     ...(metricsBearerToken ? { metricsBearerToken } : {}),

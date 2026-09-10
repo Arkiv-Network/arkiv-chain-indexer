@@ -895,13 +895,14 @@ unless the passthrough below is configured to forward them.
 Everything above is answered from PostgreSQL, which works for reads and cannot work for writes: a transaction
 has to reach a node's mempool, and no amount of stored history puts it there. Setting `SHADOW_RPC_UPSTREAM`
 opens one narrow hole — the methods in `SHADOW_RPC_UPSTREAM_METHODS`, and only those, are relayed to that node
-and their answers returned unchanged. It is never an open proxy. Unset (the default) nothing is forwarded and
-the endpoint talks to nothing but PostgreSQL. `GET /health` lists what is forwarded under
-`features.jsonRpcPassthrough`, or `false` when nothing is.
+and their answers returned unchanged. It is never an open proxy. Unset (the default) the relay follows the
+scanner: the scanner records the node it reads in `scanner_state` (`scanner_rpc_url`) at startup and the
+backend forwards there, keyless, so a deployment is told its node once. `GET /health` lists what is forwarded
+under `features.jsonRpcPassthrough`.
 
 | Environment variable | Default | Description |
 | --- | --- | --- |
-| `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset disables the passthrough. In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
+| `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset follows the node the scanner recorded (`SCANNER_RPC_FULL_NODE`, without its key). In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
 | `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
 | `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntity,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
 | `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
@@ -938,7 +939,7 @@ curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
 
 #### Experimental: entity reads from the index (`POST /shadow-rpc/experimental`)
 
-Off by default. With `ENTITY_QUERY_INDEX=true` the backend folds the decoded Arkiv operations
+On by default (`ENTITY_QUERY_INDEX=false` switches it off). The backend folds the decoded Arkiv operations
 (`transaction_operations`, so `SAVE_TRANSACTION_DATA=true` and a `DECODER_URL` are required) and the receipt
 event logs (`transaction_logs`) into two tables of its own — `entity_versions`, one row per state an entity
 went through with the block range it held for, and `entity_version_attributes`, that state's typed
@@ -1161,7 +1162,7 @@ A scrape config and starter queries are in [`docs/prometheus.md`](docs/prometheu
 | `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
-| `--entity-query-index` | `ENTITY_QUERY_INDEX` | `false` | Build the experimental entity index and serve `POST /shadow-rpc/experimental`. |
+| `--entity-query-index` | `ENTITY_QUERY_INDEX` | `true` | Build the entity index and serve `POST /shadow-rpc/experimental`; `false` switches it off. |
 | `--metrics-enabled` | `METRICS_ENABLED` | `true` | Serve Prometheus metrics on `GET /metrics`. |
 | `--metrics-bearer-token` | `METRICS_BEARER_TOKEN` | unset | Require `Authorization: Bearer <token>` on `GET /metrics`. |
 | `--entity-index-floor-block` | `ENTITY_INDEX_FLOOR_BLOCK` | detected | Pin the index floor instead of detecting the first keyed create. |

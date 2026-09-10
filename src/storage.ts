@@ -26,6 +26,7 @@ const LATEST_OBSERVED_BLOCK_KEY = "latest_observed_block";
 const SAFE_HEAD_BLOCK_KEY = "safe_head_block";
 const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
 const CHAIN_ID_KEY = "chain_id";
+const SCANNER_RPC_URL_KEY = "scanner_rpc_url";
 
 /** Upper bound on blocks one eth_feeHistory call may cover (the JSON-RPC spec's own cap). */
 export const MAX_FEE_HISTORY_BLOCKS = 1024;
@@ -997,6 +998,21 @@ export class ScannerStorage {
     await this.upsertStateValue(this.db, CHAIN_ID_KEY, chainId.toString());
   }
 
+  /**
+   * The JSON-RPC node the scanner reads, recorded at its startup so the HTTP
+   * backend's /shadow-rpc relay can reach the same node without being told
+   * it separately. Stored as configured, so keep keys in SCANNER_RPC_API_KEY
+   * rather than in the URL when the database is shared.
+   */
+  async getScannerRpcUrl(): Promise<string | undefined> {
+    const value = await this.getStateValue(SCANNER_RPC_URL_KEY);
+    return value?.trim() || undefined;
+  }
+
+  async saveScannerRpcUrl(url: string): Promise<void> {
+    await this.upsertStateValue(this.db, SCANNER_RPC_URL_KEY, url);
+  }
+
   async saveChainProgress(
     latestObservedBlock: bigint,
     safeHeadBlock: bigint,
@@ -1156,12 +1172,16 @@ export class ScannerStorage {
   }
 
   private async getStateBigInt(key: string): Promise<bigint | undefined> {
+    const value = await this.getStateValue(key);
+    return value === undefined ? undefined : BigInt(value);
+  }
+
+  private async getStateValue(key: string): Promise<string | undefined> {
     const result = await this.db.query<{ value: string }>(
       `SELECT value FROM ${this.qScannerState} WHERE key = $1`,
       [key],
     );
-    const row = result.rows[0];
-    return row ? BigInt(row.value) : undefined;
+    return result.rows[0]?.value;
   }
 
   /**

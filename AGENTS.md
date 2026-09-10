@@ -145,9 +145,11 @@ docker compose up --build
   and **nothing about the upstream leaks** — the URL may embed a key, so only the node's own JSON-RPC `error`
   object is relayed, while transport failures answer a fixed `-32000` and log the cause. Forwarded calls are
   rate limited endpoint-wide (`600/min`) because a public endpoint fronting a metered node is a way to spend
-  someone else's quota. `jsonRpc.ts` declares the `JsonRpcForwarder` interface so the dependency points one
-  way; `/health` lists the forwarded methods under `features.jsonRpcPassthrough`.
-- The experimental entity index (`ENTITY_QUERY_INDEX`, `POST /shadow-rpc/experimental`,
+  someone else's quota. With no `SHADOW_RPC_UPSTREAM` the relay follows the node the scanner recorded in
+  `scanner_state` (`scanner_rpc_url`, written by `src/index.ts` at startup), resolved on first use. `jsonRpc.ts`
+  declares the `JsonRpcForwarder` interface so the dependency points one way; `/health` lists the forwarded
+  methods under `features.jsonRpcPassthrough`.
+- The entity index (on by default; `ENTITY_QUERY_INDEX=false` turns it off; `POST /shadow-rpc/experimental`,
   `JSON_RPC_EXPERIMENTAL_PATH` in `server.ts`) answers the `arkiv_*` reads from PostgreSQL on a path of its
   own, so `/shadow-rpc` keeps relaying them to the node and the two stay comparable
   (`scripts/compareEntityQuery.ts`; `scripts/seedEntityQueryFixtures.ts` seeds the fixture suite). The pieces:

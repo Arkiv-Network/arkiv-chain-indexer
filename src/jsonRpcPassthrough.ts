@@ -65,8 +65,12 @@ export const DEFAULT_PASSTHROUGH_TIMEOUT_MS = 10_000;
 export const DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE = 600;
 
 export interface JsonRpcPassthroughOptions {
-  /** JSON-RPC endpoint of the real node (or of a key-injecting proxy in front of one). */
-  url: string;
+  /**
+   * JSON-RPC endpoint of the real node (or of a key-injecting proxy in front
+   * of one), or a resolver for it — used when the endpoint is the node the
+   * scanner recorded, which may not exist yet when the backend starts.
+   */
+  url: string | (() => Promise<string | undefined>);
   /** Sent as `x-api-key` when the upstream wants a header key rather than one baked into the URL. */
   apiKey?: string;
   /** Methods to forward; defaults to {@link DEFAULT_PASSTHROUGH_METHODS}. */
@@ -86,7 +90,8 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 
 export class JsonRpcPassthrough implements JsonRpcForwarder {
   readonly methods: ReadonlySet<string>;
-  private readonly url: string;
+  private readonly url: string | (() => Promise<string | undefined>);
+  private resolvedUrl: string | undefined;
   private readonly apiKey: string | undefined;
   private readonly timeoutMs: number;
   private readonly rateLimitPerMinute: number;
@@ -115,13 +120,27 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
     return `${[...this.methods].join(", ")} (timeout ${this.timeoutMs}ms, ${limit})`;
   }
 
+  /** The endpoint, once known; a resolver is asked until it answers, then remembered. */
+  private async endpoint(): Promise<string | undefined> {
+    if (typeof this.url === "string") return this.url;
+    if (this.resolvedUrl === undefined) this.resolvedUrl = await this.url();
+    return this.resolvedUrl;
+  }
+
   async forward(method: string, params: unknown[]): Promise<unknown> {
     this.takeRateLimitSlot(method);
 
+    const url = await this.endpoint();
+    if (!url) {
+      throw new JsonRpcError(
+        JSON_RPC_SERVER_ERROR,
+        `${method} cannot be forwarded yet: no upstream node is configured and the scanner has not recorded one`,
+      );
+    }
     const body = JSON.stringify({ jsonrpc: "2.0", id: this.nextId++, method, params });
     let response: Response;
     try {
-      response = await this.fetchImpl(this.url, {
+      response = await this.fetchImpl(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",

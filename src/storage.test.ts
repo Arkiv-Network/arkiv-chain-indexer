@@ -237,6 +237,15 @@ if (!hasPostgresForTests()) {
       expect((await storage.queryBalances({ blockNumber: 10n })).map((row) => row.balanceWei)).toEqual(["1"]);
     });
 
+    test("remembers the node the scanner reads, for the backend's relay", async () => {
+      const storage = await withStorage();
+      expect(await storage.getScannerRpcUrl()).toBeUndefined();
+      await storage.saveScannerRpcUrl("http://watchers-el:8545");
+      expect(await storage.getScannerRpcUrl()).toBe("http://watchers-el:8545");
+      await storage.saveScannerRpcUrl("https://rpc.example.test");
+      expect(await storage.getScannerRpcUrl()).toBe("https://rpc.example.test");
+    });
+
     test("orders balances, logs and fee samples numerically across the 99999/100000 boundary", async () => {
       // Regression: these queries select `block_number::text AS block_number`, and a
       // bare `ORDER BY block_number` binds to that text alias, so "99999" sorted

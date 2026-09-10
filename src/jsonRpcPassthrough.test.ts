@@ -87,6 +87,30 @@ describe("JsonRpcPassthrough", () => {
     expect(calls[0]!.headers["x-api-key"]).toBeUndefined();
   });
 
+  test("resolves a late-bound upstream once, and refuses cleanly until it is known", async () => {
+    const { impl, calls } = recordingFetch((call) => jsonResponse({ jsonrpc: "2.0", id: call.body.id, result: "0x1" }));
+    let recorded: string | undefined;
+    let asked = 0;
+    const passthrough = new JsonRpcPassthrough({
+      url: async () => {
+        asked += 1;
+        return recorded;
+      },
+      fetchImpl: impl,
+    });
+    const error = await forwardError(passthrough, "eth_chainId");
+    expect(error.code).toBe(JSON_RPC_SERVER_ERROR);
+    expect(error.message).toContain("no upstream node is configured and the scanner has not recorded one");
+    expect(calls).toHaveLength(0);
+
+    recorded = UPSTREAM;
+    expect(await passthrough.forward("eth_chainId", [])).toBe("0x1");
+    expect(await passthrough.forward("eth_chainId", [])).toBe("0x1");
+    expect(calls.map((call) => call.url)).toEqual([UPSTREAM, UPSTREAM]);
+    // Asked once per unanswered call, then remembered.
+    expect(asked).toBe(2);
+  });
+
   test("sends a configured key as x-api-key", async () => {
     const { impl, calls } = recordingFetch(() => jsonResponse({ jsonrpc: "2.0", id: 1, result: "0x1" }));
     const passthrough = new JsonRpcPassthrough({ url: UPSTREAM, apiKey: "hub-key", fetchImpl: impl });

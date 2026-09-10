@@ -139,17 +139,16 @@ async function main(): Promise<void> {
               : {}),
           })
         : undefined;
-    // The only path from /shadow-rpc to a real node. Without an upstream URL
-    // the endpoint stays what its name promises: an index, not a node.
-    const jsonRpcPassthrough = config.jsonRpcPassthrough
-      ? new JsonRpcPassthrough({
-          url: config.jsonRpcPassthrough.url,
-          ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
-          methods: config.jsonRpcPassthrough.methods,
-          timeoutMs: config.jsonRpcPassthrough.timeoutMs,
-          rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
-        })
-      : undefined;
+    // The only path from /shadow-rpc to a real node: the configured upstream,
+    // or the node the scanner recorded for itself.
+    const passthroughStorage = storage;
+    const jsonRpcPassthrough = new JsonRpcPassthrough({
+      url: config.jsonRpcPassthrough.url ?? (() => passthroughStorage.getScannerRpcUrl()),
+      ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
+      methods: config.jsonRpcPassthrough.methods,
+      timeoutMs: config.jsonRpcPassthrough.timeoutMs,
+      rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
+    });
     // Experimental: the entity index behind /shadow-rpc/experimental. Its own
     // small pool, so a long initial fold never starves the API's connections.
     let genesisImportDescription = "off";
@@ -253,14 +252,14 @@ async function main(): Promise<void> {
         : "Blocks/ranges cache: disabled",
     );
     console.log(
-      jsonRpcPassthrough
-        ? `JSON-RPC passthrough: forwarding ${jsonRpcPassthrough.describe()}`
-        : "JSON-RPC passthrough: disabled (/shadow-rpc answers from stored data only)",
+      `JSON-RPC passthrough: forwarding ${jsonRpcPassthrough.describe()} to ${
+        config.jsonRpcPassthrough.url ? "SHADOW_RPC_UPSTREAM" : "the node the scanner recorded"
+      }`,
     );
     console.log(
       entityIndex
-        ? "Entity index (experimental): projector running; arkiv_* reads answered from the index at /shadow-rpc/experimental"
-        : "Entity index (experimental): disabled (set ENTITY_QUERY_INDEX=true to build it)",
+        ? "Entity index: projector running; arkiv_* reads answered from the index at /shadow-rpc/experimental"
+        : "Entity index: disabled (ENTITY_QUERY_INDEX=false)",
     );
     if (entityIndex) console.log(`Entity index genesis import: ${genesisImportDescription}`);
     console.log(

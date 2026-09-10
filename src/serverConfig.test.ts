@@ -119,14 +119,16 @@ describe("parseServerConfig", () => {
     ).toThrow("--payload-provider-payment-share-bps must be between 0 and 10000");
   });
 
-  test("no upstream means no JSON-RPC passthrough", () => {
-    expect(parseServerConfig([], BASE_ENV).jsonRpcPassthrough).toBeUndefined();
-    // Settings without an upstream are inert rather than an error, so a
-    // deployment can keep them in .env while the passthrough is switched off.
+  test("no upstream means the passthrough follows the node the scanner recorded", () => {
+    expect(parseServerConfig([], BASE_ENV).jsonRpcPassthrough).toEqual({
+      methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntity", "arkiv_getEntityCount", "arkiv_getBlockTiming"],
+      timeoutMs: 10_000,
+      rateLimitPerMinute: 600,
+    });
+    // The other settings apply to that relay too.
     expect(
-      parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM_METHODS: "eth_call" })
-        .jsonRpcPassthrough,
-    ).toBeUndefined();
+      parseServerConfig([], { ...BASE_ENV, SHADOW_RPC_UPSTREAM_METHODS: "eth_call" }).jsonRpcPassthrough.methods,
+    ).toEqual(["eth_call"]);
   });
 
   test("an upstream URL enables the passthrough with the submission and entity-read defaults", () => {
@@ -213,8 +215,9 @@ describe("boolean flags from compose-style empty env values", () => {
       ENTITY_QUERY_INDEX: "",
       METRICS_ENABLED: "",
     });
-    expect(config.entityQueryIndex).toBe(false);
+    expect(config.entityQueryIndex).toBe(true);
     expect(config.metricsEnabled).toBe(true);
+    expect(parseServerConfig([], { DATABASE_URL: "postgres://x", ENTITY_QUERY_INDEX: "false" }).entityQueryIndex).toBe(false);
   });
 
   test("explicit values still apply", () => {
