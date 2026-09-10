@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { ARKIV_INDEX_METHODS, createArkivIndexMethods, cursorBinding, defaultProjection, projectionFingerprint } from "./arkivJsonRpc";
+import { ARKIV_INDEX_METHODS, createArkivIndexMethods, cursorBinding, defaultProjection, encodeCursor, projectionFingerprint } from "./arkivJsonRpc";
 import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperations";
 import type { InspectedLog, InspectedTransaction } from "./blockInspector";
 import { ENTITY_EVENT_TOPICS } from "./entityIndex";
@@ -636,6 +636,19 @@ describeWithPostgres("entity index (Postgres)", () => {
     const binding = cursorBinding("*", 105n, projectionFingerprint(defaultProjection()));
     const nodeCursor = `b64:${Buffer.concat([binding, Buffer.alloc(8)]).toString("base64url")}`;
     expect((await errorOf("arkiv_query", ["*", { cursor: nodeCursor }])).message).toContain("issued by a node");
+  });
+
+  test("values the bigint columns cannot hold are answered, not leaked as driver errors", async () => {
+    // A forged cursor whose createdAt is past 2^63 - 1.
+    const binding = cursorBinding("*", 105n, projectionFingerprint(defaultProjection()));
+    const forged = encodeCursor({ createdAt: 1n << 63n, position: 0, entityKey: `0x${"00".repeat(32)}` }, binding);
+    expect((await errorOf("arkiv_query", ["*", { cursor: forged, atBlock: "0x69" }])).message).toContain("cursor is malformed");
+    // $createdAt against a u64 the column cannot hold.
+    expect(await keysOf("$createdAt >= u64(9223372036854775808)")).toEqual([]);
+    expect(await result<number>("arkiv_getEntityCount", [{ query: "$createdAt < u64(18446744073709551615)" }])).toBe(4);
+    // A NUL byte in a str literal.
+    expect(await keysOf("$contentType = str('text/plain\0')")).toEqual([]);
+    expect(await result<number>("arkiv_getEntityCount", [{ query: "$contentType = str('a\0')" }])).toBe(0);
   });
 
   test("arkiv_getEntityCount counts what matches at a block", async () => {

@@ -31,6 +31,9 @@ export interface CompileOptions {
   paramOffset?: number;
 }
 
+/** Largest value Postgres `bigint` holds; `$createdAt` is typed u64 by the language. */
+const I64_MAX = (1n << 63n) - 1n;
+
 const SQL_OPERATORS: Record<ComparisonOperator, string> = {
   eq: "=",
   lt: "<",
@@ -107,8 +110,24 @@ function compileNode(node: QueryAst, params: Params, attributesTable: string): s
       const operator = isPrefix ? "LIKE" : SQL_OPERATORS[node.op];
       const operand = isPrefix ? likePrefixPattern(node.value.value) : queryValueOperand(node.value);
       const escape = isPrefix ? " ESCAPE '\\'" : "";
+      if (node.value.type === "str" && node.value.value.includes("\0")) {
+        // Postgres text cannot hold NUL (the driver rejects it as a parameter)
+        // and stored str values are NUL-stripped, so no indexed value equals or
+        // starts with this literal; str has no ordering in the language.
+        return "FALSE";
+      }
       if (node.key.kind === "builtin") {
         const { column, cast } = builtinColumn(node.key.field);
+        if (
+          node.key.field === "createdAt" &&
+          !isPrefix &&
+          (node.value.type === "u64" || node.value.type === "u256") &&
+          node.value.value > I64_MAX
+        ) {
+          // The column is a signed bigint and block numbers never reach 2^63,
+          // so a larger literal sits above every stored value.
+          return node.op === "lt" || node.op === "lte" ? "TRUE" : "FALSE";
+        }
         return `(${column} ${operator} ${params.add(operand)}${cast}${escape})`;
       }
       const ordered = !isPrefix && isOrderedType(node.value.type);

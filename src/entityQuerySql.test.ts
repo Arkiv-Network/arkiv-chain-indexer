@@ -68,6 +68,26 @@ describe("compileEntityQuery", () => {
     expect(params).toEqual(["a", 1, "true", "b", 2, "2", `0x${"ab".repeat(20)}`]);
   });
 
+  test("a str literal with NUL can match nothing", () => {
+    // Postgres text cannot hold NUL, so the driver would reject it as a parameter.
+    expect(compile("$contentType = str('a\0b')")).toEqual({ text: "FALSE", params: [] });
+    expect(compile("$contentType STARTSWITH str('a\0')")).toEqual({ text: "FALSE", params: [] });
+    expect(compile("name = str('a\0b')")).toEqual({ text: "FALSE", params: [] });
+    expect(compile("NOT (name = str('a\0b'))")).toEqual({ text: "(NOT FALSE)", params: [] });
+  });
+
+  test("$createdAt past the bigint column is decided without touching the column", () => {
+    expect(compile("$createdAt >= u64(9223372036854775808)")).toEqual({ text: "FALSE", params: [] });
+    expect(compile("$createdAt > u64(18446744073709551615)")).toEqual({ text: "FALSE", params: [] });
+    expect(compile("$createdAt = u64(9223372036854775808)")).toEqual({ text: "FALSE", params: [] });
+    expect(compile("$createdAt < u64(9223372036854775808)")).toEqual({ text: "TRUE", params: [] });
+    expect(compile("$createdAt <= u64(9223372036854775808)")).toEqual({ text: "TRUE", params: [] });
+    expect(compile("$createdAt <= u64(9223372036854775807)")).toEqual({
+      text: "(v.created_at <= $1::bigint)",
+      params: ["9223372036854775807"],
+    });
+  });
+
   test("queryValueOperand renders every type", () => {
     expect(queryValueOperand({ type: "bool", value: false })).toBe("false");
     expect(queryValueOperand({ type: "i32", value: -7 })).toBe("-7");
