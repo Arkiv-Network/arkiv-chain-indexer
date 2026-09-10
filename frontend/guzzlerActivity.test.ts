@@ -176,7 +176,7 @@ describe("activityWindowForMs", () => {
 
 describe("normalizeActivityWindowKey", () => {
   test("accepts the known window keys", () => {
-    for (const key of ["1h", "6h", "24h"]) {
+    for (const key of ["1h", "6h", "24h"] as const) {
       expect(normalizeActivityWindowKey(key)).toBe(key);
     }
   });

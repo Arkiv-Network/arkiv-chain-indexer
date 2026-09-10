@@ -13,6 +13,7 @@
     "serve": "bun run src/serve.ts",
     "test": "bun test ./src ./frontend",
     "typecheck": "tsc --noEmit",
+    "typecheck:frontend-tests": "tsc --noEmit -p frontend/tsconfig.test.json",
     "screenshot": "bun run scripts/screenshot.ts"
   },
   "devDependencies": {

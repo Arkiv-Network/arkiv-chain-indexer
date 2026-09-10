@@ -326,14 +326,16 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
   // An override answers first. Below it, a configured passthrough outranks the
   // local table: listing a method there means "let the node answer this one",
   // whether or not we could have.
-  const override = context.options.localOverrides[method];
+  // Asserted rather than annotated: an annotation narrows back to the indexed
+  // type in a tsconfig without noUncheckedIndexedAccess (the frontend's).
+  const override = context.options.localOverrides[method] as JsonRpcMethodHandler | undefined;
   const passthrough = context.options.passthrough;
   const forwarder = !override && passthrough && passthrough.methods.has(method) ? passthrough : null;
   const handler: MethodHandler | undefined = override
     ? (overrideParams) => override(overrideParams)
     : forwarder
       ? (forwardedParams) => forwarder.forward(method, forwardedParams)
-      : METHODS[method];
+      : (METHODS[method] as MethodHandler | undefined);
   const source: CallSource = override ? "override" : forwarder ? "upstream" : handler ? "stored" : "none";
   if (!handler) {
     // Unknown method names are client input: label them "unknown" so a

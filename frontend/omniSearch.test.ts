@@ -23,14 +23,14 @@ test("typeahead only offers indexed identifiers and block numbers", () => {
 test("search requests carry an abort signal and encode input as a parameter", async () => {
   const abort = new AbortController();
   let called = false;
-  globalThis.fetch = (async (target, init) => {
+  globalThis.fetch = (async (target: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(target), "http://localhost");
     expect(url.pathname).toBe("/api/search/suggest");
     expect(url.searchParams.get("q")).toBe("name=a&b");
     expect(init?.signal).toBe(abort.signal);
     called = true;
     return Response.json({ query: "name=a&b", suggestions: [] });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   await fetchSearch("name=a&b", true, abort.signal);
   expect(called).toBe(true);
 });

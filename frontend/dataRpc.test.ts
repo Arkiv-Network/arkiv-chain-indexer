@@ -48,7 +48,7 @@ function fakeFetch(answer: Answer): { fetchImpl: typeof fetch; calls: RecordedCa
     const response = await answer(call);
     // Echo the request id the way a real node would; tests only look at result/error.
     return response;
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   return { fetchImpl, calls };
 }
 

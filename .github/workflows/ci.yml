@@ -80,6 +80,12 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+      # The frontend tsconfig covers only src/; the test files are checked
+      # separately so the API fixtures cannot drift from the types they pin.
+      - name: Typecheck tests
+        run: bun run typecheck:frontend-tests
+        working-directory: .
+
       # Frontend tests run here (not in the backend job) because they import
       # .tsx modules that resolve React from frontend/node_modules. The
       # cross-package contract test additionally resolves backend imports from
