@@ -195,6 +195,74 @@ describe("parseFilterFromQuery", () => {
   });
 });
 
+describe("parameter bounds", () => {
+  test("block-like params are capped at a safe integer", () => {
+    expect(() => parseFilterFromQuery(new URLSearchParams("blockGt=99999999999999999999999999"))).toThrow(
+      /blockGt must be at most 9007199254740991/,
+    );
+    expect(() => parseTransactionFilterFromQuery(new URLSearchParams("nonceLt=9223372036854775807"))).toThrow(
+      /nonceLt must be at most 9007199254740991/,
+    );
+    expect(parseFilterFromQuery(new URLSearchParams("blockLt=9007199254740991")).blockLt).toBe(9007199254740991n);
+  });
+
+  test("dates with an expanded year are rejected instead of inverting the filter", () => {
+    expect(() => parseFilterFromQuery(new URLSearchParams("dateLt=%2B275760-09-13T00:00:00Z"))).toThrow(
+      /dateLt must fall between the years 0000 and 9999/,
+    );
+    expect(() => parseTransactionFilterFromQuery(new URLSearchParams("dateGt=-000001-01-01T00:00:00Z"))).toThrow(
+      /dateGt must fall between the years 0000 and 9999/,
+    );
+    expect(parseFilterFromQuery(new URLSearchParams("dateLt=9999-12-31T23:59:59Z")).dateLt).toBe("9999-12-31T23:59:59.000Z");
+  });
+});
+
+describe("unhandled handler errors", () => {
+  test("become a JSON 500 with CORS headers rather than Bun's text page", async () => {
+    const storage = {
+      queryBlocks: async () => {
+        throw new Error("boom");
+      },
+    } as unknown as ScannerStorage;
+    const response = await handleRequest(new Request("http://example.test/blocks"), storage);
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Content-Type")).toContain("application/json");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({ error: "boom" });
+  });
+
+  test("hide the driver's text", async () => {
+    const storage = {
+      queryBlocks: async () => {
+        const error = new Error('value "99999999999999999999" is out of range for type bigint');
+        error.name = "PostgresError";
+        throw error;
+      },
+    } as unknown as ScannerStorage;
+    for (const path of ["/blocks", "/blocks/42"]) {
+      const response = await handleRequest(new Request(`http://example.test${path}`), storage);
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({ error: "database query failed" });
+    }
+  });
+});
+
+describe("JSON-RPC body cap", () => {
+  test("is measured in bytes, so multi-byte text cannot slip past it", async () => {
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [], pad: "中".repeat(400_000) });
+    expect(body.length).toBeLessThan(1024 * 1024);
+    expect(Buffer.byteLength(body)).toBeGreaterThan(1024 * 1024);
+    const request = new Request("http://example.test/shadow-rpc", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    request.headers.delete("content-length");
+    const response = await handleRequest(request, {} as ScannerStorage);
+    expect(response.status).toBe(413);
+  });
+});
+
 describe("parseRangeFilterFromQuery", () => {
   test("parses range size, start, and date filters", () => {
     const filter = parseRangeFilterFromQuery(

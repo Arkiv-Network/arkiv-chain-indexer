@@ -41,6 +41,7 @@ import type {
   StoredLog,
   StoredTransaction,
 } from "./storage";
+import { publicErrorMessage } from "./internalError";
 import { MAX_FEE_HISTORY_BLOCKS, MAX_LOG_QUERY_BLOCKS } from "./storage";
 import {
   jsonRpcBatchSize,
@@ -366,7 +367,7 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
       return errorResponse(id, error);
     }
     countCall(context, method, source, "internal_error");
-    const message = error instanceof Error ? error.message : String(error);
+    const message = publicErrorMessage(error, `JSON-RPC ${method}`);
     return errorResponse(id, new JsonRpcError(JSON_RPC_INTERNAL_ERROR, `Internal error: ${message}`));
   } finally {
     stopTimer();
@@ -805,8 +806,15 @@ async function resolveBlockTag(param: unknown, storage: JsonRpcDataSource): Prom
       return indexedHead(storage);
     case "earliest":
       return storage.getMinStoredBlock();
-    default:
-      return parseQuantityParam(param, "blockNumber");
+    default: {
+      const blockNumber = parseQuantityParam(param, "blockNumber");
+      // Block numbers are stored as bigint; anything past a safe integer is
+      // a client error, not a database one.
+      if (blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw invalidParams("blockNumber is out of range");
+      }
+      return blockNumber;
+    }
   }
 }
 

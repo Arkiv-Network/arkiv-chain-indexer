@@ -615,6 +615,24 @@ describe("blocks, transactions and receipts", () => {
     expect(unhashed.hash).toBeNull();
   });
 
+  test("a block number past a safe integer is invalid params, not a database error", async () => {
+    const response = await call(source, "eth_getBlockByNumber", ["0xfffffffffffffffffffff", false]);
+    expect(response.error).toEqual({ code: -32602, message: "Invalid params: blockNumber is out of range" });
+  });
+
+  test("a driver error surfaces as a generic internal error", async () => {
+    const failing: JsonRpcDataSource = {
+      ...source,
+      getBlockByNumber: async () => {
+        const error = new Error('value "99999999999999999999" is out of range for type bigint');
+        error.name = "PostgresError";
+        throw error;
+      },
+    };
+    const response = await call(failing, "eth_getBlockByNumber", ["0x7", false]);
+    expect(response.error).toEqual({ code: -32603, message: "Internal error: database query failed" });
+  });
+
   test("eth_getBlockByNumber lists hashes or full objects and nulls unknown header fields", async () => {
     const block = (await result(source, "eth_getBlockByNumber", ["0x7", false])) as Record<string, unknown>;
     expect(block).toMatchObject({

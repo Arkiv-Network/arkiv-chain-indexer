@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { isDatabaseError, publicErrorMessage } from "./internalError";
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type ArkivOperationSummaryEntry } from "./arkivOperations";
 import { type BlockInspectionResult } from "./blockInspector";
@@ -692,8 +693,27 @@ export async function handleRequest(
   options: BlockServerOptions = {},
 ): Promise<Response> {
   return observeHttpRequest(request, async () =>
-    applyConditionalGet(request, await routeRequest(request, storage, options)),
+    applyConditionalGet(request, await routeRequestSafely(request, storage, options)),
   );
+}
+
+/**
+ * Anything a handler lets escape would otherwise become Bun's default
+ * `text/plain` "Something went wrong!" page without CORS headers; answer a
+ * JSON 500 like every other error instead.
+ */
+async function routeRequestSafely(
+  request: Request,
+  storage: ScannerStorage,
+  options: BlockServerOptions,
+): Promise<Response> {
+  try {
+    return await routeRequest(request, storage, options);
+  } catch (error) {
+    const context = `${request.method} ${new URL(request.url).pathname}`;
+    if (!isDatabaseError(error)) console.error(`Unhandled error on ${context}:`, error);
+    return jsonError(500, publicErrorMessage(error, context));
+  }
 }
 
 /**
@@ -1198,7 +1218,8 @@ async function handleJsonRpcRequest(
     return jsonError(413, `Request body exceeds ${JSON_RPC_MAX_BODY_BYTES} bytes`);
   }
   const text = await request.text();
-  if (text.length > JSON_RPC_MAX_BODY_BYTES) {
+  // Bytes, not UTF-16 units: a chunked body has no Content-Length to check.
+  if (Buffer.byteLength(text) > JSON_RPC_MAX_BODY_BYTES) {
     return jsonError(413, `Request body exceeds ${JSON_RPC_MAX_BODY_BYTES} bytes`);
   }
   const body = await handleJsonRpcText(text, storage, {
@@ -1305,7 +1326,7 @@ async function handleGetLlmsTxt(): Promise<Response> {
       Buffer.byteLength(body),
     );
   } catch (error) {
-    return jsonError(500, error instanceof Error ? error.message : String(error));
+    return jsonError(500, publicErrorMessage(error, "handleGetLlmsTxt"));
   }
 }
 
@@ -1331,7 +1352,7 @@ async function handleGetBlockByNumber(
     }
     return jsonResponse(blockToResponseRow(block));
   } catch (error) {
-    return jsonError(500, error instanceof Error ? error.message : String(error));
+    return jsonError(500, publicErrorMessage(error, "handleGetBlockByNumber"));
   }
 }
 
@@ -1353,7 +1374,7 @@ async function handleGetBlockInspect(
     }
     return jsonResponse({ cached: false, block } satisfies BlockInspectResponseBody);
   } catch (error) {
-    return jsonError(500, error instanceof Error ? error.message : String(error));
+    return jsonError(500, publicErrorMessage(error, "handleGetBlockInspect"));
   }
 }
 
@@ -2180,11 +2201,18 @@ function parsePageParam(value: string): number {
   return parsed;
 }
 
+/** Block numbers and nonces are stored as bigint; cap them well inside it so the handlers' ±1 stays in range too. */
+const MAX_BLOCK_PARAM = BigInt(Number.MAX_SAFE_INTEGER);
+
 function parseBlockParam(name: string, value: string): bigint {
   if (!/^\d+$/.test(value)) {
     throw new Error(`${name} must be a non-negative integer`);
   }
-  return BigInt(value);
+  const parsed = BigInt(value);
+  if (parsed > MAX_BLOCK_PARAM) {
+    throw new Error(`${name} must be at most ${MAX_BLOCK_PARAM}`);
+  }
+  return parsed;
 }
 
 function parseAddressParam(name: string, value: string): string {
@@ -2199,6 +2227,12 @@ function parseDateParam(name: string, value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`${name} must be a valid ISO-8601 date string`);
+  }
+  // Date columns are ISO text; an expanded year ("+275760-…") would sort below
+  // every digit and silently invert the filter.
+  const year = parsed.getUTCFullYear();
+  if (year < 0 || year > 9999) {
+    throw new Error(`${name} must fall between the years 0000 and 9999`);
   }
   return parsed.toISOString();
 }
