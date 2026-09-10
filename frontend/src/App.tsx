@@ -177,7 +177,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (activeView !== "baseload") return;
+    // The locked UI has nothing to show: /baseload exposes worker wallets and
+    // balances, so only poll it in admin mode.
+    if (activeView !== "baseload" || !adminModeIsActive) return;
 
     let cancelled = false;
 
@@ -199,10 +201,15 @@ export function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeView]);
+  }, [activeView, adminModeIsActive]);
 
   useEffect(() => {
-    if (activeView !== "baseload" || !adminModeIsActive) return;
+    if (activeView !== "baseload" || !adminModeIsActive) {
+      // Leaving admin mode drops the privileged list rather than keeping
+      // Save and Delete on screen for a token that is no longer sent.
+      setBaseloadSavedConfigs([]);
+      return;
+    }
 
     let cancelled = false;
 
