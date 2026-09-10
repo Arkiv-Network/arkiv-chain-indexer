@@ -171,6 +171,17 @@ describe("readGenesisDump", () => {
     expect(lineEnds).toEqual(text.split("\n").slice(0, -1).map((_, i, lines) => lines.slice(0, i + 1).join("\n").length + 1));
   });
 
+  test("an account whose bytecode merely starts with 0xFE is not a record", async () => {
+    // 0xFE is also the INVALID opcode; only a known record version byte marks an entity.
+    const text = buildDump(entities.slice(0, 1)).replace(
+      "\n",
+      `\n${JSON.stringify({ address: `0x${"77".repeat(20)}`, nonce: "0x1", balance: "0x0", code: "0xfe02c0" })}\n`,
+    );
+    const events = await collect(text);
+    expect(events[1]).toMatchObject({ type: "other", line: 2 });
+    expect(events.filter((event) => event.type === "record")).toHaveLength(1);
+  });
+
   test("the same events whatever the chunk size, and without a trailing newline", async () => {
     const text = buildDump(entities, { trailingNewline: false });
     const small = await collect(text, 3);

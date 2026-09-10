@@ -480,7 +480,9 @@ export async function* readGenesisDump(source: DumpSource, startOffset = 0, star
         yield { type: "root", root: parsed.root, line, end };
       } else if (buffer.indexOf(RECORD_MARKER) !== -1) {
         const parsed = JSON.parse(buffer.toString("utf8")) as { address?: unknown; code?: unknown };
-        if (typeof parsed.code === "string" && typeof parsed.address === "string" && parsed.code.startsWith("0xfe")) {
+        // Only a known record version is an entity: plain bytecode may start
+        // with 0xFE (INVALID) too, and must not abort the import.
+        if (typeof parsed.code === "string" && typeof parsed.address === "string" && isEntityRecordCode(parsed.code)) {
           yield { type: "record", line, end, address: parsed.address, code: new Uint8Array(Buffer.from(parsed.code.slice(2), "hex")) };
         } else {
           yield { type: "other", line, end };
