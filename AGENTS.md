@@ -110,7 +110,8 @@ docker compose up --build
   `AsyncLocalStorage`. JSON-RPC calls are counted per method in `handleSingle`; unknown method names are labelled
   `unknown` so clients cannot mint series. Cache stats and scanner progress are mirrored by collectors registered
   in `serve.ts` and refreshed at scrape time. The nginx site configs return 404 for `/api/metrics`; scrape the
-  loopback backend port, or set `METRICS_BEARER_TOKEN`. `GET /admin/metrics` renders the same registry for
+  loopback backend port, or set `METRICS_BEARER_TOKEN`; with no token the open path refuses requests that carry
+  reverse-proxy forwarding headers, because Bun collapses `/api/%2e%2e/metrics` to `/metrics` before routing. `GET /admin/metrics` renders the same registry for
   off-host scrapers and is proxied publicly, so it always demands `BASELOAD_ADMIN_BEARER_TOKEN` and answers 503
   when none is set — never let that path fall open. Successful scrapes of either path are excluded from the traffic metrics; rejected ones are counted so admin-token probing is visible.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,

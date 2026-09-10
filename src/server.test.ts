@@ -893,11 +893,11 @@ describe("Baseload API", () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload", {
         method: "PUT",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: "Bearer secret" },
         body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
       }),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime },
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
     );
 
     expect(response.status).toBe(200);
@@ -999,6 +999,25 @@ describe("Baseload API", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Admin bearer token is required",
     });
+  });
+
+  test("admin writes fail closed when no admin token is configured", async () => {
+    const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
+    for (const path of ["/baseload", "/baseload/configs"]) {
+      const response = await handleRequest(
+        new Request(`http://example.test${path}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        }),
+        {} as unknown as ScannerStorage,
+        { baseloadRuntime: runtime },
+      );
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "Admin bearer token is not configured on the backend",
+      });
+    }
   });
 
   test("lists saved baseload configs when authorized", async () => {
@@ -1117,11 +1136,11 @@ describe("Baseload API", () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload", {
         method: "PUT",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: "Bearer secret" },
         body: JSON.stringify({ workers: [{ walletNumber: 2 }, { walletNumber: 2 }] }),
       }),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime },
+      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
     );
 
     expect(response.status).toBe(400);

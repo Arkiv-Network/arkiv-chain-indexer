@@ -1035,8 +1035,14 @@ async function handleAdminVerifyRequest(
   return jsonResponse({ authorized: true });
 }
 
+/**
+ * Gate an admin write on the bearer token. Fails closed: with no token
+ * configured the admin surface is unavailable (503), never open.
+ */
 function requireAdminBearerToken(request: Request, adminBearerToken: string | undefined): Response | null {
-  if (!adminBearerToken) return null;
+  if (!adminBearerToken) {
+    return jsonError(503, "Admin bearer token is not configured on the backend");
+  }
 
   const authorization = request.headers.get("authorization");
   if (!authorization) {
@@ -1222,13 +1228,27 @@ async function handleJsonRpcRequest(
  * behind the public nginx without leaking build/traffic details.
  */
 /**
+ * Headers a reverse proxy stamps on the requests it forwards. A direct loopback
+ * scrape never carries them, so their presence means the request came through
+ * the public origin.
+ */
+const REVERSE_PROXY_HEADERS = ["x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip"];
+
+function arrivedThroughReverseProxy(request: Request): boolean {
+  return REVERSE_PROXY_HEADERS.some((name) => request.headers.has(name));
+}
+
+/**
  * Render the Prometheus registry.
  *
  * Two paths reach here. `GET /metrics` is the loopback scrape target, gated by
- * the optional `METRICS_BEARER_TOKEN` and left open when that is unset, because
- * the public nginx sites 404 it. `GET /admin/metrics` is proxied to the public
- * origin, so it always demands the admin bearer token and answers 503 rather
- * than serving anything when no token is configured.
+ * the optional `METRICS_BEARER_TOKEN`. When that is unset it is open only to
+ * direct requests: the public nginx sites 404 `/api/metrics`, but Bun collapses
+ * dot segments before routing, so `/api/%2e%2e/metrics` still lands here, and a
+ * request that carries the proxy's forwarding headers is refused as if nginx
+ * had 404ed it. `GET /admin/metrics` is proxied to the public origin, so it
+ * always demands the admin bearer token and answers 503 rather than serving
+ * anything when no token is configured.
  */
 async function handleGetMetrics(
   request: Request,
@@ -1247,7 +1267,11 @@ async function handleGetMetrics(
     }
     const authError = requireAdminBearerToken(request, options.baseloadAdminBearerToken);
     if (authError) return authError;
-  } else if (options.metricsBearerToken !== undefined) {
+  } else if (options.metricsBearerToken === undefined) {
+    if (arrivedThroughReverseProxy(request)) {
+      return jsonError(404, `Not found: ${new URL(request.url).pathname}`);
+    }
+  } else {
     const header = request.headers.get("Authorization") ?? "";
     const match = header.match(/^Bearer\s+(.+)$/i);
     if (!match) {

@@ -89,8 +89,9 @@ Baseload workers run in the backend service, not in the browser. Set `BASELOAD_R
 endpoint that should receive create transactions. The frontend only adds, edits, deletes, imports, exports, and
 monitors worker configuration through `/api/baseload`.
 
-For shared deployments, set `BASELOAD_ADMIN_BEARER_TOKEN` so mutating Baseload worker requests require
-`Authorization: Bearer <token>`. Readonly views and status APIs remain public. The Baseload tab includes an admin
+Set `BASELOAD_ADMIN_BEARER_TOKEN` so mutating Baseload worker requests can be made with
+`Authorization: Bearer <token>`; without it the admin routes answer `503` rather than accepting writes from
+anyone. Readonly views and status APIs remain public. The Baseload tab includes an admin
 bearer token field that stores the token in browser local storage and sends it only with worker configuration
 changes.
 
@@ -263,7 +264,7 @@ Backend configuration:
 | `BASELOAD_FAUCET_MAX_BALANCE` | `200` | Ether. A drip is skipped when it would leave the wallet at or above this ceiling. It is a safety net, not the resting point, and must be at least `MIN + DRIP` — a lower ceiling would refuse drips to wallets that are already below the floor. |
 | `BASELOAD_FAUCET_DRIP_AMOUNT` | `100` | Ether. Expected size of one drip, used to project the post-drip balance against the ceiling. |
 | `BASELOAD_FAUCET_COOLDOWN_SECONDS` | `60` | Minimum gap between two drips for the same wallet. |
-| `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token required for mutating Baseload worker configuration requests. Readonly requests stay public. |
+| `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Bearer token required for mutating Baseload worker configuration requests and the saved-config routes. Unset means those routes answer `503` (they never fall open). Readonly requests stay public. |
 | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional container path to a Baseload worker config JSON file that the backend loads once at startup. |
 | `BASELOAD_RPC_KEY_SERVICE_URL` | unset | Base URL of an [api-key-generator](https://github.com/Arkiv-Network/api-key-generator) instance. Setting it gives every worker its own generated RPC key instead of the one shared key in `BASELOAD_RPC_NODE`. |
 | `BASELOAD_RPC_KEY_PLACEMENT` | `bearer` | How a key is attached: `bearer` (`Authorization: Bearer <key>`), `header` (see below), or `path` (key as the last URL segment). |
@@ -403,7 +404,7 @@ Backend API:
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/baseload` | Returns backend Baseload enabled state, current config, and worker statuses. |
-| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. Requires `Authorization: Bearer <token>` when `BASELOAD_ADMIN_BEARER_TOKEN` is set. |
+| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. Requires `Authorization: Bearer <token>` matching `BASELOAD_ADMIN_BEARER_TOKEN`; `503` when no token is configured. |
 
 ## Nginx Deployment
 
@@ -1103,7 +1104,10 @@ Prometheus text exposition for the backend process, on two paths that differ onl
 `GET /metrics` is the local scrape target: scrape it from the host on the loopback backend port
 (`http://127.0.0.1:3000/metrics`), since the bundled nginx site configs answer `404` for the public
 `/api/metrics`. Set `METRICS_BEARER_TOKEN` to require `Authorization: Bearer <token>` when the port is
-reachable from further away.
+reachable from further away. Without a token the backend serves it only to direct requests: anything carrying
+a reverse proxy's forwarding headers (`X-Forwarded-For`, `X-Forwarded-Proto`, `X-Real-IP`) gets the same `404`
+nginx gives, because Bun collapses dot segments before routing and `/api/%2e%2e/metrics` would otherwise slip
+past the nginx guard.
 
 `GET /admin/metrics` renders the same registry for a scraper that cannot reach loopback, and it is proxied to
 the public origin (`https://<host>/api/admin/metrics`). It always requires `Authorization: Bearer <token>` with

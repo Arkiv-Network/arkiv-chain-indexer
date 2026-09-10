@@ -151,6 +151,23 @@ describe("GET /metrics", () => {
     expect(httpRequestsTotal.get({ route: "/metrics", method: "GET", status: "200" })).toBe(0);
   });
 
+  test("is not served to a request that came through the reverse proxy when open", async () => {
+    // nginx 404s /api/metrics, but Bun collapses `/api/%2e%2e/metrics` to
+    // `/metrics` before routing; the forwarding headers give the proxy away.
+    for (const header of ["X-Forwarded-For", "X-Forwarded-Proto", "X-Real-IP"]) {
+      const response = await handleRequest(new Request("http://x/metrics", { headers: { [header]: "1" } }), storage);
+      expect(response.status).toBe(404);
+      expect(response.headers.get("Content-Type")).toContain("application/json");
+    }
+    // A configured token still lets a proxied scraper through.
+    const response = await handleRequest(
+      new Request("http://x/metrics", { headers: { "X-Forwarded-For": "1", Authorization: "Bearer s3cret" } }),
+      storage,
+      { metricsBearerToken: "s3cret" },
+    );
+    expect(response.status).toBe(200);
+  });
+
   test("enforces the bearer token when one is configured", async () => {
     const options = { metricsBearerToken: "s3cret" };
     expect((await handleRequest(new Request("http://x/metrics"), storage, options)).status).toBe(401);
