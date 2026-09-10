@@ -3,8 +3,8 @@ import { ARKIV_INDEX_METHODS, createArkivIndexMethods, cursorBinding, defaultPro
 import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperations";
 import type { InspectedLog, InspectedTransaction } from "./blockInspector";
 import { ENTITY_EVENT_TOPICS } from "./entityIndex";
-import { EntityIndexStorage } from "./entityIndexStorage";
-import { EntityProjector } from "./entityProjector";
+import { EntityIndexStorage, foldKeyBatches } from "./entityIndexStorage";
+import { EntityProjector, retryDelayMs } from "./entityProjector";
 import { handleJsonRpcBody, type JsonRpcResponse } from "./jsonRpc";
 import { createBlockServer, type HealthResponseBody } from "./server";
 import type { ScannerStorage } from "./storage";
@@ -313,6 +313,45 @@ async function storeBlock(storage: ScannerStorage, block: FixtureBlock): Promise
 
 // ---------------------------------------------------------------------------
 
+describe("fold key batching", () => {
+  test("splits keys into consecutive batches of at most the batch width", () => {
+    expect(foldKeyBatches(["a", "b", "c", "d", "e"], 2)).toEqual([["a", "b"], ["c", "d"], ["e"]]);
+  });
+
+  test("an exact multiple leaves no trailing empty batch", () => {
+    expect(foldKeyBatches(["a", "b", "c", "d"], 2)).toEqual([["a", "b"], ["c", "d"]]);
+  });
+
+  test("no keys is no batches, so a fold of nothing reads nothing", () => {
+    expect(foldKeyBatches([], 1_000)).toEqual([]);
+  });
+
+  test("a batch wider than the keys is one batch", () => {
+    expect(foldKeyBatches(["a", "b"], 1_000)).toEqual([["a", "b"]]);
+  });
+
+  test("a width below one still makes progress one key at a time", () => {
+    expect(foldKeyBatches(["a", "b"], 0)).toEqual([["a"], ["b"]]);
+  });
+});
+
+describe("fold retry backoff", () => {
+  test("the first retry waits one poll interval and each further one doubles", () => {
+    expect([1, 2, 3, 4, 5].map((failures) => retryDelayMs(failures, 2_000))).toEqual([
+      2_000, 4_000, 8_000, 16_000, 32_000,
+    ]);
+  });
+
+  test("the wait stops growing at the cap", () => {
+    expect(retryDelayMs(6, 2_000)).toBe(60_000);
+    expect(retryDelayMs(40, 2_000)).toBe(60_000);
+  });
+
+  test("no failures polls at the poll interval", () => {
+    expect(retryDelayMs(0, 2_000)).toBe(2_000);
+  });
+});
+
 const describeWithPostgres = hasPostgresForTests() ? describe : describe.skip;
 
 describeWithPostgres("entity index (Postgres)", () => {
@@ -320,6 +359,8 @@ describeWithPostgres("entity index (Postgres)", () => {
   let index: EntityIndexStorage;
   let cleanup: () => Promise<void>;
   let methods: ReturnType<typeof createArkivIndexMethods>;
+  let indexDb: Db;
+  let indexSchema: string;
   const logs: string[] = [];
 
   const call = async (method: string, params: unknown[] = []): Promise<JsonRpcResponse> =>
@@ -337,11 +378,10 @@ describeWithPostgres("entity index (Postgres)", () => {
     const isolated = await createIsolatedStorage("entity_index");
     storage = isolated.storage;
     cleanup = isolated.cleanup;
-    index = await EntityIndexStorage.fromDb(
-      // A second pool on the same schema, the way serve.ts opens it.
-      (await import("./db")).openDb(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!, { max: 2 }),
-      { schema: isolated.schema },
-    );
+    // A second pool on the same schema, the way serve.ts opens it.
+    indexDb = openDb(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!, { max: 2 });
+    indexSchema = isolated.schema;
+    index = await EntityIndexStorage.fromDb(indexDb, { schema: indexSchema });
     methods = createArkivIndexMethods(index, storage);
     for (const block of fixtureChain()) await storeBlock(storage, block);
   });
@@ -372,6 +412,21 @@ describeWithPostgres("entity index (Postgres)", () => {
     const again = await projector.runOnce();
     expect(again.chunksFolded).toBe(0);
     expect(again.projectedThroughBlock).toBe(105n);
+  });
+
+  test("a narrow key batch folds to the same versions as a wide one", async () => {
+    const keys = await index.keysTouchedBetween(99n, 105n);
+    expect(keys.length).toBeGreaterThan(2);
+
+    const wideFold = await index.withFoldLock((client) => index.refoldEntities(keys, 105n, client));
+    const wide = await Promise.all(keys.map((key) => index.getEntityVersions(key)));
+    expect(wide.some((versions) => versions.length > 0)).toBe(true);
+
+    const narrow = await EntityIndexStorage.fromDb(indexDb, { schema: indexSchema, foldKeyBatch: 2 });
+    const narrowFold = await narrow.withFoldLock((client) => narrow.refoldEntities(keys, 105n, client));
+    expect(narrowFold).toEqual(wideFold!);
+
+    expect(await Promise.all(keys.map((key) => index.getEntityVersions(key)))).toEqual(wide);
   });
 
   test("each entity's versions replay its operations", async () => {

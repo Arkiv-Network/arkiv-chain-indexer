@@ -40,6 +40,8 @@ export interface EntityIndexStorageOptions {
   schema?: string;
   /** Pool size; the index shares the database with the scanner and the API. */
   max?: number;
+  /** Entity keys refolded per pass; see {@link DEFAULT_FOLD_KEY_BATCH}. */
+  foldKeyBatch?: number;
 }
 
 /** Where the fold stands. */
@@ -159,6 +161,24 @@ const STATE_LIVE_ENTITIES = "live_entities";
 const REGISTRY_ADDRESS = "0x4400000000000000000000000000000000000044";
 /** Blocks inspected per chunk plan; bounds one planning query. */
 const CHUNK_PLAN_BLOCKS = 5_000;
+
+/**
+ * Entity keys refolded per pass. A pass holds its keys' operations, receipt
+ * logs and folded versions in memory and binds the versions as one JSON
+ * parameter, so the batch rather than the chunk sets what a fold allocates —
+ * a chunk spans as many keys as its operations touch, which is unbounded.
+ */
+const DEFAULT_FOLD_KEY_BATCH = 1_000;
+
+/** Split `keys` into consecutive batches of at most `size`, order preserved. */
+export function foldKeyBatches(keys: readonly string[], size: number): string[][] {
+  const width = Math.max(1, Math.floor(size));
+  const batches: string[][] = [];
+  for (let start = 0; start < keys.length; start += width) {
+    batches.push(keys.slice(start, start + width));
+  }
+  return batches;
+}
 
 /** Indexes built for earlier result orders and address lookups; dropped on start. */
 const LEGACY_INDEXES = [
@@ -361,6 +381,7 @@ export class EntityIndexStorage implements EntityIndexReader {
   private readonly qTransactions: string;
   private readonly qLogs: string;
   private readonly qScannerState: string;
+  private readonly foldKeyBatch: number;
 
   private constructor(
     private readonly db: Db,
@@ -368,6 +389,7 @@ export class EntityIndexStorage implements EntityIndexReader {
     options: EntityIndexStorageOptions,
   ) {
     this.schema = options.schema ?? "public";
+    this.foldKeyBatch = options.foldKeyBatch ?? DEFAULT_FOLD_KEY_BATCH;
     const prefix = quoteIdent(this.schema);
     this.qState = `${prefix}.entity_index_state`;
     this.qVersions = `${prefix}.entity_versions`;
@@ -715,8 +737,15 @@ export class EntityIndexStorage implements EntityIndexReader {
    * the engine's receipt events attached where the logs were stored. Whole
    * transactions are loaded so the n-th create pairs with the n-th
    * `EntityCreated` even when other entities sit in between.
+   *
+   * Runs on `client` so a caller can wrap it in the fold transaction, which is
+   * also what keeps the two reads one after the other on one connection.
    */
-  async loadEntityOps(keys: readonly string[], throughBlock: bigint): Promise<Map<string, EntityOpRecord[]>> {
+  async loadEntityOps(
+    keys: readonly string[],
+    throughBlock: bigint,
+    client: DbQueryable = this.db,
+  ): Promise<Map<string, EntityOpRecord[]>> {
     const byKey = new Map<string, EntityOpRecord[]>();
     if (keys.length === 0) return byKey;
     const wanted = new Set(keys.map((key) => key.toLowerCase()));
@@ -726,29 +755,27 @@ export class EntityIndexStorage implements EntityIndexReader {
       `SELECT DISTINCT o.block_number, o.position FROM ${this.qOperations} o
        WHERE o.entity_key = ANY($1::text[]) AND o.block_number <= $2::bigint`;
 
-    const [operations, logs] = await Promise.all([
-      this.db.query<OperationRow>(
-        `WITH txs AS (${txs})
-         SELECT o.block_number::text AS block_number, o.position, o.op_index, o.operation_type, o.entity_key,
-                o.content_type, o.payload_size_bytes, o.attributes, o.expires_at_blocks::text AS expires_at_blocks,
-                o.new_owner, t.from_address, t.status, t.log_count
-         FROM ${this.qOperations} o
-         JOIN txs ON txs.block_number = o.block_number AND txs.position = o.position
-         JOIN ${this.qTransactions} t ON t.block_number = o.block_number AND t.position = o.position
-         ORDER BY o.block_number, o.position, o.op_index`,
-        [keyList, through],
-      ),
-      this.db.query<LogRow>(
-        `WITH txs AS (${txs})
-         SELECT l.block_number::text AS block_number, l.position, l.log_index, l.address,
-                l.topic0, l.topic1, l.topic2, l.topic3, l.data
-         FROM ${this.qLogs} l
-         JOIN txs ON txs.block_number = l.block_number AND txs.position = l.position
-         WHERE lower(l.address) = $3
-         ORDER BY l.block_number, l.position, l.log_index`,
-        [keyList, through, REGISTRY_ADDRESS],
-      ),
-    ]);
+    const operations = await client.query<OperationRow>(
+      `WITH txs AS (${txs})
+       SELECT o.block_number::text AS block_number, o.position, o.op_index, o.operation_type, o.entity_key,
+              o.content_type, o.payload_size_bytes, o.attributes, o.expires_at_blocks::text AS expires_at_blocks,
+              o.new_owner, t.from_address, t.status, t.log_count
+       FROM ${this.qOperations} o
+       JOIN txs ON txs.block_number = o.block_number AND txs.position = o.position
+       JOIN ${this.qTransactions} t ON t.block_number = o.block_number AND t.position = o.position
+       ORDER BY o.block_number, o.position, o.op_index`,
+      [keyList, through],
+    );
+    const logs = await client.query<LogRow>(
+      `WITH txs AS (${txs})
+       SELECT l.block_number::text AS block_number, l.position, l.log_index, l.address,
+              l.topic0, l.topic1, l.topic2, l.topic3, l.data
+       FROM ${this.qLogs} l
+       JOIN txs ON txs.block_number = l.block_number AND txs.position = l.position
+       WHERE lower(l.address) = $3
+       ORDER BY l.block_number, l.position, l.log_index`,
+      [keyList, through, REGISTRY_ADDRESS],
+    );
 
     const logsByTx = new Map<string, EntityEventLog[]>();
     for (const row of logs.rows) {
@@ -808,21 +835,33 @@ export class EntityIndexStorage implements EntityIndexReader {
    * from their operations up to `throughBlock` — on top of their genesis
    * state where they have one. Runs on `client` so a caller can wrap it in
    * the fold transaction.
+   *
+   * The keys are folded a batch at a time, each batch read, folded and
+   * written before the next is read. Keys are independent — a key's versions
+   * come from its own operations and its own genesis base, and are replaced
+   * on their own — so the result is the same whatever the batch width, while
+   * what is held at once stays bounded by the batch.
    */
   async refoldEntities(
     keys: readonly string[],
     throughBlock: bigint,
     client: DbQueryable = this.db,
   ): Promise<{ entities: number; versions: number }> {
-    if (keys.length === 0) return { entities: 0, versions: 0 };
-    const [opsByKey, bases] = await Promise.all([this.loadEntityOps(keys, throughBlock), this.loadGenesisBases(keys, client)]);
-    const versions: EntityVersion[] = [];
-    for (const key of keys) {
-      const lower = key.toLowerCase();
-      versions.push(...foldEntityVersions(lower, opsByKey.get(lower) ?? [], bases.get(lower)));
+    let entities = 0;
+    let written = 0;
+    for (const batch of foldKeyBatches(keys, this.foldKeyBatch)) {
+      const opsByKey = await this.loadEntityOps(batch, throughBlock, client);
+      const bases = await this.loadGenesisBases(batch, client);
+      const versions: EntityVersion[] = [];
+      for (const key of batch) {
+        const lower = key.toLowerCase();
+        versions.push(...foldEntityVersions(lower, opsByKey.get(lower) ?? [], bases.get(lower)));
+      }
+      await this.replaceVersions(client, batch, versions);
+      entities += batch.length;
+      written += versions.length;
     }
-    await this.replaceVersions(client, keys, versions);
-    return { entities: keys.length, versions: versions.length };
+    return { entities, versions: written };
   }
 
   /**
@@ -890,6 +929,12 @@ export class EntityIndexStorage implements EntityIndexReader {
    * Run `fn` inside a transaction that holds the projector's advisory lock,
    * so two projectors on one schema never fold at once. Returns undefined
    * without running `fn` when another holder has the lock.
+   *
+   * The transaction plans without parallel workers: a parallel plan reserves a
+   * dynamic shared memory segment sized to the joins it feeds, and the fold's
+   * joins over the operation, transaction and log tables ask for more than a
+   * container's default `/dev/shm` can back, which fails the query outright.
+   * The fold's own batching is what bounds its cost instead.
    */
   async withFoldLock<T>(fn: (client: DbQueryable) => Promise<T>): Promise<T | undefined> {
     return this.db.transaction(async (client) => {
@@ -898,6 +943,7 @@ export class EntityIndexStorage implements EntityIndexReader {
         [`entity-index:${this.schema}`],
       );
       if (!lock.rows[0]?.locked) return undefined;
+      await client.query("SET LOCAL max_parallel_workers_per_gather = 0");
       return fn(client);
     });
   }
