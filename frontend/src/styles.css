@@ -1045,7 +1045,7 @@ button.secondary {
   display: flex;
   flex-direction: column;
   gap: 2rem;
-  padding: 1rem 0 1rem;
+  padding: 0 0 1rem;
 }
 
 .home-hero {
@@ -1262,7 +1262,7 @@ button.secondary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.25rem;
-  align-items: stretch;
+  align-items: start;
 }
 
 .home-feed-grid.single {

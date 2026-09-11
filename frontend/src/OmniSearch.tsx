@@ -1,12 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { canSuggest, fetchSearch, searchHref, type SearchSuggestion } from "./searchApi";
+import { canSuggest, fetchSearch, normalizeSearchQuery, searchHref, type SearchSuggestion } from "./searchApi";
 
 export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }: {
   onNavigate: (href: string) => void;
   initialQuery?: string;
   autofocus?: boolean;
 }) {
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState(() => normalizeSearchQuery(initialQuery));
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [active, setActive] = useState(-1);
   const [focused, setFocused] = useState(false);
@@ -17,7 +17,7 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
   const generation = useRef(0);
   const listId = useId();
 
-  useEffect(() => { setQuery(initialQuery); }, [initialQuery]);
+  useEffect(() => { setQuery(normalizeSearchQuery(initialQuery)); }, [initialQuery]);
   useEffect(() => {
     const current = ++generation.current;
     const abort = new AbortController();
@@ -70,7 +70,7 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
           autoComplete="off" spellCheck={false} maxLength={256} autoFocus={autofocus}
           placeholder="Block number, address, hash or entity key…" value={query}
           onFocus={() => { setFocused(true); setDismissed(false); }}
-          onChange={(event) => { setQuery(event.target.value); setDismissed(false); }}
+          onChange={(event) => { setQuery(normalizeSearchQuery(event.target.value)); setDismissed(false); }}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
             if (event.key === "Escape") { event.preventDefault(); setDismissed(true); setActive(-1); }

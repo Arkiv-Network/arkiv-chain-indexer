@@ -23,6 +23,8 @@ import {
   writeStoredStringRecord,
 } from "./localStorage";
 import { fmtDate } from "./format";
+import { chartTimeAxis } from "./chartTime";
+import { useZonedChartLayout } from "./useZonedChartLayout";
 import {
   DEFAULT_PARAMETERS,
   filterParametersForRangeMode,
@@ -341,7 +343,7 @@ export function ChartsView({
   const xAxisMode = parseXAxisMode(filters.xAxisMode);
   const isRangeMode = zoomIndex > 0;
   const availableParameters = useMemo(
-    () => filterParametersForRangeMode(getAvailableParameters(noBatcher), isRangeMode),
+    () => filterParametersForRangeMode(getAvailableParameters(noBatcher).filter((p) => p.axis !== "batcher"), isRangeMode),
     [noBatcher, isRangeMode],
   );
   const parameterGroups = useMemo(() => groupParameters(availableParameters), [availableParameters]);
@@ -579,6 +581,7 @@ export function ChartsView({
     () => buildPlot(points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol, availableParameters),
     [points, selected, selectedPoint, timeZone, xAxisMode, tokenSymbol, availableParameters],
   );
+  const { zonedLayout, onRelayout } = useZonedChartLayout(layout, timeZone);
   const chartConfig = useMemo(
     () => ({
       displaylogo: false,
@@ -597,7 +600,8 @@ export function ChartsView({
   ) : (
     <Plot
       data={traces}
-      layout={layout}
+      layout={zonedLayout}
+      onRelayout={onRelayout}
       useResizeHandler
       style={{ width: "100%", height: "100%" }}
       config={chartConfig}
@@ -951,7 +955,7 @@ function buildPlot(
         `<b>${p.label}</b><br>` +
         "date %{customdata[2]}<br>" +
         "blocks %{customdata[0]}–%{customdata[1]}<br>" +
-        `%{y:.4~f} ${displayUnit(p.unit, tokenSymbol)}<extra></extra>`,
+        `%{y:${p.unit === "gwei" ? ".9~f" : ".4~f"}} ${displayUnit(p.unit, tokenSymbol)}<extra></extra>`,
     };
 
     if (!p.band) {
@@ -1013,10 +1017,13 @@ function buildPlot(
       y: 1.02,
       x: 0,
     },
-    hovermode: "x unified",
+    hovermode: "closest",
     xaxis: {
+      ...(xAxisMode === "dates" && xRange
+        ? chartTimeAxis(Date.parse(String(xRange[0])), Date.parse(String(xRange[1])), timeZone)
+        : {}),
       type: xAxisMode === "dates" ? "date" : "linear",
-      title: { text: xAxisMode === "dates" ? "Date" : "Block range" } as Plotly.DataTitle,
+      title: { text: xAxisMode === "dates" ? `Date (${timeZone})` : "Block range" } as Plotly.DataTitle,
       domain: [domainStart, domainEnd],
       range: xRange,
       gridcolor: getCssColor("--border", "#d6d9df"),
