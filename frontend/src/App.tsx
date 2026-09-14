@@ -7,18 +7,17 @@ import {
   loadBaseloadConfig,
   saveBaseloadConfig,
   updateBaseloadConfig as putBaseloadConfig,
-  verifyAdminToken,
   type BaseloadStateResponse,
   type BaseloadTaskStatus,
   type BaseloadWorkerBalance,
   type StoredBaseloadConfigSummary,
 } from "./api";
+import { AccountControls } from "./AccountControls";
+import { useAuth } from "./useAuth";
 import { AdminView } from "./AdminView";
 import {
   adminModeActive,
   adminModeStatus,
-  isVerifiedAdminToken,
-  privilegedAdminToken,
 } from "./adminMode";
 import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
@@ -33,7 +32,7 @@ import { HealthView } from "./HealthView";
 import { SyncStatusBanner } from "./SyncStatusBanner";
 import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
-import { navLabelForView, visibleNavItems } from "./navigation";
+import { navLabelForView, requiresAdminView, visibleNavItems } from "./navigation";
 import {
   BUILD_PAGE_SETTINGS,
   readStoredPageSettings,
@@ -59,7 +58,6 @@ import { OmniSearch } from "./OmniSearch";
 import { SearchView } from "./SearchView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
-const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
 const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 const FULL_WIDTH_STORAGE_KEY = "ui.fullWidth";
@@ -68,6 +66,7 @@ const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
 type ThemeOverride = "light" | "dark" | "";
 
 export function App() {
+  const auth = useAuth();
   const [clientLocation, setClientLocation] = useState(getCurrentLocation);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -78,13 +77,9 @@ export function App() {
   const [baseloadError, setBaseloadError] = useState<string | null>(null);
   const [baseloadSavedConfigs, setBaseloadSavedConfigs] = useState<StoredBaseloadConfigSummary[]>([]);
   const [baseloadConfigManagerError, setBaseloadConfigManagerError] = useState<string | null>(null);
-  const [baseloadAdminToken, setBaseloadAdminToken] = useState(() =>
-    readStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, ""),
-  );
   const [pageSettings, setPageSettings] = useState<PageSettings>(() =>
     readStoredPageSettings(BUILD_PAGE_SETTINGS),
   );
-  const [verifiedAdminToken, setVerifiedAdminToken] = useState("");
   const [adminModeEnabled, setAdminModeEnabled] = useState(
     () => readStoredString(ADMIN_MODE_ENABLED_STORAGE_KEY, "true") === "true",
   );
@@ -118,7 +113,7 @@ export function App() {
   // (transactionDataEnabled === null) keep the requested view mounted —
   // otherwise a direct load of /tx/… or /entity/… first flashes the blocks
   // view (and fires its /api/blocks fetch) before swapping to the real page.
-  const activeView =
+  const requestedView =
     transactionDataEnabled === false &&
     (view === "block" ||
       view === "transactions" ||
@@ -128,11 +123,12 @@ export function App() {
       view === "senders")
       ? "blocks"
       : view;
-  const chartFullscreen = activeView === "chart-fullscreen";
-  const trimmedAdminToken = baseloadAdminToken.trim();
-  const adminVerified = isVerifiedAdminToken(trimmedAdminToken, verifiedAdminToken);
+  const adminVerified = auth.session.role === "admin";
   const adminMode = adminModeStatus(adminVerified, adminModeEnabled);
   const adminModeIsActive = adminModeActive(adminVerified, adminModeEnabled);
+  const activeView = requiresAdminView(requestedView) && !adminModeIsActive ? "home" : requestedView;
+  const chartFullscreen = activeView === "chart-fullscreen";
+  const csrfToken = adminModeIsActive ? auth.session.csrfToken ?? undefined : undefined;
   const navItems = visibleNavItems(adminModeIsActive, transactionDataEnabled);
   const activeNavLabel =
     navItems.find((item) => item.view === activeView)?.label ?? navLabelForView(activeView) ?? "Menu";
@@ -215,7 +211,7 @@ export function App() {
 
     const refresh = async () => {
       try {
-        const body = await fetchBaseloadConfigs(adminBearerToken());
+        const body = await fetchBaseloadConfigs();
         if (cancelled) return;
         setBaseloadSavedConfigs(body.configs);
         setBaseloadConfigManagerError(null);
@@ -231,7 +227,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeView, baseloadAdminToken, adminModeIsActive]);
+  }, [activeView, adminModeIsActive]);
 
   useEffect(() => {
     if (
@@ -264,10 +260,6 @@ export function App() {
   useEffect(() => {
     writeStoredString(TIME_ZONE_STORAGE_KEY, timeZone);
   }, [timeZone]);
-
-  useEffect(() => {
-    writeStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, baseloadAdminToken);
-  }, [baseloadAdminToken]);
 
   useEffect(() => {
     writeStoredString(ADMIN_MODE_ENABLED_STORAGE_KEY, String(adminModeEnabled));
@@ -322,7 +314,7 @@ export function App() {
   // offline state. Lives here in App so the patch survives navigating between
   // views. The rest of the app just sees a real connection failure.
   useEffect(() => {
-    if (typeof window === "undefined" || !simulateOffline) return;
+    if (typeof window === "undefined" || !simulateOffline || !adminModeIsActive) return;
     const originalFetch = window.fetch;
     window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
@@ -341,63 +333,32 @@ export function App() {
     return () => {
       window.fetch = originalFetch;
     };
-  }, [simulateOffline]);
+  }, [simulateOffline, adminModeIsActive]);
 
   useEffect(() => {
-    if (!trimmedAdminToken) {
-      setVerifiedAdminToken("");
-      return;
-    }
-    let cancelled = false;
-    verifyAdminToken(trimmedAdminToken)
-      .then(() => {
-        if (!cancelled) setVerifiedAdminToken(trimmedAdminToken);
-      })
-      .catch(() => {
-        if (!cancelled) setVerifiedAdminToken("");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [trimmedAdminToken]);
+    if (adminModeIsActive) return;
+    setSimulateOffline(false);
+    setBaseloadConfig(EMPTY_BASELOAD_CONFIG);
+    setBaseloadTaskStatuses({});
+    setBaseloadBalances({});
+    setBaseloadSavedConfigs([]);
+    setBaseloadError(null);
+    setBaseloadConfigManagerError(null);
+  }, [adminModeIsActive]);
 
-  const onAdminLoginClick = async (event: React.MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    const input = window.prompt(
-      "Enter admin credentials (leave blank to clear):",
-      baseloadAdminToken,
-    );
-    if (input === null) return;
-    const trimmed = input.trim();
-    if (!trimmed) {
-      setBaseloadAdminToken("");
-      setVerifiedAdminToken("");
-      setAdminModeEnabled(false);
-      return;
+  useEffect(() => {
+    if (!auth.loading && !adminVerified && requiresAdminView(view)) {
+      if (writePermalink("home", {})) setClientLocation(getCurrentLocation());
     }
-    try {
-      await verifyAdminToken(trimmed);
-      setBaseloadAdminToken(trimmed);
-      setVerifiedAdminToken(trimmed);
-      setAdminModeEnabled(true);
-    } catch (error) {
-      setVerifiedAdminToken("");
-      window.alert(
-        `Admin credentials rejected: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  };
+  }, [auth.loading, adminVerified, view]);
 
   const updateBaseloadConfig = async (config: BaseloadConfig) => {
     try {
-      applyBaseloadState(await putBaseloadConfig(config, adminBearerToken()));
+      applyBaseloadState(await putBaseloadConfig(config, csrfToken));
     } catch (error) {
       setBaseloadError(error instanceof Error ? error.message : String(error));
     }
   };
-
-  const adminBearerToken = () =>
-    privilegedAdminToken(baseloadAdminToken, adminVerified, adminModeEnabled);
 
   const applyBaseloadState = (state: BaseloadStateResponse) => {
     setBaseloadConfig(state.config);
@@ -407,14 +368,14 @@ export function App() {
   };
 
   const refreshBaseloadSavedConfigs = async () => {
-    const body = await fetchBaseloadConfigs(adminBearerToken());
+    const body = await fetchBaseloadConfigs();
     setBaseloadSavedConfigs(body.configs);
     setBaseloadConfigManagerError(null);
   };
 
   const saveCurrentBaseloadConfig = async (name: string) => {
     try {
-      await saveBaseloadConfig(name, baseloadConfig, adminBearerToken());
+      await saveBaseloadConfig(name, baseloadConfig, csrfToken);
       await refreshBaseloadSavedConfigs();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -425,7 +386,7 @@ export function App() {
 
   const loadSavedBaseloadConfig = async (name: string) => {
     try {
-      applyBaseloadState(await loadBaseloadConfig(name, adminBearerToken()));
+      applyBaseloadState(await loadBaseloadConfig(name, csrfToken));
       await refreshBaseloadSavedConfigs();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -436,7 +397,7 @@ export function App() {
 
   const deleteSavedBaseloadConfig = async (name: string) => {
     try {
-      await deleteBaseloadConfig(name, adminBearerToken());
+      await deleteBaseloadConfig(name, csrfToken);
       await refreshBaseloadSavedConfigs();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -504,6 +465,7 @@ export function App() {
               Admin mode {adminMode}
             </button>
           ) : null}
+          <AccountControls auth={auth} />
           <div className="header-menu" ref={menuRef}>
             <button
               type="button"
@@ -643,11 +605,12 @@ export function App() {
           />
         ) : activeView === "data" ? (
           <DataView
+            key={`${auth.session.user?.id ?? "anonymous"}:${adminModeIsActive}`}
             locationSearch={locationSearch}
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             adminModeActive={adminModeIsActive}
-            adminToken={adminBearerToken()}
+            csrfToken={csrfToken}
           />
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView
@@ -685,8 +648,6 @@ export function App() {
             taskStatuses={baseloadTaskStatuses}
             balances={baseloadBalances}
             backendError={baseloadError}
-            adminToken={baseloadAdminToken}
-            onAdminTokenChange={setBaseloadAdminToken}
             savedConfigs={baseloadSavedConfigs}
             configManagerError={baseloadConfigManagerError}
             onRefreshSavedConfigs={refreshBaseloadSavedConfigs}
@@ -715,7 +676,6 @@ export function App() {
         ) : (
           <HealthView
             timeZone={timeZone}
-            {...(adminBearerToken() ? { adminToken: adminBearerToken() as string } : {})}
           />
         )}
       </main>
@@ -723,9 +683,6 @@ export function App() {
         <div className="footer-inner">
           <a href="/llms.txt" className="footer-link">
             llms.txt
-          </a>
-          <a href="#" className="admin-login-link" onClick={onAdminLoginClick}>
-            admin login
           </a>
         </div>
       </footer>

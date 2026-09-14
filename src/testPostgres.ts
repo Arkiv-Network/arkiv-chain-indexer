@@ -1,7 +1,7 @@
 import { openDb, type Db } from "./db";
 import { ScannerStorage } from "./storage";
 
-export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 export const hasPostgresForTests = (): boolean => Boolean(TEST_DATABASE_URL);
 

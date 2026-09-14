@@ -589,8 +589,7 @@ footer {
   gap: 0.85rem;
 }
 
-.footer-link,
-.admin-login-link {
+.footer-link {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.04em;
@@ -600,8 +599,7 @@ footer {
   transition: opacity 0.15s ease;
 }
 
-.footer-link:hover,
-.admin-login-link:hover {
+.footer-link:hover {
   opacity: 1;
   text-decoration: underline;
 }
@@ -838,24 +836,7 @@ button.secondary {
   display: none;
 }
 
-.admin-token-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
 
-.admin-token-field input {
-  width: 15rem;
-  max-width: 100%;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-}
 
 .summary {
   margin: 0.25rem 0 0.75rem;
@@ -6716,3 +6697,48 @@ form select {
   line-height: 1.35;
   white-space: pre;
 }
+
+
+.account-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  font-size: 0.78rem;
+  min-width: 0;
+}
+
+.account-identity { display: grid; min-width: 0; max-width: 14rem; }
+.account-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-identity small { color: var(--ink-muted); }
+.account-error { flex-basis: 100%; max-width: 24rem; color: var(--ink-muted); }
+.google-login-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  text-decoration: none;
+  background: var(--sand);
+  white-space: nowrap;
+}
+.google-login-button:hover { text-decoration: underline; }
+@media (max-width: 760px) {
+  .header-inner { flex-wrap: wrap; }
+  .account-controls { order: 5; width: 100%; padding: 0.45rem 0; }
+  .account-identity { max-width: calc(100vw - 9rem); }
+}
+.token-login-form { display: grid; gap: 0.7rem; flex-basis: 100%; max-width: 25rem; text-align: left; }
+.token-login-form label { display: grid; gap: 0.3rem; }
+.token-login-form input { width: 100%; min-width: 0; box-sizing: border-box; }
+.token-login-actions { display: flex; gap: 0.5rem; }
+
+.access-tokens { position: absolute; right: 1rem; top: 4.5rem; z-index: 100; width: min(36rem, calc(100vw - 2rem)); max-height: 75vh; overflow: auto; padding: 1.25rem; background: var(--bg, #fff); color: var(--ink); border: 1px solid #8886; border-radius: 10px; box-shadow: 0 8px 32px #0003; }
+.access-tokens form { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; }
+.access-tokens label { display: grid; gap: .25rem; }
+.access-tokens input { max-width: 100%; }
+.access-tokens input[readonly] { width: 100%; font-family: monospace; }
+.access-tokens li { margin: .75rem 0; }
+.access-tokens li button { margin-left: .5rem; }

@@ -1,3 +1,4 @@
+import { testAuth, testAdminHeaders } from "./testAuth";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   cacheBytes,
@@ -134,124 +135,34 @@ describe("observeHttpRequest", () => {
   });
 });
 
-describe("GET /metrics", () => {
-  const storage = {} as ScannerStorage;
-
-  test("renders the registry in the text exposition format", async () => {
-    httpRequestsTotal.inc({ route: "/blocks", method: "GET", status: "200" }, 5);
-    const response = await handleRequest(new Request("http://x/metrics"), storage);
-    expect(response.status).toBe(200);
+for (const path of ["/metrics","/admin/metrics"]) describe(`GET ${path}`, () => {
+  const storage={} as ScannerStorage;
+  const get=(headers:Record<string,string>={...testAdminHeaders},extra={})=>handleRequest(new Request(`http://x${path}`,{headers}),storage,{auth:testAuth(),...extra});
+  test("renders registry for an administrator without counting the scrape",async()=>{
+    httpRequestsTotal.inc({route:"/blocks",method:"GET",status:"200"},5);
+    const response=await get();expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/plain");
-    const body = await response.text();
-    expect(body).toContain("# TYPE http_requests_total counter");
-    expect(body).toContain('http_requests_total{route="/blocks",method="GET",status="200"} 5');
-    expect(body).toContain("process_resident_memory_bytes ");
-    expect(body).toContain("# TYPE build_info gauge");
-    // The scrape itself never shows up in the traffic counters.
-    expect(httpRequestsTotal.get({ route: "/metrics", method: "GET", status: "200" })).toBe(0);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).toContain('http_requests_total{route="/blocks",method="GET",status="200"} 5');
+    expect(httpRequestsTotal.get({route:path,method:"GET",status:"200"})).toBe(0);
   });
-
-  test("is not served to a request that came through the reverse proxy when open", async () => {
-    // nginx 404s /api/metrics, but Bun collapses `/api/%2e%2e/metrics` to
-    // `/metrics` before routing; the forwarding headers give the proxy away.
-    for (const header of ["X-Forwarded-For", "X-Forwarded-Proto", "X-Real-IP"]) {
-      const response = await handleRequest(new Request("http://x/metrics", { headers: { [header]: "1" } }), storage);
-      expect(response.status).toBe(404);
-      expect(response.headers.get("Content-Type")).toContain("application/json");
+  if (path === "/admin/metrics") test("rejects anonymous and legacy credentials, including proxy requests",async()=>{
+    expect((await get({})).status).toBe(401);
+    expect((await get({Authorization:"Bearer old-secret"},{metricsBearerToken:"old-secret"})).status).toBe(401);
+    expect((await get({"X-Forwarded-For":"1"})).status).toBe(401);
+    expect((await handleRequest(new Request(`http://x${path}`),storage)).status).toBe(503);
+  });
+  if (path === "/metrics") test("is open without login configuration, regardless of forwarding headers or credentials",async()=>{
+    for (const headers of [{}, {"X-Forwarded-For":"1", "X-Forwarded-Proto":"https"}, {Authorization:"Bearer ignored"}]) {
+      const response=await handleRequest(new Request("http://x/metrics",{headers}),storage);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toContain("text/plain");
     }
-    // A configured token still lets a proxied scraper through.
-    const response = await handleRequest(
-      new Request("http://x/metrics", { headers: { "X-Forwarded-For": "1", Authorization: "Bearer s3cret" } }),
-      storage,
-      { metricsBearerToken: "s3cret" },
-    );
-    expect(response.status).toBe(200);
+    expect((await get({})).status).toBe(200);
   });
-
-  test("enforces the bearer token when one is configured", async () => {
-    const options = { metricsBearerToken: "s3cret" };
-    expect((await handleRequest(new Request("http://x/metrics"), storage, options)).status).toBe(401);
-    expect(
-      (
-        await handleRequest(
-          new Request("http://x/metrics", { headers: { Authorization: "Bearer wrong" } }),
-          storage,
-          options,
-        )
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await handleRequest(
-          new Request("http://x/metrics", { headers: { Authorization: "Bearer s3cret" } }),
-          storage,
-          options,
-        )
-      ).status,
-    ).toBe(200);
-  });
-
-  test("can be disabled", async () => {
-    const response = await handleRequest(new Request("http://x/metrics"), storage, {
-      metricsEnabled: false,
-    });
-    expect(response.status).toBe(404);
-  });
-
-  test("only answers GET", async () => {
-    const response = await handleRequest(new Request("http://x/metrics", { method: "POST" }), storage);
-    expect(response.status).toBe(405);
-  });
-});
-
-describe("GET /admin/metrics", () => {
-  const storage = {} as ScannerStorage;
-  const options = { baseloadAdminBearerToken: "adm1n" };
-
-  const get = (headers?: Record<string, string>, extra?: Record<string, unknown>) =>
-    handleRequest(new Request("http://x/admin/metrics", headers ? { headers } : undefined), storage, {
-      ...options,
-      ...extra,
-    });
-
-  test("serves the same registry as /metrics to an authorised caller", async () => {
-    httpRequestsTotal.inc({ route: "/blocks", method: "GET", status: "200" }, 5);
-    const response = await get({ Authorization: "Bearer adm1n" });
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Content-Type")).toContain("text/plain");
-    const body = await response.text();
-    expect(body).toContain('http_requests_total{route="/blocks",method="GET",status="200"} 5');
-    // The scrape itself never shows up in the traffic counters.
-    expect(httpRequestsTotal.get({ route: "/admin/metrics", method: "GET", status: "200" })).toBe(0);
-  });
-
-  test("demands the admin bearer token", async () => {
-    expect((await get()).status).toBe(401);
-    expect((await get({ Authorization: "adm1n" })).status).toBe(401);
-    expect((await get({ Authorization: "Bearer wrong" })).status).toBe(403);
-  });
-
-  test("never opens up when no admin token is configured", async () => {
-    const response = await handleRequest(new Request("http://x/admin/metrics"), storage, {});
-    expect(response.status).toBe(503);
-  });
-
-  test("ignores METRICS_BEARER_TOKEN, which gates the loopback path only", async () => {
-    const response = await get({ Authorization: "Bearer adm1n" }, { metricsBearerToken: "s3cret" });
-    expect(response.status).toBe(200);
-  });
-
-  test("is removed with the rest of the metrics when disabled", async () => {
-    expect((await get({ Authorization: "Bearer adm1n" }, { metricsEnabled: false })).status).toBe(404);
-  });
-
-  test("only answers GET", async () => {
-    const response = await handleRequest(
-      new Request("http://x/admin/metrics", { method: "POST", headers: { Authorization: "Bearer adm1n" } }),
-      storage,
-      options,
-    );
-    expect(response.status).toBe(405);
+  test("can be disabled and only answers GET",async()=>{
+    expect((await get({...testAdminHeaders},{metricsEnabled:false})).status).toBe(404);
+    expect((await handleRequest(new Request(`http://x${path}`,{method:"POST",headers:testAdminHeaders}),storage,{auth:testAuth()})).status).toBe(405);
   });
 });
 

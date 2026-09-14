@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   adminModeActive,
   adminModeStatus,
-  isVerifiedAdminToken,
-  privilegedAdminToken,
 } from "./src/adminMode";
 
 describe("frontend admin mode state", () => {
@@ -21,16 +19,4 @@ describe("frontend admin mode state", () => {
     expect(adminModeActive(true, false)).toBe(false);
   });
 
-  test("only returns the bearer token while verified admin mode is enabled", () => {
-    expect(privilegedAdminToken(" secret ", true, true)).toBe("secret");
-    expect(privilegedAdminToken(" secret ", true, false)).toBeUndefined();
-    expect(privilegedAdminToken(" secret ", false, true)).toBeUndefined();
-    expect(privilegedAdminToken("   ", true, true)).toBeUndefined();
-  });
-
-  test("requires the current token to match the verified token exactly", () => {
-    expect(isVerifiedAdminToken(" secret ", "secret")).toBe(true);
-    expect(isVerifiedAdminToken("changed", "secret")).toBe(false);
-    expect(isVerifiedAdminToken("   ", "secret")).toBe(false);
-  });
 });

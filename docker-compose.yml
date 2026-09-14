@@ -323,7 +323,14 @@ services:
       LIST_CACHE_TTL_MS: ${LIST_CACHE_TTL_MS:-}
       BASELOAD_RPC_NODE: ${BASELOAD_RPC_NODE:-}
       BASELOAD_MNEMONIC: ${BASELOAD_MNEMONIC:-}
-      BASELOAD_ADMIN_BEARER_TOKEN: ${BASELOAD_ADMIN_BEARER_TOKEN:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-}
+      AUTH_ADMIN_EMAILS: ${AUTH_ADMIN_EMAILS-sieciech.czajka@golem.network}
+      AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-43200}
+      AUTH_INSECURE_LOCALHOST: ${AUTH_INSECURE_LOCALHOST:-false}
+      AUTH_TOKEN_LOGIN_ENABLED: ${AUTH_TOKEN_LOGIN_ENABLED:-false}
+      AUTH_TOKEN_LOGIN_TOKEN: ${AUTH_TOKEN_LOGIN_TOKEN:-}
       BASELOAD_INITIAL_CONFIG_PATH: ${BASELOAD_INITIAL_CONFIG_PATH:-}
       BASELOAD_FAUCET_URL: ${BASELOAD_FAUCET_URL:-}
       BASELOAD_FAUCET_PASSWORD: ${BASELOAD_FAUCET_PASSWORD:-}
@@ -369,9 +376,8 @@ services:
       PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: ${PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS:-}
       # Prometheus text metrics on GET /metrics (see docs/prometheus.md). The
       # nginx site configs return 404 for /api/metrics, so the scrape target is
-      # the loopback backend port; set a token if the port is reachable further.
+      # the loopback backend port. /metrics is open; deployment controls external access.
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
-      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
     ports:
       - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
     volumes:

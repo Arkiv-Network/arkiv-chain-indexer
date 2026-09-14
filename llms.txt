@@ -32,7 +32,7 @@ docker compose up --build
 | `--port <port>` | `SERVER_PORT` | `3000` | Backend TCP port. Use `0` for any free port. |
 | `--host <host>` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
 | `--transaction-data-enabled <bool>` | `SERVER_TRANSACTION_DATA_ENABLED`, `SAVE_TRANSACTION_DATA` | `true` | Enables transaction inspection endpoints and advertises transaction features in `/health`. |
-| `--baseload-admin-bearer-token <token>` | `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token for mutating Baseload requests and saved config routes. |
+| env only | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_PUBLIC_ORIGIN` | unset | Google login; required together for administrator sessions. |
 | `--baseload-initial-config <path>` | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional Baseload worker config JSON file loaded once at backend startup. |
 | `--redis-url <url>` | `REDIS_URL`, `SERVER_REDIS_URL` | unset | Enables Redis-backed `/guzzlers` and `/guzzler/:address` APIs. |
 
@@ -91,7 +91,7 @@ Related scanner and worker settings:
 | Transaction records | Stored transaction record rows | `/transaction-records` remains routed even if transaction data is disabled, but it is useful only with record data. |
 | Arkiv operation metadata | Scanner transaction storage plus decoder URL | `/transactions` may include `operationsSummary`; `/transaction/:hash` includes `operations`. |
 | Baseload workers | Backend started with Baseload runtime; `BASELOAD_RPC_NODE` required to actually submit transactions | `/baseload` status is public; runtime-dependent writes fail if runtime is unavailable. |
-| Baseload admin protection | `BASELOAD_ADMIN_BEARER_TOKEN` | Mutating `/baseload`, all `/baseload/configs...`, and `/admin/verify`. |
+| Administrator access | Google session + origin/CSRF | Mutating `/baseload`, all `/baseload/configs...`, node relay and admin metrics. Generated temporary access tokens permit all admin API operations for up to 30 days; token management requires an admin session. |
 | Guzzlers | `REDIS_URL` or `SERVER_REDIS_URL` | `/guzzlers` and `/guzzler/:address`; disabled routes return `503`. |
 | JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
 | Account balances | `SCANNER_TRACK_BALANCES` on the scanner; `account_balances` rows | `GET /balances` and `eth_getBalance` on `/shadow-rpc`. Both answer empty/`-32000` without stored readings. |
@@ -120,7 +120,7 @@ Related scanner and worker settings:
 | `GET` | `/guzzler/:address` | One sender's recent per-minute guzzler history. |
 | `GET` | `/baseload` | Current backend Baseload state and worker statuses. |
 | `PUT` | `/baseload` | Replace Baseload worker config and reconcile workers. |
-| `GET` | `/admin/verify` | Validate the configured Baseload admin bearer token. |
+| `GET` | `/auth/session` | Role, user identity, CSRF token, expiry and login availability (no-store). |
 | `GET` | `/baseload/configs` | List saved Baseload configs. |
 | `GET` | `/baseload/configs/:name` | Fetch one saved Baseload config. |
 | `PUT` | `/baseload/configs/:name` | Save or replace one named Baseload config. |
@@ -176,8 +176,8 @@ HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, 
 `/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
 under `features.jsonRpc`.
 
-It is an admin surface: every `POST` needs `Authorization: Bearer <token>` matching
-`BASELOAD_ADMIN_BEARER_TOKEN` (`401`/`403` otherwise, `503` when no token is configured), because the passthrough
+It is an admin surface: every `POST` needs an administrator Google session, configured `Origin` and
+`X-CSRF-Token` (`401`/`403` otherwise, `503` when login is unavailable), because the passthrough
 below spends the upstream node's quota and reaches its mempool. The experimental index path,
 `POST /shadow-rpc/experimental`, stays open to everyone.
 
@@ -265,8 +265,7 @@ Worth knowing before pointing a wallet at it:
 Example:
 
 ```sh
-curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $BASELOAD_ADMIN_BEARER_TOKEN" \
+curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 
@@ -722,12 +721,12 @@ wallets to scale load instead of multi-entity mutation batches.
 ### `GET /baseload`
 
 Returns backend Baseload state, enabled/runtime availability, active config, and worker statuses.
-This route is public even when `BASELOAD_ADMIN_BEARER_TOKEN` is configured.
+This route remains public with or without Google login.
 
 ### `PUT /baseload`
 
 Replaces the active backend Baseload config and starts, updates, or stops workers to match it.
-Requires `Authorization: Bearer <token>` when `BASELOAD_ADMIN_BEARER_TOKEN` is set. The request body
+Requires an administrator Google session plus origin/CSRF, or a generated temporary administrator access token. The request body
 must be a JSON object normalizable to:
 
 ```json
@@ -737,17 +736,19 @@ must be a JSON object normalizable to:
 }
 ```
 
-Invalid JSON or invalid config returns `400`. If no admin token is configured, mutation is
-unrestricted.
+Invalid JSON or invalid config returns `400`. Missing login configuration refuses human administrator access.
 
-### `GET /admin/verify`
+### Google login
 
-Validates the configured Baseload admin bearer token. Returns `503` when no admin bearer token is
-configured. Requires `Authorization: Bearer <token>` and returns `{ "authorized": true }` on success.
+GET `/auth/google/start?returnTo=/data` begins login; `/auth/google/callback` exchanges the authorization code.
+GET `/auth/session` returns role, identity, CSRF token, expiry and login availability. POST `/auth/logout`
+requires the session cookie, configured Origin and X-CSRF-Token. All auth routes are no-store.
+The sole default administrator is verified `sieciech.czajka@golem.network`, with signed `hd=golem.network`.
+Other accounts have the same public access as anonymous users, plus identity/logout. See docs/google-login.md.
 
 ### Saved Baseload Configs
 
-All saved config routes require the admin bearer token when `BASELOAD_ADMIN_BEARER_TOKEN` is set.
+All saved config routes require an administrator session; writes also require origin and CSRF validation.
 Names are URL-decoded, trimmed, must start with a letter or number, may contain letters, numbers,
 spaces, dots, underscores, or hyphens, and are limited to 80 characters.
 

@@ -6,6 +6,7 @@ queries.
 
 ## Scraping
 
+`GET /metrics` is open without authentication. Deployment networking and proxy rules control external access.
 The public nginx sites return `404` for `/api/metrics`, so scrape the backend on its loopback port
 from the same host. With the default compose binding (`BACKEND_HOST=127.0.0.1`, `BACKEND_PORT=3000`):
 
@@ -17,9 +18,6 @@ scrape_configs:
       - targets: ["127.0.0.1:3000"]
         labels:
           network: tiramisu
-    # Only when METRICS_BEARER_TOKEN is set on the backend:
-    # authorization:
-    #   credentials: "<token>"
 ```
 
 Several compose stacks on one host (e.g. `BACKEND_PORT=3001` for a second network) are separate
@@ -34,9 +32,9 @@ curl -s http://127.0.0.1:3000/metrics | head -40
 ### From off the host
 
 A scraper that cannot reach loopback uses `GET /admin/metrics`, which the nginx sites do proxy. It
-serves the same registry and always requires the admin bearer token
-(`BASELOAD_ADMIN_BEARER_TOKEN`), so there is no unauthenticated path to the metrics on the public
-origin:
+serves the same registry and requires an administrator login session or a generated access token.
+Create tokens in the signed-in administrator **Access tokens** panel and replace them before expiry
+(maximum 30 days). These tokens grant all administrator API permissions, including Baseload and Shadow RPC.
 
 ```yaml
 scrape_configs:
@@ -44,7 +42,7 @@ scrape_configs:
     scheme: https
     metrics_path: /api/admin/metrics
     authorization:
-      credentials: "<BASELOAD_ADMIN_BEARER_TOKEN>"
+      credentials: "<ARKIV_ACCESS_TOKEN>"
     static_configs:
       - targets: ["kalarepa.arkiv-global.net"]
         labels:
@@ -52,11 +50,11 @@ scrape_configs:
 ```
 
 ```sh
-curl -s -H "authorization: Bearer $BASELOAD_ADMIN_BEARER_TOKEN" \
+curl -s -H "authorization: Bearer $ARKIV_ACCESS_TOKEN" \
   https://kalarepa.arkiv-global.net/api/admin/metrics | head -40
 ```
 
-Prefer the loopback target where you have it: it keeps the admin token off the wire, and it is not
+Prefer the loopback target where you have it: it keeps the metrics credential off the wire, and it is not
 subject to the CDN in front of the public origin.
 
 ## Starter queries
@@ -116,7 +114,7 @@ indexer_lag_blocks > 50 or indexer_head_age_seconds > 120
 
 - Successful scrapes of `/metrics` and `/admin/metrics` are excluded from the traffic metrics;
   rejected ones are counted, so `http_requests_rejected_total{route="/admin/metrics"}` shows anyone
-  probing the admin token.
+  probing the metrics credential.
 - Routes are templates (`/transaction/:hash`), never raw paths; unknown paths are `other`, unknown
   JSON-RPC method names are `unknown`. Query strings are never labels.
 - `cache_requests_total` and `cache_evictions_total` mirror the caches' own counters at scrape time,

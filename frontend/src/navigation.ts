@@ -39,3 +39,8 @@ export function visibleNavItems(
 export function navLabelForView(view: View): string | undefined {
   return ALL_NAV_ITEMS.find((item) => item.view === view)?.label;
 }
+
+/** Guard view rendering as well as menu visibility, including direct links. */
+export function requiresAdminView(view: View): boolean {
+  return ALL_NAV_ITEMS.some((item) => item.view === view && item.requiresAdmin);
+}

@@ -16,9 +16,24 @@ server {
 
     # The open scrape target stays on loopback (127.0.0.1:3000); the public
     # origin serves the same registry only at /api/admin/metrics, behind the
-    # admin bearer token.
+    # administrator session or metrics-only machine credential.
     location = /api/metrics {
         return 404;
+    }
+
+    # Authorization codes and state must never enter proxy request logs.
+    # Set-Cookie headers are forwarded individually by nginx's default proxy behavior.
+    location ^~ /api/auth/ {
+        access_log off;
+        error_log /dev/null;
+        proxy_cache_bypass 1;
+        proxy_no_cache 1;
+        proxy_pass http://127.0.0.1:3000/auth/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location /api/ {

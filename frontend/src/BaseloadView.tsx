@@ -44,8 +44,6 @@ interface BaseloadViewProps {
   taskStatuses: Record<string, BaseloadTaskStatus>;
   balances: Record<string, BaseloadWorkerBalance>;
   backendError: string | null;
-  adminToken: string;
-  onAdminTokenChange: (token: string) => void;
   savedConfigs: StoredBaseloadConfigSummary[];
   configManagerError: string | null;
   onRefreshSavedConfigs: () => Promise<void>;
@@ -85,8 +83,6 @@ export function BaseloadView({
   taskStatuses,
   balances,
   backendError,
-  adminToken,
-  onAdminTokenChange,
   savedConfigs,
   configManagerError,
   onRefreshSavedConfigs,
@@ -287,15 +283,6 @@ export function BaseloadView({
       <div className="view-heading-row">
         <h2>Baseload workers</h2>
         <div className="button-row">
-          <label className="admin-token-field">
-            Admin bearer token
-            <input
-              type="password"
-              autoComplete="off"
-              value={adminToken}
-              onChange={(event) => onAdminTokenChange(event.target.value)}
-            />
-          </label>
           <label className="secondary file-button">
             Load config
             <input type="file" accept="application/json,.json" onChange={loadConfigFile} />

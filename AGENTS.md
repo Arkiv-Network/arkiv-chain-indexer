@@ -110,14 +110,14 @@ docker compose up --build
   `AsyncLocalStorage`. JSON-RPC calls are counted per method in `handleSingle`; unknown method names are labelled
   `unknown` so clients cannot mint series. Cache stats and scanner progress are mirrored by collectors registered
   in `serve.ts` and refreshed at scrape time. The nginx site configs return 404 for `/api/metrics`; scrape the
-  loopback backend port, or set `METRICS_BEARER_TOKEN`; with no token the open path refuses requests that carry
-  reverse-proxy forwarding headers, because Bun collapses `/api/%2e%2e/metrics` to `/metrics` before routing. `GET /admin/metrics` renders the same registry for
-  off-host scrapers and is proxied publicly, so it always demands `BASELOAD_ADMIN_BEARER_TOKEN` and answers 503
-  when none is set — never let that path fall open. Successful scrapes of either path are excluded from the traffic metrics; rejected ones are counted so admin-token probing is visible.
+  loopback backend port or `/api/admin/metrics`. `/metrics` is open without authentication or forwarding-header
+  checks; deployment controls external exposure. `/admin/metrics` requires an administrator session or
+  generated temporary access token. Successful scrapes are excluded from traffic metrics; rejected ones are counted.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
   once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
-  data — the only path to a node is the opt-in passthrough below. The path demands `BASELOAD_ADMIN_BEARER_TOKEN`
-  (it spends the upstream's quota), while `/shadow-rpc/experimental` is open; the Data tab offers only the
+  data — the only path to a node is the opt-in passthrough below. The path demands an administrator session,
+  configured Origin and X-CSRF-Token (it spends the upstream's quota), while `/shadow-rpc/experimental` is open
+  and explicitly receives no passthrough forwarder; the Data tab offers only the
   index and a custom node outside admin mode. `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
@@ -217,3 +217,37 @@ docker compose up --build
   port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. Compose runs the
   released upstream image directly and sets `PORT` itself.
 - All required env vars live in `.env.example`.
+
+## Google login and administrator access
+
+- `src/auth.ts`, `authStorage.ts`, `googleOidc.ts`, and `authConfig.ts` implement Google OIDC code flow,
+  PKCE/state/nonce and server-managed PostgreSQL sessions. The openid-client adapter explicitly enables
+  signature/JWKS checks. Google access/ID tokens are discarded after identity validation.
+- Google `sub` identifies users. Compute roles per request from the current allowlist, verified email and
+  signed `hd=golem.network`; the sole initial administrator is `sieciech.czajka@golem.network`.
+  Other Google users have public access plus identity/logout. Disabled users and revoked/expired sessions fail closed.
+- Protected surfaces: all saved Baseload config routes, PUT /baseload, /shadow-rpc, /admin/metrics.
+  Cookie writes and protected RPC require the configured exact Origin and session X-CSRF-Token. Auth/admin
+  responses are no-store, without wildcard CORS or conditional GET. Public reads do not load auth storage.
+- Host-only HttpOnly Secure SameSite=Lax cookies use `__Host-arkiv_session`; DB stores token hashes only.
+  Login attempts are atomically consumed and rate capped across instances; expiry cleanup runs each minute.
+  HTTP localhost cookies require explicit AUTH_INSECURE_LOCALHOST=true and a localhost AUTH_PUBLIC_ORIGIN.
+- Administrator sessions can create/revoke temporary access tokens under `/auth/access-tokens`. Only hashes
+  are stored in `auth_access_tokens`; validity is 1–30 days, enforced by the service and database. Tokens grant
+  all administrator API permissions except token management (session only). Recheck owner role/disabled state,
+  expiry and revocation on every request. Reject ambiguous bearer+session requests. The legacy environment
+  credentials METRICS_BEARER_TOKEN and BASELOAD_AUTOMATION_TOKEN no longer grant access.
+- Kalarepa alone opts into AUTH_TOKEN_LOGIN_ENABLED=true plus AUTH_TOKEN_LOGIN_TOKEN (default disabled).
+  POST /auth/token-login exchanges JSON email/token for a session, requires exact Origin, bounds the body,
+  and shares the database login rate cap. The entered email uses the current admin allowlist; all others are
+  ordinary users. Keep provider=token identities separate from Google, with email_verified=false. Token
+  sessions require the current token fingerprint on every lookup, so disabling or rotating the token rejects them.
+  This is an explicit testing option, never a bearer API fallback; keep it disabled on proper deployments.
+- `/auth/session` returns role/user/csrfToken/expiresAt/loginAvailable/tokenLoginAvailable. The frontend never stores credentials;
+  custom node fetches omit cookies and CSRF even for application-origin URLs. Gate direct admin views as well
+  as navigation; logout/role loss stops privileged polling and debug state.
+- Normal tests only use TEST_DATABASE_URL when explicitly provided, never DATABASE_URL. Run with
+  `bun --no-env-file test` when local .env contains real application credentials. OAuth fixture tests mock
+  discovery/JWKS with signed tokens; real account login and HTTPS callback validation remain opt-in manual checks.
+- See docs/google-login.md for configuration, rollout and scraper migration. Auth callback request queries
+  must not be logged by proxies. Do not expose client secrets, tokens, authorization codes or state in logs.

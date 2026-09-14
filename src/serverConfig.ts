@@ -1,3 +1,4 @@
+import { parseAuthConfig, type AuthConfig } from "./authConfig";
 import {
   CliHelpRequested,
   coerceBoolean,
@@ -37,7 +38,7 @@ export interface ServerConfig {
   port: number;
   hostname?: string;
   transactionDataEnabled: boolean;
-  baseloadAdminBearerToken?: string;
+  auth?: AuthConfig;
   baseloadInitialConfigPath?: string;
   redisUrl?: string;
   protocolScheduleUrl?: string;
@@ -63,8 +64,6 @@ export interface ServerConfig {
   entityQueryIndex: boolean;
   /** Serve Prometheus metrics on GET /metrics. Defaults to true. */
   metricsEnabled: boolean;
-  /** Bearer token required on GET /metrics; unset leaves it open. */
-  metricsBearerToken?: string;
   /** Pins the first block the entity index folds; detected from the data when unset. */
   entityIndexFloorBlock?: bigint;
   /**
@@ -121,12 +120,6 @@ const SPEC: CliSpec = {
       default: "true",
     },
     {
-      flags: "--baseload-admin-bearer-token <token>",
-      description:
-        "Bearer token required for mutating Baseload worker requests. Defaults to BASELOAD_ADMIN_BEARER_TOKEN. If unset, Baseload mutations are unrestricted.",
-      env: ["BASELOAD_ADMIN_BEARER_TOKEN"],
-    },
-    {
       flags: "--baseload-initial-config <path>",
       description:
         "Optional Baseload worker config JSON file to load once at backend startup. Defaults to BASELOAD_INITIAL_CONFIG_PATH.",
@@ -138,12 +131,6 @@ const SPEC: CliSpec = {
         "Serve Prometheus metrics on GET /metrics. Defaults to true (or METRICS_ENABLED).",
       env: ["METRICS_ENABLED"],
       default: "true",
-    },
-    {
-      flags: "--metrics-bearer-token <token>",
-      description:
-        "Bearer token required on GET /metrics. Defaults to METRICS_BEARER_TOKEN. If unset, the endpoint is open.",
-      env: ["METRICS_BEARER_TOKEN"],
     },
     {
       flags: "--redis-url <url>",
@@ -351,7 +338,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     "--transaction-data-enabled",
     cli.value("transaction-data-enabled")!,
   );
-  const baseloadAdminBearerToken = cli.value("baseload-admin-bearer-token");
+  const auth = parseAuthConfig(env);
   const baseloadInitialConfigPath = cli.value("baseload-initial-config");
   const redisUrl = cli.value("redis-url");
   const protocolScheduleUrl = cli.value("protocol-schedule-url");
@@ -429,7 +416,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     raw ? coerceBoolean(flag, raw) : fallback;
   const entityQueryIndex = boolOrDefault("--entity-query-index", cli.value("entity-query-index"), true);
   const metricsEnabled = boolOrDefault("--metrics-enabled", cli.value("metrics-enabled"), true);
-  const metricsBearerToken = cli.value("metrics-bearer-token");
   const entityIndexFloorBlockValue = cli.value("entity-index-floor-block")?.trim();
   const entityIndexFloorBlock = entityIndexFloorBlockValue
     ? BigInt(coerceInt("--entity-index-floor-block", entityIndexFloorBlockValue))
@@ -511,7 +497,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     port,
     ...(hostname ? { hostname } : {}),
     transactionDataEnabled,
-    ...(baseloadAdminBearerToken ? { baseloadAdminBearerToken } : {}),
+    ...(auth ? { auth } : {}),
     ...(baseloadInitialConfigPath ? { baseloadInitialConfigPath } : {}),
     ...(redisUrl ? { redisUrl } : {}),
     ...(protocolScheduleUrl ? { protocolScheduleUrl } : {}),
@@ -530,7 +516,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     jsonRpcPassthrough,
     entityQueryIndex,
     metricsEnabled,
-    ...(metricsBearerToken ? { metricsBearerToken } : {}),
     ...(entityIndexFloorBlock !== undefined ? { entityIndexFloorBlock } : {}),
     entityIndexGenesis,
     ...(entityIndexGenesisRpc ? { entityIndexGenesisRpc } : {}),

@@ -9,11 +9,6 @@ import {
   rpcTraffic,
 } from "./promMetrics";
 
-interface ServerMetricsPanelProps {
-  /** The verified admin token, or undefined when admin mode is off. */
-  adminToken?: string;
-}
-
 /**
  * The backend's Prometheus registry, rendered at the bottom of the health page.
  *
@@ -21,7 +16,7 @@ interface ServerMetricsPanelProps {
  * rather than a rate; `process_start_time_seconds` is shown alongside to say
  * what window the totals cover.
  */
-export function ServerMetricsPanel({ adminToken }: ServerMetricsPanelProps) {
+export function ServerMetricsPanel() {
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -29,26 +24,20 @@ export function ServerMetricsPanel({ adminToken }: ServerMetricsPanelProps) {
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
 
   const load = useCallback(() => {
-    if (!adminToken) return;
     setLoading(true);
     setError(null);
-    fetchServerMetricsText(adminToken)
+    fetchServerMetricsText()
       .then((body) => {
         setText(body);
         setFetchedAt(new Date());
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [adminToken]);
+  }, []);
 
   useEffect(() => {
-    if (!adminToken) {
-      setText(null);
-      setError(null);
-      return;
-    }
     load();
-  }, [adminToken, load]);
+  }, [load]);
 
   const samples = useMemo(() => (text ? parsePrometheusText(text) : []), [text]);
   const routes = useMemo(() => routeTraffic(samples), [samples]);
@@ -58,18 +47,6 @@ export function ServerMetricsPanel({ adminToken }: ServerMetricsPanelProps) {
     () => processStats(samples, fetchedAt ?? new Date()),
     [samples, fetchedAt],
   );
-
-  if (!adminToken) {
-    return (
-      <section className="health-panel server-metrics-panel">
-        <h3>Server metrics</h3>
-        <p className="muted">
-          Enable admin mode to load the backend's Prometheus registry. It is served on
-          <code> /api/admin/metrics</code>, behind the admin bearer token.
-        </p>
-      </section>
-    );
-  }
 
   return (
     <section className="health-panel server-metrics-panel">

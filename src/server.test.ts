@@ -1,3 +1,4 @@
+import { testAuth, testAdminHeaders } from "./testAuth";
 import { readFile } from "node:fs/promises";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
@@ -254,11 +255,11 @@ describe("JSON-RPC body cap", () => {
     expect(Buffer.byteLength(body)).toBeGreaterThan(1024 * 1024);
     const request = new Request("http://example.test/shadow-rpc", {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer secret" },
+      headers: { "content-type": "application/json", ...testAdminHeaders },
       body,
     });
     request.headers.delete("content-length");
-    const response = await handleRequest(request, {} as ScannerStorage, { baseloadAdminBearerToken: "secret" });
+    const response = await handleRequest(request, {} as ScannerStorage, { auth: testAuth() });
     expect(response.status).toBe(413);
   });
 });
@@ -276,19 +277,19 @@ describe("POST /shadow-rpc is an admin surface", () => {
       options,
     );
 
-  test("answers with the admin bearer token and refuses without it", async () => {
-    const options = { baseloadAdminBearerToken: "secret" };
+  test("answers with the administrator session token and refuses without it", async () => {
+    const options = { auth: testAuth() };
     expect((await post("/shadow-rpc", {}, options)).status).toBe(401);
-    expect((await post("/shadow-rpc", { authorization: "Bearer wrong" }, options)).status).toBe(403);
-    const ok = await post("/shadow-rpc", { authorization: "Bearer secret" }, options);
+    expect((await post("/shadow-rpc", { authorization: "Bearer wrong" }, options)).status).toBe(401);
+    const ok = await post("/shadow-rpc", { ...testAdminHeaders }, options);
     expect(ok.status).toBe(200);
     await expect(ok.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: "0x539" });
   });
 
-  test("is unavailable when no admin token is configured", async () => {
+  test("is unavailable when no Google login is configured", async () => {
     const response = await post("/shadow-rpc");
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ error: "Admin bearer token is not configured on the backend" });
+    await expect(response.json()).resolves.toEqual({ error: "Google login is not configured" });
   });
 
   test("the experimental index path stays open", async () => {
@@ -997,11 +998,11 @@ describe("Baseload API", () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload", {
         method: "PUT",
-        headers: { "content-type": "application/json", authorization: "Bearer secret" },
+        headers: { "content-type": "application/json", ...testAdminHeaders },
         body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
       }),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
     expect(response.status).toBe(200);
@@ -1011,12 +1012,12 @@ describe("Baseload API", () => {
     runtime.stop();
   });
 
-  test("keeps backend baseload state public when admin bearer is configured", async () => {
+  test("keeps backend baseload state public when administrator session is configured", async () => {
     const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
     const response = await handleRequest(
       new Request("http://example.test/baseload"),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
     expect(response.status).toBe(200);
@@ -1028,7 +1029,7 @@ describe("Baseload API", () => {
     runtime.stop();
   });
 
-  test("requires admin bearer for backend baseload updates when configured", async () => {
+  test("requires administrator session for backend baseload updates when configured", async () => {
     const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
     const response = await handleRequest(
       new Request("http://example.test/baseload", {
@@ -1037,17 +1038,17 @@ describe("Baseload API", () => {
         body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
       }),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "Admin bearer token is required",
+      error: "Sign in required",
     });
     runtime.stop();
   });
 
-  test("rejects invalid backend baseload admin bearer tokens", async () => {
+  test("rejects invalid backend baseload administrator session tokens", async () => {
     const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
     const response = await handleRequest(
       new Request("http://example.test/baseload", {
@@ -1059,29 +1060,29 @@ describe("Baseload API", () => {
         body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
       }),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "Admin bearer token is invalid",
+      error: "Invalid access token",
     });
     runtime.stop();
   });
 
-  test("accepts valid backend baseload admin bearer tokens", async () => {
+  test("accepts valid backend baseload administrator session tokens", async () => {
     const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
     const response = await handleRequest(
       new Request("http://example.test/baseload", {
         method: "PUT",
         headers: {
-          "authorization": "Bearer secret",
+          ...testAdminHeaders,
           "content-type": "application/json",
         },
         body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
       }),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
     expect(response.status).toBe(200);
@@ -1090,22 +1091,22 @@ describe("Baseload API", () => {
     runtime.stop();
   });
 
-  test("requires admin bearer for saved baseload config endpoints", async () => {
+  test("requires administrator session for saved baseload config endpoints", async () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload/configs"),
       {
         listBaseloadConfigs: async () => [],
       } as unknown as ScannerStorage,
-      { baseloadAdminBearerToken: "secret" },
+      { auth: testAuth() },
     );
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "Admin bearer token is required",
+      error: "Sign in required",
     });
   });
 
-  test("admin writes fail closed when no admin token is configured", async () => {
+  test("admin writes fail closed when no Google login is configured", async () => {
     const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
     for (const path of ["/baseload", "/baseload/configs"]) {
       const response = await handleRequest(
@@ -1119,7 +1120,7 @@ describe("Baseload API", () => {
       );
       expect(response.status).toBe(503);
       await expect(response.json()).resolves.toEqual({
-        error: "Admin bearer token is not configured on the backend",
+        error: "Google login is not configured",
       });
     }
   });
@@ -1127,7 +1128,7 @@ describe("Baseload API", () => {
   test("lists saved baseload configs when authorized", async () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload/configs", {
-        headers: { authorization: "Bearer secret" },
+        headers: { ...testAdminHeaders },
       }),
       {
         listBaseloadConfigs: async () => [
@@ -1139,7 +1140,7 @@ describe("Baseload API", () => {
           },
         ],
       } as unknown as ScannerStorage,
-      { baseloadAdminBearerToken: "secret" },
+      { auth: testAuth() },
     );
 
     expect(response.status).toBe(200);
@@ -1162,7 +1163,7 @@ describe("Baseload API", () => {
       new Request("http://example.test/baseload/configs/low%20gas", {
         method: "PUT",
         headers: {
-          authorization: "Bearer secret",
+          ...testAdminHeaders,
           "content-type": "application/json",
         },
         body: JSON.stringify({ workers: [{ walletNumber: 0 }] }),
@@ -1179,7 +1180,7 @@ describe("Baseload API", () => {
           };
         },
       } as unknown as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
     expect(response.status).toBe(200);
@@ -1198,7 +1199,7 @@ describe("Baseload API", () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload/configs/low%20gas/load", {
         method: "PUT",
-        headers: { authorization: "Bearer secret" },
+        headers: { ...testAdminHeaders },
       }),
       {
         getBaseloadConfig: async () => ({
@@ -1209,7 +1210,7 @@ describe("Baseload API", () => {
           updatedAt: "2024-01-01T00:00:00.000Z",
         }),
       } as unknown as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
     expect(response.status).toBe(200);
@@ -1223,12 +1224,12 @@ describe("Baseload API", () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload/configs/low%20gas", {
         method: "DELETE",
-        headers: { authorization: "Bearer secret" },
+        headers: { ...testAdminHeaders },
       }),
       {
         deleteBaseloadConfig: async (name: string) => name === "low gas",
       } as unknown as ScannerStorage,
-      { baseloadAdminBearerToken: "secret" },
+      { auth: testAuth() },
     );
 
     expect(response.status).toBe(200);
@@ -1240,11 +1241,11 @@ describe("Baseload API", () => {
     const response = await handleRequest(
       new Request("http://example.test/baseload", {
         method: "PUT",
-        headers: { "content-type": "application/json", authorization: "Bearer secret" },
+        headers: { "content-type": "application/json", ...testAdminHeaders },
         body: JSON.stringify({ workers: [{ walletNumber: 2 }, { walletNumber: 2 }] }),
       }),
       {} as ScannerStorage,
-      { baseloadRuntime: runtime, baseloadAdminBearerToken: "secret" },
+      { baseloadRuntime: runtime, auth: testAuth() },
     );
 
     expect(response.status).toBe(400);
@@ -1253,13 +1254,13 @@ describe("Baseload API", () => {
     });
   });
 
-  test("requires admin bearer for baseload updates through the live server", async () => {
+  test("requires administrator session for baseload updates through the live server", async () => {
     const runtime = new BaseloadRuntime({ rpcUrl: null, mnemonic: TEST_MNEMONIC });
     const server = createBlockServer({} as ScannerStorage, {
       port: 0,
       hostname: "127.0.0.1",
       baseloadRuntime: runtime,
-      baseloadAdminBearerToken: "secret",
+      auth: testAuth(),
     });
 
     try {
@@ -1271,7 +1272,7 @@ describe("Baseload API", () => {
 
       expect(response.status).toBe(401);
       await expect(response.json()).resolves.toEqual({
-        error: "Admin bearer token is required",
+        error: "Sign in required",
       });
     } finally {
       runtime.stop();

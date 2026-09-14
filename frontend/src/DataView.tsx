@@ -77,8 +77,8 @@ interface DataViewProps {
   timeZone: string;
   /** Whether the node relay (`backend`, `both`) may be offered; without it the page is index-only. */
   adminModeActive: boolean;
-  /** The token the relay is called with in admin mode; undefined otherwise. */
-  adminToken: string | undefined;
+  /** The current session's CSRF token, sent only to the application relay. */
+  csrfToken: string | undefined;
 }
 
 type BackendForwarding =
@@ -121,7 +121,7 @@ const EMPTY_RESULTS: ResultState = {
   error: null,
 };
 
-export function DataView({ locationSearch, onLocationChange, timeZone, adminModeActive, adminToken }: DataViewProps) {
+export function DataView({ locationSearch, onLocationChange, timeZone, adminModeActive, csrfToken }: DataViewProps) {
   const urlFilters = readFiltersFromSearch(locationSearch, DATA_FILTER_KEYS, EMPTY_DATA_FILTERS);
 
   // A link that names an endpoint wins over the remembered one, without overwriting it.
@@ -133,7 +133,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   // when admin mode comes back.
   const mode = permittedRpcMode(chosenMode, adminModeActive);
   const source: RpcSource = mode === "both" || mode === chosenSource.kind ? chosenSource : { ...chosenSource, kind: mode };
-  const rpcDeps = { bearerToken: adminToken };
+  const rpcDeps = { csrfToken };
   const [backend, setBackend] = useState<BackendForwarding>({ status: "loading" });
   const [check, setCheck] = useState<CheckState>({ status: "idle" });
   const [comparison, setComparison] = useState<CompareState>({ status: "idle" });
@@ -171,6 +171,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
 
   const runQuery = useCallback(
     async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }, via: RpcSource = source) => {
+      if (via.kind === "backend" && !adminModeActive) via = { kind: "index", customUrl: "" };
       const normalized = normalizeQueryInput(rawQuery);
       if (!normalized) return;
       if (via.kind === "custom" && !isValidRpcUrl(via.customUrl)) {
@@ -227,7 +228,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [source],
+    [source, csrfToken, adminModeActive],
   );
 
   /**
@@ -239,6 +240,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
    * node's head is used and the index side fails, which is the honest report.
    */
   const runComparison = useCallback(async (rawQuery: string, size: PageSize) => {
+    if (!adminModeActive) return;
     const normalized = normalizeQueryInput(rawQuery);
     if (!normalized) return;
     setFormError(null);
@@ -317,7 +319,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, []);
+  }, [csrfToken, adminModeActive]);
 
   /** Runs the editor's text and records it in the URL so the run can be shared or returned to. */
   const execute = useCallback(
@@ -356,7 +358,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
       setSource(linked.source);
       setMode(linked.mode);
     }
-    const linkedMode = linked?.mode ?? mode;
+    const linkedMode = permittedRpcMode(linked?.mode ?? mode, adminModeActive);
     if (linkedMode === "both") void runComparison(normalized, size);
     else void runQuery(normalized, size, undefined, linked?.source ?? undefined);
     // `mode` is only read as the fallback for a link that names none; a mode
@@ -432,8 +434,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     }
     setFormError(null);
     setCheck({ status: "running", startedAt: Date.now() });
-    const report = await checkRpcSource(checkSource, rpcDeps);
-    setCheck({ status: "done", report });
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const report = await checkRpcSource(checkSource, { ...rpcDeps, signal: controller.signal });
+    if (!controller.signal.aborted) setCheck({ status: "done", report });
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   /** True once `/health` has said this deployment serves no entity index. */

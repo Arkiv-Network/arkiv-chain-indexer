@@ -89,11 +89,9 @@ Baseload workers run in the backend service, not in the browser. Set `BASELOAD_R
 endpoint that should receive create transactions. The frontend only adds, edits, deletes, imports, exports, and
 monitors worker configuration through `/api/baseload`.
 
-Set `BASELOAD_ADMIN_BEARER_TOKEN` so mutating Baseload worker requests can be made with
-`Authorization: Bearer <token>`; without it the admin routes answer `503` rather than accepting writes from
-anyone. Readonly views and status APIs remain public. The Baseload tab includes an admin
-bearer token field that stores the token in browser local storage and sends it only with worker configuration
-changes.
+Configure Google login for administrator access to Baseload changes, saved configurations, the node relay,
+and server metrics. Public explorer views and status APIs remain public. See [Google login setup](docs/google-login.md)
+for credentials, callback registration, session cookies and the two narrowly scoped automation credentials.
 
 Set `BATCHER_COLLECTOR_URL` to attach recent batcher queue/threshold metadata to stored blocks. The collector
 only serves recent seconds, so the dedicated batcher collector service requests batcher data for stored blocks
@@ -264,7 +262,10 @@ Backend configuration:
 | `BASELOAD_FAUCET_MAX_BALANCE` | `200` | Ether. A drip is skipped when it would leave the wallet at or above this ceiling. It is a safety net, not the resting point, and must be at least `MIN + DRIP` — a lower ceiling would refuse drips to wallets that are already below the floor. |
 | `BASELOAD_FAUCET_DRIP_AMOUNT` | `100` | Ether. Expected size of one drip, used to project the post-drip balance against the ceiling. |
 | `BASELOAD_FAUCET_COOLDOWN_SECONDS` | `60` | Minimum gap between two drips for the same wallet. |
-| `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Bearer token required for mutating Baseload worker configuration requests and the saved-config routes. Unset means those routes answer `503` (they never fall open). Readonly requests stay public. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_PUBLIC_ORIGIN` | unset | Backend Google login configuration; all three required together. Missing all disables login and human admin access. |
+| `AUTH_ADMIN_EMAILS` | `sieciech.czajka@golem.network` | Exact normalized admin email allowlist; verified email and signed Workspace `hd=golem.network` are also required. |
+| `AUTH_SESSION_TTL_SECONDS` | `43200` | Absolute server session lifetime (60–604800 seconds). |
+| `AUTH_INSECURE_LOCALHOST` | `false` | Explicit HTTP localhost development cookies only. |
 | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional container path to a Baseload worker config JSON file that the backend loads once at startup. |
 | `BASELOAD_RPC_KEY_SERVICE_URL` | unset | Base URL of an [api-key-generator](https://github.com/Arkiv-Network/api-key-generator) instance. Setting it gives every worker its own generated RPC key instead of the one shared key in `BASELOAD_RPC_NODE`. |
 | `BASELOAD_RPC_KEY_PLACEMENT` | `bearer` | How a key is attached: `bearer` (`Authorization: Bearer <key>`), `header` (see below), or `path` (key as the last URL segment). |
@@ -404,7 +405,7 @@ Backend API:
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/baseload` | Returns backend Baseload enabled state, current config, and worker statuses. |
-| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. Requires `Authorization: Bearer <token>` matching `BASELOAD_ADMIN_BEARER_TOKEN`; `503` when no token is configured. |
+| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. Requires an administrator session with origin/CSRF checks, or a temporary administrator access token. |
 
 ## Nginx Deployment
 
@@ -843,8 +844,8 @@ HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, 
 `/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
 under `features.jsonRpc`.
 
-It is an admin surface: every `POST` needs `Authorization: Bearer <token>` matching
-`BASELOAD_ADMIN_BEARER_TOKEN` (`401`/`403` otherwise, `503` when no token is configured), because the passthrough
+It is an admin surface: every `POST` needs an administrator Google session, the configured `Origin`,
+and its `X-CSRF-Token` (`401`/`403` otherwise, `503` when login is unavailable), because the passthrough
 below spends the upstream node's quota and reaches its mempool. The experimental index path,
 `POST /shadow-rpc/experimental`, stays open to everyone.
 
@@ -932,8 +933,7 @@ Worth knowing before pointing a wallet at it:
 Example:
 
 ```sh
-curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $BASELOAD_ADMIN_BEARER_TOKEN" \
+curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 
@@ -1106,20 +1106,13 @@ The frontend's `/data` page offers the index as a third RPC source ("Indexer ent
 
 ### `GET /metrics` and `GET /admin/metrics`
 
-Prometheus text exposition for the backend process, on two paths that differ only in how they are guarded.
-
-`GET /metrics` is the local scrape target: scrape it from the host on the loopback backend port
-(`http://127.0.0.1:3000/metrics`), since the bundled nginx site configs answer `404` for the public
-`/api/metrics`. Set `METRICS_BEARER_TOKEN` to require `Authorization: Bearer <token>` when the port is
-reachable from further away. Without a token the backend serves it only to direct requests: anything carrying
-a reverse proxy's forwarding headers (`X-Forwarded-For`, `X-Forwarded-Proto`, `X-Real-IP`) gets the same `404`
-nginx gives, because Bun collapses dot segments before routing and `/api/%2e%2e/metrics` would otherwise slip
-past the nginx guard.
-
-`GET /admin/metrics` renders the same registry for a scraper that cannot reach loopback, and it is proxied to
-the public origin (`https://<host>/api/admin/metrics`). It always requires `Authorization: Bearer <token>` with
-`BASELOAD_ADMIN_BEARER_TOKEN`, the same token the `/baseload` admin routes use, and it answers `503` rather
-than serving anything when no admin token is configured. `METRICS_BEARER_TOKEN` does not apply to it.
+`GET /metrics` is open without authentication; deployment networking and proxy rules control external access.
+`GET /admin/metrics` requires an administrator login session or a generated access token.
+The public nginx path is `/api/admin/metrics`; `/api/metrics` remains blocked.
+Create tokens in **Access tokens** beside the signed-in administrator account. Tokens grant all admin API
+permissions, expire within 30 days, and can be revoked there. Use `Authorization: Bearer <access-token>`.
+The old metrics and Baseload environment credentials no longer grant access. See
+[login and token management](docs/google-login.md#automation-migration) and [scraper setup](docs/prometheus.md).
 
 The frontend's `/health` page ends with a **Server metrics** panel that renders this registry — traffic by
 route with its Postgres share, JSON-RPC by method, cache hit rates, process totals, and the raw text on
@@ -1164,7 +1157,6 @@ A scrape config and starter queries are in [`docs/prometheus.md`](docs/prometheu
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
 | `--entity-query-index` | `ENTITY_QUERY_INDEX` | `true` | Build the entity index and serve `POST /shadow-rpc/experimental`; `false` switches it off. |
 | `--metrics-enabled` | `METRICS_ENABLED` | `true` | Serve Prometheus metrics on `GET /metrics`. |
-| `--metrics-bearer-token` | `METRICS_BEARER_TOKEN` | unset | Require `Authorization: Bearer <token>` on `GET /metrics`. |
 | `--entity-index-floor-block` | `ENTITY_INDEX_FLOOR_BLOCK` | detected | Pin the index floor instead of detecting the first keyed create. |
 | `--entity-index-genesis` | `ENTITY_INDEX_GENESIS` | `auto` | `auto` asks the node once whether block 0 holds entities and imports them; `off` never asks (an offline import is still finished). |
 | `--entity-index-genesis-rpc` | `ENTITY_INDEX_GENESIS_RPC` | `SHADOW_RPC_UPSTREAM` | The node the genesis import reads (with `SHADOW_RPC_UPSTREAM_API_KEY`). |
@@ -1211,7 +1203,7 @@ are hidden:
   is a collapsed RPC endpoint switch: the **experimental entity index** (`/api/shadow-rpc/experimental`, the
   default) or a **custom RPC URL** called straight from the browser; in admin mode the **indexer backend**
   (`/api/shadow-rpc`, which forwards `arkiv_query`, `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the
-  node it is configured with, using the deployment's key and the admin token) and **Both (compare)** join the
+  node it is configured with, using the deployment's key and an administrator session) and **Both (compare)** join the
   list. The choice is kept in browser local storage; a remembered or linked `backend`/`both` is used as the
   index outside admin mode.
   "Check connection" runs `eth_chainId`, `web3_clientVersion` and the three Arkiv reads against the selected

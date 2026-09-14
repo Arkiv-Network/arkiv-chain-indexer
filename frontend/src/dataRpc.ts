@@ -1,3 +1,4 @@
+import { notifyAuthFailure } from "./authClient";
 // The Data page talks JSON-RPC to an Arkiv node for entity state the index does
 // not hold. This module is the framework-free half: which endpoint to use, how
 // a call is made, and the connection check that proves the chosen endpoint
@@ -91,7 +92,7 @@ export const COMPARE_RPC_LINK_VALUE = "both";
 
 /**
  * Whether a mode talks to the backend's node relay, which the backend serves
- * only with the admin bearer token: `backend` outright, `both` for one of its
+ * only with the administrator session: `backend` outright, `both` for one of its
  * two sides. The experimental index and a custom node are open to everyone.
  */
 export function rpcModeNeedsAdmin(mode: RpcMode): boolean {
@@ -201,12 +202,8 @@ export interface RpcCallDeps {
   timeoutMs?: number;
   /** Lets the caller cancel a call before the timeout does. */
   signal?: AbortSignal;
-  /**
-   * The admin bearer token, sent only to the backend's node relay
-   * (`/api/shadow-rpc`), which refuses calls without it. Never sent to a
-   * custom node or to the index.
-   */
-  bearerToken?: string | undefined;
+  /** Session-bound CSRF token; used only for the fixed backend relay endpoint. */
+  csrfToken?: string | undefined;
 }
 
 /** One signal that fires when either input does, without relying on `AbortSignal.any`. */
@@ -248,12 +245,13 @@ export async function callRpc<T = unknown>(
   const endpoint = rpcEndpointUrl(source);
 
   const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json" };
-  if (source.kind === "backend" && deps.bearerToken) headers.authorization = `Bearer ${deps.bearerToken}`;
+  if (source.kind === "backend" && deps.csrfToken) headers["X-CSRF-Token"] = deps.csrfToken;
 
   let response: Response;
   try {
     response = await fetchImpl(endpoint, {
       method: "POST",
+      credentials: source.kind === "custom" ? "omit" : "same-origin",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       signal: combineSignals(AbortSignal.timeout(timeoutMs), deps.signal),
@@ -281,6 +279,7 @@ export async function callRpc<T = unknown>(
     body = undefined;
   }
 
+  if (source.kind === "backend") notifyAuthFailure(response.status);
   if (!response.ok) {
     const detail = jsonRpcErrorMessage(body) ?? text.slice(0, 200).trim();
     throw new RpcCallError(method, `${method} answered HTTP ${response.status}${detail ? `: ${detail}` : ""}`, {

@@ -217,18 +217,24 @@ describe("callRpc", () => {
     expect(calls).toEqual([{ url: CUSTOM.customUrl, method: "eth_chainId", params: [] }]);
   });
 
-  test("the admin token goes to the backend relay only, never to a custom node or the index", async () => {
-    const seen: Array<string | undefined> = [];
+  test("CSRF goes only to the relay; custom nodes never receive session credentials", async () => {
+    const seen: Array<{ csrf: string | null; credentials: RequestCredentials | undefined; auth: string | null }> = [];
     const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      seen.push((init?.headers as Record<string, string>).authorization);
+      const headers = new Headers(init?.headers);
+      seen.push({ csrf: headers.get("X-CSRF-Token"), credentials: init?.credentials, auth: headers.get("authorization") });
       return jsonResponse({ jsonrpc: "2.0", id: 1, result: "0x1" });
     }) as unknown as typeof fetch;
-    const deps = { fetchImpl, bearerToken: "s3cret" };
-    await callRpc({ kind: "backend", customUrl: "" }, "eth_chainId", [], deps);
+    const deps = { fetchImpl, csrfToken: "csrf-value" };
+    await callRpc(BACKEND, "eth_chainId", [], deps);
     await callRpc({ kind: "index", customUrl: "" }, "eth_chainId", [], deps);
     await callRpc(CUSTOM, "eth_chainId", [], deps);
-    await callRpc({ kind: "backend", customUrl: "" }, "eth_chainId", [], { fetchImpl });
-    expect(seen).toEqual(["Bearer s3cret", undefined, undefined, undefined]);
+    await callRpc({ kind: "custom", customUrl: "https://explorer.example/api/shadow-rpc" }, "eth_chainId", [], deps);
+    expect(seen).toEqual([
+      { csrf: "csrf-value", credentials: "same-origin", auth: null },
+      { csrf: null, credentials: "same-origin", auth: null },
+      { csrf: null, credentials: "omit", auth: null },
+      { csrf: null, credentials: "omit", auth: null },
+    ]);
   });
 
   test("a node error becomes an RpcCallError carrying the code and method", async () => {

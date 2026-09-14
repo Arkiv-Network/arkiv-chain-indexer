@@ -1,3 +1,4 @@
+import { testAuth, testAdminHeaders } from "./testAuth";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { ARKIV_INDEX_METHODS, createArkivIndexMethods, cursorBinding, defaultProjection, encodeCursor, projectionFingerprint } from "./arkivJsonRpc";
 import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperations";
@@ -812,14 +813,14 @@ describeWithPostgres("entity index (Postgres)", () => {
       await without.stop();
     }
 
-    const server = createBlockServer(storage, { port: 0, entityIndex: index, baseloadAdminBearerToken: "adm1n" });
+    const server = createBlockServer(storage, { port: 0, entityIndex: index, auth: testAuth() });
     try {
       // The relay is admin-only; the token is sent on both paths to show the
       // experimental one does not need it.
       const post = (body: unknown, path = "/shadow-rpc/experimental") =>
         fetch(`http://${server.hostname}:${server.port}${path}`, {
           method: "POST",
-          headers: { "content-type": "application/json", authorization: "Bearer adm1n" },
+          headers: { "content-type": "application/json", ...testAdminHeaders },
           body: JSON.stringify(body),
         }).then((response) => response.json() as Promise<JsonRpcResponse>);
       const count = await post({ jsonrpc: "2.0", id: 7, method: "arkiv_getEntityCount", params: [] });

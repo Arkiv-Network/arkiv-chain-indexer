@@ -10,7 +10,7 @@
  * gas and bytes per transaction instead.
  *
  * Usage:
- *   BACKEND_URL=http://127.0.0.1:3000 BASELOAD_ADMIN_BEARER_TOKEN=… \
+ *   BACKEND_URL=http://127.0.0.1:3000 ARKIV_ACCESS_TOKEN=… \
  *   bun run scripts/rampBaseload.ts --workers 6 --entities 8 --payload 12288
  *
  *   bun run scripts/rampBaseload.ts --report        # just measure, change nothing
@@ -115,7 +115,7 @@ async function main() {
   });
 
   const backendUrl = (process.env.BACKEND_URL || "http://127.0.0.1:3000").replace(/\/+$/, "");
-  const token = process.env.BASELOAD_ADMIN_BEARER_TOKEN?.trim();
+  const token = process.env.ARKIV_ACCESS_TOKEN?.trim();
 
   const state = await getState(backendUrl);
   console.log(`Baseload enabled=${state.enabled}, ${state.config.workers.length} workers`);

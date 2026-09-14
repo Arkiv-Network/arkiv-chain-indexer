@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "./authClient";
 export interface StoredBlock {
   blockNumber: number;
   blockDate: string;
@@ -958,13 +959,8 @@ async function getJson<T>(
   return response.json() as Promise<T>;
 }
 
-async function getAdminJson<T>(path: string, bearerToken?: string): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (bearerToken) {
-    headers.authorization = `Bearer ${bearerToken}`;
-  }
-
-  const response = await fetch(`/api${path}`, { headers });
+async function getAdminJson<T>(path: string): Promise<T> {
+  const response = await authenticatedFetch(`/api${path}`);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -972,17 +968,13 @@ async function getAdminJson<T>(path: string, bearerToken?: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function putJson<T>(path: string, body: unknown, bearerToken?: string): Promise<T> {
+async function putJson<T>(path: string, body: unknown, csrfToken?: string): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json" };
-  if (bearerToken) {
-    headers.authorization = `Bearer ${bearerToken}`;
-  }
-
-  const response = await fetch(`/api${path}`, {
+  const response = await authenticatedFetch(`/api${path}`, {
     method: "PUT",
     headers,
     body: JSON.stringify(body),
-  });
+  }, csrfToken);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -990,16 +982,12 @@ async function putJson<T>(path: string, body: unknown, bearerToken?: string): Pr
   return response.json() as Promise<T>;
 }
 
-async function deleteJson<T>(path: string, bearerToken?: string): Promise<T> {
+async function deleteJson<T>(path: string, csrfToken?: string): Promise<T> {
   const headers: Record<string, string> = {};
-  if (bearerToken) {
-    headers.authorization = `Bearer ${bearerToken}`;
-  }
-
-  const response = await fetch(`/api${path}`, {
+  const response = await authenticatedFetch(`/api${path}`, {
     method: "DELETE",
     headers,
-  });
+  }, csrfToken);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -1681,39 +1669,10 @@ export function fetchGuzzlerHistory(address: string): Promise<GuzzlerHistoryResp
   ).then(expandGuzzlerHistoryResponse);
 }
 
-export interface AdminVerifyResponse {
-  authorized: true;
-}
-
-export async function verifyAdminToken(bearerToken: string): Promise<AdminVerifyResponse> {
-  const headers: Record<string, string> = {};
-  const trimmed = bearerToken.trim();
-  if (trimmed) {
-    headers.authorization = `Bearer ${trimmed}`;
-  }
-  const response = await fetch("/api/admin/verify", { headers });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`HTTP ${response.status}: ${text}`);
-  }
-  return response.json() as Promise<AdminVerifyResponse>;
-}
-
-/**
- * The Prometheus registry as text, from the admin-gated scrape path. The
- * loopback `/metrics` is not reachable from a browser on the public origin, so
- * the health page always uses this one and always sends the admin token.
- */
-export async function fetchServerMetricsText(bearerToken?: string): Promise<string> {
-  const headers: Record<string, string> = {};
-  if (bearerToken) {
-    headers.authorization = `Bearer ${bearerToken}`;
-  }
-  const response = await fetch("/api/admin/metrics", { headers });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`HTTP ${response.status}: ${text}`);
-  }
+/** The registry is available to administrator sessions through the public proxy. */
+export async function fetchServerMetricsText(): Promise<string> {
+  const response = await authenticatedFetch("/api/admin/metrics");
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
   return response.text();
 }
 
@@ -1723,44 +1682,44 @@ export function fetchBaseloadState(): Promise<BaseloadStateResponse> {
 
 export function updateBaseloadConfig(
   config: BaseloadConfig,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<BaseloadStateResponse> {
-  return putJson<BaseloadStateResponse>("/baseload", config, adminBearerToken);
+  return putJson<BaseloadStateResponse>("/baseload", config, csrfToken);
 }
 
-export function fetchBaseloadConfigs(adminBearerToken?: string): Promise<BaseloadConfigsResponse> {
-  return getAdminJson<BaseloadConfigsResponse>("/baseload/configs", adminBearerToken);
+export function fetchBaseloadConfigs(): Promise<BaseloadConfigsResponse> {
+  return getAdminJson<BaseloadConfigsResponse>("/baseload/configs");
 }
 
 export function saveBaseloadConfig(
   name: string,
   config: BaseloadConfig,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<StoredBaseloadConfig> {
   return putJson<StoredBaseloadConfig>(
     `/baseload/configs/${encodeURIComponent(name)}`,
     config,
-    adminBearerToken,
+    csrfToken,
   );
 }
 
 export function loadBaseloadConfig(
   name: string,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<BaseloadStateResponse> {
   return putJson<BaseloadStateResponse>(
     `/baseload/configs/${encodeURIComponent(name)}/load`,
     {},
-    adminBearerToken,
+    csrfToken,
   );
 }
 
 export function deleteBaseloadConfig(
   name: string,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<{ deleted: boolean }> {
   return deleteJson<{ deleted: boolean }>(
     `/baseload/configs/${encodeURIComponent(name)}`,
-    adminBearerToken,
+    csrfToken,
   );
 }

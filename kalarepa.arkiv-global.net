@@ -1,12 +1,12 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name scanner.arkiv-global.net;
+    server_name kalarepa.arkiv-global.net;
 
     client_max_body_size 10m;
 
     location = /api {
-        proxy_pass http://127.0.0.1:3000/;
+        proxy_pass http://127.0.0.1:3001/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -14,21 +14,17 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # The open scrape target stays on loopback (127.0.0.1:3000); the public
-    # origin serves the same registry only at /api/admin/metrics, behind the
-    # administrator session or metrics-only machine credential.
     location = /api/metrics {
         return 404;
     }
 
-    # Authorization codes and state must never enter proxy request logs.
-    # Set-Cookie headers are forwarded individually by nginx's default proxy behavior.
+    # Google callback credentials must not enter proxy logs or caches.
     location ^~ /api/auth/ {
         access_log off;
         error_log /dev/null;
         proxy_cache_bypass 1;
         proxy_no_cache 1;
-        proxy_pass http://127.0.0.1:3000/auth/;
+        proxy_pass http://127.0.0.1:3001/auth/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -37,7 +33,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://127.0.0.1:3000/;
+        proxy_pass http://127.0.0.1:3001/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -46,7 +42,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:23560;
+        proxy_pass http://127.0.0.1:23561;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

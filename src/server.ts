@@ -1,3 +1,4 @@
+import { AuthService, anonymousSession, authError, privateResponse, requireAdmin } from "./auth";
 import { readFile } from "node:fs/promises";
 import { isDatabaseError, publicErrorMessage } from "./internalError";
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
@@ -73,18 +74,13 @@ import {
 export interface BlockServerOptions {
   /** Read-only bounded omni search, with an independent small connection pool. */
   search?: SearchReader;
-  /**
-   * Bearer token required on `GET /metrics`. Unset leaves the endpoint open,
-   * which is fine when it is only reachable inside the compose network.
-   */
-  metricsBearerToken?: string;
   /** Set to false to disable `GET /metrics` entirely. Defaults to true. */
   metricsEnabled?: boolean;
   port?: number;
   hostname?: string;
   transactionDataEnabled?: boolean;
   baseloadRuntime?: BaseloadRuntime;
-  baseloadAdminBearerToken?: string;
+  auth?: AuthService;
   guzzlerStore?: GuzzlerStore;
   payloadProviderPaymentResolver?: PayloadProviderPaymentResolver;
   /**
@@ -656,9 +652,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
       handleRequest(request, storage, {
         transactionDataEnabled,
         ...(options.baseloadRuntime ? { baseloadRuntime: options.baseloadRuntime } : {}),
-        ...(options.baseloadAdminBearerToken !== undefined
-          ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
-          : {}),
+        ...(options.auth ? { auth: options.auth } : {}),
         ...(options.guzzlerStore ? { guzzlerStore: options.guzzlerStore } : {}),
         ...(options.payloadProviderPaymentResolver
           ? { payloadProviderPaymentResolver: options.payloadProviderPaymentResolver }
@@ -675,9 +669,6 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
         ...(options.search ? { search: options.search } : {}),
-        ...(options.metricsBearerToken !== undefined
-          ? { metricsBearerToken: options.metricsBearerToken }
-          : {}),
         ...(options.metricsEnabled !== undefined ? { metricsEnabled: options.metricsEnabled } : {}),
       }),
   };
@@ -692,9 +683,10 @@ export async function handleRequest(
   storage: ScannerStorage,
   options: BlockServerOptions = {},
 ): Promise<Response> {
-  return observeHttpRequest(request, async () =>
-    applyConditionalGet(request, await routeRequestSafely(request, storage, options)),
-  );
+  return observeHttpRequest(request, async () => {
+    const response = await routeRequestSafely(request, storage, options);
+    return sensitiveRequest(request) ? privateResponse(response) : applyConditionalGet(request, response);
+  });
 }
 
 /**
@@ -748,6 +740,13 @@ function applyConditionalGet(request: Request, response: Response): Response {
   return recordResponseBytes(new Response(null, { status: 304, headers }), 0);
 }
 
+function sensitiveRequest(request: Request): boolean {
+  const path = new URL(request.url).pathname;
+  return path.startsWith("/auth/") || path.startsWith("/admin/") || path === JSON_RPC_PATH ||
+    path === "/baseload/configs" || path.startsWith("/baseload/configs/") ||
+    (path === "/baseload" && request.method !== "GET");
+}
+
 async function routeRequest(
   request: Request,
   storage: ScannerStorage,
@@ -757,7 +756,18 @@ async function routeRequest(
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
 
   if (request.method === "OPTIONS") {
-    return recordResponseBytes(new Response(null, { status: 204, headers: CORS_HEADERS }), 0);
+    return recordResponseBytes(new Response(null, { status: 204, headers: sensitiveRequest(request) ? {} : CORS_HEADERS }), 0);
+  }
+
+  if (url.pathname.startsWith("/auth/")) {
+    if (url.pathname === "/auth/token-login" && !options.auth) return authError(404, "Token login is disabled");
+    if (options.auth) return options.auth.handle(request);
+    return url.pathname === "/auth/session" && request.method === "GET" ? anonymousSession() : authError(503, "Google login is not configured");
+  }
+  if (url.pathname === "/admin/verify") return authError(404, "Not found");
+  if (sensitiveRequest(request)) {
+    const denied = await requireAdmin(request, options.auth);
+    if (denied) return denied;
   }
 
   if (url.pathname === "/metrics") {
@@ -765,15 +775,11 @@ async function routeRequest(
   }
 
   if (url.pathname === "/admin/metrics") {
-    return handleGetMetrics(request, options, { requireAdminToken: true });
-  }
-
-  if (url.pathname === "/admin/verify") {
-    return handleAdminVerifyRequest(request, options.baseloadAdminBearerToken);
+    return handleGetMetrics(request, options);
   }
 
   if (url.pathname === "/baseload") {
-    return handleBaseloadRequest(request, options.baseloadRuntime, options.baseloadAdminBearerToken);
+    return handleBaseloadRequest(request, options.baseloadRuntime);
   }
 
   if (url.pathname === "/baseload/configs" || url.pathname.startsWith("/baseload/configs/")) {
@@ -782,17 +788,12 @@ async function routeRequest(
       url,
       storage,
       options.baseloadRuntime,
-      options.baseloadAdminBearerToken,
     );
   }
 
   if (url.pathname === JSON_RPC_PATH) {
     // The node relay spends the upstream's quota and reaches its mempool, so
     // it is an admin surface; the entity index below answers anonymously.
-    if (request.method === "POST") {
-      const authError = requireAdminBearerToken(request, options.baseloadAdminBearerToken);
-      if (authError) return authError;
-    }
     return handleJsonRpcRequest(request, storage, transactionDataEnabled, options.jsonRpcPassthrough);
   }
 
@@ -807,7 +808,7 @@ async function routeRequest(
       request,
       storage,
       transactionDataEnabled,
-      options.jsonRpcPassthrough,
+      undefined,
       createArkivIndexMethods(options.entityIndex, storage),
       JSON_RPC_EXPERIMENTAL_PATH,
     );
@@ -927,7 +928,6 @@ async function routeRequest(
 async function handleBaseloadRequest(
   request: Request,
   baseloadRuntime: BaseloadRuntime | undefined,
-  adminBearerToken: string | undefined,
 ): Promise<Response> {
   if (!baseloadRuntime) {
     return jsonError(503, "Baseload runtime is unavailable");
@@ -938,9 +938,6 @@ async function handleBaseloadRequest(
   }
 
   if (request.method === "PUT") {
-    const authError = requireAdminBearerToken(request, adminBearerToken);
-    if (authError) return authError;
-
     let body: unknown;
     try {
       body = await request.json();
@@ -963,11 +960,7 @@ async function handleBaseloadConfigsRequest(
   url: URL,
   storage: ScannerStorage,
   baseloadRuntime: BaseloadRuntime | undefined,
-  adminBearerToken: string | undefined,
 ): Promise<Response> {
-  const authError = requireAdminBearerToken(request, adminBearerToken);
-  if (authError) return authError;
-
   if (url.pathname === "/baseload/configs") {
     if (request.method !== "GET") {
       return jsonError(405, `Method ${request.method} is not allowed`);
@@ -1044,47 +1037,6 @@ async function handleBaseloadConfigsRequest(
   }
 
   return jsonError(405, `Method ${request.method} is not allowed`);
-}
-
-async function handleAdminVerifyRequest(
-  request: Request,
-  adminBearerToken: string | undefined,
-): Promise<Response> {
-  if (request.method !== "GET") {
-    return jsonError(405, `Method ${request.method} is not allowed`);
-  }
-  if (!adminBearerToken) {
-    return jsonError(503, "Admin bearer token is not configured on the backend");
-  }
-  const authError = requireAdminBearerToken(request, adminBearerToken);
-  if (authError) return authError;
-  return jsonResponse({ authorized: true });
-}
-
-/**
- * Gate an admin write on the bearer token. Fails closed: with no token
- * configured the admin surface is unavailable (503), never open.
- */
-function requireAdminBearerToken(request: Request, adminBearerToken: string | undefined): Response | null {
-  if (!adminBearerToken) {
-    return jsonError(503, "Admin bearer token is not configured on the backend");
-  }
-
-  const authorization = request.headers.get("authorization");
-  if (!authorization) {
-    return jsonError(401, "Admin bearer token is required");
-  }
-
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  if (!match?.[1]) {
-    return jsonError(401, "Authorization header must use Bearer token");
-  }
-
-  if (match[1] !== adminBearerToken) {
-    return jsonError(403, "Admin bearer token is invalid");
-  }
-
-  return null;
 }
 
 async function handleGetHealth(
@@ -1249,65 +1201,10 @@ async function handleJsonRpcRequest(
   );
 }
 
-/**
- * Prometheus scrape endpoint. Never counted in the traffic metrics (see
- * observeHttpRequest), optionally gated by a bearer token so it can sit
- * behind the public nginx without leaking build/traffic details.
- */
-/**
- * Headers a reverse proxy stamps on the requests it forwards. A direct loopback
- * scrape never carries them, so their presence means the request came through
- * the public origin.
- */
-const REVERSE_PROXY_HEADERS = ["x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip"];
-
-function arrivedThroughReverseProxy(request: Request): boolean {
-  return REVERSE_PROXY_HEADERS.some((name) => request.headers.has(name));
-}
-
-/**
- * Render the Prometheus registry.
- *
- * Two paths reach here. `GET /metrics` is the loopback scrape target, gated by
- * the optional `METRICS_BEARER_TOKEN`. When that is unset it is open only to
- * direct requests: the public nginx sites 404 `/api/metrics`, but Bun collapses
- * dot segments before routing, so `/api/%2e%2e/metrics` still lands here, and a
- * request that carries the proxy's forwarding headers is refused as if nginx
- * had 404ed it. `GET /admin/metrics` is proxied to the public origin, so it
- * always demands the admin bearer token and answers 503 rather than serving
- * anything when no token is configured.
- */
-async function handleGetMetrics(
-  request: Request,
-  options: BlockServerOptions,
-  { requireAdminToken = false }: { requireAdminToken?: boolean } = {},
-): Promise<Response> {
-  if (options.metricsEnabled === false) {
-    return jsonError(404, `Not found: ${new URL(request.url).pathname}`);
-  }
-  if (request.method !== "GET") {
-    return jsonError(405, `Method ${request.method} is not allowed`);
-  }
-  if (requireAdminToken) {
-    if (!options.baseloadAdminBearerToken) {
-      return jsonError(503, "Admin bearer token is not configured on the backend");
-    }
-    const authError = requireAdminBearerToken(request, options.baseloadAdminBearerToken);
-    if (authError) return authError;
-  } else if (options.metricsBearerToken === undefined) {
-    if (arrivedThroughReverseProxy(request)) {
-      return jsonError(404, `Not found: ${new URL(request.url).pathname}`);
-    }
-  } else {
-    const header = request.headers.get("Authorization") ?? "";
-    const match = header.match(/^Bearer\s+(.+)$/i);
-    if (!match) {
-      return jsonError(401, "Bearer token required");
-    }
-    if (match[1] !== options.metricsBearerToken) {
-      return jsonError(403, "Bearer token is invalid");
-    }
-  }
+/** /metrics is open; deployment controls exposure. /admin/metrics uses the administrator gate. */
+async function handleGetMetrics(request: Request, options: BlockServerOptions): Promise<Response> {
+  if (options.metricsEnabled === false) return jsonError(404, `Not found: ${new URL(request.url).pathname}`);
+  if (request.method !== "GET") return jsonError(405, `Method ${request.method} is not allowed`);
   const body = await metricsRegistry.render();
   return new Response(body, {
     status: 200,

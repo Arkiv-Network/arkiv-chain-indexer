@@ -1,3 +1,5 @@
+import { AuthService } from "./auth";
+import { AuthStorage } from "./authStorage";
 import { parseServerConfig, ServerHelpRequested } from "./serverConfig";
 import { buildSyncStatusResponse, createBlockServer } from "./server";
 import { ScannerStorage } from "./storage";
@@ -18,6 +20,8 @@ import { collectEntityIndex, collectIndexerProgress, collectResponseCache, colle
 
 async function main(): Promise<void> {
   let storage: ScannerStorage | undefined;
+  let authStorage: AuthStorage | undefined;
+  let authCleanup: ReturnType<typeof setInterval> | undefined;
   let guzzlerStore: GuzzlerStore | undefined;
   let baseloadRuntime: BaseloadRuntime | undefined;
   let stopEntityInvalidationListener: (() => Promise<void>) | undefined;
@@ -30,6 +34,14 @@ async function main(): Promise<void> {
   try {
     const config = parseServerConfig(process.argv.slice(2));
     storage = await ScannerStorage.open(config.databaseUrl);
+    let auth: AuthService | undefined;
+    if (config.auth) {
+      authStorage = await AuthStorage.open(config.databaseUrl);
+      auth = new AuthService(config.auth, authStorage);
+      const authStore = authStorage;
+      authCleanup = setInterval(() => { void authStore.cleanup(Date.now()).catch(() => console.warn("Auth expiry cleanup failed")); }, 60_000);
+      authCleanup.unref();
+    }
     if (config.redisUrl) {
       guzzlerStore = await RedisGuzzlerStore.open(config.redisUrl);
     }
@@ -203,9 +215,7 @@ async function main(): Promise<void> {
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
       transactionDataEnabled: config.transactionDataEnabled,
       baseloadRuntime,
-      ...(config.baseloadAdminBearerToken !== undefined
-        ? { baseloadAdminBearerToken: config.baseloadAdminBearerToken }
-        : {}),
+      ...(auth ? { auth } : {}),
       ...(guzzlerStore ? { guzzlerStore } : {}),
       ...(payloadProviderPaymentResolver ? { payloadProviderPaymentResolver } : {}),
       entityHistoryCache,
@@ -216,18 +226,12 @@ async function main(): Promise<void> {
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
       ...(entityIndex ? { entityIndex } : {}),
       metricsEnabled: config.metricsEnabled,
-      ...(config.metricsBearerToken !== undefined
-        ? { metricsBearerToken: config.metricsBearerToken }
-        : {}),
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);
     console.log(
       config.metricsEnabled
-        ? `Prometheus metrics: GET /metrics (${config.metricsBearerToken ? "bearer token required" : "open"}), ` +
-            `GET /admin/metrics (${
-              config.baseloadAdminBearerToken ? "admin bearer token required" : "503, no admin token configured"
-            })`
+        ? "Prometheus metrics: GET /metrics (open; deployment controls exposure), GET /admin/metrics (administrator session or temporary access token)"
         : "Prometheus metrics: disabled",
     );
     console.log(
@@ -280,6 +284,8 @@ async function main(): Promise<void> {
       await stopEntityInvalidationListener?.();
       await stopStoredBlockListener?.();
       await guzzlerStore?.close();
+      if (authCleanup) clearInterval(authCleanup);
+      await authStorage?.close();
       await storage?.close();
       process.exit(0);
     };
@@ -301,6 +307,8 @@ async function main(): Promise<void> {
     await stopEntityInvalidationListener?.();
     await stopStoredBlockListener?.();
     await guzzlerStore?.close();
+    if (authCleanup) clearInterval(authCleanup);
+    await authStorage?.close();
     await storage?.close();
     process.exitCode = 1;
   }
