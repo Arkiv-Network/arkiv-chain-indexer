@@ -148,7 +148,7 @@ describe("authorization boundaries", () => {
 });
 
 test("return paths cannot escape the application origin", () => {
-  for (const value of [null,"//evil.test","/\\evil.test","https://evil.test","/%2f%2fevil.test","/%5cevil","/\n/evil","/api/auth/google/start"]) expect(safeReturnPath(value)).toBe("/");
+  for (const value of [null,"//evil.test","/\\evil.test","https://evil.test","/%2f%2fevil.test","/%5cevil","/\n/evil","/api/auth/google/start","/..//evil.test","/x/..//evil.test","/%2e%2e//evil.test"]) expect(safeReturnPath(value)).toBe("/");
   expect(safeReturnPath("/data?source=index#foo")).toBe("/data?source=index#foo");
 });
 test("configuration disables login only when absent and explicitly constrains insecure development cookies", () => {

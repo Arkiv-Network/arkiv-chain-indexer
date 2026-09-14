@@ -22,7 +22,8 @@ export function safeReturnPath(value: string | null): string {
     const url = new URL(value, "https://local.invalid");
     // Encoded backslashes/control characters must not change the destination after another decoding layer.
     const decoded = decodeURIComponent(value);
-    if (url.origin !== "https://local.invalid" || decoded.startsWith("//") || /[\\\x00-\x20\x7f]/.test(decoded) || url.pathname.startsWith("/api/")) return "/";
+    // Dot segments can also normalise into a protocol-relative "//host" path ("/..//evil"), so check the parsed path too.
+    if (url.origin !== "https://local.invalid" || decoded.startsWith("//") || url.pathname.startsWith("//") || /[\\\x00-\x20\x7f]/.test(decoded) || url.pathname.startsWith("/api/")) return "/";
     return url.pathname + url.search + url.hash;
   } catch { return "/"; }
 }
