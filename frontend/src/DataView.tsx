@@ -12,6 +12,7 @@ import {
   isExpiringSoon,
   normalizeQueryInput,
   PAGE_SIZE_OPTIONS,
+  parseQueryBlock,
   resolveExpirationFilter,
   resolvePageSize,
   type EntityRecord,
@@ -162,6 +163,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     return () => clearTimeout(draftTimer.current);
   }, [query, remember]);
 
+  const [blockInput, setBlockInput] = useState(() => urlFilters.block);
   const [pageSize, setPageSize] = useState<PageSize>(() => resolvePageSize(urlFilters.pageSize));
   const [expiration, setExpiration] = useState<ExpirationFilter>(() => resolveExpirationFilter(urlFilters.expiration));
   const [results, setResults] = useState<ResultState>(EMPTY_RESULTS);
@@ -180,10 +182,11 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   useEffect(() => {
     resetCount();
     return () => countAbortRef.current?.abort();
-  }, [query, mode, source.customUrl, resetCount]);
+  }, [query, mode, source.customUrl, blockInput, resetCount]);
   const abortRef = useRef<AbortController | null>(null);
   /** The `q` this component last put into, or read from, the URL; used to tell a back/forward navigation apart. */
   const urlQueryRef = useRef<string | null>(null);
+  const urlBlockRef = useRef(urlFilters.block);
 
   useEffect(() => {
     let cancelled = false;
@@ -208,7 +211,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const runQuery = useCallback(
-    async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }, via: RpcSource = source) => {
+    async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }, via: RpcSource = source, requestedBlock?: number) => {
       if (via.kind === "backend" && !adminModeActive) via = { kind: "index", customUrl: "" };
       const normalized = normalizeQueryInput(rawQuery);
       if (!normalized) return;
@@ -236,6 +239,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         const params = buildQueryParams({
           query: normalized,
           pageSize: Number(size),
+          atBlock: requestedBlock,
           ...(continueFrom ? { cursor: continueFrom.cursor, atBlock: continueFrom.atBlock } : {}),
         });
         const deps = { ...rpcDeps, signal: controller.signal };
@@ -278,7 +282,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
    * far behind is not followed down (see {@link pickComparisonBlock}): the
    * node's head is used and the index side fails, which is the honest report.
    */
-  const runComparison = useCallback(async (rawQuery: string, size: PageSize) => {
+  const runComparison = useCallback(async (rawQuery: string, size: PageSize, requestedBlock?: number) => {
     if (!adminModeActive) return;
     const normalized = normalizeQueryInput(rawQuery);
     if (!normalized) return;
@@ -309,7 +313,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         cancelled();
         return;
       }
-      const atBlock = pickComparisonBlock(nodeTiming?.currentBlock, indexTiming?.currentBlock);
+      const atBlock = requestedBlock ?? pickComparisonBlock(nodeTiming?.currentBlock, indexTiming?.currentBlock);
       const params = buildQueryParams({
         query: normalized,
         pageSize: Number(size),
@@ -364,8 +368,14 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   const countQuery = async () => {
     const normalized = normalizeQueryInput(query);
     if (!normalized || mode !== "index") return;
+    let block: number | undefined;
+    try { block = parseQueryBlock(blockInput); }
+    catch (error) { setFormError((error as Error).message); return; }
     remember(query);
     setFormError(null);
+    urlQueryRef.current = normalized;
+    urlBlockRef.current = block === undefined ? "" : String(block);
+    if (writePermalink("data", dataPageFilters(normalized, pageSize, expiration, rpcModeLinkValue(mode, source), urlBlockRef.current))) onLocationChange();
     abortRef.current?.abort();
     resetCount();
     const controller = new AbortController();
@@ -374,7 +384,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     setComparison({ status: "idle" });
     setCountResult({ query: normalized, total: null, error: null, running: true });
     try {
-      const total = await callRpc({ kind: "index", customUrl: "" }, "arkiv_getEntityCount", [{ query: normalized }], {
+      const total = await callRpc({ kind: "index", customUrl: "" }, "arkiv_getEntityCount", [{ query: normalized, ...(block === undefined ? {} : { block }) }], {
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -395,25 +405,32 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     (text: string, size: PageSize = pageSize, filter: ExpirationFilter = expiration) => {
       const normalized = normalizeQueryInput(text);
       if (!normalized) return;
+      let block: number | undefined;
+      try { block = parseQueryBlock(blockInput); }
+      catch (error) { setFormError((error as Error).message); return; }
       remember(queryRef.current);
       remember(normalized);
       setQuery(normalized);
       urlQueryRef.current = normalized;
-      if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcModeLinkValue(mode, source)))) {
+      urlBlockRef.current = block === undefined ? "" : String(block);
+      if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcModeLinkValue(mode, source), urlBlockRef.current))) {
         onLocationChange();
       }
-      if (mode === "both") void runComparison(normalized, size);
-      else void runQuery(normalized, size);
+      if (mode === "both") void runComparison(normalized, size, block);
+      else void runQuery(normalized, size, undefined, undefined, block);
     },
-    [expiration, mode, onLocationChange, pageSize, remember, runComparison, runQuery, source],
+    [blockInput, expiration, mode, onLocationChange, pageSize, remember, runComparison, runQuery, source],
   );
 
   // A shared link, or back/forward, changes `q` under us: adopt it and run it.
   useEffect(() => {
     const fromUrl = urlFilters.q.trim();
-    if (fromUrl === (urlQueryRef.current ?? "")) return;
+    if (fromUrl === (urlQueryRef.current ?? "") && urlFilters.block === urlBlockRef.current) return;
     remember(queryRef.current);
     urlQueryRef.current = fromUrl;
+    urlBlockRef.current = urlFilters.block;
+    setBlockInput(urlFilters.block);
+    resetCount();
     const size = resolvePageSize(urlFilters.pageSize);
     const filter = resolveExpirationFilter(urlFilters.expiration);
     setPageSize(size);
@@ -423,6 +440,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
       setResults(EMPTY_RESULTS);
       return;
     }
+    let block: number | undefined;
+    try { block = parseQueryBlock(urlFilters.block); }
+    catch (error) { setFormError((error as Error).message); return; }
     const normalized = normalizeQueryInput(fromUrl);
     remember(normalized);
     setQuery(normalized);
@@ -432,12 +452,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
       setMode(linked.mode);
     }
     const linkedMode = permittedRpcMode(linked?.mode ?? mode, adminModeActive);
-    if (linkedMode === "both") void runComparison(normalized, size);
-    else void runQuery(normalized, size, undefined, linked?.source ?? undefined);
+    if (linkedMode === "both") void runComparison(normalized, size, block);
+    else void runQuery(normalized, size, undefined, linked?.source ?? undefined, block);
     // `mode` is only read as the fallback for a link that names none; a mode
     // change on its own must not re-run the query behind the user's back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remember, runComparison, runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
+  }, [remember, resetCount, runComparison, runQuery, urlFilters.block, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
 
   const cancel = () => {
     resetCount();
@@ -450,6 +470,8 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     cancel();
     setQuery("");
     urlQueryRef.current = "";
+    urlBlockRef.current = "";
+    setBlockInput("");
     setResults(EMPTY_RESULTS);
     setComparison({ status: "idle" });
     if (writePermalink("data", {})) onLocationChange();
@@ -473,7 +495,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     const filter = resolveExpirationFilter(value);
     setExpiration(filter);
     if (results.executedQuery) {
-      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, rpcModeLinkValue(mode, source)))) {
+      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, rpcModeLinkValue(mode, source), urlBlockRef.current))) {
         onLocationChange();
       }
     }
@@ -533,7 +555,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   const permalink =
     results.executedQuery === null
       ? null
-      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, rpcModeLinkValue(mode, source)));
+      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, rpcModeLinkValue(mode, source), urlBlockRef.current));
 
   const onFallbackKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -638,6 +660,18 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
             <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs the query
           </span>
           <label className="query-toolbar-field">
+            At block
+            <input
+              type="text"
+              aria-label="At block"
+              placeholder="Latest"
+              value={blockInput}
+              disabled={running}
+              onChange={(event) => { setBlockInput(event.target.value); setFormError(null); }}
+              style={{ width: "10rem" }}
+            />
+          </label>
+          <label className="query-toolbar-field">
             Page size
             <select value={pageSize} onChange={(event) => onPageSizeChange(event.target.value)} disabled={running}>
               {PAGE_SIZE_OPTIONS.map((option) => (
@@ -687,6 +721,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
             </button>
           )}
         </div>
+        {backend.status === "known" && backend.entityQueryIndex && (mode === "index" || mode === "both") ? (
+          <p className="summary">Available index blocks: {backend.entityQueryIndex.floorBlock}–{backend.entityQueryIndex.projectedThroughBlock}. Leave At block blank for latest.</p>
+        ) : null}
         {formError ? <p className="summary error query-form-error">{formError}</p> : null}
         <div className="query-examples">
           <span className="query-examples-label">Copy example</span>
@@ -721,7 +758,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         <div className="query-results">
           {countResult.error !== null ? <QueryError error={countResult.error} query={countResult.query} /> : (
             <p className="summary query-status" role="status">
-              {countResult.running ? "Counting matching entities…" : `${fmtInteger(countResult.total)} matching entities`}
+              {countResult.running ? "Counting matching entities…" : `${fmtInteger(countResult.total)} matching entities at ${blockInput.trim() && blockInput.trim().toLowerCase() !== "latest" ? `block ${blockInput.trim()}` : "latest"}`}
               {!countResult.running && expiration === "soon" ? " (before the Show filter)" : ""}
             </p>
           )}
