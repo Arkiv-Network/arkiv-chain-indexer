@@ -143,7 +143,7 @@ export function EntityResults({
   );
 }
 
-function QueryError({ error, query }: { error: unknown; query: string | null }) {
+export function QueryError({ error, query }: { error: unknown; query: string | null }) {
   const described = describeQueryError(error);
   const location = described.position !== null && query ? locateQueryPosition(query, described.position) : null;
   return (

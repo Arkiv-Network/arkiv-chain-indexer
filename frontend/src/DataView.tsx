@@ -51,7 +51,7 @@ import {
   type ComparisonReport,
   type ComparisonSide,
 } from "./entityCompare";
-import { EntityResults } from "./EntityResults";
+import { EntityResults, QueryError } from "./EntityResults";
 import { QueryHistoryDialog } from "./QueryHistoryDialog";
 import { editQueryHistory, readQueryHistory, rememberQuery, writeQueryHistory, type QueryHistoryEntry } from "./queryHistory";
 import { fmtDate, fmtInteger } from "./format";
@@ -165,6 +165,22 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   const [pageSize, setPageSize] = useState<PageSize>(() => resolvePageSize(urlFilters.pageSize));
   const [expiration, setExpiration] = useState<ExpirationFilter>(() => resolveExpirationFilter(urlFilters.expiration));
   const [results, setResults] = useState<ResultState>(EMPTY_RESULTS);
+  const [countResult, setCountResult] = useState<{
+    query: string;
+    total: number | null;
+    error: unknown | null;
+    running: boolean;
+  } | null>(null);
+  const countAbortRef = useRef<AbortController | null>(null);
+  const resetCount = useCallback(() => {
+    countAbortRef.current?.abort();
+    countAbortRef.current = null;
+    setCountResult(null);
+  }, []);
+  useEffect(() => {
+    resetCount();
+    return () => countAbortRef.current?.abort();
+  }, [query, mode, source.customUrl, resetCount]);
   const abortRef = useRef<AbortController | null>(null);
   /** The `q` this component last put into, or read from, the URL; used to tell a back/forward navigation apart. */
   const urlQueryRef = useRef<string | null>(null);
@@ -201,6 +217,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         return;
       }
       setFormError(null);
+      resetCount();
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -250,7 +267,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [source, csrfToken, adminModeActive],
+    [source, csrfToken, adminModeActive, resetCount],
   );
 
   /**
@@ -266,6 +283,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     const normalized = normalizeQueryInput(rawQuery);
     if (!normalized) return;
     setFormError(null);
+    resetCount();
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -341,7 +359,36 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [csrfToken, adminModeActive]);
+  }, [csrfToken, adminModeActive, resetCount]);
+
+  const countQuery = async () => {
+    const normalized = normalizeQueryInput(query);
+    if (!normalized || mode !== "index") return;
+    remember(query);
+    setFormError(null);
+    abortRef.current?.abort();
+    resetCount();
+    const controller = new AbortController();
+    countAbortRef.current = controller;
+    setResults(EMPTY_RESULTS);
+    setComparison({ status: "idle" });
+    setCountResult({ query: normalized, total: null, error: null, running: true });
+    try {
+      const total = await callRpc({ kind: "index", customUrl: "" }, "arkiv_getEntityCount", [{ query: normalized }], {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) {
+        throw new Error("The endpoint returned an invalid entity count.");
+      }
+      setCountResult({ query: normalized, total, error: null, running: false });
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) return;
+      setCountResult({ query: normalized, total: null, error, running: false });
+    } finally {
+      if (countAbortRef.current === controller) countAbortRef.current = null;
+    }
+  };
 
   /** Runs the editor's text and records it in the URL so the run can be shared or returned to. */
   const execute = useCallback(
@@ -393,6 +440,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   }, [remember, runComparison, runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
 
   const cancel = () => {
+    resetCount();
     abortRef.current?.abort();
     abortRef.current = null;
   };
@@ -481,7 +529,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         : []
       : results.entities;
   const hasText = query.trim().length > 0;
-  const running = results.running !== null;
+  const running = results.running !== null || countResult?.running === true;
   const permalink =
     results.executedQuery === null
       ? null
@@ -609,7 +657,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
               ))}
             </select>
           </label>
-          <button type="button" className="secondary" onClick={clear} disabled={!hasText && results.executedQuery === null}>
+          <button type="button" className="secondary" onClick={clear} disabled={!hasText && results.executedQuery === null && countResult === null}>
             Clear
           </button>
           <button type="button" className="secondary" onClick={() => {
@@ -620,6 +668,15 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
             History{queryHistory.length > 0 ? ` (${queryHistory.length})` : ""}
           </button>
           {permalink ? <CopyLinkButton href={permalink} /> : null}
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void countQuery()}
+            disabled={!hasText || running || mode !== "index" || indexOff}
+            title={mode === "index" ? "Count all matches, regardless of page size or the Show filter" : "Select Experimental index to count query matches"}
+          >
+            Count query
+          </button>
           {running ? (
             <button type="button" className="query-run" onClick={cancel}>
               Cancel
@@ -660,7 +717,16 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         <ComparisonPanel report={comparison.report} />
       ) : null}
 
-      <EntityResults
+      {countResult ? (
+        <div className="query-results">
+          {countResult.error !== null ? <QueryError error={countResult.error} query={countResult.query} /> : (
+            <p className="summary query-status" role="status">
+              {countResult.running ? "Counting matching entities…" : `${fmtInteger(countResult.total)} matching entities`}
+              {!countResult.running && expiration === "soon" ? " (before the Show filter)" : ""}
+            </p>
+          )}
+        </div>
+      ) : <EntityResults
         executedQuery={results.executedQuery}
         entities={visibleEntities}
         loadedCount={results.entities.length}
@@ -676,7 +742,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         onQueryOnly={queryOnly}
         onAddToQuery={addToQuery}
         onLocationChange={onLocationChange}
-      />
+      />}
 
       <details className="rpc-endpoint-details">
         <summary>
