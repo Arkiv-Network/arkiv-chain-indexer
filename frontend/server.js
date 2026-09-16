@@ -72,9 +72,9 @@ function cacheHeadersFor(filePath) {
     return { "cache-control": `public, max-age=${ONE_YEAR_SECONDS}, immutable` };
   }
 
-  // index.html must be revalidated on every load so deploys are picked up
+  // HTML pages must be revalidated on every load so deploys are picked up
   // immediately; the ETag/Last-Modified pair below turns that into a 304.
-  if (path.basename(filePath) === "index.html") {
+  if (path.extname(filePath).toLowerCase() === ".html") {
     return { "cache-control": "no-cache" };
   }
 
@@ -232,7 +232,11 @@ function serveRuntimeConfig(res) {
 async function serveStatic(req, res) {
   const rawPath = (req.url ?? "/").split("?")[0];
   const decoded = decodeURIComponent(rawPath);
-  const requestedPath = decoded === "/" ? "/index.html" : decoded;
+  const requestedPath = decoded === "/"
+    ? "/index.html"
+    : decoded === "/documentation/architecture" || decoded === "/documentation/architecture/"
+      ? "/documentation/architecture.html"
+      : decoded;
   const candidate = path.normalize(path.join(STATIC_DIR, requestedPath));
 
   if (!candidate.startsWith(STATIC_DIR + path.sep) && candidate !== STATIC_DIR) {

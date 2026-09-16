@@ -1,8 +1,27 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
 
+// Keep the public HTML document outside React routing in dev and preview too.
+function serveDocumentation(server: Pick<ViteDevServer, "middlewares">) {
+  server.middlewares.use((req, _res, next) => {
+    if (req.url) {
+      req.url = req.url.replace(
+        /^\/documentation\/architecture\/?(?=\?|$)/,
+        "/documentation/architecture.html",
+      );
+    }
+    next();
+  });
+}
+
+const documentation: Plugin = {
+  name: "static-documentation",
+  configureServer: serveDocumentation,
+  configurePreviewServer: serveDocumentation,
+};
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), documentation],
   server: {
     port: 5173,
     proxy: {
