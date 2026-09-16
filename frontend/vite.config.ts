@@ -6,8 +6,8 @@ function serveDocumentation(server: Pick<ViteDevServer, "middlewares">) {
   server.middlewares.use((req, _res, next) => {
     if (req.url) {
       req.url = req.url.replace(
-        /^\/documentation\/architecture\/?(?=\?|$)/,
-        "/documentation/architecture.html",
+        /^\/documentation\/(architecture|product)\/?(?=\?|$)/,
+        "/documentation/$1.html",
       );
     }
     next();

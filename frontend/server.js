@@ -232,10 +232,11 @@ function serveRuntimeConfig(res) {
 async function serveStatic(req, res) {
   const rawPath = (req.url ?? "/").split("?")[0];
   const decoded = decodeURIComponent(rawPath);
+  const documentationPage = /^\/documentation\/(architecture|product)\/?$/.exec(decoded);
   const requestedPath = decoded === "/"
     ? "/index.html"
-    : decoded === "/documentation/architecture" || decoded === "/documentation/architecture/"
-      ? "/documentation/architecture.html"
+    : documentationPage
+      ? `/documentation/${documentationPage[1]}.html`
       : decoded;
   const candidate = path.normalize(path.join(STATIC_DIR, requestedPath));
 
