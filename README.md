@@ -218,6 +218,14 @@ metric columns.
 | `--interval-ms` | `BATCHER_COLLECTOR_INTERVAL_MS` | `10000` | Delay between collector sweeps. |
 | `--once` | n/a | unset | Run one collector sweep and exit. |
 
+### Direct bouncer key
+
+Kalarepa uses a key registered directly with Tiramisu's bouncer. A single key in
+`RPC_KEY_POOL_FILE` is shared by the scanner, gap filler, backfill scanner and Baseload
+workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately.
+See [direct key provisioning and rotation](docs/tiramisu-rpc-keys.md). This setup needs
+neither the Hub browser generator nor the optional proxy below.
+
 ### Pooled RPC proxy (`rpc-proxy` profile)
 
 `docker-compose.yml` ships an optional `rpc-proxy` service running

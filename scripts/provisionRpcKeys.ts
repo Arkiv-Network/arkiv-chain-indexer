@@ -73,9 +73,15 @@ async function readQuota(controlUrl: string, token: string, key: string) {
     headers: { authorization: `Bearer ${token}` },
   });
   if (!response.ok) return null;
-  return (await response.json().catch(() => null)) as
-    | { limit?: number; used?: number; remaining?: number; used_percent?: number }
-    | null;
+  const body: unknown = await response.json().catch(() => null);
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as Record<string, unknown>;
+  // The control service also returns the full key. Only print quota figures.
+  return Object.fromEntries(
+    ["limit", "used", "remaining", "used_percent"]
+      .filter((field) => typeof record[field] === "number")
+      .map((field) => [field, record[field]]),
+  );
 }
 
 /**
@@ -172,7 +178,7 @@ async function main() {
     keys,
   };
   await mkdir(dirname(outPath), { recursive: true });
-  await writeFile(outPath, `${JSON.stringify(pool, null, 2)}\n`, "utf8");
+  await writeFile(outPath, `${JSON.stringify(pool, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
   console.log(
     `Wrote ${keys.length} keys (${minted} newly minted) to ${outPath} at quota ${quota} each ` +
@@ -246,7 +252,7 @@ async function provisionViaGenerator(values: Record<string, unknown>) {
     keys,
   };
   await mkdir(dirname(outPath), { recursive: true });
-  await writeFile(outPath, `${JSON.stringify(pool, null, 2)}\n`, "utf8");
+  await writeFile(outPath, `${JSON.stringify(pool, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
   const elapsedSeconds = Math.round((Date.now() - startedAtMs) / 1000);
   console.log(

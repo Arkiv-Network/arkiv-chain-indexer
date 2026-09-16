@@ -138,7 +138,9 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
       );
     }
     const body = JSON.stringify({ jsonrpc: "2.0", id: this.nextId++, method, params });
+    const signal = AbortSignal.timeout(this.timeoutMs);
     let response: Response;
+    let text: string;
     try {
       response = await this.fetchImpl(url, {
         method: "POST",
@@ -147,9 +149,18 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
           ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
         },
         body,
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal,
       });
+      text = await response.text();
     } catch (error) {
+      if (signal.aborted) {
+        const message = `${method} timed out after ${this.timeoutMs / 1000}s waiting for the upstream node`;
+        this.onWarning(`shadow-rpc passthrough: ${message}:`, error);
+        throw new JsonRpcError(JSON_RPC_SERVER_ERROR, message, {
+          reason: "upstream_timeout",
+          timeoutMs: this.timeoutMs,
+        });
+      }
       // The cause can name the upstream host, and the URL may carry a key, so
       // the caller gets none of it — the operator reads it in the log instead.
       this.onWarning(`shadow-rpc passthrough: ${method} could not reach the upstream node:`, error);
@@ -159,9 +170,15 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
       );
     }
 
-    const text = await response.text();
     if (!response.ok) {
       this.onWarning(`shadow-rpc passthrough: ${method} upstream returned HTTP ${response.status}:`, text);
+      if (response.status === 504) {
+        throw new JsonRpcError(
+          JSON_RPC_SERVER_ERROR,
+          `${method} timed out at the upstream gateway (HTTP 504)`,
+          { reason: "upstream_timeout", httpStatus: response.status },
+        );
+      }
       throw new JsonRpcError(
         JSON_RPC_SERVER_ERROR,
         `${method} was rejected by the upstream node (HTTP ${response.status})`,

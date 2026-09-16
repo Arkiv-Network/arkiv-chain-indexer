@@ -1,6 +1,6 @@
 // The result list of the Data page: one card per entity, with the metadata the
-// node returned, an estimated lifetime, and attribute chips that feed back into
-// the query. Payloads are not fetched here; the entity page shows history.
+// node returned, an estimated lifetime, and attribute chips that copy complete
+// query conditions. Payloads are not fetched here; the entity page shows history.
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { BlockNumberLink } from "./blockLinks";
@@ -18,7 +18,7 @@ import {
 import type { BlockTiming } from "./dataRpc";
 import { fmtDate, fmtInteger } from "./format";
 import { entityDetailHref, shouldHandleClientNavigation, writeEntityPermalink } from "./permalinks";
-import { AddressCell } from "./TransactionsView";
+import { AddressCell, copyText } from "./TransactionsView";
 import { CopyButton } from "./TransactionView";
 
 export interface EntityResultsProps {
@@ -279,8 +279,6 @@ function EntityCard({
             <AttributeChip
               key={attribute.name}
               attribute={attribute}
-              onQueryOnly={onQueryOnly}
-              onAddToQuery={onAddToQuery}
             />
           ))}
         </div>
@@ -369,39 +367,44 @@ function LifetimeBar({
   );
 }
 
-function AttributeChip({
-  attribute,
-  onQueryOnly,
-  onAddToQuery,
-}: {
-  attribute: EntityAttribute;
-  onQueryOnly: (expression: string) => void;
-  onAddToQuery: (expression: string) => void;
-}) {
+function AttributeChip({ attribute }: { attribute: EntityAttribute }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (copyStatus === "idle") return;
+    const timeout = window.setTimeout(() => setCopyStatus("idle"), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [copyStatus]);
+
+  const expression = attributeFilterExpression(attribute);
   const numeric = NUMERIC_ATTRIBUTE_TYPES.has(attribute.type);
   const shown = attribute.value.length > 40 ? `${attribute.value.slice(0, 40)}…` : attribute.value;
   return (
-    <FilterMenu
-      expression={attributeFilterExpression(attribute)}
-      label={attribute.name}
-      copyValue={attribute.value}
-      onQueryOnly={onQueryOnly}
-      onAddToQuery={onAddToQuery}
-      trigger={
-        <span className="attr-chip" title={`${attribute.name} = ${attribute.value}`}>
-          <span className="attr-chip-type">{attribute.type}</span>
-          <span className="attr-chip-name">{attribute.name}</span>
-          <span className="attr-chip-eq">=</span>
-          <span className={`attr-chip-value ${numeric ? "numeric" : "text"}`}>{numeric || attribute.type === "bool" ? shown : `"${shown}"`}</span>
-        </span>
-      }
-    />
+    <button
+      type="button"
+      className={`attr-chip attr-chip-copy ${copyStatus}`}
+      title={`Copy condition: ${expression}`}
+      aria-label={`Copy condition: ${expression}`}
+      onClick={async () => setCopyStatus(await copyText(expression) ? "copied" : "failed")}
+    >
+      <span className="attr-chip-type">{attribute.type}</span>
+      <span className="attr-chip-name">{attribute.name}</span>
+      <span className="attr-chip-eq">=</span>
+      <span className={`attr-chip-value ${numeric ? "numeric" : "text"}`}>{numeric || attribute.type === "bool" ? shown : `"${shown}"`}</span>
+      <span className="attr-chip-copy-feedback" role="status">
+        {copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Could not copy" : (
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2" />
+          </svg>
+        )}
+      </span>
+    </button>
   );
 }
 
 /**
  * A small menu offering to query by one value, add it to the current query, or
- * copy it. Triggered by a chip or the funnel button next to an address.
+ * copy it. Triggered by the funnel button next to a key or address.
  */
 function FilterMenu({
   expression,
@@ -409,14 +412,12 @@ function FilterMenu({
   copyValue,
   onQueryOnly,
   onAddToQuery,
-  trigger,
 }: {
   expression: string;
   label: string;
   copyValue: string;
   onQueryOnly: (expression: string) => void;
   onAddToQuery: (expression: string) => void;
-  trigger?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -457,17 +458,15 @@ function FilterMenu({
     <span className={`filter-menu${open ? " open" : ""}`} ref={rootRef}>
       <button
         type="button"
-        className={trigger ? "filter-menu-chip" : "filter-menu-button"}
+        className="filter-menu-button"
         aria-haspopup="menu"
         aria-expanded={open}
-        title={trigger ? `Filter by ${expression}` : `Query by ${label}`}
+        title={`Query by ${label}`}
         onClick={() => setOpen((value) => !value)}
       >
-        {trigger ?? (
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 5h18l-7 8v5l-4 2v-7L3 5z" />
-          </svg>
-        )}
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 5h18l-7 8v5l-4 2v-7L3 5z" />
+        </svg>
       </button>
       {open ? (
         <span className="filter-menu-popup" role="menu">

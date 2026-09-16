@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { EthereumRpcClient } from "./rpc";
+import { attachRpcKeyRing } from "./rpcKeyRing";
 
 const originalFetch = globalThis.fetch;
 const textEncoder = new TextEncoder();
@@ -8,6 +12,33 @@ type FetchInit = Parameters<typeof fetch>[1];
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+test("a single key in the pool authenticates RPC requests and worker leases", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rpc-single-key-"));
+  const poolFile = join(directory, "keys.json");
+  const key = "test-direct-bouncer-key";
+  try {
+    await writeFile(poolFile, JSON.stringify({ keys: [key] }));
+    globalThis.fetch = (async (_input: FetchInput, init: FetchInit) => {
+      if (new Headers(init?.headers).get("x-api-key") !== key) {
+        return new Response("invalid key", { status: 401 });
+      }
+      return Response.json({ jsonrpc: "2.0", id: 1, result: "0x2a" });
+    }) as typeof fetch;
+
+    const rpc = new EthereumRpcClient("https://example.test", "old-key");
+    const ring = await attachRpcKeyRing(rpc, "test", {
+      RPC_KEY_POOL_FILE: poolFile,
+      SCANNER_RPC_API_KEY: "old-key",
+    });
+
+    await expect(rpc.getLatestBlockNumber()).resolves.toBe(42n);
+    expect(ring?.leaseFor("worker-1")).toBe(key);
+    expect(ring?.leaseFor("worker-2")).toBe(key);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 describe("EthereumRpcClient RPC stats", () => {

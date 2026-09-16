@@ -296,7 +296,9 @@ export async function callRpc<T = unknown>(
     const error = envelope.error as { code?: unknown; message?: unknown; data?: unknown };
     const code = typeof error.code === "number" ? error.code : undefined;
     const message = typeof error.message === "string" ? error.message : JSON.stringify(error);
-    throw new RpcCallError(method, `${method} was rejected${code !== undefined ? ` (${code})` : ""}: ${message}`, {
+    const upstreamTimeout = typeof error.data === "object" && error.data !== null &&
+      (error.data as Record<string, unknown>).reason === "upstream_timeout";
+    throw new RpcCallError(method, upstreamTimeout ? message : `${method} was rejected${code !== undefined ? ` (${code})` : ""}: ${message}`, {
       code,
       data: error.data,
     });

@@ -251,6 +251,20 @@ describe("callRpc", () => {
     expect(isMethodNotFound(new Error("x"))).toBe(false);
   });
 
+  test("a relay timeout is shown directly instead of being described as a rejected query", async () => {
+    const message = "arkiv_query timed out after 10s waiting for the upstream node";
+    const data = { reason: "upstream_timeout", timeoutMs: 10_000 };
+    const { fetchImpl } = fakeFetch(() => jsonResponse({
+      jsonrpc: "2.0", id: 1, error: { code: -32000, message, data },
+    }));
+    const error = await callRpc(BACKEND, "arkiv_query", ["*"], { fetchImpl }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcCallError);
+    const rpcError = error as RpcCallError;
+    expect(rpcError.message).toBe(message);
+    expect(rpcError.code).toBe(-32000);
+    expect(rpcError.data).toEqual(data);
+  });
+
   test("a non-2xx transport answer reports the HTTP status and any node message", async () => {
     const { fetchImpl } = fakeFetch(() => jsonResponse({ error: "RATE_LIMITED" }, 429));
     const error = (await callRpc(BACKEND, "eth_chainId", [], { fetchImpl }).catch((e: unknown) => e)) as RpcCallError;

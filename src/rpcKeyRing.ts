@@ -251,8 +251,9 @@ interface KeyRingConsumer {
 }
 
 /**
- * Loads the configured key pool and attaches it to an RPC client. A pool of one
- * (or none) is left alone so single-key deployments keep their existing path.
+ * Loads the configured keys and attaches them to an RPC client. A single key
+ * must also be attached: it may come only from a file, and Baseload workers
+ * obtain their authentication headers from this ring.
  */
 export async function attachRpcKeyRing(
   client: KeyRingConsumer,
@@ -260,10 +261,10 @@ export async function attachRpcKeyRing(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<RpcKeyRing | null> {
   const keys = await loadRpcKeyPool(env);
-  if (keys.length <= 1) return null;
+  if (keys.length === 0) return null;
   const ring = new RpcKeyRing({ keys });
   client.setKeyRing(ring);
-  console.log(`[rpc-keys] ${label} rotating over ${ring.size} RPC keys`);
+  console.log(`[rpc-keys] ${label} using ${ring.size} RPC key${ring.size === 1 ? "" : "s"}`);
   return ring;
 }
 

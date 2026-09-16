@@ -52,6 +52,8 @@ import {
   type ComparisonSide,
 } from "./entityCompare";
 import { EntityResults } from "./EntityResults";
+import { QueryHistoryDialog } from "./QueryHistoryDialog";
+import { editQueryHistory, readQueryHistory, rememberQuery, writeQueryHistory, type QueryHistoryEntry } from "./queryHistory";
 import { fmtDate, fmtInteger } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import {
@@ -62,7 +64,7 @@ import {
   writeEntityPermalink,
   writePermalink,
 } from "./permalinks";
-import { AddressCell } from "./TransactionsView";
+import { AddressCell, copyText } from "./TransactionsView";
 import { CopyButton } from "./TransactionView";
 import type { MouseEvent } from "react";
 
@@ -140,6 +142,26 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   const [formError, setFormError] = useState<string | null>(null);
 
   const [query, setQuery] = useState(() => urlFilters.q);
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const [queryHistory, setQueryHistory] = useState(readQueryHistory);
+  const historyRef = useRef(queryHistory);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const draftTimer = useRef<ReturnType<typeof setTimeout>>();
+  const updateHistory = useCallback((change: (entries: QueryHistoryEntry[]) => QueryHistoryEntry[]) => {
+    const next = change(historyRef.current);
+    if (next === historyRef.current) return;
+    historyRef.current = next;
+    setQueryHistory(next);
+    writeQueryHistory(next);
+  }, []);
+  const remember = useCallback((text: string) => updateHistory(entries => rememberQuery(entries, text)), [updateHistory]);
+
+  useEffect(() => {
+    draftTimer.current = setTimeout(() => remember(query), 800);
+    return () => clearTimeout(draftTimer.current);
+  }, [query, remember]);
+
   const [pageSize, setPageSize] = useState<PageSize>(() => resolvePageSize(urlFilters.pageSize));
   const [expiration, setExpiration] = useState<ExpirationFilter>(() => resolveExpirationFilter(urlFilters.expiration));
   const [results, setResults] = useState<ResultState>(EMPTY_RESULTS);
@@ -326,6 +348,8 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     (text: string, size: PageSize = pageSize, filter: ExpirationFilter = expiration) => {
       const normalized = normalizeQueryInput(text);
       if (!normalized) return;
+      remember(queryRef.current);
+      remember(normalized);
       setQuery(normalized);
       urlQueryRef.current = normalized;
       if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcModeLinkValue(mode, source)))) {
@@ -334,13 +358,14 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
       if (mode === "both") void runComparison(normalized, size);
       else void runQuery(normalized, size);
     },
-    [expiration, mode, onLocationChange, pageSize, runComparison, runQuery, source],
+    [expiration, mode, onLocationChange, pageSize, remember, runComparison, runQuery, source],
   );
 
   // A shared link, or back/forward, changes `q` under us: adopt it and run it.
   useEffect(() => {
     const fromUrl = urlFilters.q.trim();
     if (fromUrl === (urlQueryRef.current ?? "")) return;
+    remember(queryRef.current);
     urlQueryRef.current = fromUrl;
     const size = resolvePageSize(urlFilters.pageSize);
     const filter = resolveExpirationFilter(urlFilters.expiration);
@@ -352,6 +377,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
       return;
     }
     const normalized = normalizeQueryInput(fromUrl);
+    remember(normalized);
     setQuery(normalized);
     const linked = modeFromUrl(urlFilters.rpc);
     if (linked) {
@@ -364,7 +390,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     // `mode` is only read as the fallback for a link that names none; a mode
     // change on its own must not re-run the query behind the user's back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runComparison, runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
+  }, [remember, runComparison, runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
 
   const cancel = () => {
     abortRef.current?.abort();
@@ -372,6 +398,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   };
 
   const clear = () => {
+    remember(query);
     cancel();
     setQuery("");
     urlQueryRef.current = "";
@@ -585,6 +612,13 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
           <button type="button" className="secondary" onClick={clear} disabled={!hasText && results.executedQuery === null}>
             Clear
           </button>
+          <button type="button" className="secondary" onClick={() => {
+            clearTimeout(draftTimer.current);
+            remember(query);
+            setHistoryOpen(true);
+          }}>
+            History{queryHistory.length > 0 ? ` (${queryHistory.length})` : ""}
+          </button>
           {permalink ? <CopyLinkButton href={permalink} /> : null}
           {running ? (
             <button type="button" className="query-run" onClick={cancel}>
@@ -598,20 +632,27 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         </div>
         {formError ? <p className="summary error query-form-error">{formError}</p> : null}
         <div className="query-examples">
-          <span className="query-examples-label">Try</span>
+          <span className="query-examples-label">Copy example</span>
           {EXAMPLE_QUERIES.map((example) => (
-            <button
-              key={example.label}
-              type="button"
-              className="query-example"
-              title={example.query}
-              onClick={() => setQuery(example.query)}
-            >
-              {example.label}
-            </button>
+            <CopyQueryHint key={example.label} label={example.label} query={example.query} />
           ))}
         </div>
       </div>
+
+      {historyOpen ? <QueryHistoryDialog
+        entries={queryHistory}
+        timeZone={timeZone}
+        onClose={() => setHistoryOpen(false)}
+        onEdit={(id, text) => updateHistory(entries => editQueryHistory(entries, id, text))}
+        onDelete={id => updateHistory(entries => entries.filter(entry => entry.id !== id))}
+        onLoad={text => {
+          remember(query);
+          cancel();
+          setQuery(text);
+          setFormError(null);
+          setHistoryOpen(false);
+        }}
+      /> : null}
 
       {comparison.status === "running" ? (
         <p className="summary comparison-pending">Running the query on both endpoints…</p>
@@ -1096,6 +1137,21 @@ function Row({ label, value }: { label: string; value: string }) {
       <dt className="tx-detail-label">{label}</dt>
       <dd className="tx-detail-value">{value}</dd>
     </div>
+  );
+}
+
+function CopyQueryHint({ label, query }: { label: string; query: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (status === "idle") return;
+    const timer = window.setTimeout(() => setStatus("idle"), 1500);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+  return (
+    <button type="button" className="query-example" title={`Copy query: ${query}`} aria-label={`Copy example: ${label}`}
+      onClick={async () => setStatus(await copyText(query) ? "copied" : "failed")}>
+      {label}<span className="query-copy-feedback" role="status">{status === "copied" ? " · Copied" : status === "failed" ? " · Could not copy" : ""}</span>
+    </button>
   );
 }
 

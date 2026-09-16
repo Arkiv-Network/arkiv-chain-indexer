@@ -5714,6 +5714,98 @@ form select {
   color: var(--accent);
 }
 
+.query-copy-feedback {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.query-history-dialog {
+  width: min(48rem, calc(100vw - 2rem));
+  max-height: min(80vh, 48rem);
+  box-sizing: border-box;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--sand);
+  color: var(--fg);
+  box-shadow: var(--shadow-card);
+  overflow: auto;
+}
+
+.query-history-dialog::backdrop {
+  background: #0007;
+}
+
+.query-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.query-history-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.query-history-description {
+  margin: 0.75rem 0 1rem;
+}
+
+.query-history-list {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.query-history-item {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--stone);
+}
+
+.query-history-item time {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.query-history-item pre,
+.query-history-editor {
+  margin: 0.6rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.query-history-item pre {
+  max-height: 9rem;
+  overflow: auto;
+}
+
+.query-history-editor {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--sand);
+  color: var(--fg);
+  resize: vertical;
+}
+
+.query-history-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .query-results {
   margin-bottom: 1rem;
 }
@@ -5938,7 +6030,7 @@ form select {
   color: var(--muted);
 }
 
-/* Filter menu: a chip or a funnel button that opens a three-item menu. */
+/* Filter menu: a funnel button next to an entity key or address. */
 .filter-menu {
   position: relative;
   display: inline-flex;
@@ -5971,16 +6063,6 @@ form select {
   color: var(--accent);
 }
 
-.filter-menu-chip {
-  max-width: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
 .attr-chip {
   display: inline-flex;
   align-items: center;
@@ -5995,12 +6077,41 @@ form select {
   color: var(--ink-2);
 }
 
-.filter-menu-chip:hover .attr-chip,
-.filter-menu.open .attr-chip {
+.attr-chip-copy {
+  cursor: pointer;
+  text-align: left;
+}
+
+.attr-chip-copy:hover,
+.attr-chip-copy:focus-visible,
+.attr-chip-copy.copied {
   border-color: var(--accent);
 }
 
+.attr-chip-copy-feedback {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  font-family: var(--font-sans, inherit);
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.attr-chip-copy-feedback svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.attr-chip-copy.copied .attr-chip-copy-feedback {
+  color: var(--ok);
+}
+
+.attr-chip-copy.failed .attr-chip-copy-feedback {
+  color: var(--op-red);
+}
+
 .attr-chip-type {
+  flex-shrink: 0;
   padding: 0 0.3rem;
   border-radius: 999px;
   background: var(--sand);
@@ -6010,14 +6121,20 @@ form select {
 }
 
 .attr-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--q-attribute);
 }
 
 .attr-chip-eq {
+  flex-shrink: 0;
   color: var(--muted);
 }
 
 .attr-chip-value {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
