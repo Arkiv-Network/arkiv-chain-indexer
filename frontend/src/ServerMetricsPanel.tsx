@@ -13,7 +13,7 @@ import {
  * The backend's Prometheus registry, rendered at the bottom of the health page.
  *
  * Counters are cumulative since the process started, so this is a running total
- * rather than a rate; `process_start_time_seconds` is shown alongside to say
+ * rather than a rate; `indexer_process_start_time_seconds` is shown alongside to say
  * what window the totals cover.
  */
 export function ServerMetricsPanel() {

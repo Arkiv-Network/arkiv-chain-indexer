@@ -1126,7 +1126,7 @@ The frontend's `/health` page ends with a **Server metrics** panel that renders 
 route with its Postgres share, JSON-RPC by method, cache hit rates, process totals, and the raw text on
 demand. It reads `/api/admin/metrics`, so it appears only in admin mode and says so otherwise.
 
-`METRICS_ENABLED=false` removes both. A successful scrape of either path is never counted as traffic; a rejected one is, so a run of 401s against the admin path is visible in `http_requests_rejected_total`.
+`METRICS_ENABLED=false` removes both. A successful scrape of either path is never counted as traffic; a rejected one is, so a run of 401s against the admin path is visible in `indexer_http_requests_rejected_total`.
 
 Every traffic metric is labelled by *route template* (`/transaction/:hash`, `/blocks/:number`, …) and never by
 the raw path or query string; unknown paths land on `other`, and unknown JSON-RPC method names on `unknown`, so
@@ -1134,25 +1134,25 @@ series cardinality stays bounded whatever clients send.
 
 | Metric | Type | Labels | What it tells you |
 | --- | --- | --- | --- |
-| `http_requests_total` | counter | `route`, `method`, `status` | Request rate and error ratio per endpoint. |
-| `http_request_duration_seconds` | histogram | `route`, `method` | Latency percentiles per endpoint. |
-| `http_response_bytes_total` | counter | `route`, `encoding` | Egress per endpoint, split by wire encoding (`zstd`, `gzip`, `identity`). |
-| `http_requests_in_flight` | gauge | `route` | Which endpoint is queueing right now. |
-| `http_requests_rejected_total` | counter | `route`, `reason` | 4xx by reason (`bad_request`, `unauthorized`, `not_found`, …). |
-| `jsonrpc_requests_total` | counter | `path`, `rpc_method`, `source`, `outcome` | Per-method call rate on `/shadow-rpc` and `/shadow-rpc/experimental`; `source` is `stored`, `upstream` (passthrough) or `override` (entity index). |
-| `jsonrpc_request_duration_seconds` | histogram | `path`, `rpc_method` | Per-method latency. |
-| `jsonrpc_batch_size` | histogram | `path` | Calls per JSON-RPC HTTP request. |
-| `jsonrpc_get_logs_blocks_total`, `jsonrpc_get_logs_returned_total` | counter | — | How wide `eth_getLogs` queries are and how much they return. |
-| `cache_requests_total` | counter | `cache`, `result` | Hit/miss/coalesced per cache (`entity_history`, `list`, `transaction_count`). |
-| `cache_entries`, `cache_bytes` | gauge | `cache` | Current cache occupancy. |
-| `cache_evictions_total` | counter | `cache`, `reason` | Drops by `invalidation` (NOTIFY), `ttl`, or `capacity`. |
-| `db_query_duration_seconds` | histogram | `route` | Postgres time attributed to the route that issued the query. |
-| `db_queries_total` | counter | `route`, `outcome` | Query rate and failures per route. |
-| `db_queries_in_flight` | gauge | — | Queries awaiting a result. |
-| `indexer_head_block`, `chain_head_block`, `indexer_lag_blocks`, `indexer_head_age_seconds` | gauge | — | How far the index trails the chain. |
-| `entity_index_floor_block`, `entity_index_projected_through_block`, `entity_index_live_entities`, `entity_index_genesis_entities_total`, `entity_index_genesis_entities_imported` | gauge | — | The entity index's floor and head, its last live-entity count, and the genesis import's progress; only with `ENTITY_QUERY_INDEX` on. |
-| `process_start_time_seconds`, `process_resident_memory_bytes`, `process_heap_used_bytes` | gauge | — | Process basics. |
-| `build_info` | gauge | `commit`, `built_at` | Always `1`; identifies the running build. |
+| `indexer_http_requests_total` | counter | `route`, `method`, `status` | Request rate and error ratio per endpoint. |
+| `indexer_http_request_duration_seconds` | histogram | `route`, `method` | Latency percentiles per endpoint. |
+| `indexer_http_response_bytes_total` | counter | `route`, `encoding` | Egress per endpoint, split by wire encoding (`zstd`, `gzip`, `identity`). |
+| `indexer_http_requests_in_flight` | gauge | `route` | Which endpoint is queueing right now. |
+| `indexer_http_requests_rejected_total` | counter | `route`, `reason` | 4xx by reason (`bad_request`, `unauthorized`, `not_found`, …). |
+| `indexer_jsonrpc_requests_total` | counter | `path`, `rpc_method`, `source`, `outcome` | Per-method call rate on `/shadow-rpc` and `/shadow-rpc/experimental`; `source` is `stored`, `upstream` (passthrough) or `override` (entity index). |
+| `indexer_jsonrpc_request_duration_seconds` | histogram | `path`, `rpc_method` | Per-method latency. |
+| `indexer_jsonrpc_batch_size` | histogram | `path` | Calls per JSON-RPC HTTP request. |
+| `indexer_jsonrpc_get_logs_blocks_total`, `indexer_jsonrpc_get_logs_returned_total` | counter | — | How wide `eth_getLogs` queries are and how much they return. |
+| `indexer_cache_requests_total` | counter | `cache`, `result` | Hit/miss/coalesced per cache (`entity_history`, `list`, `transaction_count`). |
+| `indexer_cache_entries`, `indexer_cache_bytes` | gauge | `cache` | Current cache occupancy. |
+| `indexer_cache_evictions_total` | counter | `cache`, `reason` | Drops by `invalidation` (NOTIFY), `ttl`, or `capacity`. |
+| `indexer_db_query_duration_seconds` | histogram | `route` | Postgres time attributed to the route that issued the query. |
+| `indexer_db_queries_total` | counter | `route`, `outcome` | Query rate and failures per route. |
+| `indexer_db_queries_in_flight` | gauge | — | Queries awaiting a result. |
+| `indexer_head_block`, `indexer_chain_head_block`, `indexer_lag_blocks`, `indexer_head_age_seconds` | gauge | — | How far the index trails the chain. |
+| `indexer_entity_index_floor_block`, `indexer_entity_index_projected_through_block`, `indexer_entity_index_live_entities`, `indexer_entity_index_genesis_entities_total`, `indexer_entity_index_genesis_entities_imported` | gauge | — | The entity index's floor and head, its last live-entity count, and the genesis import's progress; only with `ENTITY_QUERY_INDEX` on. |
+| `indexer_process_start_time_seconds`, `indexer_process_resident_memory_bytes`, `indexer_process_heap_used_bytes` | gauge | — | Process basics. |
+| `indexer_build_info` | gauge | `commit`, `built_at` | Always `1`; identifies the running build. |
 
 A scrape config and starter queries are in [`docs/prometheus.md`](docs/prometheus.md).
 

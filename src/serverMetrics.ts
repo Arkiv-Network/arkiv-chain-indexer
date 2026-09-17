@@ -84,31 +84,31 @@ export function routeTemplate(pathname: string): string {
 // HTTP traffic
 
 export const httpRequestsTotal = metricsRegistry.counter(
-  "http_requests_total",
+  "indexer_http_requests_total",
   "HTTP requests handled, by route template, method and status code.",
   ["route", "method", "status"],
 );
 
 export const httpRequestDurationSeconds = metricsRegistry.histogram(
-  "http_request_duration_seconds",
+  "indexer_http_request_duration_seconds",
   "Time from request receipt to response, by route template and method.",
   ["route", "method"],
 );
 
 export const httpResponseBytesTotal = metricsRegistry.counter(
-  "http_response_bytes_total",
+  "indexer_http_response_bytes_total",
   "Response body bytes sent, by route template and Content-Encoding on the wire.",
   ["route", "encoding"],
 );
 
 export const httpRequestsInFlight = metricsRegistry.gauge(
-  "http_requests_in_flight",
+  "indexer_http_requests_in_flight",
   "Requests currently being handled, by route template.",
   ["route"],
 );
 
 export const httpRequestsRejectedTotal = metricsRegistry.counter(
-  "http_requests_rejected_total",
+  "indexer_http_requests_rejected_total",
   "Requests answered with a client error, by route template and reason.",
   ["route", "reason"],
 );
@@ -117,31 +117,31 @@ export const httpRequestsRejectedTotal = metricsRegistry.counter(
 // JSON-RPC (one path, many methods)
 
 export const jsonRpcRequestsTotal = metricsRegistry.counter(
-  "jsonrpc_requests_total",
+  "indexer_jsonrpc_requests_total",
   "JSON-RPC calls (batch entries counted individually), by path, method, where it was answered, and outcome.",
   ["path", "rpc_method", "source", "outcome"],
 );
 
 export const jsonRpcRequestDurationSeconds = metricsRegistry.histogram(
-  "jsonrpc_request_duration_seconds",
+  "indexer_jsonrpc_request_duration_seconds",
   "Time to answer one JSON-RPC call, by path and method.",
   ["path", "rpc_method"],
 );
 
 export const jsonRpcBatchSize = metricsRegistry.histogram(
-  "jsonrpc_batch_size",
+  "indexer_jsonrpc_batch_size",
   "Number of calls per JSON-RPC HTTP request (1 for a non-batch request).",
   ["path"],
   [1, 2, 5, 10, 20, 50, 100],
 );
 
 export const jsonRpcGetLogsBlocksTotal = metricsRegistry.counter(
-  "jsonrpc_get_logs_blocks_total",
+  "indexer_jsonrpc_get_logs_blocks_total",
   "Blocks covered by eth_getLogs ranges that reached storage.",
 );
 
 export const jsonRpcGetLogsReturnedTotal = metricsRegistry.counter(
-  "jsonrpc_get_logs_returned_total",
+  "indexer_jsonrpc_get_logs_returned_total",
   "Log entries returned by eth_getLogs.",
 );
 
@@ -149,25 +149,25 @@ export const jsonRpcGetLogsReturnedTotal = metricsRegistry.counter(
 // Caches
 
 export const cacheRequestsTotal = metricsRegistry.counter(
-  "cache_requests_total",
+  "indexer_cache_requests_total",
   "Cache lookups by cache and result (hit, miss, coalesced onto an in-flight load).",
   ["cache", "result"],
 );
 
 export const cacheEntries = metricsRegistry.gauge(
-  "cache_entries",
+  "indexer_cache_entries",
   "Entries currently held, by cache.",
   ["cache"],
 );
 
 export const cacheBytes = metricsRegistry.gauge(
-  "cache_bytes",
+  "indexer_cache_bytes",
   "Bytes of cached bodies currently held, by cache.",
   ["cache"],
 );
 
 export const cacheEvictionsTotal = metricsRegistry.counter(
-  "cache_evictions_total",
+  "indexer_cache_evictions_total",
   "Entries dropped, by cache and reason (invalidation, ttl, capacity).",
   ["cache", "reason"],
 );
@@ -176,19 +176,19 @@ export const cacheEvictionsTotal = metricsRegistry.counter(
 // Database
 
 export const dbQueryDurationSeconds = metricsRegistry.histogram(
-  "db_query_duration_seconds",
+  "indexer_db_query_duration_seconds",
   "Postgres query time, attributed to the HTTP route that issued it (none outside a request).",
   ["route"],
 );
 
 export const dbQueriesTotal = metricsRegistry.counter(
-  "db_queries_total",
+  "indexer_db_queries_total",
   "Postgres queries issued, by route and outcome.",
   ["route", "outcome"],
 );
 
 export const dbQueriesInFlight = metricsRegistry.gauge(
-  "db_queries_in_flight",
+  "indexer_db_queries_in_flight",
   "Postgres queries currently awaiting a result.",
 );
 
@@ -201,13 +201,13 @@ export const indexerHeadBlock = metricsRegistry.gauge(
 );
 
 export const chainHeadBlock = metricsRegistry.gauge(
-  "chain_head_block",
+  "indexer_chain_head_block",
   "Latest block number the scanner has observed on the node.",
 );
 
 export const indexerLagBlocks = metricsRegistry.gauge(
   "indexer_lag_blocks",
-  "chain_head_block minus indexer_head_block.",
+  "indexer_chain_head_block minus indexer_head_block.",
 );
 
 export const indexerHeadAgeSeconds = metricsRegistry.gauge(
@@ -216,47 +216,47 @@ export const indexerHeadAgeSeconds = metricsRegistry.gauge(
 );
 
 export const entityIndexFloorBlock = metricsRegistry.gauge(
-  "entity_index_floor_block",
+  "indexer_entity_index_floor_block",
   "First block the experimental entity index vouches for.",
 );
 
 export const entityIndexProjectedThroughBlock = metricsRegistry.gauge(
-  "entity_index_projected_through_block",
+  "indexer_entity_index_projected_through_block",
   "Newest block folded into the experimental entity index (what /shadow-rpc/experimental calls latest).",
 );
 
 export const entityIndexLiveEntities = metricsRegistry.gauge(
-  "entity_index_live_entities",
+  "indexer_entity_index_live_entities",
   "Entities live at the entity index's projection head, as of the projector's last count.",
 );
 
 export const entityIndexGenesisEntitiesTotal = metricsRegistry.gauge(
-  "entity_index_genesis_entities_total",
+  "indexer_entity_index_genesis_entities_total",
   "Entities the node counted at block 0 for the genesis import.",
 );
 
 export const entityIndexGenesisEntitiesImported = metricsRegistry.gauge(
-  "entity_index_genesis_entities_imported",
+  "indexer_entity_index_genesis_entities_imported",
   "Genesis entities written into the entity index so far.",
 );
 
 export const processStartTimeSeconds = metricsRegistry.gauge(
-  "process_start_time_seconds",
+  "indexer_process_start_time_seconds",
   "Unix time the server process started.",
 );
 
 export const processResidentMemoryBytes = metricsRegistry.gauge(
-  "process_resident_memory_bytes",
+  "indexer_process_resident_memory_bytes",
   "Resident set size of the server process.",
 );
 
 export const processHeapUsedBytes = metricsRegistry.gauge(
-  "process_heap_used_bytes",
+  "indexer_process_heap_used_bytes",
   "JavaScript heap in use.",
 );
 
 export const buildInfo = metricsRegistry.gauge(
-  "build_info",
+  "indexer_build_info",
   "Always 1; the labels carry the build commit and date.",
   ["commit", "built_at"],
 );

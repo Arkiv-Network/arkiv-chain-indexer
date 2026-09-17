@@ -36,6 +36,20 @@ beforeEach(() => {
   metricsRegistry.resetAll();
 });
 
+test("every exposed metric and histogram series uses the indexer namespace", async () => {
+  httpRequestsTotal.inc({ route: "/blocks", method: "GET", status: "200" });
+  httpRequestDurationSeconds.observe({ route: "/blocks", method: "GET" }, 0.01);
+  const body = await metricsRegistry.render();
+  const names = body.trim().split("\n").map((line) =>
+    line.startsWith("#") ? line.split(" ")[2]! : line.split(/[ {]/)[0]!,
+  );
+  expect(names.length).toBeGreaterThan(30);
+  expect(names.every((name) => name.startsWith("indexer_") && !name.startsWith("indexer_indexer_"))).toBe(true);
+  expect(names).toContain("indexer_http_request_duration_seconds_bucket");
+  expect(names).toContain("indexer_http_request_duration_seconds_sum");
+  expect(names).toContain("indexer_http_request_duration_seconds_count");
+});
+
 describe("routeTemplate", () => {
   test("maps concrete paths to bounded templates", () => {
     expect(routeTemplate("/blocks")).toBe("/blocks");
@@ -143,7 +157,7 @@ for (const path of ["/metrics","/admin/metrics"]) describe(`GET ${path}`, () => 
     const response=await get();expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/plain");
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(await response.text()).toContain('http_requests_total{route="/blocks",method="GET",status="200"} 5');
+    expect(await response.text()).toContain('indexer_http_requests_total{route="/blocks",method="GET",status="200"} 5');
     expect(httpRequestsTotal.get({route:path,method:"GET",status:"200"})).toBe(0);
   });
   if (path === "/admin/metrics") test("rejects anonymous and legacy credentials, including proxy requests",async()=>{

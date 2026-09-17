@@ -4,6 +4,12 @@ The backend serves Prometheus text metrics on `GET /metrics`. The full metric li
 README under [`GET /metrics`](../README.md#get-metrics); this page covers scraping and a few starter
 queries.
 
+As of v0.5.11, every metric exposed by the backend starts with `indexer_`, including
+histogram buckets, sums and counts. Update existing dashboards, recording rules and alerts by
+adding `indexer_` to previously unprefixed names (for example, `http_requests_total` becomes
+`indexer_http_requests_total`). Names already starting with `indexer_` are unchanged; old names
+are no longer emitted.
+
 ## Scraping
 
 `GET /metrics` is open without authentication. Deployment networking and proxy rules control external access.
@@ -62,46 +68,46 @@ subject to the CDN in front of the public origin.
 Requests per second by endpoint:
 
 ```promql
-sum by (route) (rate(http_requests_total[5m]))
+sum by (route) (rate(indexer_http_requests_total[5m]))
 ```
 
 p95 latency per endpoint:
 
 ```promql
-histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.95, sum by (route, le) (rate(indexer_http_request_duration_seconds_bucket[5m])))
 ```
 
 Error ratio per endpoint (5xx over everything):
 
 ```promql
-sum by (route) (rate(http_requests_total{status=~"5.."}[5m]))
-  / sum by (route) (rate(http_requests_total[5m]))
+sum by (route) (rate(indexer_http_requests_total{status=~"5.."}[5m]))
+  / sum by (route) (rate(indexer_http_requests_total[5m]))
 ```
 
 Egress per endpoint, in bytes per second on the wire:
 
 ```promql
-sum by (route, encoding) (rate(http_response_bytes_total[5m]))
+sum by (route, encoding) (rate(indexer_http_response_bytes_total[5m]))
 ```
 
 JSON-RPC calls per method, and which side answered them:
 
 ```promql
-sum by (rpc_method, source) (rate(jsonrpc_requests_total[5m]))
+sum by (rpc_method, source) (rate(indexer_jsonrpc_requests_total[5m]))
 ```
 
 Share of a route's time spent in Postgres:
 
 ```promql
-sum by (route) (rate(db_query_duration_seconds_sum[5m]))
-  / sum by (route) (rate(http_request_duration_seconds_sum[5m]))
+sum by (route) (rate(indexer_db_query_duration_seconds_sum[5m]))
+  / sum by (route) (rate(indexer_http_request_duration_seconds_sum[5m]))
 ```
 
 Cache hit ratio:
 
 ```promql
-sum by (cache) (rate(cache_requests_total{result="hit"}[5m]))
-  / sum by (cache) (rate(cache_requests_total{result=~"hit|miss"}[5m]))
+sum by (cache) (rate(indexer_cache_requests_total{result="hit"}[5m]))
+  / sum by (cache) (rate(indexer_cache_requests_total{result=~"hit|miss"}[5m]))
 ```
 
 Index lag, for alerting:
@@ -113,13 +119,13 @@ indexer_lag_blocks > 50 or indexer_head_age_seconds > 120
 ## Notes
 
 - Successful scrapes of `/metrics` and `/admin/metrics` are excluded from the traffic metrics;
-  rejected ones are counted, so `http_requests_rejected_total{route="/admin/metrics"}` shows anyone
+  rejected ones are counted, so `indexer_http_requests_rejected_total{route="/admin/metrics"}` shows anyone
   probing the metrics credential.
 - Routes are templates (`/transaction/:hash`), never raw paths; unknown paths are `other`, unknown
   JSON-RPC method names are `unknown`. Query strings are never labels.
-- `cache_requests_total` and `cache_evictions_total` mirror the caches' own counters at scrape time,
+- `indexer_cache_requests_total` and `indexer_cache_evictions_total` mirror the caches' own counters at scrape time,
   so they reset with the process like any counter.
-- The scanner, aggregator and gap-filler processes do not expose metrics yet; `indexer_*` gauges are
+- The scanner, aggregator and gap-filler processes do not expose metrics yet; scanner progress gauges are
   read from `scanner_state` by the backend.
-- With `ENTITY_QUERY_INDEX` on, `entity_index_*` gauges report the index floor and projection head, the
+- With `ENTITY_QUERY_INDEX` on, `indexer_entity_index_*` gauges report the index floor and projection head, the
   last live-entity count, and the genesis import's `total` / `imported`.
