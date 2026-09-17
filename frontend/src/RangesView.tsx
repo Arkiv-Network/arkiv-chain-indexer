@@ -536,16 +536,6 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
         </form>
       </FiltersPanel>
 
-      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
-        {loading
-          ? "Loading..."
-          : error
-            ? `Failed to load ranges: ${error}`
-            : data
-              ? `${data.count} ranges${data.truncated ? ` (truncated to ${data.limit})` : ""}`
-              : ""}
-      </p>
-
       <FiltersPanel
         title="Columns"
         open={columnsOpen}
@@ -583,29 +573,41 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
         </div>
       </FiltersPanel>
 
-      <div className="overflow-x-auto border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              {visibleColumns.map((column) => (
-                <TableHead key={column.key} className={column.className}>
-                  {renderTableHeader(column.label)}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sorted.map((row) => (
-              <TableRow key={`${row.rangeSize}-${row.rangeStart}`}>
+      <div className="flex flex-col gap-2">
+        <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
+          {loading
+            ? "Loading..."
+            : error
+              ? `Failed to load ranges: ${error}`
+              : data
+                ? `${data.count} ranges${data.truncated ? ` (truncated to ${data.limit})` : ""}`
+                : ""}
+        </p>
+
+        <div className="overflow-x-auto border border-border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
                 {visibleColumns.map((column) => (
-                  <TableCell key={column.key} className={column.className} data-label={column.label}>
-                    {column.render(row)}
-                  </TableCell>
+                  <TableHead key={column.key} className={column.className}>
+                    {renderTableHeader(column.label)}
+                  </TableHead>
                 ))}
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((row) => (
+                <TableRow key={`${row.rangeSize}-${row.rangeStart}`}>
+                  {visibleColumns.map((column) => (
+                    <TableCell key={column.key} className={column.className} data-label={column.label}>
+                      {column.render(row)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
     </section>
   );

@@ -115,6 +115,10 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
             Query
           </Button>
         </form>
+        {copyStatus ? <p className="text-xs text-muted-foreground">{copyStatus}</p> : null}
+      </div>
+
+      <div className="flex flex-col gap-2">
         <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
           {loading
             ? "Loading..."
@@ -124,67 +128,66 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
                 ? `${data.count} sender addresses shown${data.truncated ? " (limited)" : ""}`
                 : "No sender stats loaded."}
         </p>
-        {copyStatus ? <p className="text-xs text-muted-foreground">{copyStatus}</p> : null}
-      </div>
 
-      <div className="overflow-x-auto border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>{renderTableHeader("Address")}</TableHead>
-              <TableHead className="text-right">{renderTableHeader("Tx count")}</TableHead>
-              <TableHead className="text-right">{renderTableHeader("Gas used")}</TableHead>
-              <TableHead className="text-right">{renderTableHeader(`Fees spent (${tokenSymbol})`)}</TableHead>
-              <TableHead className="text-right">{renderTableHeader("Avg gas per tx")}</TableHead>
-              <TableHead className="text-right">{renderTableHeader(`Avg fee (${tokenSymbol})`)}</TableHead>
-              <TableHead>{renderTableHeader("First tx (block/date)")}</TableHead>
-              <TableHead>{renderTableHeader("Last tx (block/date)")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(data?.senders ?? []).map((row) => (
-              <TableRow key={row.address}>
-                <TableCell data-label="Address">
-                  <div className="flex items-center gap-1.5">
-                    <AddressCell address={row.address} />
-                    <ActivityLink address={row.address} onLocationChange={onLocationChange} />
-                  </div>
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums" data-label="Tx count">
-                  {txCountFromNonce(row.latestNonce)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums" data-label="Gas used">
-                  {fmtMillions(row.totalGasUsed)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums" data-label="Fees spent">
-                  {fmtTokenAmount(row.totalTransactionFeeWei, tokenSymbol, { trimZeros: false })}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums" data-label="Avg gas">
-                  {fmtThousands(row.averageGasUsed)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums" data-label="Avg fee">
-                  {fmtTokenAmount(row.averageTransactionFeeWei, tokenSymbol)}
-                </TableCell>
-                <TableCell data-label="First tx">
-                  <BlockCell
-                    blockNumber={row.firstBlockNumberDecimal}
-                    date={row.firstBlockDate}
-                    timeZone={timeZone}
-                    onLocationChange={onLocationChange}
-                  />
-                </TableCell>
-                <TableCell data-label="Last tx">
-                  <BlockCell
-                    blockNumber={row.lastBlockNumberDecimal}
-                    date={row.lastBlockDate}
-                    timeZone={timeZone}
-                    onLocationChange={onLocationChange}
-                  />
-                </TableCell>
+        <div className="overflow-x-auto border border-border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{renderTableHeader("Address")}</TableHead>
+                <TableHead className="text-right">{renderTableHeader("Tx count")}</TableHead>
+                <TableHead className="text-right">{renderTableHeader("Gas used")}</TableHead>
+                <TableHead className="text-right">{renderTableHeader(`Fees spent (${tokenSymbol})`)}</TableHead>
+                <TableHead className="text-right">{renderTableHeader("Avg gas per tx")}</TableHead>
+                <TableHead className="text-right">{renderTableHeader(`Avg fee (${tokenSymbol})`)}</TableHead>
+                <TableHead>{renderTableHeader("First tx (block/date)")}</TableHead>
+                <TableHead>{renderTableHeader("Last tx (block/date)")}</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {(data?.senders ?? []).map((row) => (
+                <TableRow key={row.address}>
+                  <TableCell data-label="Address">
+                    <div className="flex items-center gap-1.5">
+                      <AddressCell address={row.address} />
+                      <ActivityLink address={row.address} onLocationChange={onLocationChange} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Tx count">
+                    {txCountFromNonce(row.latestNonce)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Gas used">
+                    {fmtMillions(row.totalGasUsed)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Fees spent">
+                    {fmtTokenAmount(row.totalTransactionFeeWei, tokenSymbol, { trimZeros: false })}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Avg gas">
+                    {fmtThousands(row.averageGasUsed)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Avg fee">
+                    {fmtTokenAmount(row.averageTransactionFeeWei, tokenSymbol)}
+                  </TableCell>
+                  <TableCell data-label="First tx">
+                    <BlockCell
+                      blockNumber={row.firstBlockNumberDecimal}
+                      date={row.firstBlockDate}
+                      timeZone={timeZone}
+                      onLocationChange={onLocationChange}
+                    />
+                  </TableCell>
+                  <TableCell data-label="Last tx">
+                    <BlockCell
+                      blockNumber={row.lastBlockNumberDecimal}
+                      date={row.lastBlockDate}
+                      timeZone={timeZone}
+                      onLocationChange={onLocationChange}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
     </section>
   );

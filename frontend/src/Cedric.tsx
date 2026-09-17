@@ -63,6 +63,12 @@ const CEDRIC_STYLE = `
   0%, 90%, 100% { transform: scaleY(1); }
   94%, 96% { transform: scaleY(0.1); }
 }
+/* Decorative peeks need room beside the list summary. */
+@media (width < 640px) {
+  .cedric--responsive {
+    display: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .cedric {
     transition: none;
@@ -96,10 +102,12 @@ export function Cedric({
   progress,
   initiallyVisible = false,
   canHide = true,
+  hideOnNarrowScreen = true,
 }: {
   progress: number | null;
   initiallyVisible?: boolean;
   canHide?: boolean;
+  hideOnNarrowScreen?: boolean;
 }) {
   // "initial" — hidden for a few seconds after load; "peeking" — up and
   // blinking; "away" — ducked behind the panel until progress advances by 3.
@@ -143,7 +151,7 @@ export function Cedric({
     <>
       <style>{CEDRIC_STYLE}</style>
       <span
-        className={`cedric${phase === "peeking" ? " is-peeking" : ""}`}
+        className={`cedric${hideOnNarrowScreen ? " cedric--responsive" : ""}${phase === "peeking" ? " is-peeking" : ""}`}
         aria-hidden="true"
         // Stay fully hidden until the first peek begins — otherwise Cedric
         // flashes in his un-positioned spot on load before he ducks. Inline so it

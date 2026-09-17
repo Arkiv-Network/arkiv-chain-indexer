@@ -185,7 +185,7 @@ function TransactionDetail({
   const payloadProviderPayments = transaction.payloadProviderPayments ?? null;
 
   return (
-    <div className="relative mt-6">
+    <div className="relative sm:mt-6">
       <CedricOnTimer />
       <div className="relative z-10 flex flex-col gap-4 border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
