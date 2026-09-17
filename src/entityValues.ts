@@ -176,6 +176,34 @@ export function wireAttributeValue(tag: AttributeTypeTag, stored: StoredAttribut
   }
 }
 
+/**
+ * The inverse of {@link wireAttributeValue}: a value as a node puts it in an
+ * `arkiv_query` response (this index uses the same encodings) back into the
+ * stored form. Returns null when the JSON value is not a value of that type —
+ * a caller importing entities refuses the entity rather than storing a lie.
+ */
+export function fromWireAttributeValue(tag: AttributeTypeTag, wire: unknown): StoredAttributeValue | null {
+  switch (tag) {
+    case "bool":
+      return typeof wire === "boolean" ? toStoredAttributeValue(tag, wire ? "true" : "false") : null;
+    case "i32":
+      return typeof wire === "number" && Number.isInteger(wire) ? toStoredAttributeValue(tag, String(wire)) : null;
+    case "u64":
+    case "u256":
+      return typeof wire === "string" && /^0x[0-9a-fA-F]+$/.test(wire)
+        ? toStoredAttributeValue(tag, BigInt(wire).toString())
+        : null;
+    case "dec":
+    case "str":
+    case "addr":
+    case "key":
+    case "bytes32":
+      return typeof wire === "string" ? toStoredAttributeValue(tag, wire) : null;
+    case "bytes":
+      return null;
+  }
+}
+
 /** Byte-wise UTF-8 comparison, the order the engine keeps attributes in. */
 export function compareUtf8(a: string, b: string): number {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));

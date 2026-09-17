@@ -12,7 +12,9 @@ import {
   isValidRpcUrl,
   missingBackendMethods,
   isRpcMode,
+  permittedRpcMode,
   readStoredRpcMode,
+  rpcModeNeedsAdmin,
   readStoredRpcSource,
   rpcEndpointUrl,
   rpcLinkValue,
@@ -48,7 +50,7 @@ function fakeFetch(answer: Answer): { fetchImpl: typeof fetch; calls: RecordedCa
     const response = await answer(call);
     // Echo the request id the way a real node would; tests only look at result/error.
     return response;
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   return { fetchImpl, calls };
 }
 
@@ -134,7 +136,7 @@ describe("rpc source selection", () => {
 
   test("the mode round-trips through storage and falls back to the remembered source kind", () => {
     const storage = memoryStorage();
-    expect(readStoredRpcMode(storage)).toBe("backend");
+    expect(readStoredRpcMode(storage)).toBe("index");
 
     // A browser that only ever stored the source kind keeps that as its mode.
     storage.setItem("gas-price-tracker:data.rpcSourceKind", "index");
@@ -167,9 +169,9 @@ describe("rpc source selection", () => {
     expect(describeRpcEndpoint({ kind: "custom", customUrl: "not a url" })).toBe("not a url");
   });
 
-  test("the choice round-trips through storage and falls back to the backend", () => {
+  test("the choice round-trips through storage and falls back to the index", () => {
     const storage = memoryStorage();
-    expect(readStoredRpcSource(storage)).toEqual({ kind: "backend", customUrl: "" });
+    expect(readStoredRpcSource(storage)).toEqual({ kind: "index", customUrl: "" });
 
     writeStoredRpcSource(CUSTOM, storage);
     expect(readStoredRpcSource(storage)).toEqual(CUSTOM);
@@ -178,8 +180,22 @@ describe("rpc source selection", () => {
     expect(readStoredRpcSource(storage).kind).toBe("index");
 
     storage.setItem("gas-price-tracker:data.rpcSourceKind", "bogus");
-    expect(readStoredRpcSource(storage).kind).toBe("backend");
+    expect(readStoredRpcSource(storage).kind).toBe("index");
     expect(readStoredRpcSource(storage).customUrl).toBe(CUSTOM.customUrl);
+  });
+
+  test("the node relay and the comparison are admin-only; everyone else is lowered to the index", () => {
+    expect(rpcModeNeedsAdmin("backend")).toBe(true);
+    expect(rpcModeNeedsAdmin("both")).toBe(true);
+    expect(rpcModeNeedsAdmin("index")).toBe(false);
+    expect(rpcModeNeedsAdmin("custom")).toBe(false);
+    for (const mode of ["backend", "index", "custom", "both"] as const) {
+      expect(permittedRpcMode(mode, true)).toBe(mode);
+    }
+    expect(permittedRpcMode("backend", false)).toBe("index");
+    expect(permittedRpcMode("both", false)).toBe("index");
+    expect(permittedRpcMode("index", false)).toBe("index");
+    expect(permittedRpcMode("custom", false)).toBe("custom");
   });
 
   test("missing backend methods are computed from the health feature list", () => {
@@ -201,6 +217,26 @@ describe("callRpc", () => {
     expect(calls).toEqual([{ url: CUSTOM.customUrl, method: "eth_chainId", params: [] }]);
   });
 
+  test("CSRF goes only to the relay; custom nodes never receive session credentials", async () => {
+    const seen: Array<{ csrf: string | null; credentials: RequestCredentials | undefined; auth: string | null }> = [];
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      seen.push({ csrf: headers.get("X-CSRF-Token"), credentials: init?.credentials, auth: headers.get("authorization") });
+      return jsonResponse({ jsonrpc: "2.0", id: 1, result: "0x1" });
+    }) as unknown as typeof fetch;
+    const deps = { fetchImpl, csrfToken: "csrf-value" };
+    await callRpc(BACKEND, "eth_chainId", [], deps);
+    await callRpc({ kind: "index", customUrl: "" }, "eth_chainId", [], deps);
+    await callRpc(CUSTOM, "eth_chainId", [], deps);
+    await callRpc({ kind: "custom", customUrl: "https://explorer.example/api/shadow-rpc" }, "eth_chainId", [], deps);
+    expect(seen).toEqual([
+      { csrf: "csrf-value", credentials: "same-origin", auth: null },
+      { csrf: null, credentials: "same-origin", auth: null },
+      { csrf: null, credentials: "omit", auth: null },
+      { csrf: null, credentials: "omit", auth: null },
+    ]);
+  });
+
   test("a node error becomes an RpcCallError carrying the code and method", async () => {
     const { fetchImpl } = fakeFetch(() =>
       jsonResponse({ jsonrpc: "2.0", id: 1, error: { code: -32601, message: "the method arkiv_query does not exist" } }),
@@ -213,6 +249,20 @@ describe("callRpc", () => {
     expect(rpcError.message).toBe("arkiv_query was rejected (-32601): the method arkiv_query does not exist");
     expect(isMethodNotFound(rpcError)).toBe(true);
     expect(isMethodNotFound(new Error("x"))).toBe(false);
+  });
+
+  test("a relay timeout is shown directly instead of being described as a rejected query", async () => {
+    const message = "arkiv_query timed out after 10s waiting for the upstream node";
+    const data = { reason: "upstream_timeout", timeoutMs: 10_000 };
+    const { fetchImpl } = fakeFetch(() => jsonResponse({
+      jsonrpc: "2.0", id: 1, error: { code: -32000, message, data },
+    }));
+    const error = await callRpc(BACKEND, "arkiv_query", ["*"], { fetchImpl }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcCallError);
+    const rpcError = error as RpcCallError;
+    expect(rpcError.message).toBe(message);
+    expect(rpcError.code).toBe(-32000);
+    expect(rpcError.data).toEqual(data);
   });
 
   test("a non-2xx transport answer reports the HTTP status and any node message", async () => {

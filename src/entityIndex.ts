@@ -173,8 +173,18 @@ function applyAttributes(byName: Map<string, StoredEntityAttribute>, cells: Arki
  * Replay one entity's applied operations into its versions. Operations may be
  * given in any order; anything before the create, or after a delete, cannot
  * have been applied by the engine and is ignored.
+ *
+ * An entity the chain was born with (a seeded genesis, see `entityGenesis.ts`)
+ * has no create operation: its state at block 0 is given as `base`, becomes
+ * version 0, and the operations replay on top of it. A create for a key that
+ * already has a base is ignored like any create on an existing entity — the
+ * engine would have refused it.
  */
-export function foldEntityVersions(entityKey: string, records: readonly EntityOpRecord[]): EntityVersion[] {
+export function foldEntityVersions(
+  entityKey: string,
+  records: readonly EntityOpRecord[],
+  base?: EntityVersion,
+): EntityVersion[] {
   const ops = [...records].sort(compareOps);
   const versions: EntityVersion[] = [];
   let current: EntityVersion | undefined;
@@ -185,6 +195,11 @@ export function foldEntityVersions(entityKey: string, records: readonly EntityOp
     versions.push(next);
     current = next;
   };
+
+  if (base) {
+    for (const attribute of base.attributes) attributes.set(attribute.name, { ...attribute });
+    push({ ...base, toBlock: null, deleted: false, attributes: sortedAttributes(attributes) });
+  }
 
   for (const op of ops) {
     if (!current) {

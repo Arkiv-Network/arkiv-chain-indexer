@@ -1,4 +1,6 @@
+import { AuthService, anonymousSession, authError, privateResponse, requireAdmin } from "./auth";
 import { readFile } from "node:fs/promises";
+import { isDatabaseError, publicErrorMessage } from "./internalError";
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
 import { type ArkivOperationSummaryEntry } from "./arkivOperations";
 import { type BlockInspectionResult } from "./blockInspector";
@@ -22,7 +24,9 @@ import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import { handleJsonRpcText, type JsonRpcForwarder, type JsonRpcMethodHandler } from "./jsonRpc";
 import { ARKIV_INDEX_METHODS, createArkivIndexMethods } from "./arkivJsonRpc";
-import type { EntityIndexReader, EntityIndexStats } from "./entityIndexStorage";
+import type { EntityVersion } from "./entityIndex";
+import type { EntityIndexReader, EntityIndexStats, GenesisImportStatus } from "./entityIndexStorage";
+import { TYPE_TAGS_BY_ID, wireAttributeValue } from "./entityValues";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
 import {
   buildPayloadProviderPaymentBreakdown,
@@ -30,7 +34,14 @@ import {
   type PayloadProviderPaymentBreakdown,
 } from "./payloadProviderPayments";
 import { ResponseCache, type CachedResponse } from "./responseCache";
+import {
+  PROMETHEUS_CONTENT_TYPE,
+  metricsRegistry,
+  observeHttpRequest,
+  recordResponseBytes,
+} from "./serverMetrics";
 import { ValueCache } from "./valueCache";
+import { parseSearchInput, SearchInputError, SearchBusyError, type SearchReader } from "./omniSearch";
 import {
   DEFAULT_ENTITY_HISTORY_LIMIT,
   MAX_BALANCES_PER_QUERY,
@@ -61,11 +72,15 @@ import {
 } from "./storage";
 
 export interface BlockServerOptions {
+  /** Read-only bounded omni search, with an independent small connection pool. */
+  search?: SearchReader;
+  /** Set to false to disable `GET /metrics` entirely. Defaults to true. */
+  metricsEnabled?: boolean;
   port?: number;
   hostname?: string;
   transactionDataEnabled?: boolean;
   baseloadRuntime?: BaseloadRuntime;
-  baseloadAdminBearerToken?: string;
+  auth?: AuthService;
   guzzlerStore?: GuzzlerStore;
   payloadProviderPaymentResolver?: PayloadProviderPaymentResolver;
   /**
@@ -170,6 +185,25 @@ export interface TransactionByHashResponseBody {
   };
 }
 
+/**
+ * The state an entity was born with when the chain's genesis carried it: no
+ * transaction created it, so this is what the entity index knows from the
+ * genesis import (see README, "Genesis entities").
+ */
+export interface EntityGenesisRecordBody {
+  owner: string;
+  creator: string;
+  /** Absolute expiry block as a decimal string; 18446744073709551615 means never. */
+  expiresAt: string;
+  contentType: string;
+  /** Raw creation flag bits (1 readonly, 2 permissionless extension); null when the import did not learn them. */
+  creationFlags: number | null;
+  /** Bytes of payload at genesis; 0 when imported over RPC, which never fetches the payload. */
+  payloadSize: number;
+  /** Typed attributes in the node's wire encoding, sorted by name. */
+  attributes: Array<{ name: string; type: string; value: unknown }>;
+}
+
 export interface EntityByKeyResponseBody {
   entityKey: string;
   /** Number of operations in `operations` (the returned slice). */
@@ -184,6 +218,8 @@ export interface EntityByKeyResponseBody {
   operations: EntityOperationResponseRow[];
   /** Earliest stored operation; present only when `truncated`. */
   firstOperation?: EntityOperationResponseRow;
+  /** Present when the entity was created in the genesis state (block 0); `operations` may then be empty. */
+  genesis?: EntityGenesisRecordBody;
 }
 
 export interface TransactionRecordsResponseBody {
@@ -310,9 +346,30 @@ export interface EntityQueryIndexHealth {
   projectedThroughBlock: string | null;
   /** How far the projection trails the scanner head. */
   lagBlocks: string | null;
-  /** Entities live at the projection head. */
+  /** Entities live at the projection head, as of the projector's last count. */
   liveEntities: number | null;
+  /** When that count was taken; the projector refreshes it on its own schedule, never a request. */
+  liveEntitiesAtUtc: string | null;
   lastFoldAtUtc: string | null;
+  /** The import of the entities the chain was born with; null when no import was ever considered. */
+  genesis: EntityGenesisImportHealth | null;
+}
+
+export interface EntityGenesisImportHealth {
+  status: GenesisImportStatus;
+  /** `walk` while rows are written, `repair` while genesis entities with later operations are refolded. */
+  phase: "walk" | "repair" | null;
+  /** `rpc` for the projector's walk of the node, `dump` for scripts/importGenesisState.ts. */
+  source: "rpc" | "dump" | null;
+  /** Entities the node counted at block 0. */
+  total: number;
+  /** Entities written so far. */
+  imported: number;
+  startedAtUtc: string;
+  finishedAtUtc: string | null;
+  /** When the import last made progress. */
+  updatedAtUtc: string | null;
+  error: string | null;
 }
 
 export const BLOCK_RESPONSE_NAMES = [
@@ -595,9 +652,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
       handleRequest(request, storage, {
         transactionDataEnabled,
         ...(options.baseloadRuntime ? { baseloadRuntime: options.baseloadRuntime } : {}),
-        ...(options.baseloadAdminBearerToken !== undefined
-          ? { baseloadAdminBearerToken: options.baseloadAdminBearerToken }
-          : {}),
+        ...(options.auth ? { auth: options.auth } : {}),
         ...(options.guzzlerStore ? { guzzlerStore: options.guzzlerStore } : {}),
         ...(options.payloadProviderPaymentResolver
           ? { payloadProviderPaymentResolver: options.payloadProviderPaymentResolver }
@@ -613,6 +668,8 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
+        ...(options.search ? { search: options.search } : {}),
+        ...(options.metricsEnabled !== undefined ? { metricsEnabled: options.metricsEnabled } : {}),
       }),
   };
   if (options.hostname !== undefined) {
@@ -626,7 +683,29 @@ export async function handleRequest(
   storage: ScannerStorage,
   options: BlockServerOptions = {},
 ): Promise<Response> {
-  return applyConditionalGet(request, await routeRequest(request, storage, options));
+  return observeHttpRequest(request, async () => {
+    const response = await routeRequestSafely(request, storage, options);
+    return sensitiveRequest(request) ? privateResponse(response) : applyConditionalGet(request, response);
+  });
+}
+
+/**
+ * Anything a handler lets escape would otherwise become Bun's default
+ * `text/plain` "Something went wrong!" page without CORS headers; answer a
+ * JSON 500 like every other error instead.
+ */
+async function routeRequestSafely(
+  request: Request,
+  storage: ScannerStorage,
+  options: BlockServerOptions,
+): Promise<Response> {
+  try {
+    return await routeRequest(request, storage, options);
+  } catch (error) {
+    const context = `${request.method} ${new URL(request.url).pathname}`;
+    if (!isDatabaseError(error)) console.error(`Unhandled error on ${context}:`, error);
+    return jsonError(500, publicErrorMessage(error, context));
+  }
 }
 
 /**
@@ -658,7 +737,14 @@ function applyConditionalGet(request: Request, response: Response): Response {
       headers.set(name, value);
     }
   }
-  return new Response(null, { status: 304, headers });
+  return recordResponseBytes(new Response(null, { status: 304, headers }), 0);
+}
+
+function sensitiveRequest(request: Request): boolean {
+  const path = new URL(request.url).pathname;
+  return path.startsWith("/auth/") || path.startsWith("/admin/") || path === JSON_RPC_PATH ||
+    path === "/baseload/configs" || path.startsWith("/baseload/configs/") ||
+    (path === "/baseload" && request.method !== "GET");
 }
 
 async function routeRequest(
@@ -670,15 +756,30 @@ async function routeRequest(
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return recordResponseBytes(new Response(null, { status: 204, headers: sensitiveRequest(request) ? {} : CORS_HEADERS }), 0);
   }
 
-  if (url.pathname === "/admin/verify") {
-    return handleAdminVerifyRequest(request, options.baseloadAdminBearerToken);
+  if (url.pathname.startsWith("/auth/")) {
+    if (url.pathname === "/auth/token-login" && !options.auth) return authError(404, "Token login is disabled");
+    if (options.auth) return options.auth.handle(request);
+    return url.pathname === "/auth/session" && request.method === "GET" ? anonymousSession() : authError(503, "Google login is not configured");
+  }
+  if (url.pathname === "/admin/verify") return authError(404, "Not found");
+  if (sensitiveRequest(request)) {
+    const denied = await requireAdmin(request, options.auth);
+    if (denied) return denied;
+  }
+
+  if (url.pathname === "/metrics") {
+    return handleGetMetrics(request, options);
+  }
+
+  if (url.pathname === "/admin/metrics") {
+    return handleGetMetrics(request, options);
   }
 
   if (url.pathname === "/baseload") {
-    return handleBaseloadRequest(request, options.baseloadRuntime, options.baseloadAdminBearerToken);
+    return handleBaseloadRequest(request, options.baseloadRuntime);
   }
 
   if (url.pathname === "/baseload/configs" || url.pathname.startsWith("/baseload/configs/")) {
@@ -687,11 +788,12 @@ async function routeRequest(
       url,
       storage,
       options.baseloadRuntime,
-      options.baseloadAdminBearerToken,
     );
   }
 
   if (url.pathname === JSON_RPC_PATH) {
+    // The node relay spends the upstream's quota and reaches its mempool, so
+    // it is an admin surface; the entity index below answers anonymously.
     return handleJsonRpcRequest(request, storage, transactionDataEnabled, options.jsonRpcPassthrough);
   }
 
@@ -706,7 +808,7 @@ async function routeRequest(
       request,
       storage,
       transactionDataEnabled,
-      options.jsonRpcPassthrough,
+      undefined,
       createArkivIndexMethods(options.entityIndex, storage),
       JSON_RPC_EXPERIMENTAL_PATH,
     );
@@ -718,6 +820,20 @@ async function routeRequest(
 
   if (url.pathname === "/llms.txt") {
     return handleGetLlmsTxt();
+  }
+
+  if (url.pathname === "/search" || url.pathname === "/search/suggest") {
+    try {
+      const input = parseSearchInput(url.searchParams, url.pathname.endsWith("/suggest"));
+      if (!options.search) return jsonError(503, "Search is unavailable");
+      const body = await options.search.search(input, transactionDataEnabled);
+      return compressedJsonResponse(request, body);
+    } catch (error) {
+      if (error instanceof SearchInputError) return jsonError(400, error.message);
+      if (error instanceof SearchBusyError) return jsonResponse({ error: error.message }, { status: 429, headers: { "Retry-After": "1" } });
+      console.warn("Search lookup failed:", error);
+      return jsonError(503, "Search is temporarily unavailable. Please retry.");
+    }
   }
 
   if (url.pathname === "/health") {
@@ -812,7 +928,6 @@ async function routeRequest(
 async function handleBaseloadRequest(
   request: Request,
   baseloadRuntime: BaseloadRuntime | undefined,
-  adminBearerToken: string | undefined,
 ): Promise<Response> {
   if (!baseloadRuntime) {
     return jsonError(503, "Baseload runtime is unavailable");
@@ -823,9 +938,6 @@ async function handleBaseloadRequest(
   }
 
   if (request.method === "PUT") {
-    const authError = requireAdminBearerToken(request, adminBearerToken);
-    if (authError) return authError;
-
     let body: unknown;
     try {
       body = await request.json();
@@ -848,11 +960,7 @@ async function handleBaseloadConfigsRequest(
   url: URL,
   storage: ScannerStorage,
   baseloadRuntime: BaseloadRuntime | undefined,
-  adminBearerToken: string | undefined,
 ): Promise<Response> {
-  const authError = requireAdminBearerToken(request, adminBearerToken);
-  if (authError) return authError;
-
   if (url.pathname === "/baseload/configs") {
     if (request.method !== "GET") {
       return jsonError(405, `Method ${request.method} is not allowed`);
@@ -931,41 +1039,6 @@ async function handleBaseloadConfigsRequest(
   return jsonError(405, `Method ${request.method} is not allowed`);
 }
 
-async function handleAdminVerifyRequest(
-  request: Request,
-  adminBearerToken: string | undefined,
-): Promise<Response> {
-  if (request.method !== "GET") {
-    return jsonError(405, `Method ${request.method} is not allowed`);
-  }
-  if (!adminBearerToken) {
-    return jsonError(503, "Admin bearer token is not configured on the backend");
-  }
-  const authError = requireAdminBearerToken(request, adminBearerToken);
-  if (authError) return authError;
-  return jsonResponse({ authorized: true });
-}
-
-function requireAdminBearerToken(request: Request, adminBearerToken: string | undefined): Response | null {
-  if (!adminBearerToken) return null;
-
-  const authorization = request.headers.get("authorization");
-  if (!authorization) {
-    return jsonError(401, "Admin bearer token is required");
-  }
-
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  if (!match?.[1]) {
-    return jsonError(401, "Authorization header must use Bearer token");
-  }
-
-  if (match[1] !== adminBearerToken) {
-    return jsonError(403, "Admin bearer token is invalid");
-  }
-
-  return null;
-}
-
 async function handleGetHealth(
   storage: ScannerStorage,
   transactionDataEnabled: boolean,
@@ -1035,6 +1108,7 @@ async function readEntityIndexHealth(
 ): Promise<EntityQueryIndexHealth> {
   const [progress, stats] = await Promise.all([entityIndex.getProgress(), entityIndex.getStats()]);
   const projected = progress.projectedThroughBlock;
+  const genesis = stats.genesis;
   return {
     path: JSON_RPC_EXPERIMENTAL_PATH,
     methods: [...ARKIV_INDEX_METHODS],
@@ -1043,7 +1117,21 @@ async function readEntityIndexHealth(
     lagBlocks:
       projected !== undefined && scannerHead !== undefined ? clampLag(scannerHead - projected) : null,
     liveEntities: stats.liveEntities,
+    liveEntitiesAtUtc: stats.liveEntitiesAtUtc,
     lastFoldAtUtc: progress.lastFoldAt ?? null,
+    genesis: genesis
+      ? {
+          status: genesis.status,
+          phase: genesis.phase,
+          source: genesis.source,
+          total: genesis.total,
+          imported: genesis.imported,
+          startedAtUtc: genesis.startedAt,
+          finishedAtUtc: genesis.finishedAt,
+          updatedAtUtc: genesis.updatedAt ?? null,
+          error: genesis.error,
+        }
+      : null,
   };
 }
 
@@ -1088,20 +1176,41 @@ async function handleJsonRpcRequest(
     return jsonError(413, `Request body exceeds ${JSON_RPC_MAX_BODY_BYTES} bytes`);
   }
   const text = await request.text();
-  if (text.length > JSON_RPC_MAX_BODY_BYTES) {
+  // Bytes, not UTF-16 units: a chunked body has no Content-Length to check.
+  if (Buffer.byteLength(text) > JSON_RPC_MAX_BODY_BYTES) {
     return jsonError(413, `Request body exceeds ${JSON_RPC_MAX_BODY_BYTES} bytes`);
   }
   const body = await handleJsonRpcText(text, storage, {
     transactionDataEnabled,
     clientVersion: await readClientVersion(),
+    path,
     ...(passthrough ? { passthrough } : {}),
     ...(localOverrides ? { localOverrides } : {}),
   });
-  return new Response(JSON.stringify(body), {
+  const payload = JSON.stringify(body);
+  return recordResponseBytes(
+    new Response(payload, {
+      status: 200,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json;charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    }),
+    payload.length,
+  );
+}
+
+/** /metrics is open; deployment controls exposure. /admin/metrics uses the administrator gate. */
+async function handleGetMetrics(request: Request, options: BlockServerOptions): Promise<Response> {
+  if (options.metricsEnabled === false) return jsonError(404, `Not found: ${new URL(request.url).pathname}`);
+  if (request.method !== "GET") return jsonError(405, `Method ${request.method} is not allowed`);
+  const body = await metricsRegistry.render();
+  return new Response(body, {
     status: 200,
     headers: {
       ...CORS_HEADERS,
-      "Content-Type": "application/json;charset=utf-8",
+      "Content-Type": PROMETHEUS_CONTENT_TYPE,
       "Cache-Control": "no-store",
     },
   });
@@ -1110,14 +1219,17 @@ async function handleJsonRpcRequest(
 async function handleGetLlmsTxt(): Promise<Response> {
   try {
     const body = await readFile(LLMS_TXT_FILE, "utf8");
-    return new Response(body, {
-      headers: {
-        ...CORS_HEADERS,
-        "Content-Type": "text/plain; charset=utf-8",
-      },
-    });
+    return recordResponseBytes(
+      new Response(body, {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "text/plain; charset=utf-8",
+        },
+      }),
+      Buffer.byteLength(body),
+    );
   } catch (error) {
-    return jsonError(500, error instanceof Error ? error.message : String(error));
+    return jsonError(500, publicErrorMessage(error, "handleGetLlmsTxt"));
   }
 }
 
@@ -1143,7 +1255,7 @@ async function handleGetBlockByNumber(
     }
     return jsonResponse(blockToResponseRow(block));
   } catch (error) {
-    return jsonError(500, error instanceof Error ? error.message : String(error));
+    return jsonError(500, publicErrorMessage(error, "handleGetBlockByNumber"));
   }
 }
 
@@ -1165,7 +1277,7 @@ async function handleGetBlockInspect(
     }
     return jsonResponse({ cached: false, block } satisfies BlockInspectResponseBody);
   } catch (error) {
-    return jsonError(500, error instanceof Error ? error.message : String(error));
+    return jsonError(500, publicErrorMessage(error, "handleGetBlockInspect"));
   }
 }
 
@@ -1383,7 +1495,7 @@ async function handleGetEntityByKey(
   // the storage NOTIFY payloads that drive invalidation are lowercase.
   const normalized = entityKey.toLowerCase();
   const limit = options.entityHistoryLimit ?? DEFAULT_ENTITY_HISTORY_LIMIT;
-  const loader = () => buildEntityByKeyResponse(normalized, storage, limit);
+  const loader = () => buildEntityByKeyResponse(normalized, storage, limit, options.entityIndex);
   // Not-found responses are cached too: the create NOTIFY evicts them the
   // moment the entity appears in storage.
   const cached = options.entityHistoryCache
@@ -1396,9 +1508,15 @@ async function buildEntityByKeyResponse(
   normalizedEntityKey: string,
   storage: ScannerStorage,
   limit: number,
+  entityIndex?: EntityIndexReader,
 ): Promise<CachedResponse> {
-  const history = await storage.getEntityOperationHistory(normalizedEntityKey, limit);
-  if (history.totalOperations === 0) {
+  // A genesis entity has no operations; the entity index's version at block 0
+  // (only a genesis import writes one) vouches for it instead.
+  const [history, genesis] = await Promise.all([
+    storage.getEntityOperationHistory(normalizedEntityKey, limit),
+    entityIndex ? entityIndex.getEntity(normalizedEntityKey, 0n, false) : Promise.resolve(undefined),
+  ]);
+  if (history.totalOperations === 0 && !genesis) {
     return {
       status: 404,
       body: JSON.stringify({
@@ -1416,8 +1534,24 @@ async function buildEntityByKeyResponse(
     ...(history.firstOperation
       ? { firstOperation: entityOperationToResponseRow(history.firstOperation) }
       : {}),
+    ...(genesis ? { genesis: genesisRecordBody(genesis) } : {}),
   };
   return withValidators({ status: 200, body: JSON.stringify(responseBody) });
+}
+
+function genesisRecordBody(version: EntityVersion): EntityGenesisRecordBody {
+  return {
+    owner: version.owner,
+    creator: version.creator,
+    expiresAt: version.expiresAt.toString(),
+    contentType: version.contentType,
+    creationFlags: version.creationFlags,
+    payloadSize: version.payloadSize,
+    attributes: version.attributes.flatMap((attribute) => {
+      const type = TYPE_TAGS_BY_ID.get(attribute.typeId);
+      return type ? [{ name: attribute.name, type, value: wireAttributeValue(type, attribute) }] : [];
+    }),
+  };
 }
 
 async function handleGetTransactionRecords(
@@ -1970,11 +2104,18 @@ function parsePageParam(value: string): number {
   return parsed;
 }
 
+/** Block numbers and nonces are stored as bigint; cap them well inside it so the handlers' ±1 stays in range too. */
+const MAX_BLOCK_PARAM = BigInt(Number.MAX_SAFE_INTEGER);
+
 function parseBlockParam(name: string, value: string): bigint {
   if (!/^\d+$/.test(value)) {
     throw new Error(`${name} must be a non-negative integer`);
   }
-  return BigInt(value);
+  const parsed = BigInt(value);
+  if (parsed > MAX_BLOCK_PARAM) {
+    throw new Error(`${name} must be at most ${MAX_BLOCK_PARAM}`);
+  }
+  return parsed;
 }
 
 function parseAddressParam(name: string, value: string): string {
@@ -1989,6 +2130,12 @@ function parseDateParam(name: string, value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`${name} must be a valid ISO-8601 date string`);
+  }
+  // Date columns are ISO text; an expanded year ("+275760-…") would sort below
+  // every digit and silently invert the filter.
+  const year = parsed.getUTCFullYear();
+  if (year < 0 || year > 9999) {
+    throw new Error(`${name} must fall between the years 0000 and 9999`);
   }
   return parsed.toISOString();
 }
@@ -2058,7 +2205,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
     headers.ETag = etagForBody(payload);
     headers["Cache-Control"] = "no-cache";
   }
-  return new Response(payload, { ...init, headers });
+  return recordResponseBytes(new Response(payload, { ...init, headers }), payload.length);
 }
 
 /** Build an HTTP response from a cached/precomputed serialized body. */
@@ -2072,14 +2219,17 @@ function responseFromCached(cached: CachedResponse): Response {
           cached.body.byteOffset,
           cached.body.byteOffset + cached.body.byteLength,
         ) as ArrayBuffer);
-  return new Response(body, {
-    status: cached.status,
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/json;charset=utf-8",
-      ...(cached.headers ?? {}),
-    },
-  });
+  return recordResponseBytes(
+    new Response(body, {
+      status: cached.status,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json;charset=utf-8",
+        ...(cached.headers ?? {}),
+      },
+    }),
+    typeof cached.body === "string" ? cached.body.length : cached.body.byteLength,
+  );
 }
 
 /**
@@ -2138,17 +2288,20 @@ async function compressedJsonResponse(request: Request, body: unknown): Promise<
     compressed.byteOffset,
     compressed.byteOffset + compressed.byteLength,
   ) as ArrayBuffer;
-  return new Response(responseBody, {
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/json;charset=utf-8",
-      "Content-Encoding": encoding,
-      "Content-Length": String(compressed.byteLength),
-      Vary: "Accept-Encoding",
-      ETag: etagForBody(compressed),
-      "Cache-Control": "no-cache",
-    },
-  });
+  return recordResponseBytes(
+    new Response(responseBody, {
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json;charset=utf-8",
+        "Content-Encoding": encoding,
+        "Content-Length": String(compressed.byteLength),
+        Vary: "Accept-Encoding",
+        ETag: etagForBody(compressed),
+        "Cache-Control": "no-cache",
+      },
+    }),
+    compressed.byteLength,
+  );
 }
 
 /** Response encodings this server can produce, best ratio first. */

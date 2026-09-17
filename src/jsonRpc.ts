@@ -41,7 +41,15 @@ import type {
   StoredLog,
   StoredTransaction,
 } from "./storage";
+import { publicErrorMessage } from "./internalError";
 import { MAX_FEE_HISTORY_BLOCKS, MAX_LOG_QUERY_BLOCKS } from "./storage";
+import {
+  jsonRpcBatchSize,
+  jsonRpcGetLogsBlocksTotal,
+  jsonRpcGetLogsReturnedTotal,
+  jsonRpcRequestDurationSeconds,
+  jsonRpcRequestsTotal,
+} from "./serverMetrics";
 
 /** The storage surface the RPC layer needs; `ScannerStorage` satisfies it. */
 export interface JsonRpcDataSource {
@@ -93,6 +101,8 @@ export interface JsonRpcOptions {
   clientVersion?: string;
   /** Upper bound on requests per batch; defaults to 100. */
   maxBatchSize?: number;
+  /** The HTTP path this request arrived on; only a metrics label. */
+  path?: string;
   /**
    * Methods answered by a real node instead of the index — transaction
    * submission, and anything else a deployment chooses to hand off. Absent
@@ -258,17 +268,33 @@ export async function handleJsonRpcBody(
         ),
       );
     }
+    jsonRpcBatchSize.observe({ path: resolved.path }, body.length);
     return Promise.all(body.map((entry) => handleSingle(entry, context)));
   }
+  jsonRpcBatchSize.observe({ path: resolved.path }, 1);
   return handleSingle(body, context);
+}
+
+/** Where a call was answered, for the metrics `source` label. */
+type CallSource = "stored" | "upstream" | "override" | "none";
+
+function countCall(
+  context: MethodContext,
+  method: string,
+  source: CallSource,
+  outcome: string,
+): void {
+  jsonRpcRequestsTotal.inc({ path: context.options.path, rpc_method: method, source, outcome });
 }
 
 async function handleSingle(request: unknown, context: MethodContext): Promise<JsonRpcResponse> {
   if (!isPlainObject(request)) {
+    countCall(context, "invalid", "none", "invalid_request");
     return errorResponse(null, new JsonRpcError(JSON_RPC_INVALID_REQUEST, "Invalid request"));
   }
   const id = normaliseId(request.id);
   if (request.jsonrpc !== undefined && request.jsonrpc !== "2.0") {
+    countCall(context, "invalid", "none", "invalid_request");
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_INVALID_REQUEST, 'Invalid request: "jsonrpc" must be "2.0"'),
@@ -276,6 +302,7 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
   }
   const method = request.method;
   if (typeof method !== "string") {
+    countCall(context, "invalid", "none", "invalid_request");
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_INVALID_REQUEST, 'Invalid request: "method" must be a string'),
@@ -288,6 +315,7 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
   // callers that work fine against a real node.
   const omittedParams = rawParams === undefined || rawParams === null;
   if (!omittedParams && !Array.isArray(rawParams)) {
+    countCall(context, knownMethodLabel(method, context), "none", "invalid_params");
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_INVALID_PARAMS, "Invalid params: expected a positional array"),
@@ -298,15 +326,21 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
   // An override answers first. Below it, a configured passthrough outranks the
   // local table: listing a method there means "let the node answer this one",
   // whether or not we could have.
-  const override = context.options.localOverrides[method];
+  // Asserted rather than annotated: an annotation narrows back to the indexed
+  // type in a tsconfig without noUncheckedIndexedAccess (the frontend's).
+  const override = context.options.localOverrides[method] as JsonRpcMethodHandler | undefined;
   const passthrough = context.options.passthrough;
   const forwarder = !override && passthrough && passthrough.methods.has(method) ? passthrough : null;
   const handler: MethodHandler | undefined = override
     ? (overrideParams) => override(overrideParams)
     : forwarder
       ? (forwardedParams) => forwarder.forward(method, forwardedParams)
-      : METHODS[method];
+      : (METHODS[method] as MethodHandler | undefined);
+  const source: CallSource = override ? "override" : forwarder ? "upstream" : handler ? "stored" : "none";
   if (!handler) {
+    // Unknown method names are client input: label them "unknown" so a
+    // caller probing random names cannot mint unbounded series.
+    countCall(context, "unknown", "none", "method_not_found");
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`),
@@ -314,21 +348,56 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
   }
   // The gate protects stored transaction rows; a forwarded call never reads them.
   if (!override && !forwarder && !context.options.transactionDataEnabled && TRANSACTION_DATA_METHODS.has(method)) {
+    countCall(context, method, source, "disabled");
     return errorResponse(
       id,
       new JsonRpcError(JSON_RPC_SERVER_ERROR, `${method} is unavailable: transaction data is disabled`),
     );
   }
 
+  const stopTimer = jsonRpcRequestDurationSeconds.startTimer({
+    path: context.options.path,
+    rpc_method: method,
+  });
   try {
     const result = await handler(params, context);
+    countCall(context, method, source, "ok");
     return { jsonrpc: "2.0", id, result };
   } catch (error) {
     if (error instanceof JsonRpcError) {
+      countCall(context, method, source, errorOutcome(error.code));
       return errorResponse(id, error);
     }
-    const message = error instanceof Error ? error.message : String(error);
+    countCall(context, method, source, "internal_error");
+    const message = publicErrorMessage(error, `JSON-RPC ${method}`);
     return errorResponse(id, new JsonRpcError(JSON_RPC_INTERNAL_ERROR, `Internal error: ${message}`));
+  } finally {
+    stopTimer();
+  }
+}
+
+/** A method label that stays bounded: known names verbatim, anything else "unknown". */
+function knownMethodLabel(method: string, context: MethodContext): string {
+  if (
+    METHODS[method] ||
+    context.options.localOverrides[method] ||
+    context.options.passthrough?.methods.has(method)
+  ) {
+    return method;
+  }
+  return "unknown";
+}
+
+function errorOutcome(code: number): string {
+  switch (code) {
+    case JSON_RPC_INVALID_PARAMS:
+      return "invalid_params";
+    case JSON_RPC_INTERNAL_ERROR:
+      return "internal_error";
+    case JSON_RPC_METHOD_NOT_FOUND:
+      return "method_not_found";
+    default:
+      return "error";
   }
 }
 
@@ -337,6 +406,7 @@ function resolveOptions(options: JsonRpcOptions): Required<JsonRpcOptions> {
     transactionDataEnabled: options.transactionDataEnabled ?? true,
     clientVersion: options.clientVersion ?? DEFAULT_CLIENT_VERSION,
     maxBatchSize: options.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE,
+    path: options.path ?? "/shadow-rpc",
     passthrough: options.passthrough ?? null,
     localOverrides: options.localOverrides ?? {},
   };
@@ -670,12 +740,14 @@ const METHODS: Record<string, MethodHandler> = {
     if (addresses) query.addresses = addresses;
     const topics = parseTopicsFilter(filter.topics);
     if (topics) query.topics = topics;
+    jsonRpcGetLogsBlocksTotal.inc(undefined, Number(toBlock - fromBlock + 1n));
     let logs: StoredLog[];
     try {
       logs = await storage.queryLogs(query);
     } catch (error) {
       throw new JsonRpcError(JSON_RPC_SERVER_ERROR, error instanceof Error ? error.message : String(error));
     }
+    jsonRpcGetLogsReturnedTotal.inc(undefined, logs.length);
     // One lookup for every block in the result, not one per block: a wide
     // query can touch thousands of distinct blocks and serial round trips
     // dominated the call.
@@ -736,8 +808,15 @@ async function resolveBlockTag(param: unknown, storage: JsonRpcDataSource): Prom
       return indexedHead(storage);
     case "earliest":
       return storage.getMinStoredBlock();
-    default:
-      return parseQuantityParam(param, "blockNumber");
+    default: {
+      const blockNumber = parseQuantityParam(param, "blockNumber");
+      // Block numbers are stored as bigint; anything past a safe integer is
+      // a client error, not a database one.
+      if (blockNumber > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw invalidParams("blockNumber is out of range");
+      }
+      return blockNumber;
+    }
   }
 }
 

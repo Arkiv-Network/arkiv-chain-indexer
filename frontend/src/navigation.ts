@@ -9,6 +9,7 @@ export interface NavItem {
 
 export const ALL_NAV_ITEMS: readonly NavItem[] = [
   { view: "home", label: "Home" },
+  { view: "search", label: "Search" },
   { view: "blocks", label: "Blocks" },
   { view: "data", label: "Data" },
   { view: "block", label: "Block", requiresTransactionData: true },
@@ -37,4 +38,9 @@ export function visibleNavItems(
 
 export function navLabelForView(view: View): string | undefined {
   return ALL_NAV_ITEMS.find((item) => item.view === view)?.label;
+}
+
+/** Guard view rendering as well as menu visibility, including direct links. */
+export function requiresAdminView(view: View): boolean {
+  return ALL_NAV_ITEMS.some((item) => item.view === view && item.requiresAdmin);
 }

@@ -11,6 +11,7 @@ import {
   resolveRequestedExpiry,
   type EntityEventLog,
   type EntityOpRecord,
+  type EntityVersion,
 } from "./entityIndex";
 import type { ArkivOperationAttribute } from "./arkivOperations";
 
@@ -248,5 +249,79 @@ describe("attachEventsToOps", () => {
     attachEventsToOps(ops, [log({ logIndex: 0, topic0: ENTITY_EVENT_TOPICS.created, data: `0x${"f".repeat(64)}${word(0n)}` })]);
     expect(ops[0]!.event?.expiresAt).toBe((1n << 256n) - 1n);
     expect(foldEntityVersions(KEY, ops)[0]!.expiresAt).toBe((1n << 256n) - 1n);
+  });
+});
+
+describe("foldEntityVersions with a genesis base", () => {
+  const base = (): EntityVersion => ({
+    entityKey: KEY,
+    version: 0,
+    fromBlock: 0,
+    fromPosition: 41,
+    fromOpIndex: 0,
+    toBlock: null,
+    deleted: false,
+    owner: ALICE,
+    creator: ALICE,
+    createdAt: 0,
+    createdPosition: 41,
+    createdOpIndex: 0,
+    updatedAt: 0,
+    expiresAt: 5000n,
+    creationFlags: 0,
+    contentType: "application/json",
+    payloadSize: 0,
+    attributes: [
+      { name: "project", typeId: 8, valueText: "seed", valueNum: null },
+      { name: "rank", typeId: 3, valueText: "7", valueNum: 7n },
+    ],
+  });
+
+  test("the base alone is version 0 with no end", () => {
+    expect(foldEntityVersions(KEY, [], base())).toEqual([base()]);
+  });
+
+  test("operations replay on top of the base and keep its identity", () => {
+    const versions = foldEntityVersions(
+      KEY,
+      [
+        op({ blockNumber: 10, position: 2, operationType: OPERATION_UPDATE, attributes: [tombstone("project"), i32("rank", "-1"), str("new", "x")] }),
+        op({ blockNumber: 20, operationType: OPERATION_EXTEND, expiresAtBlocks: 9000 }),
+        op({ blockNumber: 30, operationType: OPERATION_TRANSFER, newOwner: BOB }),
+        op({ blockNumber: 40, operationType: OPERATION_DELETE }),
+      ],
+      base(),
+    );
+    expect(versions.map((version) => [version.version, version.fromBlock, version.toBlock])).toEqual([
+      [0, 0, 10],
+      [1, 10, 20],
+      [2, 20, 30],
+      [3, 30, 40],
+      [4, 40, null],
+    ]);
+    expect(versions[0]!.attributes).toEqual(base().attributes);
+    expect(versions[1]!.attributes).toEqual([
+      { name: "new", typeId: 8, valueText: "x", valueNum: null },
+      { name: "rank", typeId: 2, valueText: "-1", valueNum: -1n },
+    ]);
+    expect(versions[1]).toMatchObject({ fromPosition: 2, updatedAt: 10, createdAt: 0, createdPosition: 41, owner: ALICE, creator: ALICE });
+    expect(versions[2]!.expiresAt).toBe(9000n);
+    expect(versions[3]!.owner).toBe(BOB);
+    expect(versions[3]!.creator).toBe(ALICE);
+    expect(versions[4]!.deleted).toBe(true);
+  });
+
+  test("a create on a based key is ignored, like a create on any existing entity", () => {
+    const versions = foldEntityVersions(KEY, [create(15), op({ blockNumber: 16, operationType: OPERATION_EXTEND, expiresAtBlocks: 7000 })], base());
+    expect(versions).toHaveLength(2);
+    expect(versions[0]).toMatchObject({ version: 0, fromBlock: 0, toBlock: 16, contentType: "application/json" });
+    expect(versions[1]).toMatchObject({ version: 1, fromBlock: 16, expiresAt: 7000n });
+  });
+
+  test("the base's attributes are copied, never shared with the versions", () => {
+    const given = base();
+    const versions = foldEntityVersions(KEY, [op({ blockNumber: 10, operationType: OPERATION_UPDATE, attributes: [str("project", "changed")] })], given);
+    expect(given.attributes[0]).toEqual({ name: "project", typeId: 8, valueText: "seed", valueNum: null });
+    expect(versions[0]!.attributes).not.toBe(given.attributes);
   });
 });

@@ -89,10 +89,9 @@ Baseload workers run in the backend service, not in the browser. Set `BASELOAD_R
 endpoint that should receive create transactions. The frontend only adds, edits, deletes, imports, exports, and
 monitors worker configuration through `/api/baseload`.
 
-For shared deployments, set `BASELOAD_ADMIN_BEARER_TOKEN` so mutating Baseload worker requests require
-`Authorization: Bearer <token>`. Readonly views and status APIs remain public. The Baseload tab includes an admin
-bearer token field that stores the token in browser local storage and sends it only with worker configuration
-changes.
+Configure Google login for administrator access to Baseload changes, saved configurations, the node relay,
+and server metrics. Public explorer views and status APIs remain public. See [Google login setup](docs/google-login.md)
+for credentials, callback registration, session cookies and the two narrowly scoped automation credentials.
 
 Set `BATCHER_COLLECTOR_URL` to attach recent batcher queue/threshold metadata to stored blocks. The collector
 only serves recent seconds, so the dedicated batcher collector service requests batcher data for stored blocks
@@ -219,6 +218,14 @@ metric columns.
 | `--interval-ms` | `BATCHER_COLLECTOR_INTERVAL_MS` | `10000` | Delay between collector sweeps. |
 | `--once` | n/a | unset | Run one collector sweep and exit. |
 
+### Direct bouncer key
+
+Kalarepa uses a key registered directly with Tiramisu's bouncer. A single key in
+`RPC_KEY_POOL_FILE` is shared by the scanner, gap filler, backfill scanner and Baseload
+workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately.
+See [direct key provisioning and rotation](docs/tiramisu-rpc-keys.md). This setup needs
+neither the Hub browser generator nor the optional proxy below.
+
 ### Pooled RPC proxy (`rpc-proxy` profile)
 
 `docker-compose.yml` ships an optional `rpc-proxy` service running
@@ -263,7 +270,10 @@ Backend configuration:
 | `BASELOAD_FAUCET_MAX_BALANCE` | `200` | Ether. A drip is skipped when it would leave the wallet at or above this ceiling. It is a safety net, not the resting point, and must be at least `MIN + DRIP` — a lower ceiling would refuse drips to wallets that are already below the floor. |
 | `BASELOAD_FAUCET_DRIP_AMOUNT` | `100` | Ether. Expected size of one drip, used to project the post-drip balance against the ceiling. |
 | `BASELOAD_FAUCET_COOLDOWN_SECONDS` | `60` | Minimum gap between two drips for the same wallet. |
-| `BASELOAD_ADMIN_BEARER_TOKEN` | unset | Optional bearer token required for mutating Baseload worker configuration requests. Readonly requests stay public. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_PUBLIC_ORIGIN` | unset | Backend Google login configuration; all three required together. Missing all disables login and human admin access. |
+| `AUTH_ADMIN_EMAILS` | `sieciech.czajka@golem.network` | Exact normalized admin email allowlist; verified email and signed Workspace `hd=golem.network` are also required. |
+| `AUTH_SESSION_TTL_SECONDS` | `43200` | Absolute server session lifetime (60–604800 seconds). |
+| `AUTH_INSECURE_LOCALHOST` | `false` | Explicit HTTP localhost development cookies only. |
 | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional container path to a Baseload worker config JSON file that the backend loads once at startup. |
 | `BASELOAD_RPC_KEY_SERVICE_URL` | unset | Base URL of an [api-key-generator](https://github.com/Arkiv-Network/api-key-generator) instance. Setting it gives every worker its own generated RPC key instead of the one shared key in `BASELOAD_RPC_NODE`. |
 | `BASELOAD_RPC_KEY_PLACEMENT` | `bearer` | How a key is attached: `bearer` (`Authorization: Bearer <key>`), `header` (see below), or `path` (key as the last URL segment). |
@@ -349,6 +359,7 @@ Expected file shape:
   "workers": [
     {
       "walletNumber": 0,
+      "name": "Office hours",
       "behavior": "create",
       "maxGasPriceGwei": 1000,
       "opsPerMinute": 1,
@@ -361,7 +372,9 @@ Expected file shape:
       "startBlock": 0,
       "endBlock": null,
       "durationSeconds": null,
-      "ttlSeconds": 3600
+      "ttlSeconds": 3600,
+      "dailyWindow": "04:30-18:30",
+      "hourlyWindow": "24-58"
     }
   ]
 }
@@ -385,6 +398,8 @@ Worker behaviors (`behavior` field):
 Worker mechanics:
 
 - Each configured worker runs on the backend within its configured start block, optional end block, and optional duration.
+- `name` is a free-form label (up to 64 characters) shown in the panel instead of the wallet number.
+- `dailyWindow` (`"HH:MM-HH:MM"`, UTC) and `hourlyWindow` (`"MM-MM"`, minutes of every hour) pause the worker outside the given ranges without ending its run. Ends are exclusive and ranges may wrap (`"22:00-04:00"`, `"50-10"`); an hourly end may also run past 60 (`"50-70"` is the same window as `"50-10"`, at most one hour long); when both are set the worker is active only while both hold, so `"04:30-18:30"` plus `"24-58"` means minutes 24 to 57 of every hour between 04:30 and 18:30 UTC. Leave either `null` for "always".
 - `entitiesPerRequest` is currently normalized to at most `1`; increase load with `opsPerMinute` or multiple worker wallets instead of multi-entity mutation batches.
 - Each worker targets up to its configured operations per minute. Each operation submits one Arkiv mutation request for up to `entitiesPerRequest` entities. If a minute is missed or under-filled, unused capacity is not carried into later minutes.
 - Each worker performs one request at a time and waits for the transaction receipt before submitting the next one (`create-ownership` sends one create batch and then one ownership-change batch because ownership changes need the newly created entity keys).
@@ -398,7 +413,7 @@ Backend API:
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/baseload` | Returns backend Baseload enabled state, current config, and worker statuses. |
-| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. Requires `Authorization: Bearer <token>` when `BASELOAD_ADMIN_BEARER_TOKEN` is set. |
+| `PUT` | `/baseload` | Replaces the backend Baseload config and starts, updates, or stops backend workers to match it. Requires an administrator session with origin/CSRF checks, or a temporary administrator access token. |
 
 ## Nginx Deployment
 
@@ -699,7 +714,12 @@ characters and is normalized to lowercase. Operations are ordered by block numbe
 operation index ascending, capped at **1,000 rows**, and each carries its transaction context (`blockNumber`,
 `blockNumberDecimal`, `blockDate`, `position`, `hash`) alongside the same operation fields as
 `/transaction/:hash`. Returns `404` when no operations are stored for the key or transaction data is disabled.
-The frontend serves this history at `/entity/<key>`, linked from every entity key on a transaction page.
+When the entity index is enabled and the key was part of the chain's genesis state, the response also carries
+`genesis` — `{ owner, creator, expiresAt, contentType, creationFlags, payloadSize, attributes: [{ name, type,
+value }] }`, `expiresAt` the absolute block as a decimal string — and a genesis entity without operations answers
+`200` with an empty `operations` instead of `404` (a `404` cached before a late import stays cached until the
+history cache's TTL). The frontend serves this history at `/entity/<key>`, linked from every entity key on a
+transaction page.
 
 ### `GET /senders`
 
@@ -832,6 +852,11 @@ HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, 
 `/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
 under `features.jsonRpc`.
 
+It is an admin surface: every `POST` needs an administrator Google session, the configured `Origin`,
+and its `X-CSRF-Token` (`401`/`403` otherwise, `503` when login is unavailable), because the passthrough
+below spends the upstream node's quota and reaches its mempool. The experimental index path,
+`POST /shadow-rpc/experimental`, stays open to everyone.
+
 The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
 answers from what the scanner happened to store, so treat it as a fast read cache for indexed history rather
 than a source of truth — anything you would trust for consensus, settlement or proofs belongs on a real node.
@@ -879,13 +904,14 @@ unless the passthrough below is configured to forward them.
 Everything above is answered from PostgreSQL, which works for reads and cannot work for writes: a transaction
 has to reach a node's mempool, and no amount of stored history puts it there. Setting `SHADOW_RPC_UPSTREAM`
 opens one narrow hole — the methods in `SHADOW_RPC_UPSTREAM_METHODS`, and only those, are relayed to that node
-and their answers returned unchanged. It is never an open proxy. Unset (the default) nothing is forwarded and
-the endpoint talks to nothing but PostgreSQL. `GET /health` lists what is forwarded under
-`features.jsonRpcPassthrough`, or `false` when nothing is.
+and their answers returned unchanged. It is never an open proxy. Unset (the default) the relay follows the
+scanner: the scanner records the node it reads in `scanner_state` (`scanner_rpc_url`) at startup and the
+backend forwards there, keyless, so a deployment is told its node once. `GET /health` lists what is forwarded
+under `features.jsonRpcPassthrough`.
 
 | Environment variable | Default | Description |
 | --- | --- | --- |
-| `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset disables the passthrough. In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
+| `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset follows the node the scanner recorded (`SCANNER_RPC_FULL_NODE`, without its key). In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
 | `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
 | `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntity,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
 | `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
@@ -915,13 +941,13 @@ Worth knowing before pointing a wallet at it:
 Example:
 
 ```sh
-curl -s http://localhost:3000/shadow-rpc -H 'Content-Type: application/json' \
+curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 
 #### Experimental: entity reads from the index (`POST /shadow-rpc/experimental`)
 
-Off by default. With `ENTITY_QUERY_INDEX=true` the backend folds the decoded Arkiv operations
+On by default (`ENTITY_QUERY_INDEX=false` switches it off). The backend folds the decoded Arkiv operations
 (`transaction_operations`, so `SAVE_TRANSACTION_DATA=true` and a `DECODER_URL` are required) and the receipt
 event logs (`transaction_logs`) into two tables of its own — `entity_versions`, one row per state an entity
 went through with the block range it held for, and `entity_version_attributes`, that state's typed
@@ -930,7 +956,9 @@ from them on a **separate path**, `POST /shadow-rpc/experimental` (`/api/shadow-
 `/shadow-rpc` is untouched and keeps relaying those methods to the node, so the two paths are two independent
 sources for the same questions, and either can be checked against the other. The path answers `404` when the
 feature is off; `GET /health` reports it under `features.entityQueryIndex` as `false` or as
-`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, lastFoldAtUtc }`.
+`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, liveEntitiesAtUtc, lastFoldAtUtc,
+genesis }`, where `genesis` is `null` or the genesis import's `{ status, phase, source, total, imported,
+startedAtUtc, finishedAtUtc, updatedAtUtc, error }` (see "Genesis entities" below).
 
 The wire contract is the node's (`arkiv-reth-rpc` / `arkiv-rpc-types` in the 0.8 engine): the same parameter
 shapes and defaults (`atBlock` hex or `latest`, `limit` 1–200 default 100, `select` with `attributes` as a
@@ -951,6 +979,7 @@ Where the index cannot honour something the node does, it says so rather than ap
 | --- | --- | --- |
 | `latest` | The chain head. | The **projection head** (`projectedThroughBlock` in `/health`): the newest block folded, a few blocks behind the scanner head, itself behind the chain. `blockNumber` in every reply says which block answered. |
 | History | Any block the node keeps state for. | Blocks between the **floor** and the projection head; anything else is `-32006` with `{ requested, latest }`. The floor is the first block whose stored creates carry entity keys (`floorBlock` in `/health`); entities created before it are unknown, so counts count what the index holds. A backfill that writes older blocks lowers the floor as it goes; `ENTITY_INDEX_FLOOR_BLOCK` pins it instead. |
+| Genesis entities | Part of the block-0 state on a seeded chain. | Imported once, from the node or from the seed's state dump (see "Genesis entities" below); until that import is `done` the floor stays above 0 and they are unknown. `payloadSize` is 0 for ones imported over RPC. |
 | `select.payload` | The bytes. | Refused with `-32000`: payload bytes are never stored (the calldata invariant). `arkiv_getEntity` leaves `payload` out. |
 | `creationFlags` | Always known. | `null` for entities created before receipt logs were stored (the flags travel in the `EntityCreated` event, not the calldata). |
 | Cursors | Resume below an internal entity id. | Resume below a creation position. Both are opaque, bound to the query, block and `select`, and reject a cursor from another request with the node's own messages — but a cursor from one source cannot be handed to the other: the index answers a node's cursor with `-32005` and a message saying so. |
@@ -963,6 +992,115 @@ fill, a rescan, the backfill scanner — and refolds those keys too. A first bui
 history in chunks and takes minutes for a few hundred thousand blocks. All writes run under an advisory lock,
 so two backends on one database never fold on top of each other.
 
+**Genesis entities (seeded chains).** A devnet built with
+[arkiv-prefill](https://github.com/Arkiv-Network/arkiv-prefill) carries its dataset in the block-0 state:
+`arkiv-cli seed-genesis` writes a reth `init-state` dump, the node starts on it, and no transaction, receipt or
+decoded operation ever mentions those entities, so the fold above never sees them. The index imports them once
+instead, as version-0 rows with `createdAt = 0` (block 0 never carries a transaction, so that is the genesis
+marker) in the node's entity-id order (`arkiv_query` at block 0 pages newest-first by id, and ids are allocated in
+seed order), and later operations on a genesis key fold on top of that base. With `ENTITY_INDEX_GENESIS=auto`
+(the default) the projector asks the node once — `eth_chainId`, block 0's hash, `arkiv_getEntityCount` at block 0 —
+and records the answer in `/health` → `entityQueryIndex.genesis`: `none` (no genesis entities), `unavailable`
+(the node cannot answer for block 0), `running` while it pages `arkiv_query("*", { atBlock: "0x0" })` in and then
+refolds the genesis keys that already have operations (`phase` `walk`, then `repair`), `done` with the floor at 0,
+`failed` with the reason (a chain-id or genesis-hash mismatch, an entity it would have to guess about), or
+`waiting` when the node holds more than `ENTITY_INDEX_GENESIS_RPC_LIMIT` (1,000,000) of them — the node collects
+every matching id before slicing a page, so each page costs O(N) and a 100-million-entity genesis cannot be walked
+over RPC. Folding pauses while an import runs, so an operation on a genesis key is never folded before its base
+exists; a shutdown ends the walk after the batch in flight, and a restart resumes from the stored cursor. The
+node is `ENTITY_INDEX_GENESIS_RPC`, defaulting to
+`SHADOW_RPC_UPSTREAM`; `ENTITY_INDEX_GENESIS=off` never asks (an offline import is still finished). Entities
+imported over RPC have `payloadSize` 0: the payload is never fetched, and the column never reaches the wire.
+
+Big seeds are loaded offline from the dump itself by `scripts/importGenesisState.ts`, the only script in the
+repository that writes to Postgres. It streams `state.jsonl` once (records decoded, payloads only measured), proves
+that the records' file order is the node's id order against the system account's `id2key` slots and entity count
+(two keccak chains; no key is kept in memory), writes batches of 5,000 under the index's fold lock with a resume
+point in the state row (an interrupted run continues from its last batch), drops the secondary indexes for the
+load on an empty index and rebuilds them after, and hands the import to the running backend, whose projector does
+the repair and marks it `done`. With `--rpc <node>` it first checks the chain id, genesis hash, block-0 state root
+and entity count against the node. Run it in the backend's container, where Postgres and the mounted seed are
+reachable:
+
+```sh
+docker compose --env-file .env.sourcify.local -f docker-compose.yml -f docker-compose.prefill.yml \
+  run --rm backend bun run scripts/importGenesisState.ts \
+    --dump /prefill/seed/state.jsonl --rpc http://arkiv-sourcify-node-1:8545 \
+    --progress-file /prefill/index/genesis-import-progress.json
+```
+
+It prints one JSON document per line (`--log text` for prose): the progress document below plus an `event` field
+(`start`, `phase`, `progress`, `done`, `stopped`, `error`), so `tail -1 | jq .percent` works on the log. Exit
+status 0 means handed off, 1 failed, 2 usage, 130 stopped by a signal (resumable). To import again after `done`
+or `failed`, reset the index: stop the backend, `TRUNCATE entity_versions, entity_version_attributes; DELETE FROM
+entity_index_state;`, start it again.
+
+**Progress file.** Both importers write the same document — `ENTITY_INDEX_GENESIS_PROGRESS_FILE` for the
+backend, `--progress-file` (defaulting to that variable) for the script — atomically on every change, in the style
+of arkiv-prefill's `seed-progress.json` and `init-state-progress.json`, so its dashboard can follow the whole
+import from one file. Abridged:
+
+```json
+{
+  "tool": "arkiv-chain-indexer", "format": 1, "writer": "import-script",
+  "status": "running", "phase": "loading", "percent": 41.3, "source": "dump", "pid": 8,
+  "started_at": 1788909600.2, "updated_at": 1788909651.9, "finished_at": null,
+  "elapsed_s": 51.7, "phase_elapsed_s": 49.1, "phases": { "starting": 0.1, "checking": 2.5 }, "error": null,
+  "chain_id": 7733102, "genesis_hash": "0x70d9…0279", "state_root": "0x1d97…c01b",
+  "entities": { "total": 28825, "imported": 15000, "skipped": 0, "attributes": 111602,
+                "payload_bytes": 107221120, "rate_per_s": 305.2, "eta_s": 45 },
+  "dump": { "path": "/prefill/seed/state.jsonl", "bytes_total": 529266475, "bytes_read": 251400000,
+            "bytes_per_s": 5120000, "eta_s": 54, "lines": 30001, "records": 15000,
+            "system_account": { "seen": false, "ids": 0, "entity_count": null }, "verification": "pending" },
+  "rpc": null,
+  "database": { "schema": "public", "batch_size": 5000, "batches": 3, "last_batch_ms": 812,
+                "indexes": "dropped", "index_rebuild_s": null },
+  "repair": null
+}
+```
+
+`phase` runs `starting` → `checking` → `loading` → `verifying` → `indexing` → `repairing` → `done` for the script
+and `walking` → `repairing` → `done` for the backend's node walk (`waiting`, `unavailable` and `failed` as in
+`/health`; `stopped` for a run interrupted at a batch boundary), `percent` covers the whole import (loading by
+bytes read, walking by entities, 100 at `done`), `phases` holds the seconds each finished phase took, `rpc` /
+`dump` / `database` / `repair` carry the detail of whichever source and stage apply, and `writer` names the
+process that last wrote the file — the script hands it to the backend at `repairing`. `pid` is that process, so a
+watcher can tell a stalled run from a finished one.
+
+**Index a local prefill devnet.** arkiv-prefill runs this indexer itself: its `docker-compose.indexer.yml`,
+included by both of its compose files, starts the published images next to the seeded node (the explorer on
+port 3021, or 3031 for its Sourcify run) and shows the import as the "Index" stage of its watcher page, so a
+plain `docker compose up` there is enough. The recipe below runs a stack built from this checkout against
+such a node instead, for developing the indexer; not alongside the prefill project's own indexer, which keeps
+the same progress file. The prefill node publishes its RPC on `127.0.0.1` only, so a stack that indexes
+it joins the node's compose network through `docker-compose.prefill.yml` (`PREFILL_NETWORK`, default
+`arkiv-sourcify_default`), which also mounts the run's artifacts at `/prefill` (`PREFILL_ARTIFACTS`, default
+`../arkiv-prefill/artifacts/sourcify-run` next to this checkout) and points the progress file into them. A third
+stack from this checkout, with its own env file:
+
+```sh
+# .env.sourcify.local
+COMPOSE_PROJECT_NAME=arkiv-chain-indexer-sourcify
+BACKEND_PORT=3002
+FRONTEND_PORT=23562
+SCANNER_RPC_FULL_NODE=http://arkiv-sourcify-node-1:8545
+SHADOW_RPC_UPSTREAM=http://arkiv-sourcify-node-1:8545
+SCANNER_OLDEST_BACKFILL_BLOCK=0
+SCANNER_DISABLE_BACKFILL=false
+SAVE_TRANSACTION_DATA=true
+ENTITY_QUERY_INDEX=true
+VITE_NETWORK_NAME=Sourcify
+# compose checks this while parsing, even though the rpc-proxy profile is off
+RPC_PROXY_UPSTREAM=http://arkiv-sourcify-node-1:8545
+```
+
+```sh
+docker compose --env-file .env.sourcify.local -f docker-compose.yml -f docker-compose.prefill.yml up -d --build
+curl -s http://127.0.0.1:3002/health | jq .features.entityQueryIndex.genesis
+bun run scripts/compareEntityQuery.ts --node http://127.0.0.1:8645 \
+  --index http://127.0.0.1:3002/shadow-rpc/experimental --at-block 0 --since-block 0
+```
+
 Two scripts turn the pair into a test rig. `scripts/compareEntityQuery.ts --node <url> --index <url>` walks
 the same queries on both sides at the same block — discovering them from the data, plus any fixture manifest —
 and reports every difference in order, fields, page boundaries, counts, `arkiv_getEntity` and the error
@@ -974,6 +1112,50 @@ a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run an
 The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
 `rpc=index` in shared links) when `/health` reports it enabled.
 
+### `GET /metrics` and `GET /admin/metrics`
+
+`GET /metrics` is open without authentication; deployment networking and proxy rules control external access.
+`GET /admin/metrics` requires an administrator login session or a generated access token.
+The public nginx path is `/api/admin/metrics`; `/api/metrics` remains blocked.
+Create tokens in **Access tokens** beside the signed-in administrator account. Tokens grant all admin API
+permissions, expire within 30 days, and can be revoked there. Use `Authorization: Bearer <access-token>`.
+The old metrics and Baseload environment credentials no longer grant access. See
+[login and token management](docs/google-login.md#automation-migration) and [scraper setup](docs/prometheus.md).
+
+The frontend's `/health` page ends with a **Server metrics** panel that renders this registry — traffic by
+route with its Postgres share, JSON-RPC by method, cache hit rates, process totals, and the raw text on
+demand. It reads `/api/admin/metrics`, so it appears only in admin mode and says so otherwise.
+
+`METRICS_ENABLED=false` removes both. A successful scrape of either path is never counted as traffic; a rejected one is, so a run of 401s against the admin path is visible in `indexer_http_requests_rejected_total`.
+
+Every traffic metric is labelled by *route template* (`/transaction/:hash`, `/blocks/:number`, …) and never by
+the raw path or query string; unknown paths land on `other`, and unknown JSON-RPC method names on `unknown`, so
+series cardinality stays bounded whatever clients send.
+
+| Metric | Type | Labels | What it tells you |
+| --- | --- | --- | --- |
+| `indexer_http_requests_total` | counter | `route`, `method`, `status` | Request rate and error ratio per endpoint. |
+| `indexer_http_request_duration_seconds` | histogram | `route`, `method` | Latency percentiles per endpoint. |
+| `indexer_http_response_bytes_total` | counter | `route`, `encoding` | Egress per endpoint, split by wire encoding (`zstd`, `gzip`, `identity`). |
+| `indexer_http_requests_in_flight` | gauge | `route` | Which endpoint is queueing right now. |
+| `indexer_http_requests_rejected_total` | counter | `route`, `reason` | 4xx by reason (`bad_request`, `unauthorized`, `not_found`, …). |
+| `indexer_jsonrpc_requests_total` | counter | `path`, `rpc_method`, `source`, `outcome` | Per-method call rate on `/shadow-rpc` and `/shadow-rpc/experimental`; `source` is `stored`, `upstream` (passthrough) or `override` (entity index). |
+| `indexer_jsonrpc_request_duration_seconds` | histogram | `path`, `rpc_method` | Per-method latency. |
+| `indexer_jsonrpc_batch_size` | histogram | `path` | Calls per JSON-RPC HTTP request. |
+| `indexer_jsonrpc_get_logs_blocks_total`, `indexer_jsonrpc_get_logs_returned_total` | counter | — | How wide `eth_getLogs` queries are and how much they return. |
+| `indexer_cache_requests_total` | counter | `cache`, `result` | Hit/miss/coalesced per cache (`entity_history`, `list`, `transaction_count`). |
+| `indexer_cache_entries`, `indexer_cache_bytes` | gauge | `cache` | Current cache occupancy. |
+| `indexer_cache_evictions_total` | counter | `cache`, `reason` | Drops by `invalidation` (NOTIFY), `ttl`, or `capacity`. |
+| `indexer_db_query_duration_seconds` | histogram | `route` | Postgres time attributed to the route that issued the query. |
+| `indexer_db_queries_total` | counter | `route`, `outcome` | Query rate and failures per route. |
+| `indexer_db_queries_in_flight` | gauge | — | Queries awaiting a result. |
+| `indexer_head_block`, `indexer_chain_head_block`, `indexer_lag_blocks`, `indexer_head_age_seconds` | gauge | — | How far the index trails the chain. |
+| `indexer_entity_index_floor_block`, `indexer_entity_index_projected_through_block`, `indexer_entity_index_live_entities`, `indexer_entity_index_genesis_entities_total`, `indexer_entity_index_genesis_entities_imported` | gauge | — | The entity index's floor and head, its last live-entity count, and the genesis import's progress; only with `ENTITY_QUERY_INDEX` on. |
+| `indexer_process_start_time_seconds`, `indexer_process_resident_memory_bytes`, `indexer_process_heap_used_bytes` | gauge | — | Process basics. |
+| `indexer_build_info` | gauge | `commit`, `built_at` | Always `1`; identifies the running build. |
+
+A scrape config and starter queries are in [`docs/prometheus.md`](docs/prometheus.md).
+
 ### Server configuration
 
 | CLI flag | Environment variable | Default | Description |
@@ -981,8 +1163,13 @@ The frontend's `/data` page offers the index as a third RPC source ("Indexer ent
 | `--database-url` | `DATABASE_URL` | required | PostgreSQL connection string. |
 | `--port` | `SERVER_PORT` | `3000` | TCP port to listen on. Use `0` to pick any free port. |
 | `--host` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
-| `--entity-query-index` | `ENTITY_QUERY_INDEX` | `false` | Build the experimental entity index and serve `POST /shadow-rpc/experimental`. |
+| `--entity-query-index` | `ENTITY_QUERY_INDEX` | `true` | Build the entity index and serve `POST /shadow-rpc/experimental`; `false` switches it off. |
+| `--metrics-enabled` | `METRICS_ENABLED` | `true` | Serve Prometheus metrics on `GET /metrics`. |
 | `--entity-index-floor-block` | `ENTITY_INDEX_FLOOR_BLOCK` | detected | Pin the index floor instead of detecting the first keyed create. |
+| `--entity-index-genesis` | `ENTITY_INDEX_GENESIS` | `auto` | `auto` asks the node once whether block 0 holds entities and imports them; `off` never asks (an offline import is still finished). |
+| `--entity-index-genesis-rpc` | `ENTITY_INDEX_GENESIS_RPC` | `SHADOW_RPC_UPSTREAM` | The node the genesis import reads (with `SHADOW_RPC_UPSTREAM_API_KEY`). |
+| `--entity-index-genesis-rpc-limit` | `ENTITY_INDEX_GENESIS_RPC_LIMIT` | `1000000` | Most genesis entities imported over RPC; a bigger genesis waits for `scripts/importGenesisState.ts`. |
+| `--entity-index-genesis-progress-file` | `ENTITY_INDEX_GENESIS_PROGRESS_FILE` | unset | Write the genesis import's progress document here on every change. |
 
 ```sh
 bun run serve -- --help
@@ -1021,9 +1208,12 @@ are hidden:
   menu to query by that value only, add it to the current query, or copy it. "Load next page" resumes the
   node's cursor at the block the first page was read at; "Expiring within 24h" filters the loaded cards
   client-side. Syntax errors show the node's message with a caret at the reported position. Below the results
-  is a collapsed RPC endpoint switch: the **indexer backend** (`/api/shadow-rpc`, which forwards `arkiv_query`,
-  `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the node it is configured with, using the deployment's
-  key) or a **custom RPC URL** called straight from the browser. The choice is kept in browser local storage.
+  is a collapsed RPC endpoint switch: the **experimental entity index** (`/api/shadow-rpc/experimental`, the
+  default) or a **custom RPC URL** called straight from the browser; in admin mode the **indexer backend**
+  (`/api/shadow-rpc`, which forwards `arkiv_query`, `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the
+  node it is configured with, using the deployment's key and an administrator session) and **Both (compare)** join the
+  list. The choice is kept in browser local storage; a remembered or linked `backend`/`both` is used as the
+  index outside admin mode.
   "Check connection" runs `eth_chainId`, `web3_clientVersion` and the three Arkiv reads against the selected
   endpoint and reports each call's verdict, latency and result, plus the node's head block, block time, live
   entity count and a sample entity key linked to its indexed history. The page also reads `/api/health` to warn

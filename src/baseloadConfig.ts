@@ -8,6 +8,7 @@ import {
   parseBaseloadRpcKeyRuntimeConfig,
   type BaseloadRpcKeyRuntimeConfig,
 } from "./baseloadRpcKeys";
+import { normalizeDailyWindow, normalizeHourlyWindow } from "./baseloadSchedule";
 
 export const BASELOAD_WORKER_BEHAVIORS = [
   "create",
@@ -21,6 +22,8 @@ export type BaseloadWorkerBehavior = (typeof BASELOAD_WORKER_BEHAVIORS)[number];
 
 export interface BaseloadWorkerConfig {
   id: string;
+  /** Free-form label for humans; empty means "wallet #N". */
+  name: string;
   behavior: BaseloadWorkerBehavior;
   maxGasPriceGwei: number;
   opsPerMinute: number;
@@ -36,6 +39,10 @@ export interface BaseloadWorkerConfig {
   endBlock: number | null;
   durationSeconds: number | null;
   ttlSeconds: number;
+  /** "HH:MM-HH:MM" in UTC, end exclusive, may wrap midnight; null = every hour of the day. */
+  dailyWindow: string | null;
+  /** "MM-MM" minutes of every hour, end exclusive, may wrap; null = every minute of the hour. */
+  hourlyWindow: string | null;
 }
 
 export interface BaseloadConfig {
@@ -44,6 +51,7 @@ export interface BaseloadConfig {
 }
 
 export interface BaseloadWorkerDraft {
+  name: string;
   behavior: string;
   maxGasPriceGwei: string;
   opsPerMinute: string;
@@ -58,6 +66,8 @@ export interface BaseloadWorkerDraft {
   endBlock: string;
   durationSeconds: string;
   ttlSeconds: string;
+  dailyWindow: string;
+  hourlyWindow: string;
 }
 
 export interface BaseloadRuntimeConfig {
@@ -93,7 +103,10 @@ export const DEFAULT_BASELOAD_PAYLOAD_PROVIDER_NAMESPACE = "arkiv.entities";
 export const DEFAULT_BASELOAD_MNEMONIC =
   "parent picture garment parrot churn record stadium pill rocket craft fish fiscal clip virus view diary replace wealth extra kitten door enforce piece nut";
 
+export const MAX_WORKER_NAME_LENGTH = 64;
+
 export const DEFAULT_BASELOAD_WORKER_VALUES = {
+  name: "",
   behavior: "create" as BaseloadWorkerBehavior,
   maxGasPriceGwei: 1000,
   opsPerMinute: 1,
@@ -107,6 +120,8 @@ export const DEFAULT_BASELOAD_WORKER_VALUES = {
   endBlock: null,
   durationSeconds: null,
   ttlSeconds: 3600,
+  dailyWindow: null,
+  hourlyWindow: null,
 } as const;
 
 export const EMPTY_BASELOAD_CONFIG: BaseloadConfig = {
@@ -154,6 +169,7 @@ function parseBaseloadPayloadProviderVerifyReceipt(value: string | undefined): b
 
 export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerDraft {
   return {
+    name: "",
     behavior: DEFAULT_BASELOAD_WORKER_VALUES.behavior,
     maxGasPriceGwei: String(DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei.toFixed(1)),
     opsPerMinute: String(DEFAULT_BASELOAD_WORKER_VALUES.opsPerMinute),
@@ -172,6 +188,8 @@ export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerD
     endBlock: "",
     durationSeconds: "",
     ttlSeconds: String(DEFAULT_BASELOAD_WORKER_VALUES.ttlSeconds),
+    dailyWindow: "",
+    hourlyWindow: "",
   };
 }
 
@@ -183,6 +201,7 @@ export function createBaseloadWorkerFromDraft(
     {
       ...DEFAULT_BASELOAD_WORKER_VALUES,
       id: createWorkerId(Number(draft.walletNumber)),
+      name: draft.name,
       behavior: draft.behavior,
       maxGasPriceGwei: parseFiniteNumber("Max gas price accepted gwei", draft.maxGasPriceGwei, {
         allowFloat: true,
@@ -245,6 +264,8 @@ export function createBaseloadWorkerFromDraft(
         allowFloat: false,
         min: 1,
       }),
+      dailyWindow: normalizeDailyWindow(draft.dailyWindow),
+      hourlyWindow: normalizeHourlyWindow(draft.hourlyWindow),
     },
     mnemonic,
   );
@@ -364,6 +385,7 @@ function normalizeBaseloadWorker(
 
   return {
     id: typeof input.id === "string" && input.id.trim() ? input.id : createWorkerId(walletNumber),
+    name: coerceName(input.name),
     behavior: coerceBehavior(input.behavior),
     maxGasPriceGwei: coerceNumber("Max gas price accepted gwei", input.maxGasPriceGwei, {
       min: 0,
@@ -401,7 +423,19 @@ function normalizeBaseloadWorker(
     endBlock,
     durationSeconds: coerceNullableInteger("Duration seconds", input.durationSeconds, { min: 1 }),
     ttlSeconds: coerceInteger("TTL seconds", input.ttlSeconds, { min: 1 }),
+    dailyWindow: normalizeDailyWindow(input.dailyWindow),
+    hourlyWindow: normalizeHourlyWindow(input.hourlyWindow),
   };
+}
+
+function coerceName(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new Error("Worker name must be a string");
+  const name = value.trim();
+  if (name.length > MAX_WORKER_NAME_LENGTH) {
+    throw new Error(`Worker name must be at most ${MAX_WORKER_NAME_LENGTH} characters`);
+  }
+  return name;
 }
 
 function coerceBehavior(value: unknown): BaseloadWorkerBehavior {

@@ -170,5 +170,5 @@ function storedBlock(
     totalGasUsed: "0",
     maxGasInBlock: "0",
     ...overrides,
-  };
+  } as StoredBlock;
 }

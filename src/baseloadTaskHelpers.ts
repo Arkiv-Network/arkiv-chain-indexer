@@ -2,6 +2,7 @@ import {
   MAX_BASELOAD_ENTITIES_PER_REQUEST,
   type BaseloadWorkerConfig,
 } from "./baseloadConfig";
+import { isBaseloadScheduleActive } from "./baseloadSchedule";
 
 export const BASELOAD_PROJECT_ATTRIBUTE = {
   key: "project",
@@ -12,6 +13,7 @@ export type BaseloadTaskLimitState =
   | { type: "before-start"; currentBlock: number }
   | { type: "after-end"; currentBlock: number }
   | { type: "duration-ended" }
+  | { type: "outside-schedule"; currentBlock: number }
   | { type: "active"; currentBlock: number };
 
 export interface BaseloadCreateInput {
@@ -149,6 +151,11 @@ export function getBaseloadLimitState(
   if (worker.durationSeconds !== null && nowMs - runStartedAtMs >= worker.durationSeconds * 1000) {
     return { type: "duration-ended" };
   }
+  // The schedule pauses rather than ends the run, so it comes after the
+  // terminal checks: a worker outside its window still finishes on time.
+  if (!isBaseloadScheduleActive(worker, nowMs)) {
+    return { type: "outside-schedule", currentBlock };
+  }
   return { type: "active", currentBlock };
 }
 
@@ -236,4 +243,69 @@ function bytesToSafeInteger(bytes: Uint8Array): number {
     value = value * 256 + byte;
   }
   return value;
+}
+
+/**
+ * True when a send was refused because the worker's fee cap sits below the
+ * current block base fee. That is the cap doing its job, not a fault: the
+ * worker should wait for gas to come down rather than report an error.
+ */
+export function isFeeCapBelowBaseFeeError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { name?: unknown; message?: unknown; cause?: unknown };
+    if (candidate.name === "FeeCapTooLowError") return true;
+    if (typeof candidate.message === "string" && FEE_CAP_TOO_LOW_PATTERN.test(candidate.message)) return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
+const FEE_CAP_TOO_LOW_PATTERN =
+  /cannot be lower than the block base fee|max fee per gas less than block base fee|fee cap less than block base fee/i;
+
+export interface BaseFeeSource {
+  getBaseFeeWei: () => Promise<bigint | null>;
+}
+
+/**
+ * One base-fee reading shared by every worker. The fleet only needs the
+ * value about once per block, so concurrent readers share a single in-flight
+ * call and a fresh value is served from memory. Failures are not cached.
+ */
+export class BaseFeeCache {
+  private value: bigint | null = null;
+  private fetchedAtMs = Number.NEGATIVE_INFINITY;
+  private inFlight: Promise<bigint | null> | null = null;
+
+  constructor(
+    private readonly ttlMs: number,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  read(source: BaseFeeSource): Promise<bigint | null> {
+    if (this.now() - this.fetchedAtMs < this.ttlMs) return Promise.resolve(this.value);
+    if (this.inFlight) return this.inFlight;
+    this.inFlight = source
+      .getBaseFeeWei()
+      .then((value) => {
+        this.value = value;
+        this.fetchedAtMs = this.now();
+        return value;
+      })
+      .finally(() => {
+        this.inFlight = null;
+      });
+    return this.inFlight;
+  }
+}
+
+export function formatGweiShort(wei: bigint): string {
+  return (Number(wei) / 1e9).toFixed(3).replace(/\.?0+$/, "");
+}
+
+export function isOutpriced(baseFeeWei: bigint | null, maxFeePerGas: bigint): boolean {
+  return baseFeeWei !== null && baseFeeWei > maxFeePerGas;
 }

@@ -50,10 +50,21 @@ export interface DataPageFilters extends Record<string, string> {
    * experimental entity index, or empty for the indexer backend.
    */
   rpc: string;
+  block: string;
 }
 
-export const DATA_FILTER_KEYS = ["q", "pageSize", "expiration", "rpc"] as const;
-export const EMPTY_DATA_FILTERS: DataPageFilters = { q: "", pageSize: "", expiration: "", rpc: "" };
+export const DATA_FILTER_KEYS = ["q", "pageSize", "expiration", "rpc", "block"] as const;
+export const EMPTY_DATA_FILTERS: DataPageFilters = { q: "", pageSize: "", expiration: "", rpc: "", block: "" };
+
+/** Empty or latest follows the head; explicit heights must retain integer precision. */
+export function parseQueryBlock(value: string): number | undefined {
+  const text = value.trim();
+  if (!text || text.toLowerCase() === "latest") return undefined;
+  if (!/^(?:[0-9]+|0x[0-9a-fA-F]+)$/.test(text) || !Number.isSafeInteger(Number(text))) {
+    throw new Error("Enter a non-negative whole block number (decimal or 0x hex), or leave blank for latest.");
+  }
+  return Number(text);
+}
 
 /** Coerces raw URL values to the page's settings, falling back to the defaults for junk. */
 export function resolvePageSize(value: string | null | undefined): PageSize {
@@ -75,12 +86,14 @@ export function dataPageFilters(
   expiration: ExpirationFilter,
   /** The `rpc` link value: a custom URL, `index`, or empty (see {@link DataPageFilters.rpc}). */
   rpcLink = "",
+  block = "",
 ): DataPageFilters {
   return {
     q: query,
     pageSize: pageSize === DEFAULT_PAGE_SIZE ? "" : pageSize,
     expiration: expiration === DEFAULT_EXPIRATION_FILTER ? "" : expiration,
     rpc: rpcLink.trim(),
+    block: block.trim(),
   };
 }
 

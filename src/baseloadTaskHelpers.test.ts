@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   BASELOAD_PROJECT_ATTRIBUTE,
+  BaseFeeCache,
+  formatGweiShort,
+  isFeeCapBelowBaseFeeError,
+  isOutpriced,
   chooseBaseloadOperation,
   createBaseloadAttributes,
   createBaseloadEntityInput,
@@ -64,6 +68,8 @@ describe("baseload task helpers", () => {
       singleCreateStringArgumentCount: 2,
       singleCreateNumberArgumentCount: 1,
       ttlSeconds: 120,
+      dailyWindow: null,
+      hourlyWindow: null,
     });
 
     const input = createBaseloadEntityInput(worker, fixedRandomBytes);
@@ -188,6 +194,7 @@ describe("baseload task helpers", () => {
 function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfig {
   return {
     id: "wallet-1",
+    name: "",
     behavior: "create",
     maxGasPriceGwei: 1000,
     opsPerMinute: 1,
@@ -203,6 +210,8 @@ function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfi
     endBlock: null,
     durationSeconds: null,
     ttlSeconds: 3600,
+    dailyWindow: null,
+    hourlyWindow: null,
     ...patch,
   };
 }
@@ -210,3 +219,83 @@ function createWorker(patch: Partial<BaseloadWorkerConfig>): BaseloadWorkerConfi
 function fixedRandomBytes(size: number): Uint8Array {
   return Uint8Array.from({ length: size }, (_, index) => index % 256);
 }
+
+describe("isFeeCapBelowBaseFeeError", () => {
+  test("recognizes viem's error by name, by message, and through the cause chain", () => {
+    const named = Object.assign(new Error("boom"), { name: "FeeCapTooLowError" });
+    expect(isFeeCapBelowBaseFeeError(named)).toBe(true);
+    expect(
+      isFeeCapBelowBaseFeeError(
+        new Error("The fee cap (`maxFeePerGas` = 1.7 gwei) cannot be lower than the block base fee."),
+      ),
+    ).toBe(true);
+    const wrapped = new Error("EntityMutationError: Transaction failed", {
+      cause: new Error("max fee per gas less than block base fee"),
+    });
+    expect(isFeeCapBelowBaseFeeError(wrapped)).toBe(true);
+  });
+
+  test("leaves other failures alone", () => {
+    expect(isFeeCapBelowBaseFeeError(new Error("Execution error without revert data"))).toBe(false);
+    expect(isFeeCapBelowBaseFeeError(null)).toBe(false);
+    expect(isFeeCapBelowBaseFeeError("nonce too low")).toBe(false);
+  });
+});
+
+describe("BaseFeeCache", () => {
+  test("shares one in-flight read and serves it until it goes stale", async () => {
+    let now = 0;
+    let calls = 0;
+    let resolveRead: (value: bigint | null) => void = () => undefined;
+    const source = {
+      getBaseFeeWei: () => {
+        calls += 1;
+        return new Promise<bigint | null>((resolve) => {
+          resolveRead = resolve;
+        });
+      },
+    };
+    const cache = new BaseFeeCache(2000, () => now);
+    const first = cache.read(source);
+    const second = cache.read(source);
+    resolveRead(1_500_000_000n);
+    expect(await first).toBe(1_500_000_000n);
+    expect(await second).toBe(1_500_000_000n);
+    expect(calls).toBe(1);
+
+    now = 1000;
+    expect(await cache.read(source)).toBe(1_500_000_000n);
+    expect(calls).toBe(1);
+
+    now = 2500;
+    const third = cache.read(source);
+    resolveRead(2_000_000_000n);
+    expect(await third).toBe(2_000_000_000n);
+    expect(calls).toBe(2);
+  });
+
+  test("does not cache a failed read", async () => {
+    let attempts = 0;
+    const source = {
+      getBaseFeeWei: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("rpc down");
+        return 7n;
+      },
+    };
+    const cache = new BaseFeeCache(2000, () => 0);
+    await expect(cache.read(source)).rejects.toThrow("rpc down");
+    expect(await cache.read(source)).toBe(7n);
+  });
+});
+
+describe("outpriced check", () => {
+  test("compares the base fee with the cap and formats gwei", () => {
+    expect(isOutpriced(2_013_120_695n, 2_000_000_000n)).toBe(true);
+    expect(isOutpriced(2_000_000_000n, 2_000_000_000n)).toBe(false);
+    expect(isOutpriced(null, 1n)).toBe(false);
+    expect(formatGweiShort(2_013_120_695n)).toBe("2.013");
+    expect(formatGweiShort(1_500_000_000n)).toBe("1.5");
+    expect(formatGweiShort(2_000_000_000n)).toBe("2");
+  });
+});

@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="An eighteen-slide product tour of the Arkiv explorer, from standard browsing and entity queries to administrator diagnostics, Baseload, and automation.">
+  <title>Arkiv explorer · Product tour</title>
+  <style>
+    :root {
+      --paper: #f4f3ee; --ink: #192725; --muted: #576760; --line: #cfd5cd;
+      --accent: #ad3f20; --soft: #f4e3d7; --green: #245649; --mint: #e3ebe3;
+      --blue: #245c7b; --blue-soft: #e4ecf1; --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; cursor: pointer; }
+    button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    .masthead { max-width: 1440px; margin: auto; padding: 22px 48px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 760; letter-spacing: -.04em; font-size: 24px; }
+    .mark { width: 21px; height: 21px; background: var(--accent); clip-path: polygon(0 100%, 38% 0, 66% 0, 100% 100%, 69% 100%, 51% 39%, 31% 100%); }
+    .brand small { margin-left: 10px; padding-left: 22px; border-left: 1px solid var(--line); color: var(--muted); font: 11px var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    .tools { display: none; gap: 7px; align-items: center; }
+    .js .tools { display: flex; }
+    .button { border: 1px solid var(--line); border-radius: 5px; background: transparent; padding: 8px 12px; color: var(--ink); font-size: 12px; font-weight: 600; }
+    .button:hover, .button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .button:disabled { opacity: .3; cursor: default; }
+    main { max-width: 1440px; margin: auto; }
+    .slide { padding: 34px 48px 28px; min-height: 670px; border-bottom: 1px solid var(--line); }
+    .js .slide { min-height: calc(100svh - 160px); border: 0; }
+    .slide[hidden] { display: none; }
+    .eyebrow { display: flex; align-items: center; gap: 14px; color: var(--muted); font: 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .eyebrow b { color: var(--accent); font-weight: 600; }
+    .eyebrow .time { margin-left: auto; letter-spacing: 0; }
+    h1, h2 { font-size: clamp(32px, 3.65vw, 52px); line-height: 1.08; font-weight: 650; letter-spacing: -.045em; margin: 20px 0 12px; max-width: 1100px; }
+    h3 { font-size: 21px; line-height: 1.25; margin: 0 0 13px; letter-spacing: -.025em; font-weight: 650; }
+    p { margin: 0; line-height: 1.5; }
+    .lede { font-size: 19px; color: var(--muted); max-width: 1080px; margin-bottom: 27px; }
+    .grid { display: grid; gap: 24px; }
+    .two { grid-template-columns: 1fr 1fr; }
+    .three { grid-template-columns: repeat(3, 1fr); }
+    .split { grid-template-columns: 1.13fr 1fr; }
+    .panel { padding: 24px; border: 1px solid var(--line); border-radius: 7px; }
+    .panel.tint { background: var(--mint); border-color: #c7d5ca; }
+    .panel.dark { color: #edf3ea; background: var(--ink); border-color: var(--ink); }
+    .panel.dark .label, .panel.dark p { color: #c8d6cb; }
+    .label { display: block; color: var(--muted); font: 11px var(--mono); letter-spacing: .07em; text-transform: uppercase; margin-bottom: 13px; }
+    .panel p, li { font-size: 17px; line-height: 1.5; }
+    ul, ol { margin: 0; padding-left: 21px; }
+    li + li { margin-top: 12px; }
+    strong { font-weight: 680; }
+    code { font-family: var(--mono); font-size: .86em; overflow-wrap: anywhere; }
+    pre { margin: 0; font: 14px/1.62 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    pre code { font: inherit; }
+    .sql-key { color: #a7d9ba; }
+    .sql-comment { color: #bac9bc; }
+    .callout { display: flex; gap: 17px; align-items: baseline; margin-top: 22px; padding: 16px 20px; background: var(--soft); border-left: 3px solid var(--accent); border-radius: 0 5px 5px 0; font-size: 16px; line-height: 1.45; }
+    .callout .label { flex-shrink: 0; color: var(--accent); margin: 0; }
+    .sources { color: var(--muted); margin-top: 20px; font: 11px/1.7 var(--mono); }
+    .sources a { color: inherit; }
+    .notes { margin-top: 18px; padding: 18px 20px; border: 1px dashed var(--muted); border-radius: 5px; font-size: 15px; line-height: 1.6; }
+    .notes strong { color: var(--accent); }
+    .js .notes { display: none; }
+    .js.show-notes .notes { display: block; }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 26px; padding: 10px 0 25px; }
+    .node { position: relative; padding: 21px 16px; border: 1px solid var(--line); border-top: 3px solid var(--green); border-radius: 5px; background: #fafaf6; }
+    .node::after { content: "→"; position: absolute; right: -22px; top: 46px; color: var(--muted); font: 20px var(--mono); }
+    .node:last-child::after { display: none; }
+    .node.db { background: var(--ink); color: var(--paper); border-color: var(--ink); border-top-color: #a1c6ab; }
+    .node .label { margin-bottom: 18px; font-size: 10px; }
+    .node.db .label, .node.db p { color: #d0dccf; }
+    .node h3 { font-size: 20px; margin-bottom: 9px; }
+    .node p { font-size: 14px; }
+    .mini { font: 12px/1.6 var(--mono); color: var(--muted); }
+    .rail { border-top: 2px solid var(--ink); padding-top: 16px; }
+    .rail p { color: var(--muted); font-size: 16px; }
+    .stack { display: grid; grid-template-columns: 200px 1fr; }
+    .stack > div { padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 17px; line-height: 1.45; }
+    .stack .term { font-weight: 680; }
+    .stack small { font: 12px var(--mono); color: var(--muted); }
+    .steps { list-style: none; padding: 0; counter-reset: step; }
+    .steps li { position: relative; padding-left: 39px; }
+    .steps li::before { counter-increment: step; content: "0" counter(step); position: absolute; left: 0; top: 2px; color: var(--accent); font: 13px var(--mono); }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; text-align: left; font-size: 16px; line-height: 1.45; }
+    th { padding: 11px 15px; border-bottom: 2px solid var(--ink); color: var(--muted); font: 11px var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+    td { vertical-align: top; border-bottom: 1px solid var(--line); padding: 15px; }
+    td:first-child { padding-left: 0; }
+    th:first-child { padding-left: 0; }
+    td:last-child { padding-right: 0; }
+    .index-table td:nth-child(2) { width: 43%; }
+    .cache-table td:nth-child(1) { width: 23%; }
+    .cache-table td:nth-child(2) { width: 30%; }
+    .schema td { padding-top: 12px; padding-bottom: 12px; }
+    .badge { color: var(--green); background: var(--mint); display: inline-block; font: 11px var(--mono); padding: 4px 7px; border-radius: 3px; }
+    .big-number { display: block; font-size: 45px; letter-spacing: -.045em; margin-bottom: 10px; font-weight: 650; line-height: 1; }
+    .metric { border-top: 1px solid var(--line); padding-top: 18px; }
+    .metric p { color: var(--muted); font-size: 16px; }
+    .chrome { display: none; max-width: 1440px; margin: auto; padding: 13px 48px 18px; border-top: 1px solid var(--line); }
+    .js .chrome { display: block; }
+    .footer-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+    .slide-nav { display: flex; gap: 5px; flex: 1; max-width: 560px; }
+    .slide-nav button { position: relative; flex: 1; min-width: 20px; height: 27px; padding: 8px 0; border: 0; background: transparent; }
+    .slide-nav button::after { content: ""; display: block; height: 3px; background: var(--line); }
+    .slide-nav button[aria-current="step"]::after { background: var(--accent); height: 5px; }
+    .slide-nav button:hover::after { background: var(--muted); }
+    .footer-controls { display: flex; gap: 8px; align-items: center; }
+    .counter { font: 12px var(--mono); margin-right: 8px; color: var(--muted); white-space: nowrap; }
+    .help { font: 10px var(--mono); color: var(--muted); margin-top: 8px; }
+    .js.overview .slide { min-height: auto; padding-top: 50px; padding-bottom: 45px; border-bottom: 1px solid var(--line); }
+    .js.overview .chrome { position: sticky; bottom: 0; background: var(--paper); }
+    noscript p { max-width: 1344px; margin: 20px auto; padding: 0 24px; }
+    @media (min-width: 1500px) { .slide { padding-top: 48px; } .lede { margin-bottom: 35px; } .panel { padding: 28px; } }
+    @media (max-height: 780px) and (min-width: 901px) {
+      .masthead { padding-top: 15px; padding-bottom: 15px; }
+      .slide { padding-top: 20px; padding-bottom: 18px; }
+      h1, h2 { font-size: 38px; margin: 14px 0 10px; }
+      h3 { font-size: 19px; margin-bottom: 10px; }
+      .lede { font-size: 16px; margin-bottom: 18px; }
+      .panel { padding: 18px; } .panel p, li { font-size: 15px; line-height: 1.45; }
+      li + li { margin-top: 9px; }
+      pre { font-size: 13px; line-height: 1.5; }
+      table { font-size: 14px; } td, .schema td { padding-top: 10px; padding-bottom: 10px; }
+      .stack > div { font-size: 15px; padding: 11px 0; }
+      .flow { padding-bottom: 19px; } .node { padding-top: 17px; padding-bottom: 17px; }
+      .rail p { font-size: 15px; } .label { margin-bottom: 11px; }
+      .sources { margin-top: 12px; font-size: 10px; }
+      .callout { font-size: 14px; margin-top: 16px; padding: 12px 16px; }
+    }
+    @media (max-width: 900px) {
+      .masthead { padding: 18px 24px; } .brand small { display: none; }
+      .slide { padding: 27px 24px; } .chrome { padding: 13px 24px; }
+      .flow { gap: 17px; } .node { padding: 15px 10px; }
+      .node::after { right: -16px; font-size: 15px; } .node h3 { font-size: 16px; }
+      .three { gap: 16px; } .stack { grid-template-columns: 155px 1fr; }
+      td { padding: 12px 10px; } pre { font-size: 12px; }
+    }
+    @media (max-width: 650px) {
+      .masthead { padding: 15px 20px; } .brand { font-size: 22px; gap: 8px; }
+      .tools { gap: 5px; } .tools .button { padding: 7px 9px; font-size: 11px; }
+      #fullscreen { display: none; }
+      .slide { padding: 26px 20px; } h1, h2 { font-size: 34px; margin-top: 19px; }
+      .lede { font-size: 17px; } .grid { gap: 17px; } .two, .three, .split { grid-template-columns: 1fr; }
+      .panel { padding: 20px; } .flow { grid-template-columns: 1fr; gap: 22px; }
+      .node { padding: 15px 18px; } .node .label { margin-bottom: 9px; }
+      .node h3 { font-size: 20px; } .node::after { content: "↓"; top: auto; bottom: -21px; left: 25px; right: auto; }
+      .stack { grid-template-columns: 1fr; } .stack .term { border: 0; padding-bottom: 0; }
+      .stack > div { padding-top: 10px; } .callout { display: block; } .callout .label { margin-bottom: 8px; }
+      table { min-width: 620px; } .schema { min-width: 420px; } .eyebrow { font-size: 10px; gap: 8px; }
+      .chrome { padding: 12px 20px; } .footer-row { flex-wrap: wrap; } .slide-nav { min-width: 100%; }
+      .footer-controls { margin-left: auto; } .help { font-size: 9px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      @page { size: A4 landscape; margin: 11mm; }
+      html, body { background: white; color: #14241d; }
+      body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .masthead, .chrome, .notes, noscript { display: none !important; }
+      .slide, .js .slide, .js.overview .slide, .slide[hidden] { display: block !important; min-height: 0; padding: 0; border: 0; break-after: page; page-break-after: always; }
+      .slide:last-child { break-after: auto; page-break-after: auto; }
+      h1, h2 { font-size: 32px; margin: 15px 0 10px; }
+      h3 { font-size: 17px; } .lede { font-size: 14px; margin-bottom: 19px; }
+      .panel { padding: 17px; } .panel p, li, table, .stack > div { font-size: 12px; }
+      li + li { margin-top: 8px; } .callout { font-size: 12px; margin-top: 17px; padding: 12px 16px; }
+      pre { font-size: 11px; } td { padding: 10px; } .sources { font-size: 9px; margin-top: 15px; }
+      .node p, .rail p, .metric p { font-size: 12px; } .node h3 { font-size: 17px; }
+      .flow { gap: 22px; } .node::after { right: -19px; } .node { padding: 17px 12px; }
+      .stack > div { padding: 10px 0; } .big-number { font-size: 33px; }
+      .grid { gap: 18px; } .table-wrap { overflow: visible; }
+    }
+
+    /* Match the architecture deck; access badges identify the two product sections. */
+    .access-badge { color: var(--green); border: 1px solid #c7d5ca; border-radius: 3px; padding: 5px 8px; background: var(--mint); }
+    .admin-slide .access-badge { color: var(--accent); border-color: #ddbaa5; background: var(--soft); }
+    .slide-bottom { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
+    .demo-link { white-space: nowrap; font: 12px var(--mono); color: var(--green); }
+    .deck-link { text-decoration: none; }
+    .slide-nav button:nth-child(n+13)::after { background: #dec4b7; }
+    .slide-nav button[aria-current="step"]::after { background: var(--accent); }
+    @media (max-width: 900px) { .brand small { display: none; } }
+    @media (max-width: 650px) {
+      .slide-nav button { min-width: 0; }
+      .slide-bottom { display: block; } .demo-link { display: inline-block; margin-top: 12px; }
+      .eyebrow { flex-wrap: wrap; } .eyebrow .time { margin-left: auto; }
+    }
+    @media print { .demo-link { display: none; } }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand"><span class="mark" aria-hidden="true"></span>arkiv<span class="brand-divider"></span><small>Block explorer / product tour</small></div>
+    <div class="tools" aria-label="Presentation controls">
+      <a class="button deck-link" href="architecture.html">Architecture ↗</a>
+      <button class="button" id="notes" type="button" aria-pressed="false" title="Toggle presenter notes (N)">Notes</button>
+      <button class="button" id="overview" type="button" aria-pressed="false" title="Show all slides (A)">All slides</button>
+      <button class="button" id="fullscreen" type="button" title="Toggle fullscreen (F)">Fullscreen</button>
+    </div>
+  </header>
+  <noscript><p>All eighteen slides are shown below. Enable JavaScript for presentation controls. Print to export the deck.</p></noscript>
+  <main id="deck" aria-label="Product presentation: standard access followed by administrator features">
+
+    <section class="slide" id="slide-1" aria-labelledby="title-1" data-name="Home">
+      <div class="eyebrow"><b>01 / Home</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h1 id="title-1">Start with what the network is doing.</h1>
+      <p class="lede">Standard access · Open the explorer and follow live activity without signing in.</p>
+      <div class="grid two"><div class="panel "><span class="label">Home / overview</span><h3>Network at a glance</h3><ul><li>Current base fee and average gas per block over the last minute.</li><li>Recent network-usage and base-fee charts with time-based hover details.</li><li>Sync status and delay warnings explain how current the displayed data is.</li></ul></div><div class="panel tint"><span class="label">Home / live feed</span><h3>A live starting point</h3><ul><li>Latest blocks link directly to their transactions and metrics.</li><li>Most-active-wallet cards show transaction volume, gas use, and fees.</li><li>Automatic updates, a block-progress animation, and connection / retry messages.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>This tour covers standard features first (1–12), then administrator features (13–18). Allow roughly 10 minutes.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/HomeView.tsx" target="_blank" rel="noopener noreferrer">HomeView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/SyncStatusBanner.tsx" target="_blank" rel="noopener noreferrer">SyncStatusBanner.tsx</a></p><a class="demo-link" href="/" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Start on Home. Show the current fee, the two recent-history charts, and one block link. The sync banner distinguishes fresh data from catch-up or delayed data; an interrupted connection leaves the last received data visible with a retry message. Cedric, the owl animation, accompanies the block feed. Activity panels depend on the deployment’s activity service.</aside>
+    </section>
+
+    <section class="slide" id="slide-2" aria-labelledby="title-2" data-name="Search">
+      <div class="eyebrow"><b>02 / Search</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-2">Find the block, transaction, or entity.</h2>
+      <p class="lede">Paste the identifier you already have. Search suggestions lead into the relevant detail page.</p>
+      <div class="grid two"><div class="panel "><span class="label">One search entry point</span><h3>What you can search</h3><ul><li><strong>Block numbers</strong> and stored block hashes.</li><li><strong>Transaction hashes</strong> and entity keys.</li><li><strong>Addresses</strong> known as senders, balance accounts, or indexed entity owners / creators.</li></ul></div><div class="panel tint"><span class="label">Suggestions + results</span><h3>Ways to navigate</h3><ul><li>Use full identifiers or hex prefixes of at least six digits, with or without <code>0x</code>.</li><li>Select a suggestion or use the Search page to review matching result types.</li><li>Open an address directly even when it has no indexed search match.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Use Search for identifiers. Use the Data page for attribute conditions such as “status is active.”</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/OmniSearch.tsx" target="_blank" rel="noopener noreferrer">OmniSearch.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/SearchView.tsx" target="_blank" rel="noopener noreferrer">SearchView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/docs/omni-search.md" target="_blank" rel="noopener noreferrer">omni-search.md</a></p><a class="demo-link" href="/search" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Demonstrate a block number and a shortened identifier. Search is not a general text search: it does not search payload contents, attribute text, or log topics. The optional entity index expands the identifier coverage to projected owners, creators, and entity keys.</aside>
+    </section>
+
+    <section class="slide" id="slide-3" aria-labelledby="title-3" data-name="Blocks">
+      <div class="eyebrow"><b>03 / Blocks</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-3">Inspect a block from the outside in.</h2>
+      <p class="lede">Start with a filtered list, then open a block to see its metrics and every stored transaction.</p>
+      <div class="grid two"><div class="panel "><span class="label">Blocks</span><h3>Blocks list</h3><ul><li>Filter by block-number bounds and date / time bounds; choose the row limit.</li><li>Compare block time, transaction count, base fee, burnt fees, and gas usage.</li><li>See input-data sizes and average transaction metrics; copy a link to the filtered view.</li></ul></div><div class="panel tint"><span class="label">Block</span><h3>Block details</h3><ul><li>Enter a block number or move to the previous / next block.</li><li>Inspect timing, fees, gas, rewards, data sizes, and available batcher metrics.</li><li>Open transactions, senders, and decoded Arkiv operations from the block’s transaction table.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Use this view to explain a fee spike, a full block, an empty block, or an unusual batch of transactions.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/BlocksView.tsx" target="_blank" rel="noopener noreferrer">BlocksView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/BlockView.tsx" target="_blank" rel="noopener noreferrer">BlockView.tsx</a></p><a class="demo-link" href="/blocks" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Click a block in the list and then a transaction. Transaction-dependent pages appear only when transaction data is enabled. Batcher fields depend on deployment configuration and collected data. Filters can be reset and the list can be shared by its URL.</aside>
+    </section>
+
+    <section class="slide" id="slide-4" aria-labelledby="title-4" data-name="Addresses">
+      <div class="eyebrow"><b>04 / Addresses</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-4">Follow an address through its transactions.</h2>
+      <p class="lede">The Address view narrows transaction history to the sender, block interval, nonce range, or dates that matter.</p>
+      <div class="grid two"><div class="panel "><span class="label">Filters + paging</span><h3>Narrow the history</h3><ul><li>Filter by sender address, an exact block, or lower / upper block bounds.</li><li>Add nonce bounds and date bounds to isolate a sequence of submissions.</li><li>Choose the page size, jump to a page, and switch result order.</li></ul></div><div class="panel tint"><span class="label">Transaction list</span><h3>Compare each transaction</h3><ul><li>Read block, hash, nonce, and the summary of Arkiv operations.</li><li>Compare gas used / limit, input size, compressed input size, effective fee, and total fee.</li><li>Follow links to the full transaction, its block, or another address; share the filtered URL.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>An address filter shows transactions sent by that address. It is not a complete account-transfer ledger.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/TransactionsView.tsx" target="_blank" rel="noopener noreferrer">TransactionsView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/permalinks.ts" target="_blank" rel="noopener noreferrer">permalinks.ts</a></p><a class="demo-link" href="/transactions" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Explain nonce as the sender’s transaction sequence. Without a sender filter, this surface also works as a general transaction list. Show the built-in pagination controls and a transaction’s Arkiv-operation summary. Avoid promising internal-transfer history or a complete incoming-transfer list.</aside>
+    </section>
+
+    <section class="slide" id="slide-5" aria-labelledby="title-5" data-name="Transactions">
+      <div class="eyebrow"><b>05 / Transactions</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-5">Understand what a transaction did.</h2>
+      <p class="lede">A transaction detail page combines execution outcome, cost, and decoded Arkiv actions.</p>
+      <div class="grid two"><div class="panel "><span class="label">Transaction overview</span><h3>Execution and cost</h3><ul><li>Success / failure, block and position, timestamp, sender, recipient or created contract.</li><li>Transaction type, nonce, transferred value, gas limit, gas used, and input sizes.</li><li>Base, effective, priority, and total fees; copy identifiers and open the external decoder.</li></ul></div><div class="panel tint"><span class="label">Operations + references</span><h3>Arkiv-specific detail</h3><ul><li>Inspect decoded operations, entity links, attributes, expiry changes, and ownership changes.</li><li>View payload size, content type, payload-reference metadata, and signer-verification status.</li><li>See payload-provider payment breakdowns and provider links when the data is available.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Useful for “did it succeed?”, “what changed?”, “what did it cost?”, and “which entity should I inspect next?”</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/TransactionView.tsx" target="_blank" rel="noopener noreferrer">TransactionView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/arkivOperations.ts" target="_blank" rel="noopener noreferrer">arkivOperations.ts</a></p><a class="demo-link" href="/tx" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Show the operation list after the fee summary. Reference verification can report verified, invalid, or untrusted signer. Provider payments require the corresponding payment information. The explorer shows metadata and payload sizes; it does not store or expose entity payload bytes as a general browsing feature.</aside>
+    </section>
+
+    <section class="slide" id="slide-6" aria-labelledby="title-6" data-name="Entities">
+      <div class="eyebrow"><b>06 / Entities</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-6">Read an entity’s lifecycle.</h2>
+      <p class="lede">Open an entity key to trace its creation and the operations that followed.</p>
+      <div class="grid two"><div class="panel "><span class="label">Entity</span><h3>Entity summary</h3><ul><li>Entity key, latest known lifecycle state, owner information, content type, and payload size.</li><li>Creation block / date, last activity, and available expiry information.</li><li>Genesis details and original attributes when the entity was imported from a seeded chain.</li></ul></div><div class="panel tint"><span class="label">History</span><h3>Operation history</h3><ul><li>Follow create, update, ownership, expiry, and delete operations in time order.</li><li>Inspect attribute changes and jump to the originating transaction or block.</li><li>See how many operations exist and when the displayed history is truncated.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Use Entity for the history of one key; use Data to search and compare entity state across many keys.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/EntityView.tsx" target="_blank" rel="noopener noreferrer">EntityView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/server.ts" target="_blank" rel="noopener noreferrer">server.ts</a></p><a class="demo-link" href="/entity" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> The default history slice contains the most recent 100 operations. If creation is outside the slice, the API can still return the first operation for the creation summary. A lifecycle label is derived from the latest stored operation; it is not a guarantee of present-time liveness. Data queries evaluate liveness at their query block.</aside>
+    </section>
+
+    <section class="slide" id="slide-7" aria-labelledby="title-7" data-name="Data queries">
+      <div class="eyebrow"><b>07 / Data queries</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-7">Ask questions about entity state.</h2>
+      <p class="lede">The experimental Data page searches entities by owner, key, built-in fields, and typed attributes.</p>
+      <div class="grid two"><div class="panel "><span class="label">Query editor</span><h3>Build and run a query</h3><ul><li>Paste an entity key or owner address, or write a typed expression such as <code>status = str('active')</code>.</li><li>Use syntax highlighting, completions, copyable examples, and query-language documentation.</li><li>Run or cancel a query, clear the editor, select page size, and copy a query permalink.</li><li>Recall the last <strong>50 queries and paused drafts</strong> saved in this browser; load, copy, edit, or delete history entries.</li></ul></div><div class="panel tint"><span class="label">Standard-access sources</span><h3>Choose the data source</h3><ul><li><strong>Experimental index:</strong> query the explorer’s indexed entity state.</li><li><strong>Custom node:</strong> enter your own RPC URL and check its connection / capabilities.</li><li>See index availability and coverage information; errors identify invalid query positions or unavailable data.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>The Data page is explicitly experimental. A query’s reported block tells you which state the results describe.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/DataView.tsx" target="_blank" rel="noopener noreferrer">DataView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/QueryEditor.tsx" target="_blank" rel="noopener noreferrer">QueryEditor.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/dataQuery.ts" target="_blank" rel="noopener noreferrer">dataQuery.ts</a></p><a class="demo-link" href="/data" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Query history is local to this browser; loading a saved query places it in the editor without running it. Standard access offers the experimental index and a custom node. The deployment’s protected upstream and the comparison mode belong to the administrator section later. Custom-node availability depends on that node and browser CORS. Do not present the index as a live-node replacement for every method.</aside>
+    </section>
+
+    <section class="slide" id="slide-8" aria-labelledby="title-8" data-name="Data results">
+      <div class="eyebrow"><b>08 / Data results</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-8">Use one result to refine the next query.</h2>
+      <p class="lede">Entity cards make query results explorable: inspect the state, select a field, and narrow the query.</p>
+      <div class="grid two"><div class="panel "><span class="label">Entity result cards</span><h3>Read the returned state</h3><ul><li>Owner / creator, content type, typed attributes, creation / update / expiry information.</li><li>Read-only and permissionless-extension flags where returned; estimated lifetime and expiry.</li><li>Loaded result count, query block, request duration, and “Load next page.”</li></ul></div><div class="panel tint"><span class="label">Refine + inspect</span><h3>Continue the investigation</h3><ul><li>Use a key, owner, or creator menu to query by that value or add it to the current query.</li><li>Click an attribute to copy its ready-to-paste query condition; copy identifiers and open entity history.</li><li>Show loaded entities estimated to expire within the next 24 hours.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>“Expiring soon” filters the results already loaded. Continue paging to examine more matches.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/EntityResults.tsx" target="_blank" rel="noopener noreferrer">EntityResults.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/dataQuery.ts" target="_blank" rel="noopener noreferrer">dataQuery.ts</a></p><a class="demo-link" href="/data" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Demonstrate copying an attribute condition, then the entity-history link. The reported count is the number loaded, not necessarily a total count of all matching entities. Continued pages stay at the original query block. Expiry dates and progress depend on block-timing information; the page explains when that estimate is unavailable.</aside>
+    </section>
+
+    <section class="slide" id="slide-9" aria-labelledby="title-9" data-name="Charts &amp; ranges">
+      <div class="eyebrow"><b>09 / Charts & ranges</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-9">Explore changes across time and block windows.</h2>
+      <p class="lede">Use Charts for patterns and Ranges for the corresponding aggregate values.</p>
+      <div class="grid two"><div class="panel "><span class="label">Charts</span><h3>History charts</h3><ul><li>Select fee, priority-fee, gas, data-size, reward, burn, transaction, and available batcher series.</li><li>Switch the horizontal axis between dates and blocks; change resolution and point count.</li><li>Move backward / forward, jump to latest, inspect a selected point, and open its block window.</li><li>Copy the configured chart link or open a chart-only fullscreen view.</li></ul></div><div class="panel tint"><span class="label">Ranges</span><h3>Aggregated range table</h3><ul><li>Choose a supported block-window size and filter by block or date bounds.</li><li>Compare totals, averages, minima, and maxima for the selected window.</li><li>Show / hide metric columns by group and restore the full column set.</li><li>Set the row limit, clear filters, and copy the filtered view’s link.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Start with a trend in Charts, then use Ranges or a block detail page to inspect the values behind it.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/ChartsView.tsx" target="_blank" rel="noopener noreferrer">ChartsView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/chartParameters.ts" target="_blank" rel="noopener noreferrer">chartParameters.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/RangesView.tsx" target="_blank" rel="noopener noreferrer">RangesView.tsx</a></p><a class="demo-link" href="/charts" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Keep this slide focused on navigation rather than explaining aggregation internals. Charts support separate series with their own units. The available metrics depend on stored data and deployment settings. Ranges cover complete stored windows; they are not live projections of a partially filled future window.</aside>
+    </section>
+
+    <section class="slide" id="slide-10" aria-labelledby="title-10" data-name="Senders &amp; activity">
+      <div class="eyebrow"><b>10 / Senders & activity</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-10">See who is driving network activity.</h2>
+      <p class="lede">Sender totals give the longer view. Activity highlights the wallets doing work now.</p>
+      <div class="grid two"><div class="panel "><span class="label">Senders</span><h3>Sender activity</h3><ul><li>Address-level transaction-count indicator, total gas, and fees spent.</li><li>Average gas / fee and first / last observed transaction block and date.</li><li>Open an address’s transactions or jump into its recent activity chart.</li></ul></div><div class="panel tint"><span class="label">Activity</span><h3>Recent activity</h3><ul><li>Wallet leaderboards for <strong>5 min, 20 min, 1 hour, 6 hours, or 24 hours</strong>.</li><li>Compare transaction volume, gas use, and fees; recognize wallets by labels and identicons.</li><li>Open a wallet’s per-minute activity, switch metric / time window, change address, and refresh.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Use Senders to investigate sustained usage and Activity to find the source of a recent traffic burst.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/SendersView.tsx" target="_blank" rel="noopener noreferrer">SendersView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/GuzzlersView.tsx" target="_blank" rel="noopener noreferrer">GuzzlersView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/GuzzlerActivityView.tsx" target="_blank" rel="noopener noreferrer">GuzzlerActivityView.tsx</a></p><a class="demo-link" href="/activity" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> The Sender view’s displayed transaction-count indicator is derived from the latest observed nonce, while its gas and fee aggregates cover indexed activity. The Activity surface covers retained recent buckets, up to 24 hours, and needs the activity service enabled. Copy-address controls and wallet links make the two views easy to cross-reference.</aside>
+    </section>
+
+    <section class="slide" id="slide-11" aria-labelledby="title-11" data-name="Records">
+      <div class="eyebrow"><b>11 / Records</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-11">Find the transactions at the extremes.</h2>
+      <p class="lede">Records ranks the stored transactions that used the most gas or paid the highest fees.</p>
+      <div class="grid three"><div class="panel "><span class="label">Record category 01</span><h3>Maximum gas used</h3><ul><li>Identify the largest gas consumers among stored transactions.</li><li>Open the transaction to see its Arkiv operations and input size.</li></ul></div><div class="panel "><span class="label">Record category 02</span><h3>Maximum fee paid</h3><ul><li>Find the highest total transaction costs.</li><li>Follow the sender or block to understand the surrounding activity.</li></ul></div><div class="panel tint"><span class="label">Record category 03</span><h3>Highest effective fee</h3><ul><li>Find transactions with the highest effective gas price.</li><li>Compare fee price against gas usage and total fee.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Each ranking includes rank, value, block, transaction hash, sender, gas used, and fee details.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/RecordTransactionsView.tsx" target="_blank" rel="noopener noreferrer">RecordTransactionsView.tsx</a></p><a class="demo-link" href="/records" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Distinguish fee price from total fee: a high price does not always mean the highest total cost. These are records within the indexed dataset, not a claim about unindexed chain history. All three categories lead back to the standard transaction / block / sender workflows.</aside>
+    </section>
+
+    <section class="slide" id="slide-12" aria-labelledby="title-12" data-name="Everyday use">
+      <div class="eyebrow"><b>12 / Everyday use</b><span>Product tour</span><span class="time access-badge">Standard access</span></div>
+      <h2 id="title-12">Share a view and keep your preferences.</h2>
+      <p class="lede">Standard access includes navigation, display controls, identity, and read APIs for your own tools.</p>
+      <div class="grid three"><div class="panel "><span class="label">Your browser</span><h3>Display and sharing</h3><ul><li>Light / dark theme, full-width layout, and a chosen time zone.</li><li>Copy detail and filtered-view links; retain supported filters and display choices in the browser.</li><li>Use breadcrumbs, copy-ID buttons, and linked addresses / blocks to move between views.</li></ul></div><div class="panel "><span class="label">Your identity</span><h3>Optional sign-in</h3><ul><li>Sign in with Google where configured; see the account identity and sign out.</li><li>Ordinary signed-in users keep standard access. Administrator status is assigned separately.</li><li>Kalarepa also offers its explicitly enabled token-login option.</li></ul></div><div class="panel tint"><span class="label">Your tools</span><h3>Read integrations</h3><ul><li>Public HTTP reads for blocks, ranges, transactions, entities, senders, activity, and sync.</li><li>Recorded balance snapshots where balance tracking is enabled.</li><li>Experimental indexed JSON-RPC reads for supported Ethereum / Arkiv methods.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>That completes standard access. The remaining slides require an administrator account; privileged views use Admin mode.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/App.tsx" target="_blank" rel="noopener noreferrer">App.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/AccountControls.tsx" target="_blank" rel="noopener noreferrer">AccountControls.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/navigation.ts" target="_blank" rel="noopener noreferrer">navigation.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/server.ts" target="_blank" rel="noopener noreferrer">server.ts</a></p><a class="demo-link" href="/" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Preference changes are local to this browser, not shared account profiles. API availability follows the deployment’s enabled data and services. Balance readings are sparse observations, not a continuous reconstructed ledger. Login options are shown only when configured; Google callback setup remains an environment concern. Standard sign-in does not unlock administrative controls.</aside>
+    </section>
+
+    <section class="slide admin-slide" id="slide-13" aria-labelledby="title-13" data-name="Health">
+      <div class="eyebrow"><b>13 / Health</b><span>Product tour</span><span class="time access-badge">Administrator</span></div>
+      <h2 id="title-13">See whether the explorer is keeping up.</h2>
+      <p class="lede">Administrator access · Health combines ingestion status, service details, and request metrics.</p>
+      <div class="grid two"><div class="panel "><span class="label">Health overview</span><h3>Freshness and capacity</h3><ul><li>Sync state, scanner progress, observed chain head, head lag, and catch-up information.</li><li>Last block age, backfill progress, server / browser time, build commit, and build date.</li><li>Database / table sizes, index sizes, activity-cache status, and retained history bounds.</li></ul></div><div class="panel tint"><span class="label">Server metrics</span><h3>Traffic and diagnostics</h3><ul><li>Requests and errors by route, mean response time, database time, and response bytes.</li><li>JSON-RPC calls by method, endpoint, and answering source.</li><li>Cache hit rates / occupancy, memory and uptime, manual refresh, and raw metric output.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Use Health to separate a quiet chain, a delayed scanner, and a slow API. The page also identifies the running backend build.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/HealthView.tsx" target="_blank" rel="noopener noreferrer">HealthView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/ServerMetricsPanel.tsx" target="_blank" rel="noopener noreferrer">ServerMetricsPanel.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/navigation.ts" target="_blank" rel="noopener noreferrer">navigation.ts</a></p><a class="demo-link" href="/health" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> First sign in as an administrator and enable Admin mode. Health is an administrator-only UI view, even though basic health / sync data also has public API surfaces. Most counters are since process start. The metrics panel reports means, so do not describe its table as a percentile dashboard.</aside>
+    </section>
+
+    <section class="slide admin-slide" id="slide-14" aria-labelledby="title-14" data-name="Node comparison">
+      <div class="eyebrow"><b>14 / Node comparison</b><span>Product tour</span><span class="time access-badge">Administrator</span></div>
+      <h2 id="title-14">Compare the index with the configured node.</h2>
+      <p class="lede">Admin mode adds the deployment’s upstream node and a side-by-side comparison to the Data page.</p>
+      <div class="grid two"><div class="panel "><span class="label">Data / source selection</span><h3>Choose the protected source</h3><ul><li>Use the configured backend / node connection in addition to the index or a custom node.</li><li>Check endpoint availability and supported query methods.</li><li>Run the same entity question against either source from the query editor.</li></ul></div><div class="panel tint"><span class="label">Data / comparison</span><h3>Both (compare)</h3><ul><li>Run node and index queries at a common block.</li><li>Compare returned entities, result order, and field values; inspect listed differences.</li><li>See per-source result counts, response times, errors, and relative speed.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>The comparison covers the first page at the selected block. Each endpoint owns its own continuation cursor.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/DataView.tsx" target="_blank" rel="noopener noreferrer">DataView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/entityCompare.ts" target="_blank" rel="noopener noreferrer">entityCompare.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/jsonRpcPassthrough.ts" target="_blank" rel="noopener noreferrer">jsonRpcPassthrough.ts</a></p><a class="demo-link" href="/data" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> This tool is for checking parity and investigating a discrepancy, not promising a fixed performance advantage. The configured upstream consumes the deployment’s node access and is protected. It can also relay explicitly allowed JSON-RPC methods for administrator integrations; transaction submission is configuration-dependent and is not a wallet UI.</aside>
+    </section>
+
+    <section class="slide admin-slide" id="slide-15" aria-labelledby="title-15" data-name="Baseload scenarios">
+      <div class="eyebrow"><b>15 / Baseload scenarios</b><span>Product tour</span><span class="time access-badge">Administrator</span></div>
+      <h2 id="title-15">Generate the workload you want to study.</h2>
+      <p class="lede">Baseload runs wallet-backed workers that create real Arkiv transactions using one of five behavior patterns.</p>
+      <div class="table-wrap"><table><thead><tr><th scope="col">Worker behavior</th><th scope="col">What it does</th><th scope="col">Use it to study</th></tr></thead><tbody>
+      <tr><td><strong>Creates only</strong></td><td>Continually create entities.</td><td>Ingestion and entity-growth traffic.</td></tr>
+      <tr><td><strong>Creates + updates</strong></td><td>Maintain a pool; update entities and refresh TTL.</td><td>Repeated writes to existing entities.</td></tr>
+      <tr><td><strong>Creates + ownership change</strong></td><td>Create entities and transfer ownership.</td><td>Ownership transitions and resulting state.</td></tr>
+      <tr><td><strong>Time bomb</strong></td><td>Target a synchronized expiry moment.</td><td>A concentrated expiration event.</td></tr>
+      <tr><td><strong>Creates + updates + deletes</strong></td><td>Cycle entities through their lifecycle.</td><td>Churn and cleanup behavior.</td></tr>
+      </tbody></table></div>
+      <div class="callout"><span class="label">In practice</span><span>These are active workloads. Workers submit transactions and spend their configured wallets’ funds.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/baseloadConfig.ts" target="_blank" rel="noopener noreferrer">baseloadConfig.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/BaseloadView.tsx" target="_blank" rel="noopener noreferrer">BaseloadView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/baseloadRuntime.ts" target="_blank" rel="noopener noreferrer">baseloadRuntime.ts</a></p><a class="demo-link" href="/baseload" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Explain the five scenarios without starting one during the presentation. This is a load-generation product feature with real network effects. The backend must have its node and wallet configuration available. “Use it to study” describes the intended experiment, not a built-in benchmark report.</aside>
+    </section>
+
+    <section class="slide admin-slide" id="slide-16" aria-labelledby="title-16" data-name="Baseload controls">
+      <div class="eyebrow"><b>16 / Baseload controls</b><span>Product tour</span><span class="time access-badge">Administrator</span></div>
+      <h2 id="title-16">Control volume, cost, and timing.</h2>
+      <p class="lede">Configure each worker’s identity, transaction shape, and run schedule from the editor.</p>
+      <div class="grid two"><div class="panel "><span class="label">Worker setup</span><h3>Volume and cost</h3><ul><li>Choose a worker name, wallet, and behavior.</li><li>Set operations per minute, entities per request, and maximum gas price.</li><li>Set payload bytes, string / numeric attribute counts, and entity TTL.</li><li>Configure a pool size or synchronized-expiry offset for the relevant behavior.</li></ul></div><div class="panel tint"><span class="label">When it runs</span><h3>Run window and schedule</h3><ul><li>Choose a start block, optional end block, and optional duration.</li><li>Set active daily hours in UTC and active minutes within each hour.</li><li>Review the schedule description and validation before applying changes.</li><li>Use projected hourly / minute traffic charts to review expected transaction and payload volume.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>A fee cap can leave a worker outpriced; a schedule can leave it waiting. Both states are visible in the fleet.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/BaseloadView.tsx" target="_blank" rel="noopener noreferrer">BaseloadView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/baseloadSchedule.ts" target="_blank" rel="noopener noreferrer">baseloadSchedule.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/baseloadProjection.ts" target="_blank" rel="noopener noreferrer">baseloadProjection.ts</a></p><a class="demo-link" href="/baseload" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> The schedule supports daily windows and minute ranges that can cross boundaries. The editor validates the configuration and distinguishes unsaved edits from applied settings. Projected traffic is calculated from worker configuration; it is not a guarantee of realized throughput or costs.</aside>
+    </section>
+
+    <section class="slide admin-slide" id="slide-17" aria-labelledby="title-17" data-name="Fleet management">
+      <div class="eyebrow"><b>17 / Fleet management</b><span>Product tour</span><span class="time access-badge">Administrator</span></div>
+      <h2 id="title-17">Operate workers and reuse configurations.</h2>
+      <p class="lede">Keep a repeatable load setup and watch the fleet’s actual state while it runs.</p>
+      <div class="grid two"><div class="panel "><span class="label">Workers + status</span><h3>Operate the live fleet</h3><ul><li>Add a worker, apply edits, revert an unsaved draft, or delete a worker.</li><li>See wallet addresses / balances and running, waiting, outpriced, and error states.</li><li>Inspect operation counts, entity-pool size, transaction / block references, and error messages.</li></ul></div><div class="panel tint"><span class="label">Configuration library</span><h3>Save and transfer setups</h3><ul><li>Save the current fleet under a name; refresh, load, or delete saved configurations.</li><li>Download / load a full fleet as JSON.</li><li>Export one worker or import a worker into the editor for review before adding it.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Applied live configuration survives backend restarts. Loading a saved fleet applies that setup to the live runtime.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/BaseloadView.tsx" target="_blank" rel="noopener noreferrer">BaseloadView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/serve.ts" target="_blank" rel="noopener noreferrer">serve.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/baseloadConfig.ts" target="_blank" rel="noopener noreferrer">baseloadConfig.ts</a></p><a class="demo-link" href="/baseload" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Explain the difference between loading a complete config and importing one worker for review. Deleting or reconfiguring a worker affects the live load generator. The active config is persisted by the backend; a saved named config is a separately reusable setup. The Errors section brings runtime and balance problems together.</aside>
+    </section>
+
+    <section class="slide admin-slide" id="slide-18" aria-labelledby="title-18" data-name="Settings &amp; tokens">
+      <div class="eyebrow"><b>18 / Settings & tokens</b><span>Product tour</span><span class="time access-badge">Administrator</span></div>
+      <h2 id="title-18">Tune the view. Authorize your tools.</h2>
+      <p class="lede">Administrator controls finish with browser-specific settings, debugging, and temporary API access.</p>
+      <div class="grid three"><div class="panel "><span class="label">Admin / local preferences</span><h3>Page settings</h3><ul><li>Override chain / network labels, token symbol, block timing, feed timing, warning thresholds, and chart refresh windows.</li><li>Save locally in this browser or reset to deployment defaults.</li><li>See which values use defaults and which are local overrides.</li></ul></div><div class="panel "><span class="label">Admin / diagnostics</span><h3>Debug tools</h3><ul><li>Simulate an unavailable block API to see the UI’s offline behavior.</li><li>Inspect Home’s request / local-data debug summary in Admin mode.</li><li>Turn the simulation off to resume normal browsing.</li></ul></div><div class="panel tint"><span class="label">Account / automation</span><h3>Access tokens</h3><ul><li>Create a named administrator API token valid for <strong>1–30 days</strong>; copy the secret when it is shown once.</li><li>Review expiry / revocation state and revoke active tokens.</li><li>Use tokens for monitoring or automation; token management requires a login session.</li></ul></div></div>
+      <div class="callout"><span class="label">In practice</span><span>Page settings affect this browser. Tokens grant administrator API permissions, including protected metrics and configured RPC access.</span></div>
+      <div class="slide-bottom"><p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/AdminView.tsx" target="_blank" rel="noopener noreferrer">AdminView.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/pageSettings.ts" target="_blank" rel="noopener noreferrer">pageSettings.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/AccessTokens.tsx" target="_blank" rel="noopener noreferrer">AccessTokens.tsx</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/frontend/src/AccountControls.tsx" target="_blank" rel="noopener noreferrer">AccountControls.tsx</a></p><a class="demo-link" href="/admin" target="_blank" rel="noopener noreferrer">Open this view ↗</a></div>
+      <aside class="notes"><strong>Presenter.</strong> Do not create or reveal a token in the presentation. Temporary tokens have broad administrator API access except token management; they are not per-feature scoped keys. Page settings do not change chain configuration or update other users’ browsers. Logout / role loss removes privileged UI state and stops privileged polling.</aside>
+    </section>
+  </main>
+
+  <footer class="chrome">
+    <div class="footer-row">
+      <nav class="slide-nav" id="slide-nav" aria-label="Jump to slide"></nav>
+      <div class="footer-controls"><span class="counter" id="counter" role="status" aria-live="polite" aria-atomic="true">01 / 18</span><button class="button" id="previous" type="button" aria-label="Previous slide">←</button><button class="button" id="next" type="button" aria-label="Next slide">→</button></div>
+    </div>
+    <p class="help">← → / Space: navigate · A: all slides · N: notes · F: fullscreen · Ctrl/Cmd + P: print / PDF · source links open repository files</p>
+  </footer>
+
+  <script>
+    (() => {
+      const slides = [...document.querySelectorAll('.slide')];
+      const nav = document.getElementById('slide-nav');
+      const previous = document.getElementById('previous');
+      const next = document.getElementById('next');
+      const overview = document.getElementById('overview');
+      const notes = document.getElementById('notes');
+      const fullscreen = document.getElementById('fullscreen');
+      let index = 0;
+      let all = false;
+      const fromHash = () => {
+        const match = /^#slide-(\d+)$/.exec(location.hash);
+        return match ? Math.max(0, Math.min(slides.length - 1, Number(match[1]) - 1)) : 0;
+      };
+      const buttons = slides.map((slide, i) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.title = `${i + 1}. ${slide.dataset.name}`;
+        button.setAttribute('aria-label', `Slide ${i + 1}: ${slide.dataset.name}`);
+        button.addEventListener('click', () => { all = false; show(i); });
+        nav.append(button);
+        return button;
+      });
+      function show(target, updateHash = true) {
+        index = Math.max(0, Math.min(slides.length - 1, target));
+        document.body.classList.toggle('overview', all);
+        overview.setAttribute('aria-pressed', String(all));
+        overview.textContent = all ? 'Present' : 'All slides';
+        slides.forEach((slide, i) => { slide.hidden = !all && i !== index; });
+        buttons.forEach((button, i) => {
+          if (i === index) button.setAttribute('aria-current', 'step');
+          else button.removeAttribute('aria-current');
+        });
+        previous.disabled = index === 0;
+        next.disabled = index === slides.length - 1;
+        document.getElementById('counter').textContent = `${String(index + 1).padStart(2, '0')} / ${slides.length} · ${slides[index].dataset.name}`;
+        if (updateHash) history.replaceState(null, '', `#slide-${index + 1}`);
+        if (all) slides[index].scrollIntoView({ block: 'start', behavior: 'instant' });
+        else window.scrollTo({ top: 0, behavior: 'instant' });
+      }
+      previous.addEventListener('click', () => show(index - 1));
+      next.addEventListener('click', () => show(index + 1));
+      overview.addEventListener('click', () => { all = !all; show(index); });
+      notes.addEventListener('click', () => {
+        const visible = document.body.classList.toggle('show-notes');
+        notes.setAttribute('aria-pressed', String(visible));
+      });
+      fullscreen.hidden = !document.fullscreenEnabled;
+      fullscreen.addEventListener('click', async () => {
+        try {
+          if (document.fullscreenElement) await document.exitFullscreen();
+          else await document.documentElement.requestFullscreen();
+        } catch { /* Fullscreen is optional in embedded or restricted browsers. */ }
+      });
+      document.addEventListener('fullscreenchange', () => {
+        fullscreen.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      });
+      window.addEventListener('hashchange', () => show(fromHash(), false));
+      window.addEventListener('keydown', event => {
+        if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+        if (event.target.closest('button, a') && [' ', 'Enter'].includes(event.key)) return;
+        const key = event.key.toLowerCase();
+        if (['arrowright', 'pagedown', ' '].includes(key)) { event.preventDefault(); show(index + (event.shiftKey ? -1 : 1)); }
+        else if (['arrowleft', 'pageup'].includes(key)) { event.preventDefault(); show(index - 1); }
+        else if (key === 'home') { event.preventDefault(); show(0); }
+        else if (key === 'end') { event.preventDefault(); show(slides.length - 1); }
+        else if (key === 'a') overview.click();
+        else if (key === 'n') notes.click();
+        else if (key === 'f') fullscreen.click();
+      });
+      document.body.classList.add('js');
+      show(fromHash(), false);
+    })();
+  </script>
+</body>
+</html>

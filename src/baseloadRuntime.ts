@@ -17,6 +17,7 @@ import {
   type BaseloadRpcEndpoint,
 } from "./baseloadRpcKeys";
 import { RpcKeyRing, attachRpcKeyRing } from "./rpcKeyRing";
+import { describeBaseloadSchedule } from "./baseloadSchedule";
 import {
   BASELOAD_DERIVATION_PATH_PREFIX,
   EMPTY_BASELOAD_CONFIG,
@@ -37,6 +38,10 @@ import {
   getMinuteAttemptLimit,
   getTimeBombDetonationMs,
   getTimeBombRemainingSeconds,
+  isFeeCapBelowBaseFeeError,
+  BaseFeeCache,
+  formatGweiShort,
+  isOutpriced,
   parseGweiToWei,
   pickSoonestExpiringPoolEntries,
   pruneExpiredPoolEntries,
@@ -52,6 +57,8 @@ export type BaseloadWorkerStatusName =
   | "updated"
   | "running"
   | "waiting"
+  /** Priced out: the worker's fee cap is below the current base fee. */
+  | "outpriced"
   | "completed"
   | "error"
   | "stopped";
@@ -91,7 +98,17 @@ interface BaseloadRpcClient {
   getChainId: () => Promise<number>;
   getBlockNumber: () => Promise<number>;
   getLatestNonce: (address: string) => Promise<number>;
-  waitForTransactionReceipt: (txHash: HexString, signal: AbortSignal) => Promise<BaseloadTransactionReceipt>;
+  /** Base fee of the latest block, or null when the chain does not report one. */
+  getBaseFeeWei: () => Promise<bigint | null>;
+  /**
+   * Polls for the receipt. `onStall` is consulted every {@link RECEIPT_STALL_CHECK_MS}
+   * with the elapsed time; returning false abandons the wait.
+   */
+  waitForTransactionReceipt: (
+    txHash: HexString,
+    signal: AbortSignal,
+    onStall?: (elapsedMs: number) => Promise<boolean>,
+  ) => Promise<BaseloadTransactionReceipt>;
 }
 
 type BaseloadTransactionReceipt = {
@@ -138,10 +155,21 @@ const BLOCK_DISPLAY_REFRESH_MS = 15_000;
 /** One block time: a receipt cannot land sooner, so polling earlier only burns budget. */
 const RECEIPT_FIRST_POLL_DELAY_MS = 2_000;
 const RECEIPT_POLL_INTERVAL_MS = 1_000;
+/** How often a stalled receipt wait asks its owner whether to keep waiting. */
+const RECEIPT_STALL_CHECK_MS = 20_000;
+/** A pending transaction that is not merely underpriced is given up after this. */
+const RECEIPT_WAIT_TIMEOUT_MS = 10 * 60_000;
+/** One base-fee reading serves the whole fleet for about a block. */
+const BASE_FEE_TTL_MS = 2_000;
 
 /** Spreads fleet-wide waits over a window so polls do not land on one tick. */
 function jitteredDelay(baseMs: number): number {
   return Math.round(baseMs * (0.75 + Math.random() * 0.5));
+}
+
+export interface BaseloadRuntimeHooks {
+  /** Called with every applied config so the fleet can be restored after a restart. */
+  persistConfig?: (config: BaseloadConfig) => void | Promise<void>;
 }
 
 export class BaseloadRuntime {
@@ -153,10 +181,14 @@ export class BaseloadRuntime {
   private balancePollInFlight = false;
   private stopped = false;
   private readonly faucet: BaseloadFaucetClient | null;
+  private readonly baseFees = new BaseFeeCache(BASE_FEE_TTL_MS);
   private readonly rpcKeys: BaseloadRpcKeyPool | null;
   private rpcKeyRing: RpcKeyRing | null = null;
 
-  constructor(private readonly runtimeConfig: BaseloadRuntimeConfig) {
+  constructor(
+    private readonly runtimeConfig: BaseloadRuntimeConfig,
+    private readonly hooks: BaseloadRuntimeHooks = {},
+  ) {
     this.faucet = runtimeConfig.faucet ? new BaseloadFaucetClient(runtimeConfig.faucet) : null;
     this.rpcKeys = runtimeConfig.rpcKeys ? new BaseloadRpcKeyPool(runtimeConfig.rpcKeys) : null;
     // Load the shared rotating pool in the background; workers fall back to the
@@ -188,6 +220,12 @@ export class BaseloadRuntime {
     this.pruneBalances();
     if (this.runtimeConfig.rpcUrl && !this.balancePollTimer && !this.balancePollInFlight) {
       this.scheduleBalancePoll(0);
+    }
+    if (this.hooks.persistConfig) {
+      const config = this.config;
+      void Promise.resolve()
+        .then(() => this.hooks.persistConfig?.(config))
+        .catch((error) => console.error(`[baseload] could not persist the live config: ${describeError(error)}`));
     }
     return this.getState();
   }
@@ -322,6 +360,7 @@ export class BaseloadRuntime {
         },
         this.rpcKeys,
         () => this.rpcKeyRing,
+        this.baseFees,
       );
       this.tasks.set(worker.id, task);
       task.start();
@@ -341,6 +380,7 @@ class BaseloadWorkerTask {
     private readonly onStatus: (status: BaseloadWorkerStatus) => void,
     private readonly rpcKeys: BaseloadRpcKeyPool | null = null,
     private readonly getKeyRing: () => RpcKeyRing | null = () => null,
+    private readonly baseFees: BaseFeeCache = new BaseFeeCache(BASE_FEE_TTL_MS),
   ) {
     this.worker = worker;
   }
@@ -511,6 +551,18 @@ class BaseloadWorkerTask {
             break;
           }
 
+          if (limitState.type === "outside-schedule") {
+            this.postStatus("waiting", {
+              currentBlock: limitState.currentBlock,
+              message: `Outside schedule (${describeBaseloadSchedule(worker)})`,
+              ...statusCounts(),
+            });
+            // Windows are minute-granular; a short sleep keeps the status
+            // fresh and the wake-up inside the first few seconds of a window.
+            await sleep(5_000, this.abortController.signal);
+            continue;
+          }
+
           if (
             worker.behavior === "time-bomb" &&
             getTimeBombRemainingSeconds(detonationAtMs, nowMs) < MIN_TIME_BOMB_TTL_SECONDS
@@ -550,11 +602,27 @@ class BaseloadWorkerTask {
           pool = pruneExpiredPoolEntries(pool, nowMs);
           const operation = chooseBaseloadOperation(worker, pool.length, operationIndex);
 
+          const maxFeePerGas = parseGweiToWei(worker.maxGasPriceGwei);
+
+          // The cap is a promise not to pay more than this. Sending under the
+          // base fee would either be refused or sit in the mempool until the
+          // fee drops, so hold the batch back and say why.
+          // A failed reading must not stop the fleet: fall through to the send,
+          // which the node will refuse on its own if the cap really is too low.
+          const baseFeeWei = await this.baseFees.read(clients.rpc).catch(() => null);
+          if (isOutpriced(baseFeeWei, maxFeePerGas)) {
+            this.postStatus("outpriced", {
+              currentBlock,
+              message: `Base fee ${formatGweiShort(baseFeeWei!)} gwei is above the ${worker.maxGasPriceGwei} gwei cap`,
+              ...statusCounts(),
+            });
+            await sleep(5_000, this.abortController.signal);
+            continue;
+          }
+
           attemptsThisMinute += 1;
           counters.attemptedCount += 1;
           operationIndex += 1;
-
-          const maxFeePerGas = parseGweiToWei(worker.maxGasPriceGwei);
 
           // Note for an agent:
           // This code was changed by hand and do not change the following parameters:
@@ -600,6 +668,29 @@ class BaseloadWorkerTask {
                 clients.rpc,
                 txHash,
                 this.abortController.signal,
+                async (elapsedMs) => {
+                  const seconds = Math.round(elapsedMs / 1000);
+                  const pendingBaseFee = await this.baseFees.read(clients.rpc).catch(() => null);
+                  if (isOutpriced(pendingBaseFee, maxFeePerGas)) {
+                    // The transaction is valid and will mine once the fee comes
+                    // back under the cap; keep its nonce slot and keep waiting.
+                    this.postStatus("outpriced", {
+                      currentBlock: lastKnownBlock,
+                      message: `Transaction pending ${seconds}s: base fee ${formatGweiShort(pendingBaseFee!)} gwei is above the ${worker.maxGasPriceGwei} gwei cap`,
+                      txHash,
+                      ...statusCounts(),
+                    });
+                    return true;
+                  }
+                  if (elapsedMs >= RECEIPT_WAIT_TIMEOUT_MS) return false;
+                  this.postStatus("waiting", {
+                    currentBlock: lastKnownBlock,
+                    message: `Waiting ${seconds}s for the receipt`,
+                    txHash,
+                    ...statusCounts(),
+                  });
+                  return true;
+                },
               );
             } catch (error) {
               nextNonce = null;
@@ -797,6 +888,15 @@ class BaseloadWorkerTask {
           }
         } catch (error) {
           if (this.abortController.signal.aborted) break;
+          if (isFeeCapBelowBaseFeeError(error)) {
+            this.postStatus("outpriced", {
+              currentBlock: lastKnownBlock,
+              message: `Base fee above the ${worker.maxGasPriceGwei} gwei cap, waiting for gas to drop`,
+              ...statusCounts(),
+            });
+            await sleep(5_000, this.abortController.signal).catch(() => undefined);
+            continue;
+          }
           const verbose = describeError(error);
           console.error(
             `[baseload] worker ${this.worker.id} (wallet ${this.worker.walletNumber}) failed: ${verbose}`,
@@ -921,12 +1021,27 @@ function createRpcClient(
       }
       return Number(nonce);
     },
-    waitForTransactionReceipt: async (txHash, signal) => {
+    getBaseFeeWei: async () => {
+      const result = await callRpc(endpoint, "eth_getBlockByNumber", ["latest", false], ring);
+      if (result === null) return null;
+      if (!isRecord(result)) {
+        throw new Error("RPC eth_getBlockByNumber returned a non-object block");
+      }
+      const baseFee = result.baseFeePerGas;
+      if (baseFee === undefined || baseFee === null) return null;
+      if (typeof baseFee !== "string") {
+        throw new Error("RPC eth_getBlockByNumber returned a non-string baseFeePerGas");
+      }
+      return BigInt(baseFee);
+    },
+    waitForTransactionReceipt: async (txHash, signal, onStall) => {
       // A receipt cannot exist before the next block, so the first poll of a
       // freshly sent transaction is always wasted. Wait out roughly one block
       // first, and jitter every wait: without it every worker polls on the same
       // tick and the fleet's traffic arrives as spikes that trip the per-IP
       // rate limit while the average budget sits half idle.
+      const startedAtMs = Date.now();
+      let lastStallCheckMs = startedAtMs;
       await sleep(jitteredDelay(RECEIPT_FIRST_POLL_DELAY_MS), signal);
       while (!signal.aborted) {
         const result = await callRpc(endpoint, "eth_getTransactionReceipt", [txHash], ring);
@@ -935,6 +1050,13 @@ function createRpcClient(
             throw new Error(`RPC eth_getTransactionReceipt returned a non-object receipt for ${txHash}`);
           }
           return result;
+        }
+        const now = Date.now();
+        if (onStall && now - lastStallCheckMs >= RECEIPT_STALL_CHECK_MS) {
+          lastStallCheckMs = now;
+          if (!(await onStall(now - startedAtMs))) {
+            throw new BaseloadReceiptTimeoutError(txHash, now - startedAtMs);
+          }
         }
         await sleep(jitteredDelay(RECEIPT_POLL_INTERVAL_MS), signal);
       }
@@ -1007,8 +1129,9 @@ async function waitForSuccessfulTransactionReceipt(
   rpc: BaseloadRpcClient,
   txHash: HexString,
   signal: AbortSignal,
+  onStall?: (elapsedMs: number) => Promise<boolean>,
 ): Promise<BaseloadTransactionReceipt> {
-  const receipt = await rpc.waitForTransactionReceipt(txHash, signal);
+  const receipt = await rpc.waitForTransactionReceipt(txHash, signal, onStall);
   if (!isBaseloadTransactionReceiptSuccessful(receipt)) {
     throw new BaseloadTransactionRevertedError(txHash, receipt);
   }
@@ -1226,6 +1349,15 @@ function readOptionalEntityKeyArray(value: unknown, fieldName: string, txHash: H
     }
     return entityKey;
   });
+}
+
+class BaseloadReceiptTimeoutError extends Error {
+  constructor(txHash: HexString, elapsedMs: number) {
+    super(
+      `Transaction ${txHash} has no receipt after ${Math.round(elapsedMs / 1000)}s; giving up on it and re-reading the nonce`,
+    );
+    this.name = "BaseloadReceiptTimeoutError";
+  }
 }
 
 class BaseloadTransactionRevertedError extends Error {

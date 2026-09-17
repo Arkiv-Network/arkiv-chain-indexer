@@ -101,9 +101,24 @@ docker compose up --build
   count. This matters more than it looks: an unfiltered `COUNT(*)` scans every transaction row, and load
   testing showed it single-handedly capping the whole backend — every other Postgres-backed endpoint queues
   behind it. Keep the key free of `limit`/`page`/`order`, and prefer fixing the count over adding indexes.
+- `src/prometheus.ts` is a dependency-free Prometheus client (Counter/Gauge/Histogram/Registry + text
+  renderer); `src/serverMetrics.ts` defines the backend's metrics on a process-global registry and serves them at
+  `GET /metrics`. `handleRequest` wraps every request in `observeHttpRequest`, which labels traffic by a *route
+  template* from `ROUTE_TEMPLATES` (never the raw path or query) — add a line there when adding a route, or it
+  is counted under `other`. Response constructors in `src/server.ts` call `recordResponseBytes` so egress can be
+  counted without re-reading bodies. `src/db.ts` times every query and attributes it to the current route via
+  `AsyncLocalStorage`. JSON-RPC calls are counted per method in `handleSingle`; unknown method names are labelled
+  `unknown` so clients cannot mint series. Cache stats and scanner progress are mirrored by collectors registered
+  in `serve.ts` and refreshed at scrape time. The nginx site configs return 404 for `/api/metrics`; scrape the
+  loopback backend port or `/api/admin/metrics`. `/metrics` is open without authentication or forwarding-header
+  checks; deployment controls external exposure. `/admin/metrics` requires an administrator session or
+  generated temporary access token. Successful scrapes are excluded from traffic metrics; rejected ones are counted.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
   once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
-  data — the only path to a node is the opt-in passthrough below. `latest` means the indexed head (`scanner_state.last_successful_block`);
+  data — the only path to a node is the opt-in passthrough below. The path demands an administrator session,
+  configured Origin and X-CSRF-Token (it spends the upstream's quota), while `/shadow-rpc/experimental` is open
+  and explicitly receives no passthrough forwarder; the Data tab offers only the
+  index and a custom node outside admin mode. `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
   calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns
@@ -130,9 +145,11 @@ docker compose up --build
   and **nothing about the upstream leaks** — the URL may embed a key, so only the node's own JSON-RPC `error`
   object is relayed, while transport failures answer a fixed `-32000` and log the cause. Forwarded calls are
   rate limited endpoint-wide (`600/min`) because a public endpoint fronting a metered node is a way to spend
-  someone else's quota. `jsonRpc.ts` declares the `JsonRpcForwarder` interface so the dependency points one
-  way; `/health` lists the forwarded methods under `features.jsonRpcPassthrough`.
-- The experimental entity index (`ENTITY_QUERY_INDEX`, `POST /shadow-rpc/experimental`,
+  someone else's quota. With no `SHADOW_RPC_UPSTREAM` the relay follows the node the scanner recorded in
+  `scanner_state` (`scanner_rpc_url`, written by `src/index.ts` at startup), resolved on first use. `jsonRpc.ts`
+  declares the `JsonRpcForwarder` interface so the dependency points one way; `/health` lists the forwarded
+  methods under `features.jsonRpcPassthrough`.
+- The entity index (on by default; `ENTITY_QUERY_INDEX=false` turns it off; `POST /shadow-rpc/experimental`,
   `JSON_RPC_EXPERIMENTAL_PATH` in `server.ts`) answers the `arkiv_*` reads from PostgreSQL on a path of its
   own, so `/shadow-rpc` keeps relaying them to the node and the two stay comparable
   (`scripts/compareEntityQuery.ts`; `scripts/seedEntityQueryFixtures.ts` seeds the fixture suite). The pieces:
@@ -149,7 +166,13 @@ docker compose up --build
   (`BTreeMap<EntityAddress, …>` in `arkiv-reth-statemanager`), so inside one transaction the operation index
   plays no part; across transactions it is creation order because a key can never be re-created); `entityProjector.ts` folds forward in chunks and
   refolds keys whose operations landed below the fold point (`transaction_operations.scanned_at`), lowering
-  the floor when a backfill brings keyed creates in below it; `arkivJsonRpc.ts` is the method layer
+  the floor when a backfill brings keyed creates in below it, and runs the genesis import for seeded chains
+  (arkiv-prefill): `entityGenesis.ts` walks the node at block 0, `entityGenesisDump.ts` +
+  `entityGenesisDumpImport.ts` load a seed's `state.jsonl` offline through `scripts/importGenesisState.ts` — the
+  only script that writes to Postgres — and `genesisProgress.ts` is the progress document both write; genesis
+  rows are version 0 with `created_at = 0` and `created_position` = entity id, `foldEntityVersions` takes such a
+  row as the base, one state row (`genesis_import`) tracks both importers, and the projector never folds while
+  an import is `running`; `arkivJsonRpc.ts` is the method layer
   (projection, cursors, options, errors) and plugs into `jsonRpc.ts` through `localOverrides`. Invariants:
   never store payload bytes (`select.payload` is refused); `latest` is the projection head, never the
   scanner or chain head; blocks outside `[floor, head]` are `-32006`, never a silently partial answer;
@@ -182,10 +205,49 @@ docker compose up --build
 ## Docker Compose
 
 - `Dockerfile` (root) builds a single Bun image used by `scanner`, `aggregator`, and `backend` services. The
-  service-specific entry point is picked via `command:` in `docker-compose.yml`.
-- `frontend/Dockerfile` builds an nginx image serving the static UI.
+  service-specific entry point is picked via `command:` in `docker-compose.yml`. The image carries `src/` and
+  `scripts/`, so the offline genesis importer runs in it (`docker compose run --rm backend bun run
+  scripts/importGenesisState.ts ...`).
+- `frontend/Dockerfile` builds the static UI and serves it with `frontend/server.js`. Its build context is
+  `frontend/` plus a second context named `shared` for the repository's `src/` (declared in
+  `docker-compose.yml` and `.github/workflows/publish-images.yml`), because `frontend/src` imports shared
+  modules such as `src/omniSearchTypes.ts` from `../src`.
 - The `decoder` image this repo publishes is built by `.github/workflows/publish-images.yml` from
   arkiv-transaction-decoder's source at a pinned commit, with `--build-arg PORT=28884`. Deployments probe that
   port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. Compose runs the
   released upstream image directly and sets `PORT` itself.
 - All required env vars live in `.env.example`.
+
+## Google login and administrator access
+
+- `src/auth.ts`, `authStorage.ts`, `googleOidc.ts`, and `authConfig.ts` implement Google OIDC code flow,
+  PKCE/state/nonce and server-managed PostgreSQL sessions. The openid-client adapter explicitly enables
+  signature/JWKS checks. Google access/ID tokens are discarded after identity validation.
+- Google `sub` identifies users. Compute roles per request from the current allowlist, verified email and
+  signed `hd=golem.network`; the sole initial administrator is `sieciech.czajka@golem.network`.
+  Other Google users have public access plus identity/logout. Disabled users and revoked/expired sessions fail closed.
+- Protected surfaces: all saved Baseload config routes, PUT /baseload, /shadow-rpc, /admin/metrics.
+  Cookie writes and protected RPC require the configured exact Origin and session X-CSRF-Token. Auth/admin
+  responses are no-store, without wildcard CORS or conditional GET. Public reads do not load auth storage.
+- Host-only HttpOnly Secure SameSite=Lax cookies use `__Host-arkiv_session`; DB stores token hashes only.
+  Login attempts are atomically consumed and rate capped across instances; expiry cleanup runs each minute.
+  HTTP localhost cookies require explicit AUTH_INSECURE_LOCALHOST=true and a localhost AUTH_PUBLIC_ORIGIN.
+- Administrator sessions can create/revoke temporary access tokens under `/auth/access-tokens`. Only hashes
+  are stored in `auth_access_tokens`; validity is 1–30 days, enforced by the service and database. Tokens grant
+  all administrator API permissions except token management (session only). Recheck owner role/disabled state,
+  expiry and revocation on every request. Reject ambiguous bearer+session requests. The legacy environment
+  credentials METRICS_BEARER_TOKEN and BASELOAD_AUTOMATION_TOKEN no longer grant access.
+- Kalarepa alone opts into AUTH_TOKEN_LOGIN_ENABLED=true plus AUTH_TOKEN_LOGIN_TOKEN (default disabled).
+  POST /auth/token-login exchanges JSON email/token for a session, requires exact Origin, bounds the body,
+  and shares the database login rate cap. The entered email uses the current admin allowlist; all others are
+  ordinary users. Keep provider=token identities separate from Google, with email_verified=false. Token
+  sessions require the current token fingerprint on every lookup, so disabling or rotating the token rejects them.
+  This is an explicit testing option, never a bearer API fallback; keep it disabled on proper deployments.
+- `/auth/session` returns role/user/csrfToken/expiresAt/loginAvailable/tokenLoginAvailable. The frontend never stores credentials;
+  custom node fetches omit cookies and CSRF even for application-origin URLs. Gate direct admin views as well
+  as navigation; logout/role loss stops privileged polling and debug state.
+- Normal tests only use TEST_DATABASE_URL when explicitly provided, never DATABASE_URL. Run with
+  `bun --no-env-file test` when local .env contains real application credentials. OAuth fixture tests mock
+  discovery/JWKS with signed tokens; real account login and HTTPS callback validation remain opt-in manual checks.
+- See docs/google-login.md for configuration, rollout and scraper migration. Auth callback request queries
+  must not be logged by proxies. Do not expose client secrets, tokens, authorization codes or state in logs.

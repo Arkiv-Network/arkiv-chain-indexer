@@ -5,6 +5,8 @@ import {
   type BaseloadWorkerConfig,
 } from "./api";
 
+import { normalizeDailyWindow, normalizeHourlyWindow } from "./baseloadSchedule";
+
 export { BASELOAD_WORKER_BEHAVIORS } from "./api";
 export type { BaseloadConfig, BaseloadWorkerBehavior, BaseloadWorkerConfig } from "./api";
 
@@ -21,6 +23,7 @@ export function behaviorUsesPool(behavior: BaseloadWorkerBehavior): boolean {
 }
 
 export interface BaseloadWorkerDraft {
+  name: string;
   behavior: string;
   maxGasPriceGwei: string;
   opsPerMinute: string;
@@ -35,6 +38,8 @@ export interface BaseloadWorkerDraft {
   endBlock: string;
   durationSeconds: string;
   ttlSeconds: string;
+  dailyWindow: string;
+  hourlyWindow: string;
 }
 
 export const BASELOAD_CONFIG_VERSION = 2;
@@ -50,7 +55,10 @@ export const MAX_WALLET_NUMBER = 250;
 // worker fails with "Execution error without revert data".
 export const MAX_BASELOAD_ENTITIES_PER_REQUEST = 64;
 
+export const MAX_WORKER_NAME_LENGTH = 64;
+
 export const DEFAULT_BASELOAD_WORKER_VALUES = {
+  name: "",
   behavior: "create" as BaseloadWorkerBehavior,
   maxGasPriceGwei: 0.1,
   opsPerMinute: 1,
@@ -64,6 +72,8 @@ export const DEFAULT_BASELOAD_WORKER_VALUES = {
   endBlock: null,
   durationSeconds: null,
   ttlSeconds: 3600,
+  dailyWindow: null,
+  hourlyWindow: null,
 } as const;
 
 export const EMPTY_BASELOAD_CONFIG: BaseloadConfig = {
@@ -73,6 +83,7 @@ export const EMPTY_BASELOAD_CONFIG: BaseloadConfig = {
 
 export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerDraft {
   return {
+    name: "",
     behavior: DEFAULT_BASELOAD_WORKER_VALUES.behavior,
     maxGasPriceGwei: String(DEFAULT_BASELOAD_WORKER_VALUES.maxGasPriceGwei.toFixed(1)),
     opsPerMinute: String(DEFAULT_BASELOAD_WORKER_VALUES.opsPerMinute),
@@ -91,7 +102,70 @@ export function createBaseloadWorkerDraft(walletNumber: number): BaseloadWorkerD
     endBlock: "",
     durationSeconds: "",
     ttlSeconds: String(DEFAULT_BASELOAD_WORKER_VALUES.ttlSeconds),
+    dailyWindow: "",
+    hourlyWindow: "",
   };
+}
+
+export function createBaseloadWorkerDraftFromWorker(worker: BaseloadWorkerConfig): BaseloadWorkerDraft {
+  return {
+    name: worker.name,
+    behavior: worker.behavior,
+    maxGasPriceGwei: String(worker.maxGasPriceGwei),
+    opsPerMinute: String(worker.opsPerMinute),
+    entitiesPerRequest: String(worker.entitiesPerRequest),
+    singleCreatePayloadSize: String(worker.singleCreatePayloadSize),
+    singleCreateStringArgumentCount: String(worker.singleCreateStringArgumentCount),
+    singleCreateNumberArgumentCount: String(worker.singleCreateNumberArgumentCount),
+    entityPoolSize: String(worker.entityPoolSize),
+    timeBombOffsetSeconds: String(worker.timeBombOffsetSeconds),
+    walletNumber: String(worker.walletNumber),
+    startBlock: String(worker.startBlock),
+    endBlock: worker.endBlock === null ? "" : String(worker.endBlock),
+    durationSeconds: worker.durationSeconds === null ? "" : String(worker.durationSeconds),
+    ttlSeconds: String(worker.ttlSeconds),
+    dailyWindow: worker.dailyWindow ?? "",
+    hourlyWindow: worker.hourlyWindow ?? "",
+  };
+}
+
+export function isSameBaseloadWorkerDraft(a: BaseloadWorkerDraft, b: BaseloadWorkerDraft): boolean {
+  return (Object.keys(a) as Array<keyof BaseloadWorkerDraft>).every((key) => a[key] === b[key]);
+}
+
+export function describeBaseloadWorkerName(worker: Pick<BaseloadWorkerConfig, "name" | "walletNumber">): string {
+  return worker.name || `wallet #${worker.walletNumber}`;
+}
+
+/** One operator as a standalone JSON document (the same shape as a `workers[]` entry). */
+export function serializeBaseloadWorker(worker: BaseloadWorkerConfig): string {
+  return `${JSON.stringify(normalizeBaseloadWorker(worker), null, 2)}\n`;
+}
+
+/**
+ * Accepts a standalone worker object (from "Export worker") or a full config
+ * holding exactly one worker, and returns the normalized worker.
+ */
+export function parseBaseloadWorkerJson(json: string): BaseloadWorkerConfig {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("Worker file is not valid JSON");
+  }
+  if (parsed === null || typeof parsed !== "object") {
+    throw new Error("Worker file must be a JSON object");
+  }
+  const candidate = parsed as { workers?: unknown };
+  if (Array.isArray(candidate.workers)) {
+    if (candidate.workers.length !== 1) {
+      throw new Error(
+        `Worker file holds ${candidate.workers.length} workers; use "Load config" for whole fleets`,
+      );
+    }
+    return normalizeBaseloadWorker(candidate.workers[0]);
+  }
+  return normalizeBaseloadWorker(parsed);
 }
 
 export function moveDraftToNextAvailableWallet(
@@ -108,6 +182,7 @@ export function createBaseloadWorkerFromDraft(draft: BaseloadWorkerDraft): Basel
   return normalizeBaseloadWorker({
     ...DEFAULT_BASELOAD_WORKER_VALUES,
     id: createWorkerId(Number(draft.walletNumber)),
+    name: draft.name,
     behavior: draft.behavior,
     maxGasPriceGwei: parseFiniteNumber("Max gas price accepted gwei", draft.maxGasPriceGwei, {
       allowFloat: true,
@@ -170,6 +245,8 @@ export function createBaseloadWorkerFromDraft(draft: BaseloadWorkerDraft): Basel
       allowFloat: false,
       min: 1,
     }),
+    dailyWindow: normalizeDailyWindow(draft.dailyWindow),
+    hourlyWindow: normalizeHourlyWindow(draft.hourlyWindow),
   });
 }
 
@@ -250,6 +327,7 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
 
   return {
     id: typeof input.id === "string" && input.id.trim() ? input.id : createWorkerId(walletNumber),
+    name: coerceName(input.name),
     behavior: coerceBehavior(input.behavior),
     maxGasPriceGwei: coerceNumber("Max gas price accepted gwei", input.maxGasPriceGwei, {
       min: 0,
@@ -287,7 +365,19 @@ function normalizeBaseloadWorker(value: unknown): BaseloadWorkerConfig {
     endBlock,
     durationSeconds: coerceNullableInteger("Duration seconds", input.durationSeconds, { min: 1 }),
     ttlSeconds: coerceInteger("TTL seconds", input.ttlSeconds, { min: 1 }),
+    dailyWindow: normalizeDailyWindow(input.dailyWindow),
+    hourlyWindow: normalizeHourlyWindow(input.hourlyWindow),
   };
+}
+
+function coerceName(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new Error("Worker name must be a string");
+  const name = value.trim();
+  if (name.length > MAX_WORKER_NAME_LENGTH) {
+    throw new Error(`Worker name must be at most ${MAX_WORKER_NAME_LENGTH} characters`);
+  }
+  return name;
 }
 
 function coerceBehavior(value: unknown): BaseloadWorkerBehavior {

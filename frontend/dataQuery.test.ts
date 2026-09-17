@@ -14,6 +14,7 @@ import {
   lifetimeProgress,
   locateQueryPosition,
   normalizeQueryInput,
+  parseQueryBlock,
   resolveExpirationFilter,
   resolvePageSize,
 } from "./src/dataQuery";
@@ -71,8 +72,8 @@ describe("page settings", () => {
   });
 
   test("dataPageFilters leaves defaults out of the URL", () => {
-    expect(dataPageFilters("*", "25", "all")).toEqual({ q: "*", pageSize: "", expiration: "", rpc: "" });
-    expect(dataPageFilters("*", "100", "soon")).toEqual({ q: "*", pageSize: "100", expiration: "soon", rpc: "" });
+    expect(dataPageFilters("*", "25", "all")).toEqual({ q: "*", pageSize: "", expiration: "", rpc: "", block: "" });
+    expect(dataPageFilters("*", "100", "soon")).toEqual({ q: "*", pageSize: "100", expiration: "soon", rpc: "", block: "" });
   });
 
   test("dataPageFilters names a custom RPC endpoint so the link reproduces the run", () => {
@@ -246,5 +247,21 @@ describe("block timing", () => {
     expect(formatRelativeMs(3 * 3_600_000, now)).toBe("in 3 hours");
     expect(formatRelativeMs(2 * 86_400_000, now)).toBe("in 2 days");
     expect(formatRelativeMs(-400 * 86_400_000, now)).toBe("last year");
+  });
+});
+
+describe("query block selection", () => {
+  test("defaults to latest and accepts decimal, hex and block zero", () => {
+    expect(parseQueryBlock("")).toBeUndefined();
+    expect(parseQueryBlock(" latest ")).toBeUndefined();
+    expect(parseQueryBlock("0")).toBe(0);
+    expect(parseQueryBlock("528083")).toBe(528083);
+    expect(parseQueryBlock("0x80ed3")).toBe(528083);
+    expect(dataPageFilters("*", "25", "all", "index", "528083").block).toBe("528083");
+  });
+  test("rejects invalid or imprecise heights instead of querying latest", () => {
+    for (const input of ["-1", "1.5", "1e3", "junk", "9007199254740993"]) {
+      expect(() => parseQueryBlock(input)).toThrow("block number");
+    }
   });
 });

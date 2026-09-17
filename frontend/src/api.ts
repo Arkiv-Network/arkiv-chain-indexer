@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "./authClient";
 export interface StoredBlock {
   blockNumber: number;
   blockDate: string;
@@ -288,6 +289,24 @@ export interface StoredEntityOperation extends ArkivOperation {
   hash: string;
 }
 
+/**
+ * The state an entity was born with when the chain's genesis carried it (a
+ * seeded devnet): no transaction created it, so the backend reports what its
+ * entity index imported from block 0.
+ */
+export interface EntityGenesisRecord {
+  owner: string;
+  creator: string;
+  /** Absolute expiry block as a decimal string; 18446744073709551615 means never. */
+  expiresAt: string;
+  contentType: string;
+  /** Raw creation flag bits (1 readonly, 2 permissionless extension); null when unknown. */
+  creationFlags: number | null;
+  /** Payload bytes at genesis; 0 when the import never fetched the payload. */
+  payloadSize: number;
+  attributes: Array<{ name: string; type: string; value: unknown }>;
+}
+
 export interface EntityByKeyResponse {
   entityKey: string;
   /** Number of operations in `operations` (the returned slice). */
@@ -300,6 +319,8 @@ export interface EntityByKeyResponse {
   operations: StoredEntityOperation[];
   /** Earliest stored operation; present only on truncated histories. */
   firstOperation?: StoredEntityOperation;
+  /** Present for an entity created in the genesis state; `operations` may then be empty. */
+  genesis?: EntityGenesisRecord;
 }
 
 export const ENTITY_OPERATION_RESPONSE_NAMES = [
@@ -341,6 +362,7 @@ interface CompactEntityByKeyResponse {
   names: string[];
   operations: EntityOperationResponseRow[];
   firstOperation?: EntityOperationResponseRow;
+  genesis?: EntityGenesisRecord;
 }
 
 export interface ArkivOperationSummaryEntry {
@@ -804,7 +826,23 @@ export interface EntityQueryIndexHealth {
   /** How far the projection trails the scanner head. */
   lagBlocks: string | null;
   liveEntities: number | null;
+  /** When `liveEntities` was counted; null until the first count. */
+  liveEntitiesAtUtc: string | null;
   lastFoldAtUtc: string | null;
+  /** The genesis import (a chain seeded at block 0); null when none was ever considered. */
+  genesis: EntityGenesisImportHealth | null;
+}
+
+export interface EntityGenesisImportHealth {
+  status: "none" | "waiting" | "running" | "done" | "unavailable" | "failed";
+  phase: "walk" | "repair" | null;
+  source: "rpc" | "dump" | null;
+  total: number;
+  imported: number;
+  startedAtUtc: string;
+  finishedAtUtc: string | null;
+  updatedAtUtc: string | null;
+  error: string | null;
 }
 
 export const BASELOAD_WORKER_BEHAVIORS = [
@@ -819,6 +857,8 @@ export type BaseloadWorkerBehavior = (typeof BASELOAD_WORKER_BEHAVIORS)[number];
 
 export interface BaseloadWorkerConfig {
   id: string;
+  /** Free-form label for humans; empty means "wallet #N". */
+  name: string;
   behavior: BaseloadWorkerBehavior;
   maxGasPriceGwei: number;
   opsPerMinute: number;
@@ -834,6 +874,10 @@ export interface BaseloadWorkerConfig {
   endBlock: number | null;
   durationSeconds: number | null;
   ttlSeconds: number;
+  /** "HH:MM-HH:MM" in UTC, end exclusive, may wrap midnight; null = every hour of the day. */
+  dailyWindow: string | null;
+  /** "MM-MM" minutes of every hour, end exclusive, may wrap; null = every minute of the hour. */
+  hourlyWindow: string | null;
 }
 
 export interface BaseloadConfig {
@@ -844,7 +888,16 @@ export interface BaseloadConfig {
 export interface BaseloadTaskStatus {
   workerId: string;
   walletNumber: number;
-  status: "starting" | "ready" | "updated" | "running" | "waiting" | "completed" | "error" | "stopped";
+  status:
+    | "starting"
+    | "ready"
+    | "updated"
+    | "running"
+    | "waiting"
+    | "outpriced"
+    | "completed"
+    | "error"
+    | "stopped";
   updatedAt: string;
   currentBlock?: number;
   message?: string;
@@ -906,13 +959,8 @@ async function getJson<T>(
   return response.json() as Promise<T>;
 }
 
-async function getAdminJson<T>(path: string, bearerToken?: string): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (bearerToken) {
-    headers.authorization = `Bearer ${bearerToken}`;
-  }
-
-  const response = await fetch(`/api${path}`, { headers });
+async function getAdminJson<T>(path: string): Promise<T> {
+  const response = await authenticatedFetch(`/api${path}`);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -920,17 +968,13 @@ async function getAdminJson<T>(path: string, bearerToken?: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function putJson<T>(path: string, body: unknown, bearerToken?: string): Promise<T> {
+async function putJson<T>(path: string, body: unknown, csrfToken?: string): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json" };
-  if (bearerToken) {
-    headers.authorization = `Bearer ${bearerToken}`;
-  }
-
-  const response = await fetch(`/api${path}`, {
+  const response = await authenticatedFetch(`/api${path}`, {
     method: "PUT",
     headers,
     body: JSON.stringify(body),
-  });
+  }, csrfToken);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -938,16 +982,12 @@ async function putJson<T>(path: string, body: unknown, bearerToken?: string): Pr
   return response.json() as Promise<T>;
 }
 
-async function deleteJson<T>(path: string, bearerToken?: string): Promise<T> {
+async function deleteJson<T>(path: string, csrfToken?: string): Promise<T> {
   const headers: Record<string, string> = {};
-  if (bearerToken) {
-    headers.authorization = `Bearer ${bearerToken}`;
-  }
-
-  const response = await fetch(`/api${path}`, {
+  const response = await authenticatedFetch(`/api${path}`, {
     method: "DELETE",
     headers,
-  });
+  }, csrfToken);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -1098,6 +1138,7 @@ function expandEntityByKeyResponse(response: CompactEntityByKeyResponse): Entity
     ...(response.firstOperation
       ? { firstOperation: decodeEntityOperationResponseRow(response.firstOperation, names) }
       : {}),
+    ...(response.genesis ? { genesis: response.genesis } : {}),
   };
 }
 
@@ -1628,22 +1669,11 @@ export function fetchGuzzlerHistory(address: string): Promise<GuzzlerHistoryResp
   ).then(expandGuzzlerHistoryResponse);
 }
 
-export interface AdminVerifyResponse {
-  authorized: true;
-}
-
-export async function verifyAdminToken(bearerToken: string): Promise<AdminVerifyResponse> {
-  const headers: Record<string, string> = {};
-  const trimmed = bearerToken.trim();
-  if (trimmed) {
-    headers.authorization = `Bearer ${trimmed}`;
-  }
-  const response = await fetch("/api/admin/verify", { headers });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`HTTP ${response.status}: ${text}`);
-  }
-  return response.json() as Promise<AdminVerifyResponse>;
+/** The registry is available to administrator sessions through the public proxy. */
+export async function fetchServerMetricsText(): Promise<string> {
+  const response = await authenticatedFetch("/api/admin/metrics");
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  return response.text();
 }
 
 export function fetchBaseloadState(): Promise<BaseloadStateResponse> {
@@ -1652,44 +1682,44 @@ export function fetchBaseloadState(): Promise<BaseloadStateResponse> {
 
 export function updateBaseloadConfig(
   config: BaseloadConfig,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<BaseloadStateResponse> {
-  return putJson<BaseloadStateResponse>("/baseload", config, adminBearerToken);
+  return putJson<BaseloadStateResponse>("/baseload", config, csrfToken);
 }
 
-export function fetchBaseloadConfigs(adminBearerToken?: string): Promise<BaseloadConfigsResponse> {
-  return getAdminJson<BaseloadConfigsResponse>("/baseload/configs", adminBearerToken);
+export function fetchBaseloadConfigs(): Promise<BaseloadConfigsResponse> {
+  return getAdminJson<BaseloadConfigsResponse>("/baseload/configs");
 }
 
 export function saveBaseloadConfig(
   name: string,
   config: BaseloadConfig,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<StoredBaseloadConfig> {
   return putJson<StoredBaseloadConfig>(
     `/baseload/configs/${encodeURIComponent(name)}`,
     config,
-    adminBearerToken,
+    csrfToken,
   );
 }
 
 export function loadBaseloadConfig(
   name: string,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<BaseloadStateResponse> {
   return putJson<BaseloadStateResponse>(
     `/baseload/configs/${encodeURIComponent(name)}/load`,
     {},
-    adminBearerToken,
+    csrfToken,
   );
 }
 
 export function deleteBaseloadConfig(
   name: string,
-  adminBearerToken?: string,
+  csrfToken?: string,
 ): Promise<{ deleted: boolean }> {
   return deleteJson<{ deleted: boolean }>(
     `/baseload/configs/${encodeURIComponent(name)}`,
-    adminBearerToken,
+    csrfToken,
   );
 }

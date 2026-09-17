@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { EntityRecord, QueryPage } from "./src/dataQuery";
-import { compareEntityPages, entityDifferences, speedupFactor, type ComparisonSide } from "./src/entityCompare";
+import {
+  MAX_COMPARE_LAG_BLOCKS,
+  compareEntityPages,
+  entityDifferences,
+  pickComparisonBlock,
+  speedupFactor,
+  type ComparisonSide,
+} from "./src/entityCompare";
 
 function entity(overrides: Partial<EntityRecord> = {}): EntityRecord {
   return {
@@ -146,5 +153,23 @@ describe("speedupFactor", () => {
 
     const instant = compareEntityPages(side(page([entity()]), 120), side(page([entity()]), 0));
     expect(speedupFactor(instant)).toBeNull();
+  });
+});
+
+describe("pickComparisonBlock", () => {
+  test("follows the index head while it trails the node by a little", () => {
+    expect(pickComparisonBlock(26551, 26540)).toBe(26540);
+    expect(pickComparisonBlock(26551, 26551 - MAX_COMPARE_LAG_BLOCKS)).toBe(26551 - MAX_COMPARE_LAG_BLOCKS);
+  });
+
+  test("stays on the node head when the index is far behind or ahead", () => {
+    expect(pickComparisonBlock(26551, 26551 - MAX_COMPARE_LAG_BLOCKS - 1)).toBe(26551);
+    expect(pickComparisonBlock(26551, 26560)).toBe(26551);
+  });
+
+  test("uses whichever head answered", () => {
+    expect(pickComparisonBlock(undefined, 42)).toBe(42);
+    expect(pickComparisonBlock(42, undefined)).toBe(42);
+    expect(pickComparisonBlock(undefined, undefined)).toBeUndefined();
   });
 });

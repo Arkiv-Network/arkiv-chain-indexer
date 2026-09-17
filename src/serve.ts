@@ -1,3 +1,5 @@
+import { AuthService } from "./auth";
+import { AuthStorage } from "./authStorage";
 import { parseServerConfig, ServerHelpRequested } from "./serverConfig";
 import { buildSyncStatusResponse, createBlockServer } from "./server";
 import { ScannerStorage } from "./storage";
@@ -11,10 +13,15 @@ import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import { EntityProjector } from "./entityProjector";
+import { createRpcGenesisSource } from "./entityGenesis";
+import { OmniSearch } from "./omniSearch";
 import type { GuzzlerStore } from "./guzzlers";
+import { collectEntityIndex, collectIndexerProgress, collectResponseCache, collectValueCache } from "./serverMetrics";
 
 async function main(): Promise<void> {
   let storage: ScannerStorage | undefined;
+  let authStorage: AuthStorage | undefined;
+  let authCleanup: ReturnType<typeof setInterval> | undefined;
   let guzzlerStore: GuzzlerStore | undefined;
   let baseloadRuntime: BaseloadRuntime | undefined;
   let stopEntityInvalidationListener: (() => Promise<void>) | undefined;
@@ -22,10 +29,19 @@ async function main(): Promise<void> {
   let syncPrecomputer: PrecomputedResponse | undefined;
   let entityIndex: EntityIndexStorage | undefined;
   let entityProjector: EntityProjector | undefined;
+  let search: OmniSearch | undefined;
 
   try {
     const config = parseServerConfig(process.argv.slice(2));
     storage = await ScannerStorage.open(config.databaseUrl);
+    let auth: AuthService | undefined;
+    if (config.auth) {
+      authStorage = await AuthStorage.open(config.databaseUrl);
+      auth = new AuthService(config.auth, authStorage);
+      const authStore = authStorage;
+      authCleanup = setInterval(() => { void authStore.cleanup(Date.now()).catch(() => console.warn("Auth expiry cleanup failed")); }, 60_000);
+      authCleanup.unref();
+    }
     if (config.redisUrl) {
       guzzlerStore = await RedisGuzzlerStore.open(config.redisUrl);
     }
@@ -95,8 +111,24 @@ async function main(): Promise<void> {
       }
     }
     const baseloadRuntimeConfig = parseBaseloadRuntimeConfig();
-    baseloadRuntime = new BaseloadRuntime(baseloadRuntimeConfig);
-    if (config.baseloadInitialConfigPath) {
+    const storageForBaseload = storage;
+    baseloadRuntime = new BaseloadRuntime(baseloadRuntimeConfig, {
+      persistConfig: (liveConfig) => storageForBaseload.saveBaseloadLiveConfig(liveConfig),
+    });
+    // The fleet that was running before the restart wins over the startup
+    // file; the file only seeds a database that has never seen a fleet.
+    const storedBaseloadConfig = await storage.loadBaseloadLiveConfig();
+    let restoredBaseload = false;
+    if (storedBaseloadConfig !== undefined) {
+      try {
+        const restored = baseloadRuntime.updateConfig(storedBaseloadConfig);
+        console.log(`Restored the live Baseload config from the database (${restored.config.workers.length} workers)`);
+        restoredBaseload = true;
+      } catch (error) {
+        console.warn("Stored live Baseload config could not be applied; starting without it:", error);
+      }
+    }
+    if (!restoredBaseload && config.baseloadInitialConfigPath) {
       const initialBaseloadConfig = await readBaseloadConfigFile(
         config.baseloadInitialConfigPath,
         baseloadRuntimeConfig.mnemonic,
@@ -119,34 +151,71 @@ async function main(): Promise<void> {
               : {}),
           })
         : undefined;
-    // The only path from /shadow-rpc to a real node. Without an upstream URL
-    // the endpoint stays what its name promises: an index, not a node.
-    const jsonRpcPassthrough = config.jsonRpcPassthrough
-      ? new JsonRpcPassthrough({
-          url: config.jsonRpcPassthrough.url,
-          ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
-          methods: config.jsonRpcPassthrough.methods,
-          timeoutMs: config.jsonRpcPassthrough.timeoutMs,
-          rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
-        })
-      : undefined;
+    // The only path from /shadow-rpc to a real node: the configured upstream,
+    // or the node the scanner recorded for itself.
+    const passthroughStorage = storage;
+    const jsonRpcPassthrough = new JsonRpcPassthrough({
+      url: config.jsonRpcPassthrough.url ?? (() => passthroughStorage.getScannerRpcUrl()),
+      ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
+      methods: config.jsonRpcPassthrough.methods,
+      timeoutMs: config.jsonRpcPassthrough.timeoutMs,
+      rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
+    });
     // Experimental: the entity index behind /shadow-rpc/experimental. Its own
     // small pool, so a long initial fold never starves the API's connections.
+    let genesisImportDescription = "off";
     if (config.entityQueryIndex) {
       entityIndex = await EntityIndexStorage.open(config.databaseUrl, { max: 4 });
+      // The entities a seeded chain was born with come from the node, since
+      // no operation ever created them; without a node only an offline
+      // import (scripts/importGenesisState.ts) can bring them in.
+      const genesisSource =
+        config.entityIndexGenesis === "auto" && config.entityIndexGenesisRpc
+          ? createRpcGenesisSource({
+              url: config.entityIndexGenesisRpc.url,
+              ...(config.entityIndexGenesisRpc.apiKey ? { apiKey: config.entityIndexGenesisRpc.apiKey } : {}),
+              log: (message) => console.log(message),
+            })
+          : undefined;
+      genesisImportDescription =
+        config.entityIndexGenesis === "off"
+          ? "off (ENTITY_INDEX_GENESIS=off; an offline import is still finished)"
+          : genesisSource
+            ? `auto, from the node at ${config.entityIndexGenesisRpc?.url.replace(/\/\/[^/]*@/, "//")} ` +
+              `(up to ${config.entityIndexGenesisRpcLimit} entities over RPC)`
+            : "auto, but no node is configured (set SHADOW_RPC_UPSTREAM or ENTITY_INDEX_GENESIS_RPC); only an offline import is finished";
+      if (config.entityIndexGenesisProgressFile) genesisImportDescription += `; progress file ${config.entityIndexGenesisProgressFile}`;
       entityProjector = new EntityProjector(entityIndex, {
         ...(config.entityIndexFloorBlock !== undefined ? { floorBlock: config.entityIndexFloorBlock } : {}),
+        genesis: {
+          ...(genesisSource ? { source: genesisSource } : {}),
+          mode: config.entityIndexGenesis,
+          rpcLimit: config.entityIndexGenesisRpcLimit,
+          ...(config.entityIndexGenesisProgressFile ? { progressFile: config.entityIndexGenesisProgressFile } : {}),
+        },
       });
       entityProjector.start();
+      const entityIndexForMetrics = entityIndex;
+      collectEntityIndex(
+        () => entityIndexForMetrics.getProgress(),
+        () => entityIndexForMetrics.getStats(),
+      );
     }
+    // Prometheus collectors: refreshed at scrape time from the caches' own
+    // counters and the scanner progress row.
+    const storageForMetrics = storage;
+    collectResponseCache("entity_history", () => entityHistoryCache.stats());
+    collectResponseCache("list", () => listCache.stats());
+    collectValueCache("transaction_count", () => transactionCountCache.stats());
+    collectIndexerProgress(() => storageForMetrics.getScannerProgress());
+    search = OmniSearch.open(config.databaseUrl, config.entityQueryIndex);
     const server = createBlockServer(storage, {
+      search,
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),
       transactionDataEnabled: config.transactionDataEnabled,
       baseloadRuntime,
-      ...(config.baseloadAdminBearerToken !== undefined
-        ? { baseloadAdminBearerToken: config.baseloadAdminBearerToken }
-        : {}),
+      ...(auth ? { auth } : {}),
       ...(guzzlerStore ? { guzzlerStore } : {}),
       ...(payloadProviderPaymentResolver ? { payloadProviderPaymentResolver } : {}),
       entityHistoryCache,
@@ -156,9 +225,15 @@ async function main(): Promise<void> {
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
       ...(entityIndex ? { entityIndex } : {}),
+      metricsEnabled: config.metricsEnabled,
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
     console.log(`Guzzler statistics: ${guzzlerStore ? "enabled" : "disabled"}`);
+    console.log(
+      config.metricsEnabled
+        ? "Prometheus metrics: GET /metrics (open; deployment controls exposure), GET /admin/metrics (administrator session or temporary access token)"
+        : "Prometheus metrics: disabled",
+    );
     console.log(
       entityHistoryCache.enabled
         ? `Entity history cache: up to ${config.entityCacheMaxEntries} entries / ` +
@@ -181,15 +256,16 @@ async function main(): Promise<void> {
         : "Blocks/ranges cache: disabled",
     );
     console.log(
-      jsonRpcPassthrough
-        ? `JSON-RPC passthrough: forwarding ${jsonRpcPassthrough.describe()}`
-        : "JSON-RPC passthrough: disabled (/shadow-rpc answers from stored data only)",
+      `JSON-RPC passthrough: forwarding ${jsonRpcPassthrough.describe()} to ${
+        config.jsonRpcPassthrough.url ? "SHADOW_RPC_UPSTREAM" : "the node the scanner recorded"
+      }`,
     );
     console.log(
       entityIndex
-        ? "Entity index (experimental): projector running; arkiv_* reads answered from the index at /shadow-rpc/experimental"
-        : "Entity index (experimental): disabled (set ENTITY_QUERY_INDEX=true to build it)",
+        ? "Entity index: projector running; arkiv_* reads answered from the index at /shadow-rpc/experimental"
+        : "Entity index: disabled (ENTITY_QUERY_INDEX=false)",
     );
+    if (entityIndex) console.log(`Entity index genesis import: ${genesisImportDescription}`);
     console.log(
       transactionCountCache.enabled
         ? `Transaction count cache: up to ${config.transactionCountCacheMaxEntries} filters, ` +
@@ -203,10 +279,13 @@ async function main(): Promise<void> {
       syncPrecomputer?.stop();
       await entityProjector?.stop();
       await server.stop();
+      await search?.close();
       await entityIndex?.close();
       await stopEntityInvalidationListener?.();
       await stopStoredBlockListener?.();
       await guzzlerStore?.close();
+      if (authCleanup) clearInterval(authCleanup);
+      await authStorage?.close();
       await storage?.close();
       process.exit(0);
     };
@@ -220,6 +299,7 @@ async function main(): Promise<void> {
     }
 
     console.error(error);
+    await search?.close();
     baseloadRuntime?.stop();
     syncPrecomputer?.stop();
     await entityProjector?.stop();
@@ -227,6 +307,8 @@ async function main(): Promise<void> {
     await stopEntityInvalidationListener?.();
     await stopStoredBlockListener?.();
     await guzzlerStore?.close();
+    if (authCleanup) clearInterval(authCleanup);
+    await authStorage?.close();
     await storage?.close();
     process.exitCode = 1;
   }

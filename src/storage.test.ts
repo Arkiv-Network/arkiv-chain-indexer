@@ -237,6 +237,61 @@ if (!hasPostgresForTests()) {
       expect((await storage.queryBalances({ blockNumber: 10n })).map((row) => row.balanceWei)).toEqual(["1"]);
     });
 
+    test("remembers the node the scanner reads, for the backend's relay", async () => {
+      const storage = await withStorage();
+      expect(await storage.getScannerRpcUrl()).toBeUndefined();
+      await storage.saveScannerRpcUrl("http://watchers-el:8545");
+      expect(await storage.getScannerRpcUrl()).toBe("http://watchers-el:8545");
+      await storage.saveScannerRpcUrl("https://rpc.example.test");
+      expect(await storage.getScannerRpcUrl()).toBe("https://rpc.example.test");
+    });
+
+    test("orders balances, logs and fee samples numerically across the 99999/100000 boundary", async () => {
+      // Regression: these queries select `block_number::text AS block_number`, and a
+      // bare `ORDER BY block_number` binds to that text alias, so "99999" sorted
+      // above "100000" and eth_getBalance answered from the wrong block.
+      const storage = await withStorage();
+      const holder = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const log = (logIndex: number) => ({ logIndex, address: "0xfeed" as const, topics: [], data: "0x" as const });
+      for (const [blockNumber, balance, fee] of [
+        [99_999n, 1n, "9"],
+        [100_000n, 2n, "1"],
+        [100_001n, 3n, "5"],
+      ] as const) {
+        await storage.saveBlockMetrics(
+          blockMetricsFixture({ blockNumber }),
+          { kind: "lastSuccessfulBlock" },
+          [transactionFixture({ hash: `0x${blockNumber}`, priorityFeeWei: fee, logs: [log(0)] })],
+          [],
+          undefined,
+          new Map([[holder, balance]]),
+        );
+      }
+
+      expect((await storage.getBalanceAt(holder, 100_001n))?.blockNumber).toBe("100001");
+      expect((await storage.queryBalances({})).map((row) => row.blockNumber)).toEqual(["100001", "100000", "99999"]);
+      expect((await storage.queryBalances({ order: "asc" })).map((row) => row.blockNumber)).toEqual([
+        "99999",
+        "100000",
+        "100001",
+      ]);
+      expect((await storage.queryLogs({ fromBlock: 99_999n, toBlock: 100_001n })).map((row) => row.blockNumber)).toEqual([
+        99_999n,
+        100_000n,
+        100_001n,
+      ]);
+      expect((await storage.getPriorityFeeSamples(99_999n, 100_001n)).map((row) => row.blockNumber)).toEqual([
+        99_999n,
+        100_000n,
+        100_001n,
+      ]);
+      expect((await storage.getMinPriorityFeePerBlock(99_999n, 100_001n)).map((row) => row.blockNumber)).toEqual([
+        99_999n,
+        100_000n,
+        100_001n,
+      ]);
+    });
+
     test("reports database and application table sizes", async () => {
       const storage = await withStorage();
       await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 0n }), { kind: "lastSuccessfulBlock" }, [
@@ -261,6 +316,7 @@ if (!hasPostgresForTests()) {
         "sender_stats",
         "scanner_state",
         "baseload_configs",
+        "baseload_live_config",
       ]);
       expect(byName.get("blocks")?.rowCount).toBe("2");
       expect(byName.get("transactions")?.rowCount).toBe("2");
@@ -297,6 +353,7 @@ if (!hasPostgresForTests()) {
         workers: [
           {
             id: "wallet-0",
+            name: "",
             behavior: "create",
             maxGasPriceGwei: 0.1,
             opsPerMinute: 1,
@@ -312,6 +369,8 @@ if (!hasPostgresForTests()) {
             endBlock: null,
             durationSeconds: null,
             ttlSeconds: 3600,
+            dailyWindow: null,
+            hourlyWindow: null,
           },
         ],
       });
@@ -329,6 +388,18 @@ if (!hasPostgresForTests()) {
       expect((await storage.getBaseloadConfig("low gas"))?.config.workers[0]?.walletNumber).toBe(0);
       expect(await storage.deleteBaseloadConfig("low gas")).toBe(true);
       expect(await storage.getBaseloadConfig("low gas")).toBeUndefined();
+    });
+
+    test("keeps one live baseload config snapshot across saves", async () => {
+      const storage = await withStorage();
+
+      expect(await storage.loadBaseloadLiveConfig()).toBeUndefined();
+      await storage.saveBaseloadLiveConfig({ version: 2, workers: [{ id: "a" }] });
+      await storage.saveBaseloadLiveConfig({ version: 2, workers: [{ id: "b" }, { id: "c" }] });
+      expect(await storage.loadBaseloadLiveConfig()).toEqual({
+        version: 2,
+        workers: [{ id: "b" }, { id: "c" }],
+      });
     });
   });
 

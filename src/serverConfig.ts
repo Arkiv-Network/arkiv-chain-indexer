@@ -1,3 +1,4 @@
+import { parseAuthConfig, type AuthConfig } from "./authConfig";
 import {
   CliHelpRequested,
   coerceBoolean,
@@ -12,6 +13,7 @@ import {
   DEFAULT_RESPONSE_CACHE_TTL_MS,
 } from "./responseCache";
 import { DEFAULT_ENTITY_HISTORY_LIMIT } from "./storage";
+import { DEFAULT_GENESIS_RPC_LIMIT } from "./entityProjector";
 import {
   DEFAULT_PASSTHROUGH_METHODS,
   DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE,
@@ -23,7 +25,8 @@ import {
  * Present only when an upstream URL is configured; absent, nothing is forwarded.
  */
 export interface JsonRpcPassthroughConfig {
-  url: string;
+  /** Unset means "the node the scanner recorded" (`scanner_state.scanner_rpc_url`). */
+  url?: string;
   apiKey?: string;
   methods: string[];
   timeoutMs: number;
@@ -35,7 +38,7 @@ export interface ServerConfig {
   port: number;
   hostname?: string;
   transactionDataEnabled: boolean;
-  baseloadAdminBearerToken?: string;
+  auth?: AuthConfig;
   baseloadInitialConfigPath?: string;
   redisUrl?: string;
   protocolScheduleUrl?: string;
@@ -51,7 +54,7 @@ export interface ServerConfig {
   listCacheTtlMs: number;
   transactionCountCacheMaxEntries: number;
   transactionCountCacheTtlMs: number;
-  jsonRpcPassthrough?: JsonRpcPassthroughConfig;
+  jsonRpcPassthrough: JsonRpcPassthroughConfig;
   /**
    * Serve the Arkiv entity reads from the indexer's own experimental entity
    * index at `POST /shadow-rpc/experimental`, and run the projector that
@@ -59,8 +62,22 @@ export interface ServerConfig {
    * node, and the index is a second, independent source to check against it.
    */
   entityQueryIndex: boolean;
+  /** Serve Prometheus metrics on GET /metrics. Defaults to true. */
+  metricsEnabled: boolean;
   /** Pins the first block the entity index folds; detected from the data when unset. */
   entityIndexFloorBlock?: bigint;
+  /**
+   * Whether the entity index asks the node for the entities the chain was
+   * born with (a seeded genesis) and imports them. `off` never asks; an
+   * import the offline importer started is finished either way.
+   */
+  entityIndexGenesis: "auto" | "off";
+  /** The node the genesis import reads; defaults to the shadow-RPC upstream. */
+  entityIndexGenesisRpc?: { url: string; apiKey?: string };
+  /** The largest genesis the RPC walk takes on; beyond it the import waits for the offline importer. */
+  entityIndexGenesisRpcLimit: number;
+  /** Where the genesis import writes its progress document; unset writes none. */
+  entityIndexGenesisProgressFile?: string;
 }
 
 const DEFAULT_PORT = 3000;
@@ -103,16 +120,17 @@ const SPEC: CliSpec = {
       default: "true",
     },
     {
-      flags: "--baseload-admin-bearer-token <token>",
-      description:
-        "Bearer token required for mutating Baseload worker requests. Defaults to BASELOAD_ADMIN_BEARER_TOKEN. If unset, Baseload mutations are unrestricted.",
-      env: ["BASELOAD_ADMIN_BEARER_TOKEN"],
-    },
-    {
       flags: "--baseload-initial-config <path>",
       description:
         "Optional Baseload worker config JSON file to load once at backend startup. Defaults to BASELOAD_INITIAL_CONFIG_PATH.",
       env: ["BASELOAD_INITIAL_CONFIG_PATH"],
+    },
+    {
+      flags: "--metrics-enabled <bool>",
+      description:
+        "Serve Prometheus metrics on GET /metrics. Defaults to true (or METRICS_ENABLED).",
+      env: ["METRICS_ENABLED"],
+      default: "true",
     },
     {
       flags: "--redis-url <url>",
@@ -211,9 +229,9 @@ const SPEC: CliSpec = {
     {
       flags: "--entity-query-index <bool>",
       description:
-        "Experimental: answer arkiv_query, arkiv_getEntity, arkiv_getEntityCount and arkiv_getBlockTiming from the indexer's own entity index at POST /shadow-rpc/experimental, and run the projector that builds it. Defaults to false (or ENTITY_QUERY_INDEX). /shadow-rpc keeps forwarding those methods to the upstream node.",
+        "Answer arkiv_query, arkiv_getEntity, arkiv_getEntityCount and arkiv_getBlockTiming from the indexer's own entity index at POST /shadow-rpc/experimental, and run the projector that builds it. Defaults to true (or ENTITY_QUERY_INDEX); false switches the index off. /shadow-rpc keeps forwarding those methods to the upstream node.",
       env: ["ENTITY_QUERY_INDEX"],
-      default: "false",
+      default: "true",
     },
     {
       flags: "--entity-index-floor-block <n>",
@@ -222,9 +240,35 @@ const SPEC: CliSpec = {
       env: ["ENTITY_INDEX_FLOOR_BLOCK"],
     },
     {
+      flags: "--entity-index-genesis <auto|off>",
+      description:
+        "Whether the entity index imports the entities the chain was born with (a seeded genesis) from the node: auto asks the node once and imports what block 0 holds; off never asks. Defaults to auto (or ENTITY_INDEX_GENESIS).",
+      env: ["ENTITY_INDEX_GENESIS"],
+      default: "auto",
+    },
+    {
+      flags: "--entity-index-genesis-rpc <url>",
+      description:
+        "JSON-RPC node the genesis import reads block 0 from. Defaults to the shadow-RPC upstream (or ENTITY_INDEX_GENESIS_RPC); the upstream's API key is sent with it.",
+      env: ["ENTITY_INDEX_GENESIS_RPC"],
+    },
+    {
+      flags: "--entity-index-genesis-rpc-limit <n>",
+      description:
+        "Most genesis entities the import walks over RPC; a bigger genesis waits for scripts/importGenesisState.ts, since the node's paging costs O(N) per page. Defaults to 1000000 (or ENTITY_INDEX_GENESIS_RPC_LIMIT).",
+      env: ["ENTITY_INDEX_GENESIS_RPC_LIMIT"],
+      default: DEFAULT_GENESIS_RPC_LIMIT.toString(),
+    },
+    {
+      flags: "--entity-index-genesis-progress-file <path>",
+      description:
+        "Write the genesis import's progress document (phase, percent, counts, rates, ETA; see docs) to this file on every change, for a watcher such as arkiv-prefill's dashboard. Unset by default (or ENTITY_INDEX_GENESIS_PROGRESS_FILE).",
+      env: ["ENTITY_INDEX_GENESIS_PROGRESS_FILE"],
+    },
+    {
       flags: "--shadow-rpc-upstream <url>",
       description:
-        "Real JSON-RPC node that POST /shadow-rpc forwards submission methods to. Unset (the default) keeps the endpoint node-free and those methods answer -32601.",
+        "Real JSON-RPC node that POST /shadow-rpc forwards the allowlisted methods to. Unset (the default) follows the scanner to the node it recorded in scanner_state, keyless; set it to relay elsewhere or with SHADOW_RPC_UPSTREAM_API_KEY.",
       env: ["SHADOW_RPC_UPSTREAM"],
     },
     {
@@ -294,7 +338,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     "--transaction-data-enabled",
     cli.value("transaction-data-enabled")!,
   );
-  const baseloadAdminBearerToken = cli.value("baseload-admin-bearer-token");
+  const auth = parseAuthConfig(env);
   const baseloadInitialConfigPath = cli.value("baseload-initial-config");
   const redisUrl = cli.value("redis-url");
   const protocolScheduleUrl = cli.value("protocol-schedule-url");
@@ -367,25 +411,32 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     DEFAULT_TRANSACTION_COUNT_CACHE_TTL_MS,
   );
 
-  const entityQueryIndex = coerceBoolean("--entity-query-index", cli.value("entity-query-index")!);
+  // Same compose `${VAR:-}` rule as intOrDefault: an empty string means "default".
+  const boolOrDefault = (flag: string, raw: string | undefined, fallback: boolean) =>
+    raw ? coerceBoolean(flag, raw) : fallback;
+  const entityQueryIndex = boolOrDefault("--entity-query-index", cli.value("entity-query-index"), true);
+  const metricsEnabled = boolOrDefault("--metrics-enabled", cli.value("metrics-enabled"), true);
   const entityIndexFloorBlockValue = cli.value("entity-index-floor-block")?.trim();
   const entityIndexFloorBlock = entityIndexFloorBlockValue
     ? BigInt(coerceInt("--entity-index-floor-block", entityIndexFloorBlockValue))
     : undefined;
 
-  // The upstream URL is the switch: no URL, no passthrough, and the rest of
-  // these settings never come into play.
+  // The passthrough is always on: with no URL it follows the scanner to the
+  // node recorded in scanner_state, so a deployment relays without being told
+  // the node twice.
   const passthroughUrl = cli.value("shadow-rpc-upstream")?.trim();
-  let jsonRpcPassthrough: JsonRpcPassthroughConfig | undefined;
-  if (passthroughUrl) {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(passthroughUrl);
-    } catch {
-      throw new Error(`--shadow-rpc-upstream must be a URL: ${passthroughUrl}`);
-    }
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      throw new Error("--shadow-rpc-upstream must be an http(s) URL");
+  let jsonRpcPassthrough: JsonRpcPassthroughConfig;
+  {
+    let parsedUrl: URL | undefined;
+    if (passthroughUrl) {
+      try {
+        parsedUrl = new URL(passthroughUrl);
+      } catch {
+        throw new Error(`--shadow-rpc-upstream must be a URL: ${passthroughUrl}`);
+      }
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        throw new Error("--shadow-rpc-upstream must be an http(s) URL");
+      }
     }
     const methods = parsePassthroughMethods(
       cli.value("shadow-rpc-upstream-methods")?.trim() || DEFAULT_PASSTHROUGH_METHODS.join(","),
@@ -406,7 +457,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     );
     const apiKey = cli.value("shadow-rpc-upstream-api-key")?.trim();
     jsonRpcPassthrough = {
-      url: passthroughUrl,
+      ...(passthroughUrl ? { url: passthroughUrl } : {}),
       ...(apiKey ? { apiKey } : {}),
       methods,
       timeoutMs,
@@ -414,12 +465,39 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     };
   }
 
+  const genesisModeValue = cli.value("entity-index-genesis")?.trim().toLowerCase() || "auto";
+  if (genesisModeValue !== "auto" && genesisModeValue !== "off") {
+    throw new Error(`--entity-index-genesis must be auto or off, got ${genesisModeValue}`);
+  }
+  const entityIndexGenesis: "auto" | "off" = genesisModeValue;
+  const genesisRpcUrl = cli.value("entity-index-genesis-rpc")?.trim() || passthroughUrl;
+  let entityIndexGenesisRpc: { url: string; apiKey?: string } | undefined;
+  if (genesisRpcUrl) {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(genesisRpcUrl);
+    } catch {
+      throw new Error(`--entity-index-genesis-rpc must be a URL: ${genesisRpcUrl}`);
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new Error("--entity-index-genesis-rpc must be an http(s) URL");
+    }
+    const apiKey = cli.value("shadow-rpc-upstream-api-key")?.trim();
+    entityIndexGenesisRpc = { url: genesisRpcUrl, ...(apiKey ? { apiKey } : {}) };
+  }
+  const entityIndexGenesisRpcLimit = intOrDefault(
+    "--entity-index-genesis-rpc-limit",
+    cli.value("entity-index-genesis-rpc-limit"),
+    DEFAULT_GENESIS_RPC_LIMIT,
+  );
+  const entityIndexGenesisProgressFile = cli.value("entity-index-genesis-progress-file")?.trim() || undefined;
+
   return {
     databaseUrl,
     port,
     ...(hostname ? { hostname } : {}),
     transactionDataEnabled,
-    ...(baseloadAdminBearerToken ? { baseloadAdminBearerToken } : {}),
+    ...(auth ? { auth } : {}),
     ...(baseloadInitialConfigPath ? { baseloadInitialConfigPath } : {}),
     ...(redisUrl ? { redisUrl } : {}),
     ...(protocolScheduleUrl ? { protocolScheduleUrl } : {}),
@@ -435,8 +513,13 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     listCacheTtlMs,
     transactionCountCacheMaxEntries,
     transactionCountCacheTtlMs,
-    ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
+    jsonRpcPassthrough,
     entityQueryIndex,
+    metricsEnabled,
     ...(entityIndexFloorBlock !== undefined ? { entityIndexFloorBlock } : {}),
+    entityIndexGenesis,
+    ...(entityIndexGenesisRpc ? { entityIndexGenesisRpc } : {}),
+    entityIndexGenesisRpcLimit,
+    ...(entityIndexGenesisProgressFile ? { entityIndexGenesisProgressFile } : {}),
   };
 }

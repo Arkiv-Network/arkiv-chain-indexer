@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-basic-dist-min";
 import { AddressFace } from "./AddressFace";
+import { chartTimeAxis } from "./chartTime";
+import { useZonedChartLayout } from "./useZonedChartLayout";
 import { fetchGuzzlerHistory, type GuzzlerHistoryPoint, type GuzzlerHistoryResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { Stat, StatGrid } from "@/components/stat";
@@ -101,6 +103,7 @@ export function GuzzlerActivityView({
     [windowedPoints, metricKey, now, selectedWindow.ms, timeZone, tokenSymbol],
   );
 
+  const { zonedLayout, onRelayout } = useZonedChartLayout(layout, timeZone);
   const display = addressDisplay(address);
   const transactionsHref = addressSearchHref(address);
   const retentionLabel = data ? fmtDurationSeconds(data.retentionMs / 1000) : "24h";
@@ -213,7 +216,8 @@ export function GuzzlerActivityView({
         {windowedPoints.length > 0 ? (
           <Plot
             data={traces}
-            layout={layout}
+            layout={zonedLayout}
+            onRelayout={onRelayout}
             useResizeHandler
             style={{ width: "100%", height: "100%" }}
             config={{ displaylogo: false, responsive: true }}
@@ -303,8 +307,13 @@ function buildActivityPlot(
     showlegend: false,
     hovermode: "x",
     xaxis: {
+      ...(range || points.length > 0 ? chartTimeAxis(
+        range ? Date.parse(String(range[0])) : Date.parse(points[0]!.startTime),
+        range ? Date.parse(String(range[1])) : Date.parse(points[points.length - 1]!.startTime),
+        timeZone,
+      ) : {}),
       type: "date",
-      title: { text: "Time" } as Plotly.DataTitle,
+      title: { text: `Time (${timeZone})` } as Plotly.DataTitle,
       gridcolor: getCssVar("--border", "#e9e6de"),
       zerolinecolor: getCssVar("--border", "#e9e6de"),
       ...(range ? { range, autorange: false } : { autorange: true }),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth, type HealthResponse } from "./api";
 import { fmtBytes, fmtDate, fmtDurationSeconds, fmtInteger, fmtUtcDate } from "./format";
+import { ServerMetricsPanel } from "./ServerMetricsPanel";
 import { SyncDetails } from "./SyncStatusBanner";
 import { describeSync, type SyncTone } from "./syncStatus";
 import { Badge } from "@/components/ui/badge";
@@ -233,6 +234,8 @@ export function HealthView({ timeZone }: HealthViewProps) {
           </div>
         </CardContent>
       </Card>
+
+      <ServerMetricsPanel />
     </section>
   );
 }

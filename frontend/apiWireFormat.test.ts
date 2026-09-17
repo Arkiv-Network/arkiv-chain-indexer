@@ -46,7 +46,16 @@ afterEach(() => {
 });
 
 function mockJson(body: unknown): void {
-  globalThis.fetch = (async () => Response.json(body)) as typeof fetch;
+  globalThis.fetch = (async () => Response.json(body)) as unknown as typeof fetch;
+}
+
+/**
+ * What the frontend gets back after a round trip: the compact rows carry
+ * every column the UI reads, and `logCount` is not one of them.
+ */
+function onTheWire<T extends { logCount: unknown }>(transaction: T): Omit<T, "logCount"> {
+  const { logCount: _notSent, ...sent } = transaction;
+  return sent;
 }
 
 function serverTransactionFixture(): ServerStoredTransaction {
@@ -75,6 +84,7 @@ function serverTransactionFixture(): ServerStoredTransaction {
     transactionFeeWei: "2310000",
     status: "1",
     contractAddress: null,
+    logCount: null,
   };
 }
 
@@ -176,9 +186,9 @@ describe("compact row wire format", () => {
     const response = await fetchTransactions(new URLSearchParams());
 
     expect(response.count).toBe(2);
-    expect(response.transactions[0]).toEqual(plain);
+    expect(response.transactions[0]).toEqual(onTheWire(plain));
     expect(response.transactions[0]?.operationsSummary).toBeUndefined();
-    expect(response.transactions[1]).toEqual(withSummary);
+    expect(response.transactions[1]).toEqual(onTheWire(withSummary));
   });
 
   test("transaction record rows round-trip", async () => {
@@ -201,7 +211,7 @@ describe("compact row wire format", () => {
 
     const response = await fetchTransactionRecords(new URLSearchParams());
 
-    expect(response.records.gas_used[0]).toEqual(record);
+    expect(response.records.gas_used[0]).toEqual(onTheWire(record));
     expect(response.records.transaction_fee).toEqual([]);
   });
 

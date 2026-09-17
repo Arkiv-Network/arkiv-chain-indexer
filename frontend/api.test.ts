@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 describe("frontend API helpers", () => {
-  test("does not attach admin bearer tokens to readonly baseload requests", async () => {
+  test("does not attach CSRF tokens to public baseload reads", async () => {
     let observedHeaders: Headers | undefined;
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
       observedHeaders = new Headers(init?.headers);
@@ -39,14 +39,14 @@ describe("frontend API helpers", () => {
         statuses: {},
         balances: {},
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await fetchBaseloadState();
 
     expect(observedHeaders?.get("authorization")).toBeNull();
   });
 
-  test("attaches admin bearer tokens to baseload updates", async () => {
+  test("attaches session CSRF to baseload updates", async () => {
     let observedHeaders: Headers | undefined;
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
       observedHeaders = new Headers(init?.headers);
@@ -56,22 +56,22 @@ describe("frontend API helpers", () => {
         statuses: {},
         balances: {},
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await updateBaseloadConfig(EMPTY_BASELOAD_CONFIG, "secret");
 
-    expect(observedHeaders?.get("authorization")).toBe("Bearer secret");
+    expect(observedHeaders?.get("X-CSRF-Token")).toBe("secret");
     expect(observedHeaders?.get("content-type")).toBe("application/json");
   });
 
-  test("attaches admin bearer tokens to saved config management requests", async () => {
-    const observed: Array<{ input: string; method: string; authorization: string | null }> = [];
+  test("uses session CSRF for saved config mutations", async () => {
+    const observed: Array<{ input: string; method: string; csrfToken: string | null }> = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       observed.push({
         input: String(input),
         method: init?.method ?? "GET",
-        authorization: headers.get("authorization"),
+        csrfToken: headers.get("X-CSRF-Token"),
       });
       if (String(input).endsWith("/baseload/configs")) {
         return Response.json({ configs: [] });
@@ -92,18 +92,18 @@ describe("frontend API helpers", () => {
         updatedAt: "2024-01-01T00:00:00.000Z",
         deleted: true,
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
-    await fetchBaseloadConfigs("secret");
+    await fetchBaseloadConfigs();
     await saveBaseloadConfig("low gas", EMPTY_BASELOAD_CONFIG, "secret");
     await loadBaseloadConfig("low gas", "secret");
     await deleteBaseloadConfig("low gas", "secret");
 
     expect(observed).toEqual([
-      { input: "/api/baseload/configs", method: "GET", authorization: "Bearer secret" },
-      { input: "/api/baseload/configs/low%20gas", method: "PUT", authorization: "Bearer secret" },
-      { input: "/api/baseload/configs/low%20gas/load", method: "PUT", authorization: "Bearer secret" },
-      { input: "/api/baseload/configs/low%20gas", method: "DELETE", authorization: "Bearer secret" },
+      { input: "/api/baseload/configs", method: "GET", csrfToken: null },
+      { input: "/api/baseload/configs/low%20gas", method: "PUT", csrfToken: "secret" },
+      { input: "/api/baseload/configs/low%20gas/load", method: "PUT", csrfToken: "secret" },
+      { input: "/api/baseload/configs/low%20gas", method: "DELETE", csrfToken: "secret" },
     ]);
   });
 
@@ -118,7 +118,7 @@ describe("frontend API helpers", () => {
         filters: { order: "desc" },
         senders: [],
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await fetchSenders(new URLSearchParams("limit=25&order=desc"));
 
@@ -137,7 +137,7 @@ describe("frontend API helpers", () => {
           effective_fee: [],
         },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await fetchTransactionRecords(new URLSearchParams("limit=20"));
 
@@ -166,7 +166,7 @@ describe("frontend API helpers", () => {
         status: 200,
         headers: { "content-type": "application/json" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await fetchBlocks(new URLSearchParams("limit=1"), (sample) =>
       samples.push(sample),
@@ -190,7 +190,7 @@ describe("frontend API helpers", () => {
         filters: { blockGt: null, blockLt: null, dateGt: null, dateLt: null },
         names: BLOCK_RESPONSE_NAMES,
         blocks: [compactBlockRow(42)],
-      })) as typeof fetch;
+      })) as unknown as typeof fetch;
 
     const result = await fetchBlocks(new URLSearchParams("limit=1"));
 
@@ -208,7 +208,7 @@ describe("frontend API helpers", () => {
   });
 
   test("decodes compact single-block rows", async () => {
-    globalThis.fetch = (async () => Response.json(compactBlockRow(43))) as typeof fetch;
+    globalThis.fetch = (async () => Response.json(compactBlockRow(43))) as unknown as typeof fetch;
 
     const result = await fetchBlockByNumber(43);
 
@@ -232,7 +232,7 @@ describe("frontend API helpers", () => {
         });
       }
       return Response.json(["2024-01-03T00:00:00.000Z", 45]);
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await fetchBlocks(new URLSearchParams("limit=1"));
     const result = await fetchBlockByNumber(45);
@@ -249,7 +249,7 @@ describe("frontend API helpers", () => {
       durationMs: number;
       transferredBytes: number;
     }> = [];
-    globalThis.fetch = (async () => new Response(body, { status: 404 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response(body, { status: 404 })) as unknown as typeof fetch;
 
     const result = await fetchBlockByNumber(43, (sample) => samples.push(sample));
 
@@ -276,7 +276,7 @@ describe("frontend API helpers", () => {
         },
         names: RANGE_RESPONSE_NAMES,
         ranges: [compactRangeRow(100)],
-      })) as typeof fetch;
+      })) as unknown as typeof fetch;
 
     const result = await fetchRanges(new URLSearchParams("limit=1"));
 
@@ -306,7 +306,7 @@ describe("frontend API helpers", () => {
         count: 1,
         names: GUZZLER_HISTORY_POINT_RESPONSE_NAMES,
         points: [compactGuzzlerHistoryPointRow()],
-      })) as typeof fetch;
+      })) as unknown as typeof fetch;
 
     const result = await fetchGuzzlerHistory(address);
 
@@ -342,7 +342,7 @@ describe("frontend API helpers", () => {
           },
         ],
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await fetchGuzzlers(10, "1h");
 
@@ -414,7 +414,7 @@ describe("frontend API helpers", () => {
         });
       }
       return Response.json(compactBlockRow(42));
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await fetchBlockInspect("42");
 
@@ -465,7 +465,7 @@ describe("frontend API helpers", () => {
         });
       }
       return Response.json({ error: "unexpected request" }, { status: 500 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await fetchLatestBlockInspect();
 
@@ -486,7 +486,7 @@ describe("frontend API helpers", () => {
         filters: { blockGt: null, blockLt: null, dateGt: null, dateLt: null },
         names: BLOCK_RESPONSE_NAMES,
         blocks: [],
-      })) as typeof fetch;
+      })) as unknown as typeof fetch;
 
     await expect(fetchLatestBlockInspect()).rejects.toThrow("No blocks were found in storage");
   });
@@ -497,7 +497,7 @@ describe("frontend API helpers", () => {
         return Response.json({ error: "Transaction data is disabled" }, { status: 404 });
       }
       return Response.json(compactBlockRow(42));
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await fetchBlockInspect("42");
 

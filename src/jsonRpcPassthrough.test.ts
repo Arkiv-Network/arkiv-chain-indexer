@@ -87,6 +87,30 @@ describe("JsonRpcPassthrough", () => {
     expect(calls[0]!.headers["x-api-key"]).toBeUndefined();
   });
 
+  test("resolves a late-bound upstream once, and refuses cleanly until it is known", async () => {
+    const { impl, calls } = recordingFetch((call) => jsonResponse({ jsonrpc: "2.0", id: call.body.id, result: "0x1" }));
+    let recorded: string | undefined;
+    let asked = 0;
+    const passthrough = new JsonRpcPassthrough({
+      url: async () => {
+        asked += 1;
+        return recorded;
+      },
+      fetchImpl: impl,
+    });
+    const error = await forwardError(passthrough, "eth_chainId");
+    expect(error.code).toBe(JSON_RPC_SERVER_ERROR);
+    expect(error.message).toContain("no upstream node is configured and the scanner has not recorded one");
+    expect(calls).toHaveLength(0);
+
+    recorded = UPSTREAM;
+    expect(await passthrough.forward("eth_chainId", [])).toBe("0x1");
+    expect(await passthrough.forward("eth_chainId", [])).toBe("0x1");
+    expect(calls.map((call) => call.url)).toEqual([UPSTREAM, UPSTREAM]);
+    // Asked once per unanswered call, then remembered.
+    expect(asked).toBe(2);
+  });
+
   test("sends a configured key as x-api-key", async () => {
     const { impl, calls } = recordingFetch(() => jsonResponse({ jsonrpc: "2.0", id: 1, result: "0x1" }));
     const passthrough = new JsonRpcPassthrough({ url: UPSTREAM, apiKey: "hub-key", fetchImpl: impl });
@@ -165,7 +189,7 @@ describe("JsonRpcPassthrough", () => {
     expect(await passthrough.forward("eth_sendRawTransaction", [RAW_TX])).toBeNull();
   });
 
-  test("gives up on a hung upstream instead of holding the request open", async () => {
+  test("reports a hung upstream as a timeout, without exposing its address", async () => {
     const { onWarning } = warnings();
     const impl = ((_url: unknown, init: RequestInit) =>
       new Promise((_resolve, reject) => {
@@ -177,9 +201,39 @@ describe("JsonRpcPassthrough", () => {
       timeoutMs: 5,
       onWarning,
     });
-    const error = await forwardError(passthrough, "eth_sendRawTransaction", [RAW_TX]);
+    const error = await forwardError(passthrough, "arkiv_query", ["*"]);
     expect(error.code).toBe(JSON_RPC_SERVER_ERROR);
-    expect(error.message).toContain("could not be forwarded");
+    expect(error.message).toBe("arkiv_query timed out after 0.005s waiting for the upstream node");
+    expect(error.toBody().data).toEqual({ reason: "upstream_timeout", timeoutMs: 5 });
+    expect(error.message).not.toContain("SUPER_SECRET_KEY");
+    expect(error.message).not.toContain("node.example.test");
+  });
+
+  test("also reports a timeout while reading the upstream response body", async () => {
+    const { onWarning } = warnings();
+    const impl = (async (_url: unknown, init: RequestInit) =>
+      new Response(new ReadableStream({
+        start(controller) {
+          init.signal?.addEventListener("abort", () => controller.error(init.signal!.reason), { once: true });
+        },
+      }))) as unknown as typeof fetch;
+    const passthrough = new JsonRpcPassthrough({ url: UPSTREAM, fetchImpl: impl, timeoutMs: 5, onWarning });
+    const error = await forwardError(passthrough, "arkiv_query", ["*"]);
+    expect(error.code).toBe(JSON_RPC_SERVER_ERROR);
+    expect(error.message).toBe("arkiv_query timed out after 0.005s waiting for the upstream node");
+    expect(error.toBody().data).toEqual({ reason: "upstream_timeout", timeoutMs: 5 });
+  });
+
+  test("reports an upstream gateway timeout without exposing its body", async () => {
+    const { onWarning } = warnings();
+    const { impl } = recordingFetch(() => new Response(`gateway timeout at ${UPSTREAM}`, { status: 504 }));
+    const passthrough = new JsonRpcPassthrough({ url: UPSTREAM, fetchImpl: impl, onWarning });
+    const error = await forwardError(passthrough, "arkiv_query", ["*"]);
+    expect(error.code).toBe(JSON_RPC_SERVER_ERROR);
+    expect(error.message).toBe("arkiv_query timed out at the upstream gateway (HTTP 504)");
+    expect(error.toBody().data).toEqual({ reason: "upstream_timeout", httpStatus: 504 });
+    expect(error.message).not.toContain("SUPER_SECRET_KEY");
+    expect(error.message).not.toContain("node.example.test");
   });
 
   test("caps forwarded calls per minute and reopens on the next window", async () => {

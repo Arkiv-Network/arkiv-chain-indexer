@@ -34,7 +34,7 @@ class MemoryStorage implements StorageLike {
   }
 }
 
-interface Filters {
+interface Filters extends Record<string, string> {
   blockGt: string;
   blockLt: string;
   limit: string;

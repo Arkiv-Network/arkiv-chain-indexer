@@ -40,6 +40,9 @@ async function main(): Promise<void> {
     if (chainId !== undefined) {
       await storage.saveChainId(BigInt(chainId));
     }
+    // The backend's /shadow-rpc relay follows the scanner to the same node
+    // unless SHADOW_RPC_UPSTREAM names another.
+    await storage.saveScannerRpcUrl(config.rpcUrl);
 
     if (config.redisUrl) {
       const store = await RedisGuzzlerStore.open(config.redisUrl);

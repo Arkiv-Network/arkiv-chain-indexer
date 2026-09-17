@@ -1,3 +1,4 @@
+import type { BaseloadConfig } from "./baseloadConfig";
 import { describe, expect, test } from "bun:test";
 import { createWalletClient, ENTITY_EVENTS_ABI, ExpirationTime } from "@arkiv-network/sdk";
 import { defineChain, encodeAbiParameters, encodeEventTopics, http } from "viem";
@@ -369,6 +370,8 @@ function startFakeNode(options: { entitiesPerBatch: number }) {
           return reply("0x1");
         case "eth_blockNumber":
           return reply("0x64");
+        case "eth_getBlockByNumber":
+          return reply({ number: "0x64", baseFeePerGas: "0x1" });
         case "eth_getBalance":
           return reply("0x56bc75e2d63100000");
         case "eth_getTransactionCount":
@@ -431,6 +434,24 @@ function entityCreatedLog(entityKey: string) {
   };
 }
 
+describe("baseload live config persistence", () => {
+  test("hands every applied config to the persist hook", async () => {
+    const persisted: BaseloadConfig[] = [];
+    const runtime = new BaseloadRuntime(
+      { rpcUrl: null, mnemonic: TEST_MNEMONIC },
+      { persistConfig: (config) => { persisted.push(config); } },
+    );
+    try {
+      runtime.updateConfig({ workers: [{ walletNumber: 3, behavior: "create" }] });
+      runtime.updateConfig({ workers: [] });
+      await Promise.resolve();
+      expect(persisted.map((config) => config.workers.map((worker) => worker.walletNumber))).toEqual([[3], []]);
+    } finally {
+      runtime.stop();
+    }
+  });
+});
+
 describe("baseload worker loop RPC budget", () => {
   test(
     "spends one send and no lookups per operation after the first",
@@ -471,6 +492,8 @@ describe("baseload worker loop RPC budget", () => {
         expect(node.countOf("eth_estimateGas")).toBeLessThanOrEqual(1);
         // Heights ride in on receipts, so no operation pays for one.
         expect(node.countOf("eth_blockNumber")).toBeLessThanOrEqual(1);
+        // The base fee is read at most once per operation, and shared for a block.
+        expect(node.countOf("eth_getBlockByNumber")).toBeLessThanOrEqual(sends);
         // What is left is the send plus the receipt polls it takes to see it land.
         // The run is stopped mid-flight, so the last send may have no poll yet.
         const receiptPolls = node.countOf("eth_getTransactionReceipt");
@@ -483,6 +506,7 @@ describe("baseload worker loop RPC budget", () => {
           "eth_estimateGas",
           "eth_fillTransaction",
           "eth_getBalance",
+          "eth_getBlockByNumber",
           "eth_getTransactionCount",
           "eth_getTransactionReceipt",
           "eth_sendRawTransaction",

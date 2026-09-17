@@ -1,3 +1,4 @@
+import { notifyAuthFailure } from "./authClient";
 // The Data page talks JSON-RPC to an Arkiv node for entity state the index does
 // not hold. This module is the framework-free half: which endpoint to use, how
 // a call is made, and the connection check that proves the chosen endpoint
@@ -38,7 +39,7 @@ export const DEFAULT_RPC_TIMEOUT_MS = 15_000;
 const SOURCE_KIND_STORAGE_KEY = "data.rpcSourceKind";
 const CUSTOM_URL_STORAGE_KEY = "data.rpcCustomUrl";
 
-export const DEFAULT_RPC_SOURCE: RpcSource = { kind: "backend", customUrl: "" };
+export const DEFAULT_RPC_SOURCE: RpcSource = { kind: "index", customUrl: "" };
 
 export function isRpcSourceKind(value: string): value is RpcSourceKind {
   return value === "backend" || value === "index" || value === "custom";
@@ -88,6 +89,20 @@ export type RpcMode = RpcSourceKind | "both";
 
 /** The `rpc=` link value that asks for the side-by-side comparison. */
 export const COMPARE_RPC_LINK_VALUE = "both";
+
+/**
+ * Whether a mode talks to the backend's node relay, which the backend serves
+ * only with the administrator session: `backend` outright, `both` for one of its
+ * two sides. The experimental index and a custom node are open to everyone.
+ */
+export function rpcModeNeedsAdmin(mode: RpcMode): boolean {
+  return mode === "backend" || mode === "both";
+}
+
+/** The mode this browser may actually use: an admin's choice as made, anyone else's lowered to the index. */
+export function permittedRpcMode(mode: RpcMode, adminModeActive: boolean): RpcMode {
+  return !adminModeActive && rpcModeNeedsAdmin(mode) ? "index" : mode;
+}
 
 /** The two endpoints `both` compares, the node's relay first. */
 export const COMPARE_SOURCES: readonly [RpcSource, RpcSource] = [
@@ -187,6 +202,8 @@ export interface RpcCallDeps {
   timeoutMs?: number;
   /** Lets the caller cancel a call before the timeout does. */
   signal?: AbortSignal;
+  /** Session-bound CSRF token; used only for the fixed backend relay endpoint. */
+  csrfToken?: string | undefined;
 }
 
 /** One signal that fires when either input does, without relying on `AbortSignal.any`. */
@@ -227,11 +244,15 @@ export async function callRpc<T = unknown>(
   const id = nextRequestId++;
   const endpoint = rpcEndpointUrl(source);
 
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json" };
+  if (source.kind === "backend" && deps.csrfToken) headers["X-CSRF-Token"] = deps.csrfToken;
+
   let response: Response;
   try {
     response = await fetchImpl(endpoint, {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
+      credentials: source.kind === "custom" ? "omit" : "same-origin",
+      headers,
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       signal: combineSignals(AbortSignal.timeout(timeoutMs), deps.signal),
     });
@@ -258,6 +279,7 @@ export async function callRpc<T = unknown>(
     body = undefined;
   }
 
+  if (source.kind === "backend") notifyAuthFailure(response.status);
   if (!response.ok) {
     const detail = jsonRpcErrorMessage(body) ?? text.slice(0, 200).trim();
     throw new RpcCallError(method, `${method} answered HTTP ${response.status}${detail ? `: ${detail}` : ""}`, {
@@ -274,7 +296,9 @@ export async function callRpc<T = unknown>(
     const error = envelope.error as { code?: unknown; message?: unknown; data?: unknown };
     const code = typeof error.code === "number" ? error.code : undefined;
     const message = typeof error.message === "string" ? error.message : JSON.stringify(error);
-    throw new RpcCallError(method, `${method} was rejected${code !== undefined ? ` (${code})` : ""}: ${message}`, {
+    const upstreamTimeout = typeof error.data === "object" && error.data !== null &&
+      (error.data as Record<string, unknown>).reason === "upstream_timeout";
+    throw new RpcCallError(method, upstreamTimeout ? message : `${method} was rejected${code !== undefined ? ` (${code})` : ""}: ${message}`, {
       code,
       data: error.data,
     });

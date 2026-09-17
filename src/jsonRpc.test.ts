@@ -1,3 +1,4 @@
+import { testAuth, testAdminHeaders } from "./testAuth";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   JSON_RPC_INVALID_PARAMS,
@@ -615,6 +616,24 @@ describe("blocks, transactions and receipts", () => {
     expect(unhashed.hash).toBeNull();
   });
 
+  test("a block number past a safe integer is invalid params, not a database error", async () => {
+    const response = await call(source, "eth_getBlockByNumber", ["0xfffffffffffffffffffff", false]);
+    expect(response.error).toEqual({ code: -32602, message: "Invalid params: blockNumber is out of range" });
+  });
+
+  test("a driver error surfaces as a generic internal error", async () => {
+    const failing: JsonRpcDataSource = {
+      ...source,
+      getBlockByNumber: async () => {
+        const error = new Error('value "99999999999999999999" is out of range for type bigint');
+        error.name = "PostgresError";
+        throw error;
+      },
+    };
+    const response = await call(failing, "eth_getBlockByNumber", ["0x7", false]);
+    expect(response.error).toEqual({ code: -32603, message: "Internal error: database query failed" });
+  });
+
   test("eth_getBlockByNumber lists hashes or full objects and nulls unknown header fields", async () => {
     const block = (await result(source, "eth_getBlockByNumber", ["0x7", false])) as Record<string, unknown>;
     expect(block).toMatchObject({
@@ -1170,12 +1189,12 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
 
   test("POST /shadow-rpc serves batches from storage; other verbs are rejected", async () => {
     const storage = await seededStorage();
-    const server = createBlockServer(storage, { port: 0, hostname: "127.0.0.1" });
+    const server = createBlockServer(storage, { port: 0, hostname: "127.0.0.1", auth: testAuth() });
     try {
       const base = `http://${server.hostname}:${server.port}`;
       const response = await fetch(`${base}/shadow-rpc`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...testAdminHeaders },
         body: JSON.stringify([
           { jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] },
           { jsonrpc: "2.0", id: 2, method: "eth_blockNumber", params: [] },
@@ -1190,7 +1209,7 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
         ]),
       });
       expect(response.status).toBe(200);
-      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
       const batch = (await response.json()) as JsonRpcResponse[];
       expect(batch.map((entry) => entry.error)).toEqual(Array(10).fill(undefined));
       expect(batch[0]!.result).toBe("0x92a1e");
@@ -1213,11 +1232,15 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
       expect(((batch[8]!.result as { logs: Array<{ logIndex: string; blockHash: string }> }).logs).map((l) => [l.logIndex, l.blockHash])).toEqual([["0x0", BLOCK_1_HASH], ["0x1", BLOCK_1_HASH]]);
       expect((batch[9]!.result as unknown[]).length).toBe(2);
 
-      const parseError = await fetch(`${base}/shadow-rpc`, { method: "POST", body: "nope" });
+      const parseError = await fetch(`${base}/shadow-rpc`, {
+        method: "POST",
+        headers: { ...testAdminHeaders },
+        body: "nope",
+      });
       expect(parseError.status).toBe(200);
       expect(((await parseError.json()) as JsonRpcResponse).error?.code).toBe(JSON_RPC_PARSE_ERROR);
 
-      const get = await fetch(`${base}/shadow-rpc`);
+      const get = await fetch(`${base}/shadow-rpc`, { headers: testAdminHeaders });
       expect(get.status).toBe(405);
 
       // `/rpc` was renamed, not aliased: the old path must not quietly keep
@@ -1264,11 +1287,12 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
         url: `http://${node.hostname}:${node.port}`,
         apiKey: "hub-key",
       }),
+      auth: testAuth(),
     });
     const post = (body: unknown) =>
       fetch(`http://${server.hostname}:${server.port}/shadow-rpc`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...testAdminHeaders },
         body: JSON.stringify(body),
       });
     try {
@@ -1309,10 +1333,16 @@ describe.skipIf(!hasPostgresForTests())("JSON-RPC over PostgreSQL", () => {
 
   test("transaction methods are gated when transaction data is disabled", async () => {
     const storage = await seededStorage();
-    const server = createBlockServer(storage, { port: 0, hostname: "127.0.0.1", transactionDataEnabled: false });
+    const server = createBlockServer(storage, {
+      port: 0,
+      hostname: "127.0.0.1",
+      transactionDataEnabled: false,
+      auth: testAuth(),
+    });
     try {
       const response = await fetch(`http://${server.hostname}:${server.port}/shadow-rpc`, {
         method: "POST",
+        headers: { ...testAdminHeaders },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [txHash(1)] }),
       });
       const body = (await response.json()) as JsonRpcResponse;

@@ -1,6 +1,6 @@
 // The result list of the Data page: one card per entity, with the metadata the
-// node returned, an estimated lifetime, and attribute chips that feed back into
-// the query. Payloads are not fetched here; the entity page shows history.
+// node returned, an estimated lifetime, and attribute chips that copy complete
+// query conditions. Payloads are not fetched here; the entity page shows history.
 
 import { Clipboard, Filter, ListPlus, Loader2, Search } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
@@ -24,7 +24,7 @@ import {
 import type { BlockTiming } from "./dataRpc";
 import { fmtDate, fmtInteger } from "./format";
 import { entityDetailHref, shouldHandleClientNavigation, writeEntityPermalink } from "./permalinks";
-import { AddressCell } from "./TransactionsView";
+import { AddressCell, copyText } from "./TransactionsView";
 
 export interface EntityResultsProps {
   /** The query the results belong to, as sent to the node. */
@@ -139,7 +139,7 @@ export function EntityResults({
   );
 }
 
-function QueryError({ error, query }: { error: unknown; query: string | null }) {
+export function QueryError({ error, query }: { error: unknown; query: string | null }) {
   const described = describeQueryError(error);
   const location = described.position !== null && query ? locateQueryPosition(query, described.position) : null;
   return (
@@ -275,7 +275,7 @@ function EntityCard({
           <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Attributes</span>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {entity.attributes.map((attribute) => (
-              <AttributeChip key={attribute.name} attribute={attribute} onQueryOnly={onQueryOnly} onAddToQuery={onAddToQuery} />
+              <AttributeChip key={attribute.name} attribute={attribute} />
             ))}
           </div>
         </div>
@@ -391,45 +391,44 @@ function TypeTagChip({ tag }: { tag: string }) {
   );
 }
 
-function AttributeChip({
-  attribute,
-  onQueryOnly,
-  onAddToQuery,
-}: {
-  attribute: EntityAttribute;
-  onQueryOnly: (expression: string) => void;
-  onAddToQuery: (expression: string) => void;
-}) {
+function AttributeChip({ attribute }: { attribute: EntityAttribute }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (copyStatus === "idle") return;
+    const timeout = window.setTimeout(() => setCopyStatus("idle"), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [copyStatus]);
+
+  const expression = attributeFilterExpression(attribute);
   const numeric = NUMERIC_ATTRIBUTE_TYPES.has(attribute.type);
   const shown = attribute.value.length > 40 ? `${attribute.value.slice(0, 40)}…` : attribute.value;
-  const displayValue = numeric || attribute.type === "bool" ? shown : `"${shown}"`;
   return (
-    <FilterMenu
-      expression={attributeFilterExpression(attribute)}
-      label={attribute.name}
-      copyValue={attribute.value}
-      onQueryOnly={onQueryOnly}
-      onAddToQuery={onAddToQuery}
-      trigger={
-        <span
-          className="inline-flex max-w-full items-center gap-1 border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent hover:text-accent-foreground"
-          title={`${attribute.name} = ${attribute.value}`}
-        >
-          <TypeTagChip tag={attribute.type} />
-          <span className="shrink-0 text-muted-foreground">{attribute.name}</span>
-          <span className="mx-0.5 shrink-0">=</span>
-          <span className={cn("truncate", numeric ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400")}>
-            {displayValue}
-          </span>
-        </span>
-      }
-    />
+    <button
+      type="button"
+      className={`attr-chip attr-chip-copy inline-flex max-w-full items-center gap-1 border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent ${copyStatus}`}
+      title={`Copy condition: ${expression}`}
+      aria-label={`Copy condition: ${expression}`}
+      onClick={async () => setCopyStatus(await copyText(expression) ? "copied" : "failed")}
+    >
+      <TypeTagChip tag={attribute.type} />
+      <span className="attr-chip-name">{attribute.name}</span>
+      <span className="attr-chip-eq">=</span>
+      <span className={`attr-chip-value ${numeric ? "numeric" : "text"}`}>{numeric || attribute.type === "bool" ? shown : `"${shown}"`}</span>
+      <span className="attr-chip-copy-feedback" role="status">
+        {copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Could not copy" : (
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2" />
+          </svg>
+        )}
+      </span>
+    </button>
   );
 }
 
 /**
  * A small menu offering to query by one value, add it to the current query, or
- * copy it. Triggered by a chip or the funnel button next to an address.
+ * copy it. Triggered by the funnel button next to a key or address.
  */
 function FilterMenu({
   expression,
@@ -437,14 +436,12 @@ function FilterMenu({
   copyValue,
   onQueryOnly,
   onAddToQuery,
-  trigger,
 }: {
   expression: string;
   label: string;
   copyValue: string;
   onQueryOnly: (expression: string) => void;
   onAddToQuery: (expression: string) => void;
-  trigger?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -485,17 +482,13 @@ function FilterMenu({
     <span className="relative inline-flex" ref={rootRef}>
       <button
         type="button"
-        className={
-          trigger
-            ? "cursor-pointer"
-            : "inline-flex size-5 shrink-0 items-center justify-center border border-border text-muted-foreground opacity-70 transition-colors hover:border-accent hover:text-accent hover:opacity-100"
-        }
+        className="inline-flex size-5 shrink-0 items-center justify-center border border-border text-muted-foreground opacity-70 transition-colors hover:border-accent hover:text-accent hover:opacity-100"
         aria-haspopup="menu"
         aria-expanded={open}
-        title={trigger ? `Filter by ${expression}` : `Query by ${label}`}
+        title={`Query by ${label}`}
         onClick={() => setOpen((value) => !value)}
       >
-        {trigger ?? <Filter className="size-3" />}
+        <Filter className="size-3" />
       </button>
       {open ? (
         <span className="absolute top-full left-0 z-20 mt-1 min-w-48 border border-border bg-popover p-1 shadow-md" role="menu">

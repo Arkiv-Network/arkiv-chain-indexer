@@ -1,6 +1,6 @@
 {
   "name": "gas-price-tracker",
-  "version": "0.4.0",
+  "version": "0.5.12",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,7 @@
     "serve": "bun run src/serve.ts",
     "test": "bun test ./src ./frontend",
     "typecheck": "tsc --noEmit",
+    "typecheck:frontend-tests": "tsc --noEmit -p frontend/tsconfig.test.json",
     "screenshot": "bun run scripts/screenshot.ts"
   },
   "devDependencies": {
@@ -24,6 +25,7 @@
   "dependencies": {
     "@arkiv-network/sdk": "0.8.0-advanced.3",
     "commander": "^15.0.0",
+    "openid-client": "^6.8.8",
     "viem": "^2.38.2"
   }
 }

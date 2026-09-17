@@ -238,6 +238,7 @@ export function encodeCursor(position: EntityCursorPosition, binding: Buffer): s
 /** The node's cursor carries an 8-byte entity id after the binding; the index has no such id. */
 const NODE_POSITION_LENGTH = 8;
 
+const MAX_CURSOR_CREATED_AT = (1n << 63n) - 1n;
 const CURSOR_MALFORMED = "cursor is malformed — pass back the cursor from the previous page";
 const CURSOR_MISMATCHED = "cursor belongs to a different query, block or select — start a new page-through";
 const CURSOR_FROM_NODE = "cursor was issued by a node, not by the entity index — page through one source from its first page";
@@ -260,8 +261,12 @@ export function decodeCursor(text: string, binding: Buffer): EntityCursorPositio
   }
   if (raw.length !== BINDING_LENGTH + POSITION_LENGTH) throw cursorError(CURSOR_MALFORMED);
   if (!raw.subarray(0, BINDING_LENGTH).equals(binding)) throw cursorError(CURSOR_MISMATCHED);
+  const createdAt = raw.readBigUInt64BE(BINDING_LENGTH);
+  // The index binds this to a bigint column; a forged value past 2^63 - 1
+  // would surface as a driver error instead of a cursor error.
+  if (createdAt > MAX_CURSOR_CREATED_AT) throw cursorError(CURSOR_MALFORMED);
   return {
-    createdAt: raw.readBigUInt64BE(BINDING_LENGTH),
+    createdAt,
     position: raw.readUInt32BE(BINDING_LENGTH + 8),
     entityKey: `0x${raw.subarray(BINDING_LENGTH + 12).toString("hex")}`,
   };
@@ -541,11 +546,13 @@ export function createArkivIndexMethods(
       if (params.length !== 0) {
         throw invalidParams(`invalid params: expected 0 parameter(s), got ${params.length}`);
       }
-      const progress = await chain.getScannerProgress();
-      const head = progress.lastSuccessfulBlock;
+      // The projection head, as `latest` is: a caller that pins a read to
+      // `current_block` must land on a block the index can answer for, and
+      // the chain head the scanner has reached may be a few blocks ahead.
+      const head = (await index.getProgress()).projectedThroughBlock;
       const block = head === undefined ? undefined : await chain.getBlockByNumber(head);
       if (head === undefined || !block) {
-        throw new JsonRpcError(JSON_RPC_SERVER_ERROR, "no block has been indexed yet");
+        throw new JsonRpcError(JSON_RPC_SERVER_ERROR, "the entity index has not projected any block yet");
       }
       const currentBlockTime = Math.floor(Date.parse(block.blockDate) / 1000);
       const previous = head > 0n ? await chain.getBlockByNumber(head - 1n) : undefined;

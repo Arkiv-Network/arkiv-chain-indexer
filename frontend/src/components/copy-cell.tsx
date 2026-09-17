@@ -2,7 +2,7 @@ import { Check, Copy } from "lucide-react";
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-async function copyText(value: string): Promise<boolean> {
+export async function copyText(value: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(value);
     return true;

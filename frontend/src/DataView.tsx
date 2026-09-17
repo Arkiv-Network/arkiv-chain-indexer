@@ -21,6 +21,7 @@ import {
   isExpiringSoon,
   normalizeQueryInput,
   PAGE_SIZE_OPTIONS,
+  parseQueryBlock,
   resolveExpirationFilter,
   resolvePageSize,
   type EntityRecord,
@@ -39,6 +40,7 @@ import {
   isAbortError,
   isValidRpcUrl,
   missingBackendMethods,
+  permittedRpcMode,
   readStoredRpcMode,
   readStoredRpcSource,
   rpcModeFromLinkValue,
@@ -54,11 +56,14 @@ import {
 } from "./dataRpc";
 import {
   compareEntityPages,
+  pickComparisonBlock,
   speedupFactor,
   type ComparisonReport,
   type ComparisonSide,
 } from "./entityCompare";
-import { EntityResults } from "./EntityResults";
+import { EntityResults, QueryError } from "./EntityResults";
+import { QueryHistoryDialog } from "./QueryHistoryDialog";
+import { editQueryHistory, readQueryHistory, rememberQuery, writeQueryHistory, type QueryHistoryEntry } from "./queryHistory";
 import { fmtDate, fmtInteger } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import {
@@ -69,7 +74,7 @@ import {
   writeEntityPermalink,
   writePermalink,
 } from "./permalinks";
-import { AddressCell } from "./TransactionsView";
+import { AddressCell, copyText } from "./TransactionsView";
 import type { MouseEvent } from "react";
 
 const QueryEditor = lazy(() => import("./QueryEditor"));
@@ -81,6 +86,10 @@ interface DataViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
+  /** Whether the node relay (`backend`, `both`) may be offered; without it the page is index-only. */
+  adminModeActive: boolean;
+  /** The current session's CSRF token, sent only to the application relay. */
+  csrfToken: string | undefined;
 }
 
 type BackendForwarding =
@@ -123,25 +132,69 @@ const EMPTY_RESULTS: ResultState = {
   error: null,
 };
 
-export function DataView({ locationSearch, onLocationChange, timeZone }: DataViewProps) {
+export function DataView({ locationSearch, onLocationChange, timeZone, adminModeActive, csrfToken }: DataViewProps) {
   const urlFilters = readFiltersFromSearch(locationSearch, DATA_FILTER_KEYS, EMPTY_DATA_FILTERS);
 
   // A link that names an endpoint wins over the remembered one, without overwriting it.
   const linkedSource = modeFromUrl(urlFilters.rpc);
-  const [source, setSource] = useState<RpcSource>(() => linkedSource?.source ?? readStoredRpcSource());
-  const [mode, setMode] = useState<RpcMode>(() => linkedSource?.mode ?? readStoredRpcMode());
+  const [chosenSource, setSource] = useState<RpcSource>(() => linkedSource?.source ?? readStoredRpcSource());
+  const [chosenMode, setMode] = useState<RpcMode>(() => linkedSource?.mode ?? readStoredRpcMode());
+  // The relay is an admin surface: outside admin mode a remembered or linked
+  // `backend`/`both` is used as `index`, and the choice itself is kept for
+  // when admin mode comes back.
+  const mode = permittedRpcMode(chosenMode, adminModeActive);
+  const source: RpcSource = mode === "both" || mode === chosenSource.kind ? chosenSource : { ...chosenSource, kind: mode };
+  const rpcDeps = { csrfToken };
   const [backend, setBackend] = useState<BackendForwarding>({ status: "loading" });
   const [check, setCheck] = useState<CheckState>({ status: "idle" });
   const [comparison, setComparison] = useState<CompareState>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
 
   const [query, setQuery] = useState(() => urlFilters.q);
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const [queryHistory, setQueryHistory] = useState(readQueryHistory);
+  const historyRef = useRef(queryHistory);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const draftTimer = useRef<ReturnType<typeof setTimeout>>();
+  const updateHistory = useCallback((change: (entries: QueryHistoryEntry[]) => QueryHistoryEntry[]) => {
+    const next = change(historyRef.current);
+    if (next === historyRef.current) return;
+    historyRef.current = next;
+    setQueryHistory(next);
+    writeQueryHistory(next);
+  }, []);
+  const remember = useCallback((text: string) => updateHistory(entries => rememberQuery(entries, text)), [updateHistory]);
+
+  useEffect(() => {
+    draftTimer.current = setTimeout(() => remember(query), 800);
+    return () => clearTimeout(draftTimer.current);
+  }, [query, remember]);
+
+  const [blockInput, setBlockInput] = useState(() => urlFilters.block);
   const [pageSize, setPageSize] = useState<PageSize>(() => resolvePageSize(urlFilters.pageSize));
   const [expiration, setExpiration] = useState<ExpirationFilter>(() => resolveExpirationFilter(urlFilters.expiration));
   const [results, setResults] = useState<ResultState>(EMPTY_RESULTS);
+  const [countResult, setCountResult] = useState<{
+    query: string;
+    total: number | null;
+    error: unknown | null;
+    running: boolean;
+  } | null>(null);
+  const countAbortRef = useRef<AbortController | null>(null);
+  const resetCount = useCallback(() => {
+    countAbortRef.current?.abort();
+    countAbortRef.current = null;
+    setCountResult(null);
+  }, []);
+  useEffect(() => {
+    resetCount();
+    return () => countAbortRef.current?.abort();
+  }, [query, mode, source.customUrl, blockInput, resetCount]);
   const abortRef = useRef<AbortController | null>(null);
   /** The `q` this component last put into, or read from, the URL; used to tell a back/forward navigation apart. */
   const urlQueryRef = useRef<string | null>(null);
+  const urlBlockRef = useRef(urlFilters.block);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,7 +219,8 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const runQuery = useCallback(
-    async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }, via: RpcSource = source) => {
+    async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }, via: RpcSource = source, requestedBlock?: number) => {
+      if (via.kind === "backend" && !adminModeActive) via = { kind: "index", customUrl: "" };
       const normalized = normalizeQueryInput(rawQuery);
       if (!normalized) return;
       if (via.kind === "custom" && !isValidRpcUrl(via.customUrl)) {
@@ -174,6 +228,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         return;
       }
       setFormError(null);
+      resetCount();
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -192,9 +247,10 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         const params = buildQueryParams({
           query: normalized,
           pageSize: Number(size),
+          atBlock: requestedBlock,
           ...(continueFrom ? { cursor: continueFrom.cursor, atBlock: continueFrom.atBlock } : {}),
         });
-        const deps = { signal: controller.signal };
+        const deps = { ...rpcDeps, signal: controller.signal };
         const [pageResult, timingResult] = await Promise.all([
           callRpc(via, "arkiv_query", params, deps),
           // Block timing turns heights into dates; a failure there is not a query failure.
@@ -223,19 +279,23 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [source],
+    [source, csrfToken, adminModeActive, resetCount],
   );
 
   /**
    * Sends the same query to the node's relay and to the experimental index and
    * reports where they part company. Both calls are pinned to the lower of the
    * two heads: the index runs a little behind the node, and an unpinned pair
-   * would read as a wall of differences that is really just that lag.
+   * would read as a wall of differences that is really just that lag. An index
+   * far behind is not followed down (see {@link pickComparisonBlock}): the
+   * node's head is used and the index side fails, which is the honest report.
    */
-  const runComparison = useCallback(async (rawQuery: string, size: PageSize) => {
+  const runComparison = useCallback(async (rawQuery: string, size: PageSize, requestedBlock?: number) => {
+    if (!adminModeActive) return;
     const normalized = normalizeQueryInput(rawQuery);
     if (!normalized) return;
     setFormError(null);
+    resetCount();
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -245,7 +305,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     setResults({ ...EMPTY_RESULTS, executedQuery: normalized, running: "first" });
 
     const [nodeSource, indexSource] = COMPARE_SOURCES;
-    const deps = { signal: controller.signal };
+    const deps = { ...rpcDeps, signal: controller.signal };
     /** A cancelled run takes its own spinner down, unless a newer run owns it now. */
     const cancelled = () => {
       if (abortRef.current !== null && abortRef.current !== controller) return;
@@ -261,10 +321,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         cancelled();
         return;
       }
-      const heads = [nodeTiming?.currentBlock, indexTiming?.currentBlock].filter(
-        (block): block is number => typeof block === "number",
-      );
-      const atBlock = heads.length > 0 ? Math.min(...heads) : undefined;
+      const atBlock = requestedBlock ?? pickComparisonBlock(nodeTiming?.currentBlock, indexTiming?.currentBlock);
       const params = buildQueryParams({
         query: normalized,
         pageSize: Number(size),
@@ -314,29 +371,74 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, []);
+  }, [csrfToken, adminModeActive, resetCount]);
+
+  const countQuery = async () => {
+    const normalized = normalizeQueryInput(query);
+    if (!normalized || mode !== "index") return;
+    let block: number | undefined;
+    try { block = parseQueryBlock(blockInput); }
+    catch (error) { setFormError((error as Error).message); return; }
+    remember(query);
+    setFormError(null);
+    urlQueryRef.current = normalized;
+    urlBlockRef.current = block === undefined ? "" : String(block);
+    if (writePermalink("data", dataPageFilters(normalized, pageSize, expiration, rpcModeLinkValue(mode, source), urlBlockRef.current))) onLocationChange();
+    abortRef.current?.abort();
+    resetCount();
+    const controller = new AbortController();
+    countAbortRef.current = controller;
+    setResults(EMPTY_RESULTS);
+    setComparison({ status: "idle" });
+    setCountResult({ query: normalized, total: null, error: null, running: true });
+    try {
+      const total = await callRpc({ kind: "index", customUrl: "" }, "arkiv_getEntityCount", [{ query: normalized, ...(block === undefined ? {} : { block }) }], {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) {
+        throw new Error("The endpoint returned an invalid entity count.");
+      }
+      setCountResult({ query: normalized, total, error: null, running: false });
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) return;
+      setCountResult({ query: normalized, total: null, error, running: false });
+    } finally {
+      if (countAbortRef.current === controller) countAbortRef.current = null;
+    }
+  };
 
   /** Runs the editor's text and records it in the URL so the run can be shared or returned to. */
   const execute = useCallback(
     (text: string, size: PageSize = pageSize, filter: ExpirationFilter = expiration) => {
       const normalized = normalizeQueryInput(text);
       if (!normalized) return;
+      let block: number | undefined;
+      try { block = parseQueryBlock(blockInput); }
+      catch (error) { setFormError((error as Error).message); return; }
+      remember(queryRef.current);
+      remember(normalized);
       setQuery(normalized);
       urlQueryRef.current = normalized;
-      if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcModeLinkValue(mode, source)))) {
+      urlBlockRef.current = block === undefined ? "" : String(block);
+      if (writePermalink("data", dataPageFilters(normalized, size, filter, rpcModeLinkValue(mode, source), urlBlockRef.current))) {
         onLocationChange();
       }
-      if (mode === "both") void runComparison(normalized, size);
-      else void runQuery(normalized, size);
+      if (mode === "both") void runComparison(normalized, size, block);
+      else void runQuery(normalized, size, undefined, undefined, block);
     },
-    [expiration, mode, onLocationChange, pageSize, runComparison, runQuery, source],
+    [blockInput, expiration, mode, onLocationChange, pageSize, remember, runComparison, runQuery, source],
   );
 
   // A shared link, or back/forward, changes `q` under us: adopt it and run it.
   useEffect(() => {
     const fromUrl = urlFilters.q.trim();
-    if (fromUrl === (urlQueryRef.current ?? "")) return;
+    if (fromUrl === (urlQueryRef.current ?? "") && urlFilters.block === urlBlockRef.current) return;
+    remember(queryRef.current);
     urlQueryRef.current = fromUrl;
+    urlBlockRef.current = urlFilters.block;
+    setBlockInput(urlFilters.block);
+    resetCount();
     const size = resolvePageSize(urlFilters.pageSize);
     const filter = resolveExpirationFilter(urlFilters.expiration);
     setPageSize(size);
@@ -346,30 +448,38 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       setResults(EMPTY_RESULTS);
       return;
     }
+    let block: number | undefined;
+    try { block = parseQueryBlock(urlFilters.block); }
+    catch (error) { setFormError((error as Error).message); return; }
     const normalized = normalizeQueryInput(fromUrl);
+    remember(normalized);
     setQuery(normalized);
     const linked = modeFromUrl(urlFilters.rpc);
     if (linked) {
       setSource(linked.source);
       setMode(linked.mode);
     }
-    const linkedMode = linked?.mode ?? mode;
-    if (linkedMode === "both") void runComparison(normalized, size);
-    else void runQuery(normalized, size, undefined, linked?.source ?? undefined);
+    const linkedMode = permittedRpcMode(linked?.mode ?? mode, adminModeActive);
+    if (linkedMode === "both") void runComparison(normalized, size, block);
+    else void runQuery(normalized, size, undefined, linked?.source ?? undefined, block);
     // `mode` is only read as the fallback for a link that names none; a mode
     // change on its own must not re-run the query behind the user's back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runComparison, runQuery, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
+  }, [remember, resetCount, runComparison, runQuery, urlFilters.block, urlFilters.expiration, urlFilters.pageSize, urlFilters.q, urlFilters.rpc]);
 
   const cancel = () => {
+    resetCount();
     abortRef.current?.abort();
     abortRef.current = null;
   };
 
   const clear = () => {
+    remember(query);
     cancel();
     setQuery("");
     urlQueryRef.current = "";
+    urlBlockRef.current = "";
+    setBlockInput("");
     setResults(EMPTY_RESULTS);
     setComparison({ status: "idle" });
     if (writePermalink("data", {})) onLocationChange();
@@ -393,7 +503,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     const filter = resolveExpirationFilter(value);
     setExpiration(filter);
     if (results.executedQuery) {
-      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, rpcModeLinkValue(mode, source)))) {
+      if (writePermalink("data", dataPageFilters(results.executedQuery, pageSize, filter, rpcModeLinkValue(mode, source), urlBlockRef.current))) {
         onLocationChange();
       }
     }
@@ -429,8 +539,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
     }
     setFormError(null);
     setCheck({ status: "running", startedAt: Date.now() });
-    const report = await checkRpcSource(checkSource);
-    setCheck({ status: "done", report });
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const report = await checkRpcSource(checkSource, { ...rpcDeps, signal: controller.signal });
+    if (!controller.signal.aborted) setCheck({ status: "done", report });
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   /** True once `/health` has said this deployment serves no entity index. */
@@ -445,11 +559,11 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         : []
       : results.entities;
   const hasText = query.trim().length > 0;
-  const running = results.running !== null;
+  const running = results.running !== null || countResult?.running === true;
   const permalink =
     results.executedQuery === null
       ? null
-      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, rpcModeLinkValue(mode, source)));
+      : buildPermalinkHref("data", dataPageFilters(results.executedQuery, pageSize, expiration, rpcModeLinkValue(mode, source), urlBlockRef.current));
 
   const onFallbackKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -469,17 +583,15 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
           onLocationChange={onLocationChange}
         />
         <h2 className="font-heading text-lg font-black tracking-tight">Data</h2>
+        <p className="page-caution" role="note">
+          Experimental — use with caution
+        </p>
       </div>
 
       <p className="max-w-3xl text-xs text-muted-foreground">
-        Query the live entity state held by an Arkiv node. The index does not store entity state, so every result here
-        comes straight from the selected RPC endpoint.{" "}
-        <a
-          href={DOCS_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:text-foreground hover:decoration-foreground"
-        >
+        Query entity state from the indexer&apos;s experimental entity index, or from any node you name; in admin mode
+        the deployment&apos;s own node relay is available too, so the two can be compared.{" "}
+        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
           Query language docs
         </a>
         .
@@ -489,13 +601,13 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         <span className="text-xs font-medium text-muted-foreground">Query against</span>
         <Tabs value={mode} onValueChange={(value) => updateMode(value as RpcMode)}>
           <TabsList aria-label="RPC source">
-            <TabsTrigger value="backend" title={BACKEND_RPC_PATH}>
+            {adminModeActive ? <TabsTrigger value="backend" title={BACKEND_RPC_PATH}>
               Default node
-            </TabsTrigger>
+            </TabsTrigger> : null}
             <TabsTrigger value="index" title={BACKEND_INDEX_RPC_PATH}>
               Experimental index
             </TabsTrigger>
-            <TabsTrigger value="both">Both (compare)</TabsTrigger>
+            {adminModeActive ? <TabsTrigger value="both">Both (compare)</TabsTrigger> : null}
             {mode === "custom" || source.customUrl.trim() ? (
               <TabsTrigger value="custom" title={describeRpcEndpoint({ kind: "custom", customUrl: source.customUrl })}>
                 Custom
@@ -509,7 +621,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
       </div>
       {indexOff && (mode === "index" || mode === "both") ? (
         <p className="border border-amber-600/30 bg-amber-600/10 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300">
-          This deployment has not enabled the entity index (<span className="font-mono">ENTITY_QUERY_INDEX</span>), so{" "}
+          This deployment has switched off the entity index (<span className="font-mono">ENTITY_QUERY_INDEX=false</span>), so{" "}
           <span className="font-mono">{BACKEND_INDEX_RPC_PATH}</span> answers 404.
         </p>
       ) : null}
@@ -540,6 +652,18 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
             to run the query
           </span>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            At block
+            <input
+              type="text"
+              aria-label="At block"
+              placeholder="Latest"
+              value={blockInput}
+              disabled={running}
+              onChange={(event) => { setBlockInput(event.target.value); setFormError(null); }}
+              className="w-40 rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
             Page size
             <select value={pageSize} onChange={(event) => onPageSizeChange(event.target.value)} disabled={running} className={selectClass}>
               {PAGE_SIZE_OPTIONS.map((option) => (
@@ -559,10 +683,26 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
               ))}
             </select>
           </label>
-          <Button type="button" variant="outline" size="sm" onClick={clear} disabled={!hasText && results.executedQuery === null}>
+          <Button type="button" variant="outline" size="sm" onClick={clear} disabled={!hasText && results.executedQuery === null && countResult === null}>
             Clear
           </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => {
+            clearTimeout(draftTimer.current);
+            remember(query);
+            setHistoryOpen(true);
+          }}>
+            History{queryHistory.length > 0 ? ` (${queryHistory.length})` : ""}
+          </Button>
           {permalink ? <CopyLinkButton href={permalink} /> : null}
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void countQuery()}
+            disabled={!hasText || running || mode !== "index" || indexOff}
+            title={mode === "index" ? "Count all matches, regardless of page size or the Show filter" : "Select Experimental index to count query matches"}
+          >
+            Count query
+          </button>
           {running ? (
             <Button type="button" variant="destructive" size="sm" onClick={cancel}>
               Cancel
@@ -573,22 +713,32 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
             </Button>
           )}
         </div>
+        {backend.status === "known" && backend.entityQueryIndex && (mode === "index" || mode === "both") ? (
+          <p className="text-xs text-muted-foreground">Available index blocks: {backend.entityQueryIndex.floorBlock}–{backend.entityQueryIndex.projectedThroughBlock}. Leave At block blank for latest.</p>
+        ) : null}
         {formError ? <p className="border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{formError}</p> : null}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Try</span>
+          <span className="text-xs text-muted-foreground">Copy example</span>
           {EXAMPLE_QUERIES.map((example) => (
-            <button
-              key={example.label}
-              type="button"
-              title={example.query}
-              onClick={() => setQuery(example.query)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              {example.label}
-            </button>
+            <CopyQueryHint key={example.label} label={example.label} query={example.query} />
           ))}
         </div>
       </Card>
+
+      {historyOpen ? <QueryHistoryDialog
+        entries={queryHistory}
+        timeZone={timeZone}
+        onClose={() => setHistoryOpen(false)}
+        onEdit={(id, text) => updateHistory(entries => editQueryHistory(entries, id, text))}
+        onDelete={id => updateHistory(entries => entries.filter(entry => entry.id !== id))}
+        onLoad={text => {
+          remember(query);
+          cancel();
+          setQuery(text);
+          setFormError(null);
+          setHistoryOpen(false);
+        }}
+      /> : null}
 
       {comparison.status === "running" ? (
         <p className="text-xs text-muted-foreground">Running the query on both endpoints…</p>
@@ -596,7 +746,16 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         <ComparisonPanel report={comparison.report} />
       ) : null}
 
-      <EntityResults
+      {countResult ? (
+        <div className="query-results">
+          {countResult.error !== null ? <QueryError error={countResult.error} query={countResult.query} /> : (
+            <p className="summary query-status" role="status">
+              {countResult.running ? "Counting matching entities…" : `${fmtInteger(countResult.total)} matching entities at ${blockInput.trim() && blockInput.trim().toLowerCase() !== "latest" ? `block ${blockInput.trim()}` : "latest"}`}
+              {!countResult.running && expiration === "soon" ? " (before the Show filter)" : ""}
+            </p>
+          )}
+        </div>
+      ) : <EntityResults
         executedQuery={results.executedQuery}
         entities={visibleEntities}
         loadedCount={results.entities.length}
@@ -612,7 +771,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
         onQueryOnly={queryOnly}
         onAddToQuery={addToQuery}
         onLocationChange={onLocationChange}
-      />
+      />}
 
       <details className="group border border-border bg-card">
         <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-4 py-2.5 text-xs font-medium text-foreground [&::-webkit-details-marker]:hidden [&::marker]:content-none">
@@ -643,13 +802,13 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
             <div className="flex flex-col gap-2">
               <h3 className="text-xs font-semibold text-foreground">RPC endpoint</h3>
               <div className="flex flex-col gap-2" role="radiogroup" aria-label="RPC endpoint">
-                <RpcSourceOption checked={mode === "backend"} onChange={() => onKindChange("backend")} title="Indexer backend">
+                {adminModeActive ? <RpcSourceOption checked={mode === "backend"} onChange={() => onKindChange("backend")} title="Indexer backend">
                   <span>
                     <span className="font-mono">{BACKEND_RPC_PATH}</span> forwards the entity reads to the node it is
                     configured with, using the deployment&apos;s own API key.
                   </span>
                   <BackendForwardingNote backend={backend} missing={missing} />
-                </RpcSourceOption>
+                </RpcSourceOption> : null}
 
                 <RpcSourceOption
                   checked={mode === "index"}
@@ -685,7 +844,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                   />
                 </RpcSourceOption>
 
-                <RpcSourceOption checked={mode === "both"} onChange={() => updateMode("both")} title="Both, compared">
+                {adminModeActive ? <RpcSourceOption checked={mode === "both"} onChange={() => updateMode("both")} title="Both, compared">
                   <span>
                     Sends each query to <span className="font-mono">{BACKEND_RPC_PATH}</span> and{" "}
                     <span className="font-mono">{BACKEND_INDEX_RPC_PATH}</span> at once, both pinned to the lower of
@@ -694,7 +853,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone }: DataVie
                     answer.
                   </span>
                   <IndexStatusNote backend={backend} />
-                </RpcSourceOption>
+                </RpcSourceOption> : null}
               </div>
             </div>
             <div className="flex flex-col gap-2">
@@ -847,8 +1006,40 @@ function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
   if (index === false) {
     return (
       <span className="block text-xs text-amber-700 dark:text-amber-400">
-        This deployment has not enabled the entity index (<span className="font-mono">ENTITY_QUERY_INDEX</span>), so
+        This deployment has switched off the entity index (<span className="font-mono">ENTITY_QUERY_INDEX=false</span>), so
         this endpoint answers 404.
+      </span>
+    );
+  }
+  const genesis = index.genesis;
+  if (genesis?.status === "running") {
+    return (
+      <span className="rpc-source-option-status warn">
+        Importing genesis entities: {genesis.imported.toLocaleString("en-US")} /{" "}
+        {genesis.total.toLocaleString("en-US")}
+        {genesis.phase === "repair"
+          ? " are in; refolding the ones with later operations"
+          : genesis.source === "dump"
+            ? " (offline import from the seed's state dump)"
+            : " (from the node)"}
+        . Results are incomplete until the import is done.
+      </span>
+    );
+  }
+  if (genesis?.status === "waiting") {
+    return (
+      <span className="rpc-source-option-status warn">
+        {genesis.total.toLocaleString("en-US")} genesis entities are waiting for the offline import
+        (<span className="mono">scripts/importGenesisState.ts</span>); until then entities created before
+        block {index.floorBlock ?? "?"} are not indexed.
+      </span>
+    );
+  }
+  if (genesis?.status === "failed") {
+    return (
+      <span className="rpc-source-option-status warn">
+        The genesis import failed: {genesis.error ?? "no reason recorded"}. Entities created before block{" "}
+        {index.floorBlock ?? "?"} are not indexed.
       </span>
     );
   }
@@ -862,11 +1053,17 @@ function IndexStatusNote({ backend }: { backend: BackendForwarding }) {
   }
   const lag = index.lagBlocks === null ? "" : `, ${index.lagBlocks} blocks behind the scanner`;
   const live = index.liveEntities === null ? "" : `; ${index.liveEntities.toLocaleString("en-US")} live entities`;
+  const coverage =
+    genesis?.status === "done" && index.floorBlock === "0"
+      ? `Every entity is indexed, including the ${genesis.total.toLocaleString("en-US")} from the genesis state.`
+      : genesis?.status === "unavailable"
+        ? `Entities created before block ${index.floorBlock ?? "?"} are not indexed, and the node could not say whether the genesis state holds any.`
+        : `Entities created before block ${index.floorBlock ?? "?"} are not indexed.`;
   return (
     <span className="block text-xs text-emerald-700 dark:text-emerald-400">
       Projected through block {index.projectedThroughBlock}
       {lag}
-      {live}. Entities created before block {index.floorBlock ?? "?"} are not indexed.
+      {live}. {coverage}
     </span>
   );
 }
@@ -1021,6 +1218,21 @@ function Row({ label, value }: { label: string; value: string }) {
       <dt className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">{label}</dt>
       <dd className="text-xs text-foreground">{value}</dd>
     </div>
+  );
+}
+
+function CopyQueryHint({ label, query }: { label: string; query: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (status === "idle") return;
+    const timer = window.setTimeout(() => setStatus("idle"), 1500);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+  return (
+    <button type="button" className="query-example" title={`Copy query: ${query}`} aria-label={`Copy example: ${label}`}
+      onClick={async () => setStatus(await copyText(query) ? "copied" : "failed")}>
+      {label}<span className="query-copy-feedback" role="status">{status === "copied" ? " · Copied" : status === "failed" ? " · Could not copy" : ""}</span>
+    </button>
   );
 }
 

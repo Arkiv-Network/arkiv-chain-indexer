@@ -3,7 +3,7 @@
 //
 // The editor is controlled from the outside: `value` is the source of truth,
 // edits report through `onChange`, and a `value` that differs from the document
-// (an example chip, a filter added from a result, a shared link) is pushed in.
+// (a restored history entry, a filter added from a result, a shared link) is pushed in.
 
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";

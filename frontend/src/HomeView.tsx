@@ -21,7 +21,6 @@ import {
   fmtGasPrice,
   fmtInteger,
   fmtTokenAmount,
-  pickGasPriceUnit,
   weiToGasPriceNumber,
 } from "./format";
 import { InfoTooltip } from "./InfoTooltip";
@@ -39,6 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChartCard } from "@/components/chart-card";
 import { cn } from "@/lib/utils";
+import { chartTimeAxis, chartTimeLabels } from "./chartTime";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -375,7 +375,7 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
 
       <div className="flex flex-col gap-3">
         <h3 className="font-heading text-lg font-black tracking-tight">
-          {settings.chainName} live statistics
+          {settings.networkName || settings.chainName} network overview
         </h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <MetricCard
@@ -387,13 +387,6 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
             value={lastMinuteAvgGas !== null ? fmtGasBillions(lastMinuteAvgGas) : "—"}
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          Machine-readable API and data notes are available at{" "}
-          <a className="text-primary hover:underline" href="/llms.txt">
-            llms.txt
-          </a>
-          .
-        </p>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -460,7 +453,7 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
         </div>
       </div>
 
-      <LiveHistograms blocks={blocks} error={blocksError} loaded={blocksData !== null} settings={settings} />
+      <LiveHistograms timeZone={timeZone} blocks={blocks} error={blocksError} loaded={blocksData !== null} settings={settings} />
 
       {adminModeActive ? <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} /> : null}
     </section>
@@ -726,11 +719,13 @@ function formatBehind(ms: number): string {
 }
 
 function LiveHistograms({
+  timeZone,
   blocks,
   error,
   loaded,
   settings,
 }: {
+  timeZone: string;
   blocks: StoredBlock[];
   error: string | null;
   loaded: boolean;
@@ -740,12 +735,7 @@ function LiveHistograms({
     () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS,
   );
 
-  // Arkiv chains price gas in single-digit wei, where a gwei axis flattens the
-  // whole series onto zero — pick the unit from the data instead.
-  const baseFeeUnit = useMemo(
-    () => pickGasPriceUnit(blocks.map((block) => block.baseBlockFeeWei)),
-    [blocks],
-  );
+  const baseFeeUnit = "gwei";
 
   // Re-render every second so the window shifts when the wall clock crosses
   // into a new minute.
@@ -761,6 +751,7 @@ function LiveHistograms({
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <MinAvgMaxPanel
+        timeZone={timeZone}
         title="Network usage"
         unitLabel="gas"
         blocks={blocks}
@@ -795,50 +786,9 @@ function LiveHistograms({
         error={error}
         loaded={loaded}
       />
-      {settings.noBatcher ? null : (
-        <MinAvgMaxPanel
-          title="Batcher Operation"
-          unitLabel="queue size"
-          blocks={blocks}
-          currentMinuteMs={currentMinuteMs}
-          histogramWindowMinutes={settings.histogramWindowMinutes}
-          colorVar="--chart-3"
-          colorFallback="#4b52c7"
-          extractValue={(block) => {
-            if (block.batcherQueueSize === undefined || block.batcherQueueSize === null) return null;
-            try {
-              const queueSize = Number(BigInt(block.batcherQueueSize));
-              return Number.isFinite(queueSize) ? queueSize : null;
-            } catch {
-              return null;
-            }
-          }}
-          hoverLabel="Batcher queue"
-          yTickformat=".2s"
-          yTicksuffix=""
-          hoverFormat=".3s"
-          infoLabel="What is batcher operation?"
-          infoTitle="Batcher Operation"
-          infoBody={
-            <>
-              <p>
-                The batcher queue size reported by the collector for each block. The
-                solid line is the per-minute average queue size, and the band shows
-                the per-minute min/max range.
-              </p>
-              <p>
-                Missing collector readings are left out of the calculation so gaps
-                show where operation metrics were not available.
-              </p>
-            </>
-          }
-          emptyLabel="No batcher queue data in this window."
-          error={error}
-          loaded={loaded}
-        />
-      )}
       <MinAvgMaxPanel
         title="Base block fee"
+        timeZone={timeZone}
         unitLabel={baseFeeUnit}
         blocks={blocks}
         currentMinuteMs={currentMinuteMs}
@@ -848,7 +798,7 @@ function LiveHistograms({
         extractValue={(block) => weiToGasPriceNumber(block.baseBlockFeeWei, baseFeeUnit)}
         hoverLabel="Base fee"
         yTicksuffix={` ${baseFeeUnit}`}
-        hoverFormat={baseFeeUnit === "wei" ? ",.0f" : ",.3f"}
+        hoverFormat=".9~f"
         infoLabel="What is base block fee?"
         infoTitle="Base block fee (EIP‑1559)"
         infoBody={
@@ -860,11 +810,7 @@ function LiveHistograms({
               The base fee is burnt rather than paid to miners.
             </p>
             <p>
-              Shown in {baseFeeUnit}
-              {baseFeeUnit === "gwei"
-                ? ` (1 gwei = 10^-9 ${settings.tokenSymbol})`
-                : ` (1 ${settings.tokenSymbol} = 10^18 wei)`}
-              , the smallest unit that keeps this chain's fees readable. The solid
+              Shown in Gwei (1 Gwei = 10^-9 {settings.tokenSymbol}). The solid
               line is the per-minute average; the band shows the per‑minute min/max
               range.
             </p>
@@ -878,6 +824,7 @@ function LiveHistograms({
 }
 
 interface MinAvgMaxPanelProps {
+  timeZone: string;
   title: string;
   unitLabel: string;
   blocks: StoredBlock[];
@@ -899,6 +846,7 @@ interface MinAvgMaxPanelProps {
 }
 
 function MinAvgMaxPanel({
+  timeZone,
   title,
   unitLabel,
   blocks,
@@ -941,6 +889,7 @@ function MinAvgMaxPanel({
     const hasData = series.some((p) => p.avg !== null);
 
     const xs = series.map((p) => new Date(p.ts).toISOString());
+    const timeLabels = chartTimeLabels(series.map((p) => p.ts), timeZone);
     const ysAvg = series.map((p) => p.avg);
     const ysMin = series.map((p) => p.min);
     const ysMax = series.map((p) => p.max);
@@ -953,10 +902,11 @@ function MinAvgMaxPanel({
       mode: "lines+markers",
       x: xs,
       y: ysMax as unknown as Plotly.Datum[],
-      connectgaps: true,
+      connectgaps: false,
       line: { color: bandLine, width: 1, shape: "linear" },
       marker: { color: bandLine, size: 3, line: { width: 0 } },
-      hovertemplate: `max %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
+      text: timeLabels,
+      hovertemplate: `%{text}<br>max %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
       showlegend: false,
     };
     const minTrace: Partial<Plotly.PlotData> = {
@@ -964,12 +914,13 @@ function MinAvgMaxPanel({
       mode: "lines+markers",
       x: xs,
       y: ysMin as unknown as Plotly.Datum[],
-      connectgaps: true,
+      connectgaps: false,
       fill: "tonexty",
       fillcolor: bandFill,
       line: { color: bandLine, width: 1, shape: "linear" },
       marker: { color: bandLine, size: 3, line: { width: 0 } },
-      hovertemplate: `min %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
+      text: timeLabels,
+      hovertemplate: `%{text}<br>min %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
       showlegend: false,
     };
     const avgTrace: Partial<Plotly.PlotData> = {
@@ -977,26 +928,28 @@ function MinAvgMaxPanel({
       mode: "lines+markers",
       x: xs,
       y: ysAvg as unknown as Plotly.Datum[],
-      connectgaps: true,
+      connectgaps: false,
       line: { color: baseColor, width: 1.5, shape: "linear" },
       marker: { color: baseColor, size: 4, line: { width: 0 } },
-      hovertemplate: `<b>${hoverLabel}</b><br>%{x|%H:%M}<br>%{y:${hoverFormat}}${valueSuffix} avg<extra></extra>`,
+      text: timeLabels,
+      hovertemplate: `<b>${hoverLabel}</b><br>%{text}<br>%{y:${hoverFormat}}${valueSuffix} avg<extra></extra>`,
     };
 
     const layout: Partial<Plotly.Layout> = {
       autosize: true,
-      margin: { l: 56, r: 16, t: 8, b: 28 },
+      margin: { l: 64, r: 24, t: 8, b: 52 },
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(0,0,0,0)",
       font: { color: textColor, size: 11 },
       showlegend: false,
-      hovermode: "x unified",
+      hovermode: "closest",
       hoverlabel: {
         bgcolor: getCssColor("--card", "#ffffff"),
         bordercolor: gridColor,
         font: { color: getCssColor("--foreground", "#111111"), size: 12 },
       },
       xaxis: {
+        ...chartTimeAxis(minMs, xMaxMs, timeZone),
         type: "date",
         range: [new Date(minMs).toISOString(), new Date(xMaxMs).toISOString()],
         gridcolor: "rgba(0,0,0,0)",
@@ -1030,6 +983,7 @@ function MinAvgMaxPanel({
     unitLabel,
     yTickformat,
     yTicksuffix,
+    timeZone,
   ]);
 
   return (
@@ -1045,7 +999,7 @@ function MinAvgMaxPanel({
         </>
       }
       meta={`${unitLabel} · last ${histogramWindowMinutes} min`}
-      contentClassName="h-[260px]"
+      contentClassName="h-[260px] flex-none"
     >
       {error && !loaded ? (
         <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-xs">

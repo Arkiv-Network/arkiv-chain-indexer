@@ -1,10 +1,6 @@
-/*
- * Design system foundation, copied from the Arkiv Data Explorer
- * (data-explorer/app/globals.css). Tokens, fonts and Tailwind setup live
- * here; the legacy styles.css is loaded after this file and is retired
- * view by view.
- */
+/* Shared Arkiv design tokens, fonts, and Tailwind primitives. */
 @import "tailwindcss";
+@import "./feature-panels.css";
 
 /* Fonts: IBM Plex Mono for all text, BrutalType for headings. Self-hosted
    and preloaded from index.html so text paints in its final face. */
@@ -201,6 +197,12 @@
   --chart-3: #4b52c7;
   --chart-4: #e9e6de;
   --chart-5: #111111;
+  --ok: #1b7a4c;
+  --error: var(--destructive);
+  --op-red: #b3261e;
+  --op-amber: #b25e09;
+  --op-purple: #7a3fb8;
+  --shadow-card: 0 4px 16px #0001;
   --radius: 0.625rem;
   --sidebar: #f6f4ef;
   --sidebar-foreground: #111111;
@@ -213,6 +215,11 @@
 }
 
 .dark {
+  color-scheme: dark;
+  --ok: #86c59f;
+  --op-red: #f28b82;
+  --op-amber: #e9b56b;
+  --op-purple: #c6a0e8;
   --background: #111111;
   --foreground: #f6f4ef;
   --card: #1c1c1c;

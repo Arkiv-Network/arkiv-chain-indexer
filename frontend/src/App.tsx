@@ -1,3 +1,4 @@
+import { Popover } from "@base-ui/react/popover";
 import {
   Activity,
   Boxes,
@@ -13,6 +14,7 @@ import {
   type LucideIcon,
   Moon,
   Receipt,
+  Search,
   Settings2,
   Shield,
   Sun,
@@ -28,18 +30,17 @@ import {
   loadBaseloadConfig,
   saveBaseloadConfig,
   updateBaseloadConfig as putBaseloadConfig,
-  verifyAdminToken,
   type BaseloadStateResponse,
   type BaseloadTaskStatus,
   type BaseloadWorkerBalance,
   type StoredBaseloadConfigSummary,
 } from "./api";
+import { AccountControls } from "./AccountControls";
+import { useAuth } from "./useAuth";
 import { AdminView } from "./AdminView";
 import {
   adminModeActive,
   adminModeStatus,
-  isVerifiedAdminToken,
-  privilegedAdminToken,
 } from "./adminMode";
 import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
@@ -54,7 +55,7 @@ import { HealthView } from "./HealthView";
 import { SyncStatusBanner } from "./SyncStatusBanner";
 import { HomeView } from "./HomeView";
 import { readStoredString, writeStoredString } from "./localStorage";
-import { visibleNavItems } from "./navigation";
+import { requiresAdminView, visibleNavItems } from "./navigation";
 import {
   BUILD_PAGE_SETTINGS,
   readStoredPageSettings,
@@ -83,9 +84,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { OmniSearch } from "./OmniSearch";
+import { SearchView } from "./SearchView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
-const BASELOAD_ADMIN_TOKEN_STORAGE_KEY = "baseload.adminBearerToken";
 const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
 const SIMULATE_OFFLINE_STORAGE_KEY = "home.simulateOffline";
 const FULL_WIDTH_STORAGE_KEY = "ui.fullWidth";
@@ -95,6 +97,7 @@ type ThemeOverride = "light" | "dark" | "";
 
 const NAV_ICONS: Partial<Record<View, LucideIcon>> = {
   home: Home,
+  search: Search,
   blocks: Boxes,
   block: Box,
   transactions: Wallet,
@@ -111,82 +114,50 @@ const NAV_ICONS: Partial<Record<View, LucideIcon>> = {
   baseload: Gauge,
 };
 
-// Compact "Display" menu: full width toggle + time zone select, tucked behind
-// a Settings2 icon button in the header. Mirrors the manual dropdown pattern
-// used by the explorer's chain selector (open state + backdrop-to-close),
-// rather than pulling in a new popover primitive for one header control.
+// Anchor positioning keeps display controls on screen at narrow widths and
+// provides keyboard dismissal and focus restoration through the shared UI library.
 function DisplayMenu({
-  fullWidth,
-  onToggleFullWidth,
-  timeZone,
-  onTimeZoneChange,
+  fullWidth, onToggleFullWidth, timeZone, onTimeZoneChange,
 }: {
   fullWidth: boolean;
   onToggleFullWidth: () => void;
   timeZone: string;
   onTimeZoneChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
 }) {
-  const [open, setOpen] = useState(false);
-
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-haspopup="true"
+    <Popover.Root>
+      <Popover.Trigger
         title="Display settings"
-        className={cn(
-          "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-          open && "bg-accent text-foreground",
-        )}
+        aria-label="Display settings"
+        className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-open:bg-accent data-open:text-foreground"
       >
         <Settings2 className="size-4" />
-      </button>
-      {open ? (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-10 cursor-default"
-            onClick={() => setOpen(false)}
-            aria-label="Close display settings"
-          />
-          <div className="absolute top-full right-0 z-20 mt-1 w-64 rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md">
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner sideOffset={6} align="end" collisionPadding={12} className="z-[60]">
+          <Popover.Popup aria-label="Display settings" className="w-64 max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs font-medium">Full width</span>
-              <Button
-                type="button"
-                variant={fullWidth ? "default" : "outline"}
-                size="xs"
-                onClick={onToggleFullWidth}
-                aria-pressed={fullWidth}
-              >
+              <Button type="button" variant={fullWidth ? "default" : "outline"} size="xs" onClick={onToggleFullWidth} aria-pressed={fullWidth}>
                 {fullWidth ? "On" : "Off"}
               </Button>
             </div>
             <Separator className="my-3" />
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Time zone</span>
-              <select
-                value={timeZone}
-                onChange={onTimeZoneChange}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
-              >
-                {TIME_ZONE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="display-time-zone" className="text-xs font-medium text-muted-foreground">Time zone</label>
+              <select id="display-time-zone" value={timeZone} onChange={onTimeZoneChange} className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground">
+                {TIME_ZONE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
-            </label>
-          </div>
-        </>
-      ) : null}
-    </div>
+            </div>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
 export function App() {
+  const auth = useAuth();
   const [clientLocation, setClientLocation] = useState(getCurrentLocation);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
   const [baseloadConfig, setBaseloadConfig] = useState<BaseloadConfig>(EMPTY_BASELOAD_CONFIG);
@@ -195,13 +166,9 @@ export function App() {
   const [baseloadError, setBaseloadError] = useState<string | null>(null);
   const [baseloadSavedConfigs, setBaseloadSavedConfigs] = useState<StoredBaseloadConfigSummary[]>([]);
   const [baseloadConfigManagerError, setBaseloadConfigManagerError] = useState<string | null>(null);
-  const [baseloadAdminToken, setBaseloadAdminToken] = useState(() =>
-    readStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, ""),
-  );
   const [pageSettings, setPageSettings] = useState<PageSettings>(() =>
     readStoredPageSettings(BUILD_PAGE_SETTINGS),
   );
-  const [verifiedAdminToken, setVerifiedAdminToken] = useState("");
   const [adminModeEnabled, setAdminModeEnabled] = useState(
     () => readStoredString(ADMIN_MODE_ENABLED_STORAGE_KEY, "true") === "true",
   );
@@ -235,7 +202,7 @@ export function App() {
   // (transactionDataEnabled === null) keep the requested view mounted —
   // otherwise a direct load of /tx/… or /entity/… first flashes the blocks
   // view (and fires its /api/blocks fetch) before swapping to the real page.
-  const activeView =
+  const requestedView =
     transactionDataEnabled === false &&
     (view === "block" ||
       view === "transactions" ||
@@ -245,17 +212,19 @@ export function App() {
       view === "senders")
       ? "blocks"
       : view;
-  const chartFullscreen = activeView === "chart-fullscreen";
-  const trimmedAdminToken = baseloadAdminToken.trim();
-  const adminVerified = isVerifiedAdminToken(trimmedAdminToken, verifiedAdminToken);
+  const adminVerified = auth.session.role === "admin";
   const adminMode = adminModeStatus(adminVerified, adminModeEnabled);
   const adminModeIsActive = adminModeActive(adminVerified, adminModeEnabled);
+  const activeView = requiresAdminView(requestedView) && !adminModeIsActive ? "home" : requestedView;
+  const chartFullscreen = activeView === "chart-fullscreen";
+  const csrfToken = adminModeIsActive ? auth.session.csrfToken ?? undefined : undefined;
   const navItems = visibleNavItems(adminModeIsActive, transactionDataEnabled);
 
   useEffect(() => {
     const network = pageSettings.networkName ? ` · ${pageSettings.networkName}` : "";
-    document.title = `${pageSettings.chainName} BlockExplorer${network}`;
-  }, [pageSettings.chainName, pageSettings.networkName]);
+    const screen = activeView === "data" ? "Data (experimental, use with caution) · " : "";
+    document.title = `${screen}${pageSettings.chainName} BlockExplorer${network}`;
+  }, [activeView, pageSettings.chainName, pageSettings.networkName]);
 
   useEffect(() => {
     const onPopState = () => setClientLocation(getCurrentLocation());
@@ -270,7 +239,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (activeView !== "baseload") return;
+    // The locked UI has nothing to show: /baseload exposes worker wallets and
+    // balances, so only poll it in admin mode.
+    if (activeView !== "baseload" || !adminModeIsActive) return;
 
     let cancelled = false;
 
@@ -292,16 +263,21 @@ export function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeView]);
+  }, [activeView, adminModeIsActive]);
 
   useEffect(() => {
-    if (activeView !== "baseload") return;
+    if (activeView !== "baseload" || !adminModeIsActive) {
+      // Leaving admin mode drops the privileged list rather than keeping
+      // Save and Delete on screen for a token that is no longer sent.
+      setBaseloadSavedConfigs([]);
+      return;
+    }
 
     let cancelled = false;
 
     const refresh = async () => {
       try {
-        const body = await fetchBaseloadConfigs(adminBearerToken());
+        const body = await fetchBaseloadConfigs();
         if (cancelled) return;
         setBaseloadSavedConfigs(body.configs);
         setBaseloadConfigManagerError(null);
@@ -317,7 +293,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeView, baseloadAdminToken, adminModeIsActive]);
+  }, [activeView, adminModeIsActive]);
 
   useEffect(() => {
     if (
@@ -357,10 +333,6 @@ export function App() {
   }, [timeZone]);
 
   useEffect(() => {
-    writeStoredString(BASELOAD_ADMIN_TOKEN_STORAGE_KEY, baseloadAdminToken);
-  }, [baseloadAdminToken]);
-
-  useEffect(() => {
     writeStoredString(ADMIN_MODE_ENABLED_STORAGE_KEY, String(adminModeEnabled));
   }, [adminModeEnabled]);
 
@@ -390,7 +362,7 @@ export function App() {
 
   // Mirror the effective theme as a `.dark` class on <html>. The design
   // system (globals.css, Tailwind `dark:` variant) keys off the class; the
-  // legacy stylesheet keys off `data-theme` and the OS media query.
+  // saved theme preference and the OS media query stay in sync.
   useEffect(() => {
     if (typeof document === "undefined") return;
     const media =
@@ -432,7 +404,7 @@ export function App() {
   // offline state. Lives here in App so the patch survives navigating between
   // views. The rest of the app just sees a real connection failure.
   useEffect(() => {
-    if (typeof window === "undefined" || !simulateOffline) return;
+    if (typeof window === "undefined" || !simulateOffline || !adminModeIsActive) return;
     const originalFetch = window.fetch;
     window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
@@ -451,63 +423,32 @@ export function App() {
     return () => {
       window.fetch = originalFetch;
     };
-  }, [simulateOffline]);
+  }, [simulateOffline, adminModeIsActive]);
 
   useEffect(() => {
-    if (!trimmedAdminToken) {
-      setVerifiedAdminToken("");
-      return;
-    }
-    let cancelled = false;
-    verifyAdminToken(trimmedAdminToken)
-      .then(() => {
-        if (!cancelled) setVerifiedAdminToken(trimmedAdminToken);
-      })
-      .catch(() => {
-        if (!cancelled) setVerifiedAdminToken("");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [trimmedAdminToken]);
+    if (adminModeIsActive) return;
+    setSimulateOffline(false);
+    setBaseloadConfig(EMPTY_BASELOAD_CONFIG);
+    setBaseloadTaskStatuses({});
+    setBaseloadBalances({});
+    setBaseloadSavedConfigs([]);
+    setBaseloadError(null);
+    setBaseloadConfigManagerError(null);
+  }, [adminModeIsActive]);
 
-  const onAdminLoginClick = async (event: React.MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    const input = window.prompt(
-      "Enter admin credentials (leave blank to clear):",
-      baseloadAdminToken,
-    );
-    if (input === null) return;
-    const trimmed = input.trim();
-    if (!trimmed) {
-      setBaseloadAdminToken("");
-      setVerifiedAdminToken("");
-      setAdminModeEnabled(false);
-      return;
+  useEffect(() => {
+    if (!auth.loading && !adminVerified && requiresAdminView(view)) {
+      if (writePermalink("home", {})) setClientLocation(getCurrentLocation());
     }
-    try {
-      await verifyAdminToken(trimmed);
-      setBaseloadAdminToken(trimmed);
-      setVerifiedAdminToken(trimmed);
-      setAdminModeEnabled(true);
-    } catch (error) {
-      setVerifiedAdminToken("");
-      window.alert(
-        `Admin credentials rejected: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  };
+  }, [auth.loading, adminVerified, view]);
 
   const updateBaseloadConfig = async (config: BaseloadConfig) => {
     try {
-      applyBaseloadState(await putBaseloadConfig(config, adminBearerToken()));
+      applyBaseloadState(await putBaseloadConfig(config, csrfToken));
     } catch (error) {
       setBaseloadError(error instanceof Error ? error.message : String(error));
     }
   };
-
-  const adminBearerToken = () =>
-    privilegedAdminToken(baseloadAdminToken, adminVerified, adminModeEnabled);
 
   const applyBaseloadState = (state: BaseloadStateResponse) => {
     setBaseloadConfig(state.config);
@@ -517,14 +458,14 @@ export function App() {
   };
 
   const refreshBaseloadSavedConfigs = async () => {
-    const body = await fetchBaseloadConfigs(adminBearerToken());
+    const body = await fetchBaseloadConfigs();
     setBaseloadSavedConfigs(body.configs);
     setBaseloadConfigManagerError(null);
   };
 
   const saveCurrentBaseloadConfig = async (name: string) => {
     try {
-      await saveBaseloadConfig(name, baseloadConfig, adminBearerToken());
+      await saveBaseloadConfig(name, baseloadConfig, csrfToken);
       await refreshBaseloadSavedConfigs();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -535,7 +476,7 @@ export function App() {
 
   const loadSavedBaseloadConfig = async (name: string) => {
     try {
-      applyBaseloadState(await loadBaseloadConfig(name, adminBearerToken()));
+      applyBaseloadState(await loadBaseloadConfig(name, csrfToken));
       await refreshBaseloadSavedConfigs();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -546,7 +487,7 @@ export function App() {
 
   const deleteSavedBaseloadConfig = async (name: string) => {
     try {
-      await deleteBaseloadConfig(name, adminBearerToken());
+      await deleteBaseloadConfig(name, csrfToken);
       await refreshBaseloadSavedConfigs();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -566,6 +507,10 @@ export function App() {
   };
 
   const isChartsMain = activeView === "charts";
+  const navigateSearch = (href: string) => {
+    window.history.pushState({}, "", href);
+    refreshFromLocation();
+  };
 
   if (chartFullscreen) {
     return (
@@ -639,9 +584,10 @@ export function App() {
             })}
           </nav>
 
-          <div className="flex-1" />
+          {activeView !== "search" ? <div className="header-search min-w-0 flex-1 basis-56"><OmniSearch onNavigate={navigateSearch} /></div> : null}
 
           <div className="flex flex-wrap items-center gap-2">
+            <AccountControls auth={auth} />
             {adminMode !== "hidden" ? (
               <Badge
                 variant={adminMode === "enabled" ? "default" : "outline"}
@@ -697,7 +643,9 @@ export function App() {
           !isChartsMain && !fullWidth && "max-w-415",
         )}
       >
-        {activeView === "home" ? (
+        {activeView === "search" ? (
+          <SearchView locationSearch={locationSearch} onNavigate={navigateSearch} onLocationChange={refreshFromLocation} />
+        ) : activeView === "home" ? (
           <HomeView
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
@@ -751,7 +699,14 @@ export function App() {
             lockedAddress={addressParam}
           />
         ) : activeView === "data" ? (
-          <DataView locationSearch={locationSearch} onLocationChange={refreshFromLocation} timeZone={timeZone} />
+          <DataView
+            key={`${auth.session.user?.id ?? "anonymous"}:${adminModeIsActive}`}
+            locationSearch={locationSearch}
+            onLocationChange={refreshFromLocation}
+            timeZone={timeZone}
+            adminModeActive={adminModeIsActive}
+            csrfToken={csrfToken}
+          />
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView
             onLocationChange={refreshFromLocation}
@@ -788,8 +743,6 @@ export function App() {
             taskStatuses={baseloadTaskStatuses}
             balances={baseloadBalances}
             backendError={baseloadError}
-            adminToken={baseloadAdminToken}
-            onAdminTokenChange={setBaseloadAdminToken}
             savedConfigs={baseloadSavedConfigs}
             configManagerError={baseloadConfigManagerError}
             onRefreshSavedConfigs={refreshBaseloadSavedConfigs}
@@ -816,7 +769,9 @@ export function App() {
             onToggleSimulateOffline={() => setSimulateOffline((value) => !value)}
           />
         ) : (
-          <HealthView timeZone={timeZone} />
+          <HealthView
+            timeZone={timeZone}
+          />
         )}
       </main>
       <footer className="border-t border-border bg-card">
@@ -826,13 +781,6 @@ export function App() {
             className="text-xs text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:underline"
           >
             llms.txt
-          </a>
-          <a
-            href="#"
-            onClick={onAdminLoginClick}
-            className="text-xs text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:underline"
-          >
-            admin login
           </a>
         </div>
       </footer>

@@ -26,6 +26,7 @@ const LATEST_OBSERVED_BLOCK_KEY = "latest_observed_block";
 const SAFE_HEAD_BLOCK_KEY = "safe_head_block";
 const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
 const CHAIN_ID_KEY = "chain_id";
+const SCANNER_RPC_URL_KEY = "scanner_rpc_url";
 
 /** Upper bound on blocks one eth_feeHistory call may cover (the JSON-RPC spec's own cap). */
 export const MAX_FEE_HISTORY_BLOCKS = 1024;
@@ -417,6 +418,7 @@ export class ScannerStorage {
   private readonly qTransactionRecords: string;
   private readonly qSenderStats: string;
   private readonly qBaseloadConfigs: string;
+  private readonly qBaseloadLiveConfig: string;
 
   private constructor(
     private readonly db: Db,
@@ -433,6 +435,7 @@ export class ScannerStorage {
     this.qTransactionRecords = `${quoteIdent(this.schema)}.transaction_records`;
     this.qSenderStats = `${quoteIdent(this.schema)}.sender_stats`;
     this.qBaseloadConfigs = `${quoteIdent(this.schema)}.baseload_configs`;
+    this.qBaseloadLiveConfig = `${quoteIdent(this.schema)}.baseload_live_config`;
   }
 
   static async open(
@@ -572,6 +575,15 @@ export class ScannerStorage {
         name TEXT PRIMARY KEY,
         config_json JSONB NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    // Single-row snapshot of the running Baseload fleet so a restart brings
+    // it back. Loose JSON on purpose: the runtime re-normalizes it on load.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS ${this.qBaseloadLiveConfig} (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        config_json JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
@@ -986,6 +998,21 @@ export class ScannerStorage {
     await this.upsertStateValue(this.db, CHAIN_ID_KEY, chainId.toString());
   }
 
+  /**
+   * The JSON-RPC node the scanner reads, recorded at its startup so the HTTP
+   * backend's /shadow-rpc relay can reach the same node without being told
+   * it separately. Stored as configured, so keep keys in SCANNER_RPC_API_KEY
+   * rather than in the URL when the database is shared.
+   */
+  async getScannerRpcUrl(): Promise<string | undefined> {
+    const value = await this.getStateValue(SCANNER_RPC_URL_KEY);
+    return value?.trim() || undefined;
+  }
+
+  async saveScannerRpcUrl(url: string): Promise<void> {
+    await this.upsertStateValue(this.db, SCANNER_RPC_URL_KEY, url);
+  }
+
   async saveChainProgress(
     latestObservedBlock: bigint,
     safeHeadBlock: bigint,
@@ -1085,6 +1112,11 @@ export class ScannerStorage {
         qualifiedName: this.qBaseloadConfigs,
         regclassName: regclassName(this.schema, "baseload_configs"),
       },
+      {
+        name: "baseload_live_config",
+        qualifiedName: this.qBaseloadLiveConfig,
+        regclassName: regclassName(this.schema, "baseload_live_config"),
+      },
     ];
 
     const [databaseSizeResult, tableStats] = await Promise.all([
@@ -1140,12 +1172,16 @@ export class ScannerStorage {
   }
 
   private async getStateBigInt(key: string): Promise<bigint | undefined> {
+    const value = await this.getStateValue(key);
+    return value === undefined ? undefined : BigInt(value);
+  }
+
+  private async getStateValue(key: string): Promise<string | undefined> {
     const result = await this.db.query<{ value: string }>(
       `SELECT value FROM ${this.qScannerState} WHERE key = $1`,
       [key],
     );
-    const row = result.rows[0];
-    return row ? BigInt(row.value) : undefined;
+    return result.rows[0]?.value;
   }
 
   /**
@@ -2008,7 +2044,7 @@ export class ScannerStorage {
       `SELECT block_number::text AS block_number, block_date, address, balance_wei
        FROM ${this.qAccountBalances}
        WHERE address = $1 AND block_number <= $2
-       ORDER BY block_number DESC
+       ORDER BY ${this.qAccountBalances}.block_number DESC
        LIMIT 1`,
       [address.toLowerCase(), upToBlock.toString()],
     );
@@ -2061,7 +2097,7 @@ export class ScannerStorage {
       `SELECT block_number::text AS block_number, block_date, address, balance_wei
        FROM ${this.qAccountBalances}
        ${where}
-       ORDER BY block_number ${order}, address ASC
+       ORDER BY ${this.qAccountBalances}.block_number ${order}, address ASC
        LIMIT $${params.length}`,
       params,
     );
@@ -2492,7 +2528,7 @@ export class ScannerStorage {
       `SELECT block_number::text AS block_number, priority_fee_wei, gas_used
        FROM ${this.qTransactions}
        WHERE block_number >= $1 AND block_number <= $2
-       ORDER BY block_number ASC, priority_fee_wei::numeric ASC, position ASC`,
+       ORDER BY ${this.qTransactions}.block_number ASC, priority_fee_wei::numeric ASC, position ASC`,
       [fromBlock.toString(), toBlock.toString()],
     );
     return result.rows.map((row) => ({
@@ -2519,7 +2555,7 @@ export class ScannerStorage {
        FROM ${this.qTransactions}
        WHERE block_number >= $1 AND block_number <= $2
        GROUP BY block_number
-       ORDER BY block_number ASC`,
+       ORDER BY ${this.qTransactions}.block_number ASC`,
       [fromBlock.toString(), toBlock.toString()],
     );
     return result.rows.map((row) => ({
@@ -2580,7 +2616,7 @@ export class ScannerStorage {
       `SELECT ${LOG_SELECT_COLUMNS}
        FROM ${this.qTransactionLogs}
        WHERE ${clauses.join(" AND ")}
-       ORDER BY block_number ASC, position ASC, log_index ASC
+       ORDER BY ${this.qTransactionLogs}.block_number ASC, position ASC, log_index ASC
        LIMIT $${params.length}`,
       params,
     );
@@ -2829,6 +2865,24 @@ export class ScannerStorage {
   async deleteBaseloadConfig(name: string): Promise<boolean> {
     const result = await this.db.query(`DELETE FROM ${this.qBaseloadConfigs} WHERE name = $1`, [name]);
     return (result.rowCount ?? 0) > 0;
+  }
+
+  /** Snapshot of the running fleet; whatever JSON the runtime last applied. */
+  async saveBaseloadLiveConfig(config: unknown): Promise<void> {
+    await this.db.query(
+      `INSERT INTO ${this.qBaseloadLiveConfig} (id, config_json, updated_at)
+       VALUES (1, $1::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET config_json = EXCLUDED.config_json, updated_at = NOW()`,
+      [config],
+    );
+  }
+
+  async loadBaseloadLiveConfig(): Promise<unknown | undefined> {
+    const result = await this.db.query<{ config_json: string }>(
+      `SELECT config_json::text AS config_json FROM ${this.qBaseloadLiveConfig} WHERE id = 1`,
+    );
+    const row = result.rows[0];
+    return row ? JSON.parse(row.config_json) : undefined;
   }
 
   async aggregateRangeIfComplete(

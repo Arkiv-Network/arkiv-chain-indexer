@@ -209,3 +209,22 @@ export function speedupFactor(report: ComparisonReport): number | null {
   if (index <= 0 || node <= 0) return null;
   return node / index;
 }
+
+/**
+ * How far the experimental index may trail the node before a comparison stops
+ * following it. Within this, both sides are pinned to the index's head; beyond
+ * it, the node's head is used and the index reports the lag as its own error.
+ */
+export const MAX_COMPARE_LAG_BLOCKS = 100;
+
+/**
+ * The block both sides of a comparison are pinned to: the index's head while
+ * it is within {@link MAX_COMPARE_LAG_BLOCKS} of the node's, else the node's;
+ * whichever side answered when only one did; nothing when neither did.
+ */
+export function pickComparisonBlock(nodeHead: number | undefined, indexHead: number | undefined): number | undefined {
+  if (nodeHead === undefined) return indexHead;
+  if (indexHead === undefined) return nodeHead;
+  if (indexHead >= nodeHead) return nodeHead;
+  return nodeHead - indexHead <= MAX_COMPARE_LAG_BLOCKS ? indexHead : nodeHead;
+}
