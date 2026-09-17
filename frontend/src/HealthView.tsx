@@ -64,7 +64,7 @@ export function HealthView({ timeZone }: HealthViewProps) {
   const guzzlersEnabled = guzzlers?.enabled ?? data?.features.guzzlers ?? false;
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-heading text-lg font-black tracking-tight">Health</h2>
         <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>

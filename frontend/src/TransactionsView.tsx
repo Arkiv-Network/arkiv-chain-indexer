@@ -371,7 +371,7 @@ export function TransactionsView({
   const filtersChanged = activeFilterCount > 0 || filters.limit !== EMPTY.limit;
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
       <h2 className="font-heading text-lg font-black tracking-tight">Address transactions</h2>
       {locked ? (
         <div className="flex items-center gap-2 border border-border bg-card px-3 py-2">

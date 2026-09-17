@@ -71,7 +71,7 @@ export function NavigationMenu({
                       }}
                       className={cn(
                         "inline-flex min-h-9 items-center gap-2 rounded-md border px-2 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                        active ? "border-accent bg-accent/10 text-foreground" : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+                        active ? "border-border bg-muted text-foreground" : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
                       )}
                     >
                       <Icon className="size-3.5 shrink-0" aria-hidden="true" />

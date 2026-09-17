@@ -1306,7 +1306,7 @@
     @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50;
   }
   :where(.account-controls, .access-tokens, .omni-search) button:not(.secondary) {
-    @apply rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50;
+    @apply rounded-md bg-button-primary px-3 py-1.5 text-xs font-medium text-button-primary-foreground hover:bg-button-primary-hover disabled:opacity-50;
   }
   :where(.account-controls, .access-tokens, .worker-editor) input:not([type="radio"]):not([type="checkbox"]),
   :where(.account-controls, .access-tokens, .worker-editor) select {

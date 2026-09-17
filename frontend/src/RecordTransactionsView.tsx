@@ -151,7 +151,7 @@ export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol
   }, []);
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
       <h2 className="font-heading text-lg font-black tracking-tight">Record transactions</h2>
       <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {loading

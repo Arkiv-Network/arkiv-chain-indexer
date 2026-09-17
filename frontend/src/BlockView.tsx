@@ -129,7 +129,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
       <PageBreadcrumbs
         items={[
           { view: "home", label: "Home" },
@@ -300,13 +300,13 @@ function BlockDetailSkeleton({ rows }: { rows: number }) {
     <div role="status" aria-label="Loading block details">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" aria-hidden="true">
         {Array.from({ length: rows }, (_, index) => (
-          <div key={index} className="border border-border bg-muted/40 px-3 py-2">
+          <div key={index} className="border border-border bg-card px-3 py-2">
             <div className="h-2.5 w-16 animate-pulse rounded-none bg-muted-foreground/20" />
             <div className="mt-2 h-3 w-20 animate-pulse rounded-none bg-muted-foreground/20" />
           </div>
         ))}
       </div>
-      <div className="mt-4 h-48 animate-pulse border border-border bg-muted/40" aria-hidden="true" />
+      <div className="mt-4 h-48 animate-pulse border border-border bg-card" aria-hidden="true" />
     </div>
   );
 }

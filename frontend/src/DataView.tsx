@@ -573,7 +573,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
       <div className="flex flex-col gap-1.5">
         <PageBreadcrumbs
           items={[
