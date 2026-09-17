@@ -184,8 +184,8 @@ function GuzzlerLeaderboard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-heading text-lg font-black tracking-tight">Most Active Wallets (1h)</h2>
         <div className="flex flex-wrap items-center gap-3">
-          <Tabs value={windowKey} onValueChange={(value) => setWindowKey(value as WindowKey)}>
-            <TabsList aria-label="Active window">
+          <Tabs className="min-w-0 max-w-full" value={windowKey} onValueChange={(value) => setWindowKey(value as WindowKey)}>
+            <TabsList aria-label="Active window" className="max-w-full flex-wrap group-data-horizontal/tabs:h-auto">
               {WINDOWS.map((w) => (
                 <TabsTrigger key={w.key} value={w.key}>
                   {w.label}
@@ -204,35 +204,37 @@ function GuzzlerLeaderboard({
         most transactions over the selected window, ranked by total gas used.
       </p>
 
-      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
-        {error
-          ? `Failed to load guzzlers: ${error}`
-          : data
-            ? `${fmtInteger(total)} of ${fmtInteger(activeCount)} addresses active in the last ${
-                selectedWindow.label
-              }, ranked by gas used.`
-            : loading
-              ? "Loading guzzlers…"
-              : "No guzzlers loaded."}
-      </p>
+      <div className="flex flex-col gap-2">
+        <p className={cn("flex items-end text-xs sm:min-h-12 sm:pr-32", error ? "text-destructive" : "text-muted-foreground")}>
+          {error
+            ? `Failed to load guzzlers: ${error}`
+            : data
+              ? `${fmtInteger(total)} of ${fmtInteger(activeCount)} addresses active in the last ${
+                  selectedWindow.label
+                }, ranked by gas used.`
+              : loading
+                ? "Loading guzzlers…"
+                : "No guzzlers loaded."}
+        </p>
 
-      <div className="relative">
-        <Cedric progress={refreshTick} />
-        <ol className="relative z-10 flex flex-col gap-2">
-          {guzzlers.slice(0, shown).map((g, index) => (
-            <GuzzlerCard
-              key={g.address}
-              rank={index + 1}
-              guzzler={g}
-              maxGas={maxGas}
-              nowMs={now}
-              tokenSymbol={tokenSymbol}
-              // Carry the leaderboard's window selection into the activity view.
-              activityWindowKey={activityWindowForMs(selectedWindow.ms)}
-              onSelect={onSelectAddress}
-            />
-          ))}
-        </ol>
+        <div className="relative">
+          <Cedric progress={refreshTick} />
+          <ol className="relative z-10 flex flex-col gap-2">
+            {guzzlers.slice(0, shown).map((g, index) => (
+              <GuzzlerCard
+                key={g.address}
+                rank={index + 1}
+                guzzler={g}
+                maxGas={maxGas}
+                nowMs={now}
+                tokenSymbol={tokenSymbol}
+                // Carry the leaderboard's window selection into the activity view.
+                activityWindowKey={activityWindowForMs(selectedWindow.ms)}
+                onSelect={onSelectAddress}
+              />
+            ))}
+          </ol>
+        </div>
       </div>
 
       {shown < total ? (
@@ -274,7 +276,7 @@ function GuzzlerCard({
   };
 
   return (
-    <li className="relative grid grid-cols-[2.25rem_40px_minmax(0,1fr)_auto] items-center gap-3 border border-border bg-card px-3 py-2.5">
+    <li className="relative grid grid-cols-[2.25rem_40px_minmax(0,1fr)] sm:grid-cols-[2.25rem_40px_minmax(0,1fr)_auto] items-center gap-3 border border-border bg-card px-3 py-2.5">
       <a className="absolute inset-0 z-[1]" href={href} onClick={open} aria-label={label} />
       <span className={cn("text-right font-mono text-sm font-semibold tabular-nums text-muted-foreground", rank <= 3 && "text-accent")}>
         {rank}
@@ -294,7 +296,7 @@ function GuzzlerCard({
           last seen {lastSeenAgo === null ? "—" : `${fmtDurationSeconds(lastSeenAgo)} ago`}
         </span>
       </div>
-      <dl className="flex gap-4">
+      <dl className="col-span-3 flex flex-wrap justify-between gap-x-4 gap-y-2 sm:col-span-1 sm:justify-start">
         <div className="flex flex-col items-end gap-0.5">
           <dt className="order-2 text-[10px] tracking-wider text-muted-foreground uppercase">Gas used</dt>
           <dd className="order-1 font-mono text-sm font-semibold tabular-nums">{fmtInteger(guzzler.totalGasUsed)}</dd>

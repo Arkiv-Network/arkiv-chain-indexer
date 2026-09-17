@@ -454,18 +454,6 @@ export function TransactionsView({
         </form>
       </FiltersPanel>
 
-      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
-        {loading
-          ? "Loading..."
-          : error
-            ? `Failed to query transactions: ${error}`
-            : data
-              ? `${data.totalCount} ${transactionLabel}; showing ${data.count} on page ${data.page}${
-                  data.totalPages ? ` of ${data.totalPages}` : ""
-                }`
-              : "Enter an address, block, or date range to query stored transactions."}
-      </p>
-
       {sortIsPageLocal ? (
         <p className="text-xs text-muted-foreground" role="status">
           Sorting reorders the {data?.count ?? 0} rows on this page, not all {data?.totalCount ?? 0}{" "}
@@ -498,46 +486,60 @@ export function TransactionsView({
         {copyStatus ? <span className="text-xs text-muted-foreground">{copyStatus}</span> : null}
       </div>
 
-      <div className="relative mt-6">
-        <CedricOnTimer />
-        <div className="relative z-10 overflow-x-auto border border-border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                {columns.map((column) => (
-                  <TableHead key={column.key} className={column.className}>
-                    <button
-                      type="button"
-                      className={cn(
-                        "inline-flex w-full items-center gap-1 text-left font-medium hover:text-accent",
-                        column.className?.includes("text-right") && "justify-end",
-                      )}
-                      onClick={() => setSortKey(column.key)}
-                      title={
-                        sortIsPageLocal
-                          ? `Sort the rows on this page by ${column.label}`
-                          : `Sort by ${column.label}`
-                      }
-                    >
-                      <span>{renderTableHeader(column.label)}</span>
-                      <SortIcon active={sort?.key === column.key} direction={sort?.key === column.key ? sort.direction : "asc"} />
-                    </button>
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={`${row.blockNumberDecimal}:${row.position}:${row.hash}`}>
+      <div className="flex flex-col gap-2">
+        <p className={cn("flex items-end text-xs sm:min-h-12 sm:pr-32", error ? "text-destructive" : "text-muted-foreground")}>
+          {loading
+            ? "Loading..."
+            : error
+              ? `Failed to query transactions: ${error}`
+              : data
+                ? `${data.totalCount} ${transactionLabel}; showing ${data.count} on page ${data.page}${
+                    data.totalPages ? ` of ${data.totalPages}` : ""
+                  }`
+                : "Enter an address, block, or date range to query stored transactions."}
+        </p>
+
+        <div className="relative">
+          <CedricOnTimer />
+          <div className="relative z-10 overflow-x-auto border border-border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
                   {columns.map((column) => (
-                    <TableCell key={column.key} className={column.className} data-label={column.label}>
-                      {column.render(row)}
-                    </TableCell>
+                    <TableHead key={column.key} className={column.className}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "inline-flex w-full items-center gap-1 text-left font-medium hover:text-accent",
+                          column.className?.includes("text-right") && "justify-end",
+                        )}
+                        onClick={() => setSortKey(column.key)}
+                        title={
+                          sortIsPageLocal
+                            ? `Sort the rows on this page by ${column.label}`
+                            : `Sort by ${column.label}`
+                        }
+                      >
+                        <span>{renderTableHeader(column.label)}</span>
+                        <SortIcon active={sort?.key === column.key} direction={sort?.key === column.key ? sort.direction : "asc"} />
+                      </button>
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={`${row.blockNumberDecimal}:${row.position}:${row.hash}`}>
+                    {columns.map((column) => (
+                      <TableCell key={column.key} className={column.className} data-label={column.label}>
+                        {column.render(row)}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       </div>
     </section>

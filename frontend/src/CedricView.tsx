@@ -9,7 +9,7 @@ export function CedricView() {
           <p>Just Cedric, blinking and glancing around.</p>
         </div>
         <div className="cedric-page-art" aria-label="Cedric the owl">
-          <Cedric progress={0} initiallyVisible canHide={false} />
+          <Cedric progress={0} initiallyVisible canHide={false} hideOnNarrowScreen={false} />
         </div>
       </div>
     </section>

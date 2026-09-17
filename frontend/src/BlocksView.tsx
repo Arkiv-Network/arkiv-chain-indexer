@@ -405,41 +405,44 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
         </form>
       </FiltersPanel>
 
-      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
-        {loading
-          ? "Loading…"
-          : error
-            ? `Failed to load blocks: ${error}`
-            : data
-              ? `${data.count} blocks${data.truncated ? ` (truncated to ${data.limit})` : ""}`
-              : ""}
-      </p>
+      <div className="flex flex-col gap-2">
+        {/* Keep peek space above the table; align the count at its lower left, clear of Cedric. */}
+        <p className={cn("flex items-end text-xs sm:min-h-12 sm:pr-32", error ? "text-destructive" : "text-muted-foreground")}>
+          {loading
+            ? "Loading…"
+            : error
+              ? `Failed to load blocks: ${error}`
+              : data
+                ? `${data.count} blocks${data.truncated ? ` (truncated to ${data.limit})` : ""}`
+                : ""}
+        </p>
 
-      <div className="relative mt-6">
-        <CedricOnTimer />
-        <div className="relative z-10 overflow-x-auto border border-border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                {columns.map((column) => (
-                  <TableHead key={column.key} className={column.className}>
-                    {renderTableHeader(column.label)}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sorted.map((row) => (
-                <TableRow key={row.blockNumber}>
+        <div className="relative">
+          <CedricOnTimer />
+          <div className="relative z-10 overflow-x-auto border border-border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
                   {columns.map((column) => (
-                    <TableCell key={column.key} className={column.className} data-label={column.label}>
-                      {column.render(row)}
-                    </TableCell>
+                    <TableHead key={column.key} className={column.className}>
+                      {renderTableHeader(column.label)}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {sorted.map((row) => (
+                  <TableRow key={row.blockNumber}>
+                    {columns.map((column) => (
+                      <TableCell key={column.key} className={column.className} data-label={column.label}>
+                        {column.render(row)}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       </div>
     </section>
