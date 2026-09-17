@@ -518,7 +518,7 @@ export function App() {
       <main
         className={cn(
           "relative z-[1] flex-1 min-h-0",
-          isChartsMain ? "flex p-0" : "mx-auto w-full p-4 md:p-6",
+          isChartsMain ? "flex p-0" : "mx-auto w-full p-4 md:px-6 md:pb-6",
           !isChartsMain && !fullWidth && "max-w-415",
         )}
       >

@@ -1072,8 +1072,8 @@ function buildPlot(
       title: { text: xAxisMode === "dates" ? `Date (${timeZone})` : "Block range" } as Plotly.DataTitle,
       domain: [domainStart, domainEnd],
       range: xRange,
-      gridcolor: getCssColor("--border", "#e9e6de"),
-      zerolinecolor: getCssColor("--border", "#e9e6de"),
+      gridcolor: getCssColor("--border", "#e5e7eb"),
+      zerolinecolor: getCssColor("--border", "#e5e7eb"),
     },
   };
 
@@ -1101,8 +1101,8 @@ function buildPlot(
     const refKey = i === 0 ? "yaxis" : `yaxis${i + 1}`;
     const baseAxis: Partial<Plotly.LayoutAxis> = {
       title: { text: a.axisLabel } as Plotly.DataTitle,
-      gridcolor: getCssColor("--border", "#e9e6de"),
-      zerolinecolor: getCssColor("--border", "#e9e6de"),
+      gridcolor: getCssColor("--border", "#e5e7eb"),
+      zerolinecolor: getCssColor("--border", "#e5e7eb"),
     };
 
     if (i === 0) {

@@ -125,7 +125,7 @@ export function GuzzlerActivityView({
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button type="button" variant="ghost" size="sm" onClick={onBack} className="gap-1">
@@ -314,15 +314,15 @@ function buildActivityPlot(
       ) : {}),
       type: "date",
       title: { text: `Time (${timeZone})` } as Plotly.DataTitle,
-      gridcolor: getCssVar("--border", "#e9e6de"),
-      zerolinecolor: getCssVar("--border", "#e9e6de"),
+      gridcolor: getCssVar("--border", "#e5e7eb"),
+      zerolinecolor: getCssVar("--border", "#e5e7eb"),
       ...(range ? { range, autorange: false } : { autorange: true }),
     },
     yaxis: {
       title: { text: meta.axisTitle.replace("{token}", tokenSymbol) } as Plotly.DataTitle,
       rangemode: "tozero",
-      gridcolor: getCssVar("--border", "#e9e6de"),
-      zerolinecolor: getCssVar("--border", "#e9e6de"),
+      gridcolor: getCssVar("--border", "#e5e7eb"),
+      zerolinecolor: getCssVar("--border", "#e5e7eb"),
     },
   };
 

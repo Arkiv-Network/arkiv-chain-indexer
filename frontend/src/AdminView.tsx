@@ -61,7 +61,7 @@ export function AdminView({
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h2 className="font-heading text-lg font-black tracking-tight">Page settings</h2>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">

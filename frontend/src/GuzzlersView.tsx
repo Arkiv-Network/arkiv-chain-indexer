@@ -180,7 +180,7 @@ function GuzzlerLeaderboard({
   }, [shown, total]);
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-heading text-lg font-black tracking-tight">Most Active Wallets (1h)</h2>
         <div className="flex flex-wrap items-center gap-3">

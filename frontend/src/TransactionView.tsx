@@ -114,7 +114,7 @@ export function TransactionView({
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
       <PageBreadcrumbs
         items={[
           { view: "home", label: "Home" },

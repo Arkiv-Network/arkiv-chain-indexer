@@ -25,7 +25,7 @@ export function Stat({
   size?: "sm" | "lg";
 }) {
   return (
-    <div className={cn("border border-border bg-muted/40 px-3 py-2", wide && "col-span-2")}>
+    <div className={cn("border border-border bg-card px-3 py-2", wide && "col-span-2")}>
       <dt className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">{label}</dt>
       <dd
         className={cn(

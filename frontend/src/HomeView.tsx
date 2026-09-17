@@ -356,7 +356,7 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-8 px-3 py-6 md:px-6">
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-8 px-3 md:px-6">
       {blocksError ? (
         <div
           role="alert"
@@ -867,8 +867,8 @@ function MinAvgMaxPanel({
   loaded,
 }: MinAvgMaxPanelProps) {
   const baseColor = getCssColor(colorVar, colorFallback);
-  const gridColor = getCssColor("--border", "#e9e6de");
-  const textColor = getCssColor("--muted-foreground", "#64625d");
+  const gridColor = getCssColor("--border", "#e5e7eb");
+  const textColor = getCssColor("--muted-foreground", "#5e6b80");
 
   const { traces, layout, hasData } = useMemo<{
     traces: Partial<Plotly.PlotData>[];
