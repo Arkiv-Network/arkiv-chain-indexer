@@ -1,7 +1,13 @@
+import { Activity } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { fetchSenders, type SendersResponse } from "./api";
-import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtMillions, fmtThousands, fmtTokenAmount } from "./format";
+import { BlockCell } from "@/components/block-cell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { FilterField } from "@/components/filters-panel";
+import { cn } from "@/lib/utils";
+import { fmtMillions, fmtThousands, fmtTokenAmount } from "./format";
 import { buildPermalinkHref, buildRouteHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { AddressCell } from "./TransactionsView";
@@ -89,26 +95,27 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
   };
 
   return (
-    <section className="view senders-view">
-      <div className="view-heading-row">
-        <h2>Sender activity</h2>
-        <div className="senders-heading-meta">
-          <span className="senders-row-count">{filters.limit} rows</span>
-          <button type="button" className="secondary" onClick={copyPermalink}>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-heading text-lg font-black tracking-tight">Sender activity</h2>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="tabular-nums">{filters.limit} rows</span>
+          <Button type="button" variant="outline" size="sm" onClick={copyPermalink}>
             Copy link
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="senders-filter-panel">
-        <form onSubmit={onSubmit} className="senders-form">
-          <label>
-            rows
-            <input type="text" inputMode="numeric" value={filters.limit} onChange={setFilter("limit")} />
-          </label>
-          <button type="submit">Query</button>
+      <div className="flex flex-col gap-2 border border-border bg-card p-3">
+        <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">
+          <FilterField label="Rows">
+            <Input type="text" inputMode="numeric" className="w-24" value={filters.limit} onChange={setFilter("limit")} />
+          </FilterField>
+          <Button type="submit" size="sm">
+            Query
+          </Button>
         </form>
-        <p className={`summary${error ? " error" : ""}`}>
+        <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
           {loading
             ? "Loading..."
             : error
@@ -117,59 +124,67 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
                 ? `${data.count} sender addresses shown${data.truncated ? " (limited)" : ""}`
                 : "No sender stats loaded."}
         </p>
-        {copyStatus ? <div className="permalink-row"><span>{copyStatus}</span></div> : null}
+        {copyStatus ? <p className="text-xs text-muted-foreground">{copyStatus}</p> : null}
       </div>
 
-      <div className="table-wrap">
-        <table className="data-table sender-table">
-          <thead>
-            <tr>
-              <th scope="col">{renderTableHeader("Address")}</th>
-              <th scope="col" className="num">{renderTableHeader("Tx count")}</th>
-              <th scope="col" className="num">{renderTableHeader("Gas used")}</th>
-              <th scope="col" className="num">{renderTableHeader(`Fees spent (${tokenSymbol})`)}</th>
-              <th scope="col" className="num">{renderTableHeader("Avg gas per tx")}</th>
-              <th scope="col" className="num">{renderTableHeader(`Avg fee (${tokenSymbol})`)}</th>
-              <th scope="col">{renderTableHeader("First tx (block/date)")}</th>
-              <th scope="col">{renderTableHeader("Last tx (block/date)")}</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="overflow-x-auto border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>{renderTableHeader("Address")}</TableHead>
+              <TableHead className="text-right">{renderTableHeader("Tx count")}</TableHead>
+              <TableHead className="text-right">{renderTableHeader("Gas used")}</TableHead>
+              <TableHead className="text-right">{renderTableHeader(`Fees spent (${tokenSymbol})`)}</TableHead>
+              <TableHead className="text-right">{renderTableHeader("Avg gas per tx")}</TableHead>
+              <TableHead className="text-right">{renderTableHeader(`Avg fee (${tokenSymbol})`)}</TableHead>
+              <TableHead>{renderTableHeader("First tx (block/date)")}</TableHead>
+              <TableHead>{renderTableHeader("Last tx (block/date)")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {(data?.senders ?? []).map((row) => (
-              <tr key={row.address}>
-                <td data-label="Address">
-                  <div className="sender-address">
+              <TableRow key={row.address}>
+                <TableCell data-label="Address">
+                  <div className="flex items-center gap-1.5">
                     <AddressCell address={row.address} />
                     <ActivityLink address={row.address} onLocationChange={onLocationChange} />
                   </div>
-                </td>
-                <td className="num" data-label="Tx count">{txCountFromNonce(row.latestNonce)}</td>
-                <td className="num" data-label="Gas used">{fmtMillions(row.totalGasUsed)}</td>
-                <td className="num" data-label="Fees spent">{fmtTokenAmount(row.totalTransactionFeeWei, tokenSymbol, { trimZeros: false })}</td>
-                <td className="num" data-label="Avg gas">{fmtThousands(row.averageGasUsed)}</td>
-                <td className="num" data-label="Avg fee">{fmtTokenAmount(row.averageTransactionFeeWei, tokenSymbol)}</td>
-                <td data-label="First tx">
-                  <div className="block-meta">
-                    <BlockNumberLink
-                      blockNumber={row.firstBlockNumberDecimal}
-                      onLocationChange={onLocationChange}
-                    />
-                    <span className="block-meta-date">{fmtDate(row.firstBlockDate, timeZone)}</span>
-                  </div>
-                </td>
-                <td data-label="Last tx">
-                  <div className="block-meta">
-                    <BlockNumberLink
-                      blockNumber={row.lastBlockNumberDecimal}
-                      onLocationChange={onLocationChange}
-                    />
-                    <span className="block-meta-date">{fmtDate(row.lastBlockDate, timeZone)}</span>
-                  </div>
-                </td>
-              </tr>
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums" data-label="Tx count">
+                  {txCountFromNonce(row.latestNonce)}
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums" data-label="Gas used">
+                  {fmtMillions(row.totalGasUsed)}
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums" data-label="Fees spent">
+                  {fmtTokenAmount(row.totalTransactionFeeWei, tokenSymbol, { trimZeros: false })}
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums" data-label="Avg gas">
+                  {fmtThousands(row.averageGasUsed)}
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums" data-label="Avg fee">
+                  {fmtTokenAmount(row.averageTransactionFeeWei, tokenSymbol)}
+                </TableCell>
+                <TableCell data-label="First tx">
+                  <BlockCell
+                    blockNumber={row.firstBlockNumberDecimal}
+                    date={row.firstBlockDate}
+                    timeZone={timeZone}
+                    onLocationChange={onLocationChange}
+                  />
+                </TableCell>
+                <TableCell data-label="Last tx">
+                  <BlockCell
+                    blockNumber={row.lastBlockNumberDecimal}
+                    date={row.lastBlockDate}
+                    timeZone={timeZone}
+                    onLocationChange={onLocationChange}
+                  />
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </section>
   );
@@ -186,15 +201,13 @@ function ActivityLink({ address, onLocationChange }: { address: string; onLocati
   };
   return (
     <a
-      className="row-activity-link"
+      className="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground opacity-70 transition-colors hover:text-accent hover:opacity-100"
       href={buildRouteHref("guzzlers", filters)}
       onClick={onClick}
       title="View activity"
       aria-label={`View activity for ${address}`}
     >
-      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-      </svg>
+      <Activity className="size-3.5" />
     </a>
   );
 }

@@ -1,5 +1,6 @@
 import { buildRouteHref, writePermalink } from "./permalinks";
 import type { MouseEvent } from "react";
+import { cn } from "@/lib/utils";
 
 export function blockPanelHref(blockNumber: string | number | null | undefined): string {
   const value = String(blockNumber ?? "").trim();
@@ -20,7 +21,7 @@ export function BlockNumberLink({
   const display = label ?? (value || "-");
 
   if (!value) {
-    return <span className="mono">{display}</span>;
+    return <span className="font-mono tabular-nums">{display}</span>;
   }
 
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -32,7 +33,11 @@ export function BlockNumberLink({
   };
 
   return (
-    <a className={`${label ? "" : "mono "}block-link`} href={blockPanelHref(value)} onClick={onClick}>
+    <a
+      className={cn("text-primary hover:underline", !label && "font-mono tabular-nums")}
+      href={blockPanelHref(value)}
+      onClick={onClick}
+    >
       {display}
     </a>
   );

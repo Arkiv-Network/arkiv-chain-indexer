@@ -6,8 +6,10 @@ import {
   type TransactionRecordsResponse,
 } from "./api";
 import { AddressCell } from "./TransactionsView";
-import { BlockNumberLink } from "./blockLinks";
-import { fmtDate, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
+import { BlockCell } from "@/components/block-cell";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import { fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
 import { TransactionHashLink } from "./TransactionView";
 import { renderTableHeader } from "./tableHeader";
 
@@ -64,27 +66,25 @@ function recordColumns(
   timeZone: string,
   tokenSymbol: string,
 ): Column[] {
+  const num = "text-right font-mono tabular-nums";
   const sharedColumns: Column[] = [
     {
       key: "rank",
       label: "Rank",
-      className: "num",
+      className: num,
       render: (row) => row.rank,
     },
     {
       key: "recordValue",
       label: category.valueLabel,
-      className: "num",
+      className: num,
       render: category.renderValue,
     },
     {
       key: "block",
       label: "Block",
       render: (row) => (
-        <div className="block-meta">
-          <BlockNumberLink blockNumber={row.blockNumberDecimal} onLocationChange={onLocationChange} />
-          <span className="block-meta-date">{fmtDate(row.blockDate, timeZone)}</span>
-        </div>
+        <BlockCell blockNumber={row.blockNumberDecimal} date={row.blockDate} timeZone={timeZone} onLocationChange={onLocationChange} />
       ),
     },
     {
@@ -102,19 +102,19 @@ function recordColumns(
     {
       key: "gasUsed",
       label: "Gas Used",
-      className: "num",
+      className: num,
       render: (row) => fmtInteger(row.gasUsed),
     },
     {
       key: "effectiveGasPriceWei",
       label: "Effective fee",
-      className: "num",
+      className: num,
       render: (row) => fmtGasPrice(row.effectiveGasPriceWei),
     },
     {
       key: "transactionFeeWei",
       label: "Tx fee",
-      className: "num",
+      className: num,
       render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
     },
   ];
@@ -151,9 +151,9 @@ export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol
   }, []);
 
   return (
-    <section className="view record-transactions-view">
-      <h2>Record transactions</h2>
-      <p className={`summary${error ? " error" : ""}`}>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <h2 className="font-heading text-lg font-black tracking-tight">Record transactions</h2>
+      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {loading
           ? "Loading..."
           : error
@@ -163,7 +163,7 @@ export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol
               : "No record transactions loaded."}
       </p>
 
-      <div className="record-category-stack">
+      <div className="flex flex-col gap-6">
         {categories(tokenSymbol).map((category) => (
           <RecordCategoryTable
             key={category.key}
@@ -195,40 +195,42 @@ function RecordCategoryTable({
   const columns = recordColumns(category, onLocationChange, timeZone, tokenSymbol);
 
   return (
-    <section className="record-category">
-      <div className="record-category-heading">
-        <h3>{category.title}</h3>
-        <span>{rows.length} rows</span>
+    <section className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-medium text-foreground">{category.title}</h3>
+        <span className="font-mono text-xs text-muted-foreground">{rows.length} rows</span>
       </div>
-      <div className="table-wrap">
-          <table className="data-table tx-table record-table">
-          <thead>
-            <tr>
+      <div className="overflow-x-auto border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
               {columns.map((column) => (
-                <th key={column.key} scope="col" className={column.className}>
+                <TableHead key={column.key} className={column.className}>
                   {renderTableHeader(column.label)}
-                </th>
+                </TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length}>No records stored yet.</td>
-              </tr>
+              <TableRow>
+                <TableCell colSpan={columns.length} className="text-xs text-muted-foreground">
+                  No records stored yet.
+                </TableCell>
+              </TableRow>
             ) : (
               rows.map((row) => (
-                <tr key={`${row.category}:${row.blockNumberDecimal}:${row.position}`}>
+                <TableRow key={`${row.category}:${row.blockNumberDecimal}:${row.position}`}>
                   {columns.map((column) => (
-                    <td key={column.key} className={column.className} data-label={column.label}>
+                    <TableCell key={column.key} className={column.className} data-label={column.label}>
                       {column.render(row)}
-                    </td>
+                    </TableCell>
                   ))}
-                </tr>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </section>
   );

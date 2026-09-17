@@ -3,6 +3,10 @@ import { AddressFace } from "./AddressFace";
 import { Cedric } from "./Cedric";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
+import { CopyButton } from "@/components/copy-cell";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { fmtDurationSeconds, fmtInteger, fmtTokenAmount } from "./format";
 import { GuzzlerActivityView } from "./GuzzlerActivityView";
 import {
@@ -176,35 +180,31 @@ function GuzzlerLeaderboard({
   }, [shown, total]);
 
   return (
-    <section className="view guzzlers-view">
-      <div className="view-heading-row">
-        <h2>Most Active Wallets (1h)</h2>
-        <div className="guzzler-controls">
-          <div className="segmented" role="group" aria-label="Active window">
-            {WINDOWS.map((w) => (
-              <button
-                key={w.key}
-                type="button"
-                className={w.key === windowKey ? "active" : ""}
-                aria-pressed={w.key === windowKey}
-                onClick={() => setWindowKey(w.key)}
-              >
-                {w.label}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="secondary" onClick={load} disabled={loading}>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-heading text-lg font-black tracking-tight">Most Active Wallets (1h)</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs value={windowKey} onValueChange={(value) => setWindowKey(value as WindowKey)}>
+            <TabsList aria-label="Active window">
+              {WINDOWS.map((w) => (
+                <TabsTrigger key={w.key} value={w.key}>
+                  {w.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
             {loading ? "Refreshing" : "Refresh"}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <p className="guzzler-intro summary">
+      <p className="text-xs text-muted-foreground">
         These are the network's most active wallets — the senders submitting the
         most transactions over the selected window, ranked by total gas used.
       </p>
 
-      <p className={`summary${error ? " error" : ""}`}>
+      <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {error
           ? `Failed to load guzzlers: ${error}`
           : data
@@ -216,12 +216,9 @@ function GuzzlerLeaderboard({
               : "No guzzlers loaded."}
       </p>
 
-      <div className="guzzler-list-wrap">
+      <div className="relative">
         <Cedric progress={refreshTick} />
-        {/* Opaque shelf painted over Cedric's body so only his head peeks —
-            stands in for the solid panel he hides behind on the home feed. */}
-        <div className="cedric-shelf guzzler-cedric-shelf" aria-hidden="true" />
-        <ol className="guzzler-list">
+        <ol className="relative z-10 flex flex-col gap-2">
           {guzzlers.slice(0, shown).map((g, index) => (
             <GuzzlerCard
               key={g.address}
@@ -239,7 +236,7 @@ function GuzzlerLeaderboard({
       </div>
 
       {shown < total ? (
-        <div ref={sentinelRef} className="guzzler-sentinel">
+        <div ref={sentinelRef} className="py-4 text-center text-xs text-muted-foreground">
           Showing {fmtInteger(shown)} of {fmtInteger(total)} — scroll for more…
         </div>
       ) : null}
@@ -277,33 +274,38 @@ function GuzzlerCard({
   };
 
   return (
-    <li className="guzzler-card clickable">
-      <a className="guzzler-card-hitbox" href={href} onClick={open} aria-label={label} />
-      <span className={`guzzler-rank${rank <= 3 ? " top" : ""}`}>{rank}</span>
-      <AddressFace address={guzzler.address} loading="lazy" />
-      <div className="guzzler-main">
-        <div className="guzzler-id">
+    <li className="relative grid grid-cols-[2.25rem_40px_minmax(0,1fr)_auto] items-center gap-3 border border-border bg-card px-3 py-2.5">
+      <a className="absolute inset-0 z-[1]" href={href} onClick={open} aria-label={label} />
+      <span className={cn("text-right font-mono text-sm font-semibold tabular-nums text-muted-foreground", rank <= 3 && "text-accent")}>
+        {rank}
+      </span>
+      <AddressFace address={guzzler.address} loading="lazy" className="size-10 border border-border" />
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex items-center gap-1.5">
           <AddressLabel address={guzzler.address} label={display.label} title={display.title} />
         </div>
-        <div className="guzzler-bar" aria-hidden="true">
-          <span style={{ width: `${barPct}%` }} />
+        <div className="relative h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+          <span
+            className="absolute inset-y-0 left-0 min-w-0.5 rounded-full bg-gradient-to-r from-accent to-primary"
+            style={{ width: `${barPct}%` }}
+          />
         </div>
-        <span className="guzzler-meta">
+        <span className="text-xs text-muted-foreground">
           last seen {lastSeenAgo === null ? "—" : `${fmtDurationSeconds(lastSeenAgo)} ago`}
         </span>
       </div>
-      <dl className="guzzler-stats">
-        <div>
-          <dt>Gas used</dt>
-          <dd>{fmtInteger(guzzler.totalGasUsed)}</dd>
+      <dl className="flex gap-4">
+        <div className="flex flex-col items-end gap-0.5">
+          <dt className="order-2 text-[10px] tracking-wider text-muted-foreground uppercase">Gas used</dt>
+          <dd className="order-1 font-mono text-sm font-semibold tabular-nums">{fmtInteger(guzzler.totalGasUsed)}</dd>
         </div>
-        <div>
-          <dt>Txs</dt>
-          <dd>{fmtInteger(guzzler.transactionCount)}</dd>
+        <div className="flex flex-col items-end gap-0.5">
+          <dt className="order-2 text-[10px] tracking-wider text-muted-foreground uppercase">Txs</dt>
+          <dd className="order-1 font-mono text-sm font-semibold tabular-nums">{fmtInteger(guzzler.transactionCount)}</dd>
         </div>
-        <div>
-          <dt>Fees</dt>
-          <dd>{fmtTokenAmount(guzzler.totalFeeWei, tokenSymbol)}</dd>
+        <div className="flex flex-col items-end gap-0.5">
+          <dt className="order-2 text-[10px] tracking-wider text-muted-foreground uppercase">Fees</dt>
+          <dd className="order-1 font-mono text-sm font-semibold tabular-nums">{fmtTokenAmount(guzzler.totalFeeWei, tokenSymbol)}</dd>
         </div>
       </dl>
     </li>
@@ -319,39 +321,12 @@ function AddressLabel({
   label: string;
   title?: string;
 }) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timeout = window.setTimeout(() => setCopied(false), 1200);
-    return () => window.clearTimeout(timeout);
-  }, [copied]);
-
-  const onCopy = async (event: React.MouseEvent) => {
-    // The card is clickable; copying must not also navigate into the address.
-    event.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(address);
-      setCopied(true);
-    } catch {
-      /* clipboard unavailable — ignore */
-    }
-  };
-
   return (
-    <span className="guzzler-address">
-      <span className="mono" title={title ?? address}>
+    <span className="inline-flex items-center gap-1">
+      <span className="font-mono text-sm" title={title ?? address}>
         {label}
       </span>
-      <button
-        type="button"
-        className="copy-cell-button"
-        aria-label="Copy address"
-        title={copied ? "Copied" : "Copy address"}
-        onClick={onCopy}
-      >
-        <span aria-hidden="true" className="copy-cell-icon" />
-      </button>
+      <CopyButton value={address} label="address" className="relative z-[2]" />
     </span>
   );
 }

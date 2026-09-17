@@ -10,6 +10,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, placeholder as cmPlaceholder } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+import "./queryEditor.css";
 import { arkivQueryLanguage } from "./queryLanguage";
 
 export interface QueryEditorProps {
@@ -22,43 +23,42 @@ export interface QueryEditorProps {
 
 const editorTheme = EditorView.theme({
   "&": {
-    fontSize: "0.9rem",
+    fontSize: "0.8125rem",
     backgroundColor: "transparent",
-    color: "var(--fg)",
+    color: "var(--color-foreground)",
   },
   ".cm-content": {
-    fontFamily: "var(--font-mono)",
+    fontFamily: "var(--font-mono), ui-monospace, monospace",
     padding: "0.6rem 0",
     minHeight: "3.4rem",
-    caretColor: "var(--fg)",
+    caretColor: "var(--color-foreground)",
   },
   ".cm-line": { padding: "0 0.75rem" },
   ".cm-gutters": { display: "none" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { overflow: "auto", lineHeight: "1.5" },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--fg)" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-foreground)" },
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground": {
-    backgroundColor: "var(--q-selection) !important",
+    backgroundColor: "var(--color-accent) !important",
+    opacity: "0.35",
   },
   ".cm-activeLine": { backgroundColor: "transparent" },
-  ".cm-placeholder": { color: "var(--muted)", fontStyle: "normal" },
+  ".cm-placeholder": { color: "var(--color-muted-foreground)", fontStyle: "normal" },
   ".cm-tooltip": {
-    backgroundColor: "var(--sand)",
-    color: "var(--fg)",
-    border: "1px solid var(--border)",
-    borderRadius: "var(--r-sm)",
-    boxShadow: "var(--shadow-card)",
-    fontFamily: "var(--font-mono)",
+    backgroundColor: "var(--color-popover)",
+    color: "var(--color-popover-foreground)",
+    border: "1px solid var(--color-border)",
+    fontFamily: "var(--font-mono), ui-monospace, monospace",
     fontSize: "0.8rem",
   },
   ".cm-tooltip-autocomplete ul li[aria-selected]": {
-    backgroundColor: "var(--ark-blue)",
-    color: "#ffffff",
+    backgroundColor: "var(--color-primary)",
+    color: "var(--color-primary-foreground)",
   },
   ".cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail": {
-    color: "#ffffffcc",
+    color: "var(--color-primary-foreground)",
   },
-  ".cm-completionDetail": { color: "var(--muted)", marginLeft: "0.6rem", fontStyle: "normal" },
+  ".cm-completionDetail": { color: "var(--color-muted-foreground)", marginLeft: "0.6rem", fontStyle: "normal" },
 });
 
 export default function QueryEditor({ value, onChange, onExecute, placeholder, autoFocus }: QueryEditorProps) {
@@ -128,5 +128,9 @@ export default function QueryEditor({ value, onChange, onExecute, placeholder, a
     });
   }, [value]);
 
-  return <div ref={hostRef} className="query-editor-host" />;
+  return (
+    <div className="overflow-hidden rounded-md border border-input bg-muted">
+      <div ref={hostRef} className="query-editor-host font-mono text-sm" />
+    </div>
+  );
 }

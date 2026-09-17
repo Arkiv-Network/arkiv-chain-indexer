@@ -1,5 +1,7 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Keep the public HTML document outside React routing in dev and preview too.
 function serveDocumentation(server: Pick<ViteDevServer, "middlewares">) {
@@ -21,7 +23,12 @@ const documentation: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [react(), documentation],
+  plugins: [react(), tailwindcss(), documentation],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   server: {
     port: 5173,
     proxy: {

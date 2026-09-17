@@ -1,3 +1,4 @@
+import { ExternalLink } from "lucide-react";
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import {
   fetchTransactionByHash,
@@ -10,6 +11,14 @@ import { AddressCell } from "./TransactionsView";
 import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
 import { CedricOnTimer } from "./Cedric";
+import { CopyButton } from "@/components/copy-cell";
+
+// Re-exported so existing `import { CopyButton } from "./TransactionView"`
+// call sites (DataView, EntityView) keep working against the shared component.
+export { CopyButton } from "@/components/copy-cell";
+import { OpBadge, StatusBadge, type StatusTone } from "@/components/op-badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   fmtBytes,
   fmtDate,
@@ -105,42 +114,43 @@ export function TransactionView({
   };
 
   return (
-    <section className="view transaction-view">
-      <div className="page-heading">
-        <PageBreadcrumbs
-          items={[
-            { view: "home", label: "Home" },
-            { view: "blocks", label: "Block list" },
-            { view: "transaction", label: "Transaction details" },
-          ]}
-          onLocationChange={onLocationChange}
-        />
-        <h2>Transaction</h2>
-      </div>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 py-6 md:px-6">
+      <PageBreadcrumbs
+        items={[
+          { view: "home", label: "Home" },
+          { view: "blocks", label: "Block list" },
+          { view: "transaction", label: "Transaction details" },
+        ]}
+        onLocationChange={onLocationChange}
+      />
+      <h2 className="font-heading text-lg font-black tracking-tight">Transaction</h2>
 
-      <form onSubmit={onSubmit} className="tx-lookup-form">
+      <form onSubmit={onSubmit} className="flex max-w-2xl gap-2">
         <input
           type="text"
           inputMode="text"
           spellCheck={false}
           autoComplete="off"
           placeholder="0x… transaction hash"
+          className="h-8 min-w-0 flex-1 rounded-none border border-input bg-transparent px-2.5 py-1 font-mono text-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 dark:bg-input/30"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <button type="submit">Look up</button>
+        <Button type="submit" size="sm" className="shrink-0">
+          Look up
+        </Button>
       </form>
-      {formError ? <p className="summary error">{formError}</p> : null}
+      {formError ? <p className="text-xs text-destructive">{formError}</p> : null}
 
       {!hash ? (
-        <p className="summary">Enter a transaction hash above to view its details.</p>
+        <p className="text-xs text-muted-foreground">Enter a transaction hash above to view its details.</p>
       ) : status === "loading" ? (
-        <p className="summary">Loading transaction…</p>
+        <p className="text-xs text-muted-foreground">Loading transaction…</p>
       ) : status === "error" ? (
-        <p className="summary error">Failed to load transaction: {error}</p>
+        <p className="text-xs text-destructive">Failed to load transaction: {error}</p>
       ) : status === "notfound" ? (
-        <p className="summary error">
-          Transaction <span className="mono">{hash}</span> was not found in storage.
+        <p className="text-xs text-destructive">
+          Transaction <span className="font-mono">{hash}</span> was not found in storage.
         </p>
       ) : data ? (
         <TransactionDetail
@@ -175,102 +185,102 @@ function TransactionDetail({
   const payloadProviderPayments = transaction.payloadProviderPayments ?? null;
 
   return (
-    <div className="tx-cedric-card-wrap">
+    <div className="relative mt-6">
       <CedricOnTimer />
-      <div className="tx-detail-card">
-      <div className="tx-detail-topline">
-        <span className={`tx-status-badge ${status.tone}`}>{status.label}</span>
-        <span className="tx-detail-hash mono">{transaction.hash}</span>
-        <CopyButton value={transaction.hash} label="transaction hash" />
-        {decoderHref ? (
-          <a className="tx-explorer-link" href={decoderHref} target="_blank" rel="noreferrer">
-            Decode ↗
-          </a>
-        ) : null}
-      </div>
-
-      <div className="tx-detail-groups">
-        <section className="tx-detail-group">
-          <h3>Overview</h3>
-          <dl className="tx-detail-grid">
-            <Row label="Status">
-              <span className={`tx-status-badge ${status.tone}`}>{status.label}</span>
-            </Row>
-            <Row label="Block">
-              <span className="tx-inline">
-                <BlockNumberLink
-                  blockNumber={transaction.blockNumberDecimal}
-                  onLocationChange={onLocationChange}
-                />
-                <span className="tx-muted">pos {transaction.position}</span>
-              </span>
-            </Row>
-            <Row label="Timestamp" title={transaction.blockDate}>
-              {fmtDate(transaction.blockDate, timeZone)}
-            </Row>
-            <Row label="From">
-              <AddressCell address={transaction.from} />
-            </Row>
-            <Row label={isContractCreation ? "Contract created" : "To"}>
-              <AddressCell address={transaction.to ?? transaction.contractAddress} />
-            </Row>
-            {transaction.to && transaction.contractAddress ? (
-              <Row label="Contract">
-                <AddressCell address={transaction.contractAddress} />
-              </Row>
-            ) : null}
-            <Row label="Type">{txTypeLabel(transaction.type)}</Row>
-            <Row label="Nonce">{transaction.nonce ?? "—"}</Row>
-            <Row label="Value">{fmtTokenAmount(transaction.valueWei, tokenSymbol)}</Row>
-          </dl>
-        </section>
-
-        <section className="tx-detail-group">
-          <h3>Gas</h3>
-          <dl className="tx-detail-grid">
-            <Row label="Gas limit">{fmtInteger(transaction.gasLimit)}</Row>
-            <Row label="Gas used (of limit)">{fmtRatio(transaction.gasUsed, transaction.gasLimit)}</Row>
-            <Row label="Input data">{fmtBytes(transaction.inputDataSizeBytes)}</Row>
-            <Row label="Input data zstd">{fmtBytes(transaction.inputDataCompressedSizeBytes)}</Row>
-            <Row label="Cumulative gas">{fmtInteger(transaction.cumulativeGasUsed)}</Row>
-          </dl>
-        </section>
-
-        <section className="tx-detail-group">
-          <h3>Fees</h3>
-          <dl className="tx-detail-grid">
-            <Row label="Transaction fee">
-              {fmtTokenAmount(transaction.transactionFeeWei, tokenSymbol)}
-            </Row>
-            <Row label="Effective gas price">{fmtGasPrice(transaction.effectiveGasPriceWei)}</Row>
-            <Row label="Base fee">{fmtGasPrice(transaction.baseBlockFeeWei)}</Row>
-            <Row label="Priority fee">{fmtGasPrice(transaction.priorityFeeWei)}</Row>
-            <Row label="Gas price">{fmtGasPrice(transaction.gasPriceWei)}</Row>
-            <Row label="Max fee per gas">{fmtGasPrice(transaction.maxFeePerGasWei)}</Row>
-            <Row label="Max priority per gas">{fmtGasPrice(transaction.maxPriorityFeePerGasWei)}</Row>
-          </dl>
-        </section>
-      </div>
-
-      {operations.length > 0 ? (
-        <section className="tx-detail-group tx-detail-operations">
-          <h3>Arkiv operations ({operations.length})</h3>
-          {payloadProviderPayments ? (
-            <PayloadProviderPaymentsPanel
-              payments={payloadProviderPayments}
-              tokenSymbol={tokenSymbol}
-            />
+      <div className="relative z-10 flex flex-col gap-4 border border-border bg-card p-4">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
+          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+          <span className="truncate font-mono text-xs text-foreground">{transaction.hash}</span>
+          <CopyButton value={transaction.hash} label="transaction hash" />
+          {decoderHref ? (
+            <a
+              className="ml-auto inline-flex items-center gap-1 text-xs text-accent hover:underline"
+              href={decoderHref}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Decode
+              <ExternalLink className="size-3" />
+            </a>
           ) : null}
-          {operations.map((operation) => (
-            <OperationCard
-              key={operation.opIndex}
-              operation={operation}
-              blockTimeMs={blockTimeMs}
-              onLocationChange={onLocationChange}
-            />
-          ))}
-        </section>
-      ) : null}
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <section className="flex flex-col gap-1">
+            <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Overview</h3>
+            <dl className="flex flex-col">
+              <Row label="Status">
+                <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+              </Row>
+              <Row label="Block">
+                <span className="inline-flex flex-wrap items-baseline gap-2">
+                  <BlockNumberLink blockNumber={transaction.blockNumberDecimal} onLocationChange={onLocationChange} />
+                  <span className="text-xs text-muted-foreground">pos {transaction.position}</span>
+                </span>
+              </Row>
+              <Row label="Timestamp" title={transaction.blockDate ?? undefined}>
+                {fmtDate(transaction.blockDate, timeZone)}
+              </Row>
+              <Row label="From">
+                <AddressCell address={transaction.from} />
+              </Row>
+              <Row label={isContractCreation ? "Contract created" : "To"}>
+                <AddressCell address={transaction.to ?? transaction.contractAddress} />
+              </Row>
+              {transaction.to && transaction.contractAddress ? (
+                <Row label="Contract">
+                  <AddressCell address={transaction.contractAddress} />
+                </Row>
+              ) : null}
+              <Row label="Type">{txTypeLabel(transaction.type)}</Row>
+              <Row label="Nonce">{transaction.nonce ?? "—"}</Row>
+              <Row label="Value">{fmtTokenAmount(transaction.valueWei, tokenSymbol)}</Row>
+            </dl>
+          </section>
+
+          <section className="flex flex-col gap-1">
+            <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Gas</h3>
+            <dl className="flex flex-col">
+              <Row label="Gas limit">{fmtInteger(transaction.gasLimit)}</Row>
+              <Row label="Gas used (of limit)">{fmtRatio(transaction.gasUsed, transaction.gasLimit)}</Row>
+              <Row label="Input data">{fmtBytes(transaction.inputDataSizeBytes)}</Row>
+              <Row label="Input data zstd">{fmtBytes(transaction.inputDataCompressedSizeBytes)}</Row>
+              <Row label="Cumulative gas">{fmtInteger(transaction.cumulativeGasUsed)}</Row>
+            </dl>
+          </section>
+
+          <section className="flex flex-col gap-1">
+            <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Fees</h3>
+            <dl className="flex flex-col">
+              <Row label="Transaction fee">{fmtTokenAmount(transaction.transactionFeeWei, tokenSymbol)}</Row>
+              <Row label="Effective gas price">{fmtGasPrice(transaction.effectiveGasPriceWei)}</Row>
+              <Row label="Base fee">{fmtGasPrice(transaction.baseBlockFeeWei)}</Row>
+              <Row label="Priority fee">{fmtGasPrice(transaction.priorityFeeWei)}</Row>
+              <Row label="Gas price">{fmtGasPrice(transaction.gasPriceWei)}</Row>
+              <Row label="Max fee per gas">{fmtGasPrice(transaction.maxFeePerGasWei)}</Row>
+              <Row label="Max priority per gas">{fmtGasPrice(transaction.maxPriorityFeePerGasWei)}</Row>
+            </dl>
+          </section>
+        </div>
+
+        {operations.length > 0 ? (
+          <section className="flex flex-col gap-3 border-t border-border pt-4">
+            <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+              Arkiv operations ({operations.length})
+            </h3>
+            {payloadProviderPayments ? (
+              <PayloadProviderPaymentsPanel payments={payloadProviderPayments} tokenSymbol={tokenSymbol} />
+            ) : null}
+            {operations.map((operation) => (
+              <OperationCard
+                key={operation.opIndex}
+                operation={operation}
+                blockTimeMs={blockTimeMs}
+                onLocationChange={onLocationChange}
+              />
+            ))}
+          </section>
+        ) : null}
       </div>
     </div>
   );
@@ -293,20 +303,20 @@ function PayloadProviderPaymentsPanel({
     payments.providerShareBps === null ? "—" : `${(payments.providerShareBps / 100).toFixed(2)}%`;
 
   return (
-    <div className="payload-payment-panel">
-      <div className="payload-payment-head">
+    <div className="border border-border bg-muted/40 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4>Payload provider payments</h4>
-          <p>
+          <h4 className="text-xs font-medium text-foreground">Payload provider payments</h4>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             {payments.entries.length} reference payment
             {payments.entries.length === 1 ? "" : "s"} - {sourceLabel}
           </p>
         </div>
-        <span className={`tx-status-badge ${payments.enabled ? "ok" : "unknown"}`}>
+        <StatusBadge tone={payments.enabled ? "ok" : "unknown"}>
           {payments.enabled ? "enabled" : "not active"}
-        </span>
+        </StatusBadge>
       </div>
-      <dl className="payload-payment-totals">
+      <dl className="mt-2 flex flex-col">
         <Row label="Signed payment">
           {paymentValue(payments.totalPaymentWei, tokenSymbol)}
           {payments.totalPaymentGasUnits ? ` (${fmtInteger(payments.totalPaymentGasUnits)} gas units)` : ""}
@@ -323,30 +333,35 @@ function PayloadProviderPaymentsPanel({
         </Row>
       </dl>
 
-      <div className="payload-payment-providers">
+      <div className="mt-3 flex flex-col gap-2">
         {payments.providers.map((provider) => (
           <div
-            className="payload-payment-provider"
+            className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border pt-2 text-xs first:border-0 first:pt-0"
             key={`${provider.provider}:${provider.signer ?? ""}`}
           >
-            <div>
-              <strong>{provider.provider}</strong>
-              <span>{provider.paymentCount} payment{provider.paymentCount === 1 ? "" : "s"}</span>
+            <div className="flex items-baseline gap-2">
+              <strong className="font-medium text-foreground">{provider.provider}</strong>
+              <span className="text-muted-foreground">
+                {provider.paymentCount} payment{provider.paymentCount === 1 ? "" : "s"}
+              </span>
             </div>
             {provider.signer ? <AddressCell address={provider.signer} /> : <span>—</span>}
-            <div>{paymentValue(provider.providerEarnedWei, tokenSymbol)}</div>
-            <div className="tx-muted">burn {paymentValue(provider.burnedWei, tokenSymbol)}</div>
+            <div className="font-mono">{paymentValue(provider.providerEarnedWei, tokenSymbol)}</div>
+            <div className="font-mono text-muted-foreground">burn {paymentValue(provider.burnedWei, tokenSymbol)}</div>
           </div>
         ))}
       </div>
 
-      <div className="payload-payment-entries">
+      <div className="mt-3 flex flex-col gap-1">
         {payments.entries.map((entry) => (
-          <div className="payload-payment-entry" key={`${entry.opIndex}:${entry.payloadId}`}>
-            <span className="tx-muted">op #{entry.opIndex}</span>
-            <span className="mono truncate">{entry.payloadId}</span>
-            <span>{paymentValue(entry.providerEarnedWei, tokenSymbol)}</span>
-            <span className="tx-muted">burn {paymentValue(entry.burnedWei, tokenSymbol)}</span>
+          <div
+            className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs"
+            key={`${entry.opIndex}:${entry.payloadId}`}
+          >
+            <span className="text-muted-foreground">op #{entry.opIndex}</span>
+            <span className="truncate font-mono">{entry.payloadId}</span>
+            <span className="font-mono">{paymentValue(entry.providerEarnedWei, tokenSymbol)}</span>
+            <span className="font-mono text-muted-foreground">burn {paymentValue(entry.burnedWei, tokenSymbol)}</span>
           </div>
         ))}
       </div>
@@ -372,18 +387,18 @@ function OperationCard({
   const payloadHref = reference ? payloadInfoHref(reference.id) : null;
 
   return (
-    <div className="op-card">
-      <div className="op-card-head">
-        <span className={`op-badge op-${operation.operation}`}>{operation.operation}</span>
-        {operation.isReference ? <span className="op-badge op-reference">reference</span> : null}
-        <span className="tx-muted">#{operation.opIndex}</span>
+    <div className="border border-border p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <OpBadge operation={operation.operation} />
+        {operation.isReference ? <OpBadge operation="reference" /> : null}
+        <span className="text-xs text-muted-foreground">#{operation.opIndex}</span>
       </div>
-      <dl className="tx-detail-grid">
+      <dl className="flex flex-col">
         <Row label="Entity key">
           {entityKey ? (
-            <span className="tx-inline">
+            <span className="inline-flex flex-wrap items-baseline gap-1.5">
               <a
-                className="mono block-link"
+                className="truncate font-mono text-foreground transition-colors hover:text-accent hover:underline"
                 href={entityDetailHref(entityKey)}
                 onClick={(event) => {
                   if (!onLocationChange) return;
@@ -406,10 +421,10 @@ function OperationCard({
         </Row>
         {verdict ? (
           <Row label="Verification">
-            <div className="op-verification">
-              <span className={`tx-status-badge ${verdict.tone}`}>{verdict.label}</span>
+            <div className="flex flex-col items-start gap-1">
+              <StatusBadge tone={verdict.tone}>{verdict.label}</StatusBadge>
               {verification && verification.errors.length > 0 ? (
-                <div className="op-verification-errors">
+                <div className="flex flex-col gap-0.5 text-xs text-destructive">
                   {verification.errors.map((error, index) => (
                     <div key={index}>{error}</div>
                   ))}
@@ -420,19 +435,19 @@ function OperationCard({
         ) : null}
         {operation.referenceError ? (
           <Row label="Reference">
-            <span className="tx-status-badge fail">{operation.referenceError}</span>
+            <StatusBadge tone="fail">{operation.referenceError}</StatusBadge>
           </Row>
         ) : null}
         {reference ? (
           <>
             <Row label="Provider">
-              <span className="tx-inline">
+              <span className="inline-flex flex-wrap items-baseline gap-2">
                 {verification?.recoveredSigner ? (
                   <AddressFace
                     address={verification.recoveredSigner}
                     width={18}
                     height={18}
-                    className="op-provider-face"
+                    className="rounded-full"
                     alt=""
                     title={`Signer identicon for ${verification.recoveredSigner}`}
                   />
@@ -441,10 +456,10 @@ function OperationCard({
               </span>
             </Row>
             <Row label="Payload id">
-              <span className="tx-inline">
+              <span className="inline-flex flex-wrap items-baseline gap-1.5">
                 {payloadHref ? (
                   <a
-                    className="mono truncate"
+                    className="truncate font-mono text-foreground transition-colors hover:text-accent hover:underline"
                     href={payloadHref}
                     target="_blank"
                     rel="noreferrer"
@@ -453,14 +468,14 @@ function OperationCard({
                     {reference.id}
                   </a>
                 ) : (
-                  <span className="mono truncate">{reference.id}</span>
+                  <span className="truncate font-mono">{reference.id}</span>
                 )}
                 <CopyButton value={reference.id} label="payload id" />
               </span>
             </Row>
             <Row label="Namespace">{reference.namespace}</Row>
             <Row label="Checksum">
-              <span className="mono truncate">{reference.checksum}</span>
+              <span className="truncate font-mono">{reference.checksum}</span>
             </Row>
             <Row label="Reference size" title={`${fmtInteger(reference.sizeBytes)} bytes`}>
               {fmtBytes(reference.sizeBytes)}
@@ -474,10 +489,10 @@ function OperationCard({
         ) : null}
         {operation.attributes.length > 0 ? (
           <Row label="Attributes">
-            <div className="op-attributes">
+            <div className="flex flex-col gap-0.5">
               {operation.attributes.map((attribute, index) => (
                 <div key={`${attribute.key}:${index}`} title={attribute.valueTypeName}>
-                  {attribute.key} = <span className="mono">{attribute.value}</span>
+                  {attribute.key} = <span className="font-mono">{attribute.value}</span>
                 </div>
               ))}
             </div>
@@ -508,16 +523,16 @@ function isAllZeroBytes32(value: string): boolean {
 
 function Row({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
   return (
-    <div className="tx-detail-row">
-      <dt className="tx-detail-label">{label}</dt>
-      <dd className="tx-detail-value" title={title}>
+    <div className="grid grid-cols-[minmax(7rem,9rem)_minmax(0,1fr)] items-baseline gap-2 border-b border-dashed border-border py-1 last:border-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn("min-w-0 truncate font-mono text-xs text-foreground")} title={title}>
         {children}
       </dd>
     </div>
   );
 }
 
-function statusInfo(status: string | null): { label: string; tone: "ok" | "fail" | "unknown" } {
+function statusInfo(status: string | null): { label: string; tone: StatusTone } {
   if (status === "1") return { label: "Success", tone: "ok" };
   if (status === "0") return { label: "Failed", tone: "fail" };
   return { label: status ?? "Unknown", tone: "unknown" };
@@ -528,9 +543,7 @@ function statusInfo(status: string | null): { label: string; tone: "ok" | "fail"
  * implies the signer is trusted (the decoder records an untrusted signer as an
  * error that fails the verdict), so an untrusted signer surfaces under `fail`.
  */
-function referenceVerdict(
-  verification: ArkivReferenceVerification,
-): { label: string; tone: "ok" | "fail" } {
+function referenceVerdict(verification: ArkivReferenceVerification): { label: string; tone: StatusTone } {
   if (verification.valid) return { label: "Verified", tone: "ok" };
   if (!verification.signerTrusted) return { label: "Untrusted signer", tone: "fail" };
   return { label: "Invalid", tone: "fail" };
@@ -553,48 +566,6 @@ function txTypeLabel(type: string | null): string {
   }
 }
 
-export function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timeout = window.setTimeout(() => setCopied(false), 1200);
-    return () => window.clearTimeout(timeout);
-  }, [copied]);
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-    } catch {
-      // Clipboard unavailable (e.g. insecure context) — silently ignore.
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      className="copy-cell-button"
-      aria-label={`Copy ${label}`}
-      title={copied ? "Copied" : `Copy ${label}`}
-      onClick={onCopy}
-    >
-      <span aria-hidden="true" className="copy-cell-icon">
-        {copied ? (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="11" height="11" rx="2" />
-            <path d="M5 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2" />
-          </svg>
-        )}
-      </span>
-    </button>
-  );
-}
-
 /**
  * In-app link to the transaction detail panel (`/tx/<hash>`). Mirrors
  * BlockNumberLink: renders an anchor with a real href (so middle-click /
@@ -603,7 +574,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
 export function TransactionHashLink({
   hash,
   onLocationChange,
-  className = "mono truncate",
+  className = "truncate font-mono text-xs",
   label,
 }: {
   hash: string | null | undefined;
@@ -630,7 +601,7 @@ export function TransactionHashLink({
 
   return (
     <a
-      className={`${className} block-link`}
+      className={cn(className, "text-foreground transition-colors hover:text-accent hover:underline")}
       href={transactionDetailHref(value)}
       onClick={onClick}
       title={hash ?? undefined}

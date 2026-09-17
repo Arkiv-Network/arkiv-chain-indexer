@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "./icons";
+import { cn } from "@/lib/utils";
 
 interface InfoTooltipProps {
   label: string;
@@ -122,11 +123,14 @@ export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
   }, [pinned]);
 
   return (
-    <span className="info-tooltip" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+    <span className="relative inline-flex items-center leading-none" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
       <button
         ref={triggerRef}
         type="button"
-        className={`info-tooltip-trigger${pinned ? " is-pinned" : ""}`}
+        className={cn(
+          "inline-flex items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+          pinned && "text-foreground",
+        )}
         aria-label={label}
         aria-expanded={open}
         aria-describedby={open ? popupId : undefined}
@@ -143,13 +147,12 @@ export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
               ref={popupRef}
               id={popupId}
               role="tooltip"
-              className="info-tooltip-popup"
+              className="fixed z-[1000] w-max max-w-[min(480px,calc(100vw-16px))] rounded-md border border-border bg-popover px-3.5 py-3 text-xs leading-relaxed text-popover-foreground shadow-md [&_p+p]:mt-2 [&_p]:m-0 [&_p]:text-muted-foreground [&_strong]:mb-1.5 [&_strong]:block [&_strong]:text-[13px] [&_strong]:font-semibold"
               data-placement={position?.placement ?? "bottom"}
               style={{
                 top: position?.top ?? -9999,
                 left: position?.left ?? -9999,
                 visibility: position ? "visible" : "hidden",
-                ["--info-tooltip-arrow-left" as string]: position ? `${position.arrowLeft}px` : "50%",
               }}
               onMouseEnter={handleEnter}
               onMouseLeave={handleLeave}

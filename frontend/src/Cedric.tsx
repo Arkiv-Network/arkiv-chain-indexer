@@ -11,6 +11,75 @@ const CEDRIC_PROGRESS_AWAY = 3;
 
 const CEDRIC_INITIAL_HIDDEN_MS = 3000;
 
+// Cedric's motion (duck/peek transform, blink, and gaze-wander) is a one-off
+// animation outside the design system's token vocabulary — no Tailwind
+// utility expresses gated keyframes cleanly, so it ships as scoped CSS
+// alongside the component instead of living in a shared stylesheet.
+const CEDRIC_STYLE = `
+.cedric {
+  position: absolute;
+  z-index: 0;
+  top: -76px;
+  right: 2.5rem;
+  width: 84px;
+  height: 150px;
+  pointer-events: none;
+  transform: translateY(64px);
+  transition: transform 1.5s ease-in;
+  will-change: transform;
+}
+.cedric.is-peeking {
+  transform: translateY(0);
+  transition: transform 0.6s cubic-bezier(0.34, 1.4, 0.6, 1);
+}
+.cedric svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 3px 2px rgba(17, 17, 17, 0.18));
+}
+.cedric-eyes {
+  transform-box: view-box;
+  transform-origin: 60px 57px;
+}
+.cedric.is-peeking .cedric-eyes {
+  animation: cedric-blink 4.2s ease-in-out infinite;
+}
+.cedric-pupils {
+  transform-box: view-box;
+  transform: translate(-6px, 5px);
+}
+.cedric.is-peeking .cedric-pupils {
+  animation: cedric-glance 7s ease-in-out infinite;
+}
+@keyframes cedric-glance {
+  0%, 16% { transform: translate(-6px, 5px); }
+  26%, 40% { transform: translate(-7px, 2px); }
+  50%, 63% { transform: translate(-3px, 7px); }
+  73%, 88% { transform: translate(-6px, 6px); }
+  98%, 100% { transform: translate(-6px, 5px); }
+}
+@keyframes cedric-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  94%, 96% { transform: scaleY(0.1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cedric {
+    transition: none;
+    transform: translateY(0);
+  }
+  .cedric-eyes,
+  .cedric.is-peeking .cedric-eyes {
+    animation: none;
+  }
+  .cedric-pupils,
+  .cedric.is-peeking .cedric-pupils {
+    animation: none;
+    transform: translate(-6px, 5px);
+  }
+}
+`;
+
 // Drives Cedric on a self-contained timer for views that have no natural
 // monotonic signal (e.g. the transactions table, which only loads on demand).
 // Keeping the tick state here means the host view doesn't re-render every tick.
@@ -71,15 +140,17 @@ export function Cedric({
   }, [canHide, progress, phase]);
 
   return (
-    <span
-      className={`cedric${phase === "peeking" ? " is-peeking" : ""}`}
-      aria-hidden="true"
-      // Stay fully hidden until the first peek begins — otherwise Cedric
-      // flashes in his un-positioned spot on load before he ducks. Inline so it
-      // applies on the very first paint, before the stylesheet is in effect.
-      style={{ visibility: phase === "initial" ? "hidden" : "visible" }}
-      onAnimationIteration={canHide ? onIteration : undefined}
-    >
+    <>
+      <style>{CEDRIC_STYLE}</style>
+      <span
+        className={`cedric${phase === "peeking" ? " is-peeking" : ""}`}
+        aria-hidden="true"
+        // Stay fully hidden until the first peek begins — otherwise Cedric
+        // flashes in his un-positioned spot on load before he ducks. Inline so it
+        // applies on the very first paint, before the stylesheet is in effect.
+        style={{ visibility: phase === "initial" ? "hidden" : "visible" }}
+        onAnimationIteration={canHide ? onIteration : undefined}
+      >
       <svg viewBox="0 0 120 130" xmlns="http://www.w3.org/2000/svg">
         {/* ear tufts */}
         <path d="M30 28 L41 7 L54 31 Z" fill="#6E4B30" />
@@ -109,6 +180,7 @@ export function Cedric({
         {/* beak */}
         <path d="M60 65 L68 73 Q60 82 52 73 Z" fill="#FE7446" />
       </svg>
-    </span>
+      </span>
+    </>
   );
 }

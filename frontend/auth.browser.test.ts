@@ -69,7 +69,7 @@ suite("Google login UI and proxy", () => {
         const body = await request.json();
         const result = body.method === "arkiv_getBlockTiming"
           ? { current_block: 10, current_block_time: 1_800_000_000, duration: 2 }
-          : { data: [], blockNumber: "0xa", cursor: null };
+          : body.method === "arkiv_getEntityCount" ? 0 : { data: [], blockNumber: "0xa", cursor: null };
         return Response.json({ jsonrpc: "2.0", id: body.id, result });
       }
       if (path === "/baseload/configs") return Response.json({ configs: [] });
@@ -195,6 +195,51 @@ suite("Google login UI and proxy", () => {
     const bounds = await button.boundingBox();
     expect(bounds).not.toBeNull(); expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
     expect(page.url()).not.toContain("authError");
+    await context.close();
+  });
+
+  test("redesigned Data controls preserve historical counts and query history", async () => {
+    session = anonymous();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await openPage(context);
+    await page.goto(`${base}/data?q=*&block=7`);
+    const countButton = page.getByRole("button", { name: "Count query", exact: true });
+    await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some(button => button.textContent?.trim() === "Count query" && !button.disabled));
+    expect(await page.getByLabel("At block", { exact: true }).inputValue()).toBe("7");
+    expect(await page.getByRole("tab", { name: "Default node", exact: true }).count()).toBe(0);
+    const request = page.waitForRequest(request => request.postDataJSON()?.method === "arkiv_getEntityCount");
+    await countButton.click();
+    expect((await request).postDataJSON().params).toEqual([{ query: "*", block: 7 }]);
+    await page.getByText("0 matching entities at block 7", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /^History/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Query history" });
+    await dialog.waitFor();
+    const bounds = (await dialog.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    await dialog.getByRole("button", { name: "Load into editor", exact: true }).first().click();
+    expect(await dialog.count()).toBe(0);
+    await context.close();
+  });
+
+  test("mobile home charts keep their height and display settings close with Escape", async () => {
+    session = anonymous();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await openPage(context);
+    await page.goto(base);
+    const chart = page.locator('[data-slot="card"]').filter({ hasText: "Network usage" }).last();
+    await chart.waitFor();
+    // Empty/loading charts need the same reserved area as populated charts.
+    expect((await chart.boundingBox())!.height).toBeGreaterThanOrEqual(260);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.getByTitle("Display settings", { exact: true }).click();
+    const timeZone = page.getByLabel("Time zone", { exact: true });
+    await timeZone.waitFor();
+    const bounds = (await timeZone.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    await page.keyboard.press("Escape");
+    await timeZone.waitFor({ state: "detached" });
     await context.close();
   });
 
