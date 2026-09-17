@@ -222,7 +222,7 @@ suite("Google login UI and proxy", () => {
     await context.close();
   });
 
-  test("mobile home charts keep their height and display settings close with Escape", async () => {
+  test("mobile home charts keep their height and popup navigation closes with Escape", async () => {
     session = anonymous();
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await openPage(context);
@@ -232,7 +232,7 @@ suite("Google login UI and proxy", () => {
     // Empty/loading charts need the same reserved area as populated charts.
     expect((await chart.boundingBox())!.height).toBeGreaterThanOrEqual(260);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    await page.getByTitle("Display settings", { exact: true }).click();
+    await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
     const timeZone = page.getByLabel("Time zone", { exact: true });
     await timeZone.waitFor();
     const bounds = (await timeZone.boundingBox())!;
@@ -242,6 +242,41 @@ suite("Google login UI and proxy", () => {
     await timeZone.waitFor({ state: "detached" });
     await context.close();
   });
+
+  for (const width of [1440, 390]) {
+    test(`popup navigation keeps pages and display controls together at ${width}px`, async () => {
+      session = anonymous();
+      const context = await browser.newContext({ viewport: { width, height: 844 } });
+      const page = await openPage(context);
+      await page.goto(base);
+      await page.getByRole("link", { name: "Sign in with Google" }).waitFor();
+      expect(await page.getByRole("navigation", { name: "Primary navigation" }).count()).toBe(0);
+      await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
+      const popup = page.getByRole("dialog", { name: "Navigation menu" });
+      await popup.waitFor();
+      const bounds = (await popup.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
+      expect(await popup.getByRole("link", { name: "Home", exact: true }).getAttribute("aria-current")).toBe("page");
+      expect(await popup.getByRole("link", { name: "Admin", exact: true }).count()).toBe(0);
+      await popup.getByRole("button", { name: "Full width", exact: true }).click();
+      await page.waitForFunction(() => localStorage.getItem("gas-price-tracker:ui.fullWidth") === "true");
+      await popup.getByTitle("Switch to dark mode", { exact: true }).click();
+      await page.waitForFunction(() => document.documentElement.classList.contains("dark"));
+      await popup.getByLabel("Time zone", { exact: true }).selectOption("UTC");
+      await page.waitForFunction(() => localStorage.getItem("gas-price-tracker:timeZone") === "UTC");
+      await popup.getByRole("link", { name: "Data", exact: true }).click();
+      await popup.waitFor({ state: "detached" });
+      await page.getByRole("heading", { name: "Data", exact: true }).waitFor();
+      expect(await page.getByRole("button", { name: "Open navigation menu", exact: true }).textContent()).toBe("Data");
+      await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
+      await popup.waitFor();
+      await page.mouse.click(1, 843);
+      await popup.waitFor({ state: "detached" });
+      await context.close();
+    });
+  }
 
   test("production proxy preserves request cookies and multiple response cookies", async () => {
     const response = await fetch(`${base}/api/auth/proxy-cookie-test`, { headers: { Cookie: "session=example" } });

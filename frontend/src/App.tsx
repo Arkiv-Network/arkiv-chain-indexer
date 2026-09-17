@@ -1,26 +1,5 @@
-import { Popover } from "@base-ui/react/popover";
-import {
-  Activity,
-  Boxes,
-  Box,
-  Database,
-  ExternalLink,
-  Gauge,
-  HeartPulse,
-  Home,
-  Layers,
-  LineChart,
-  ListOrdered,
-  type LucideIcon,
-  Moon,
-  Receipt,
-  Search,
-  Settings2,
-  Shield,
-  Sun,
-  Users,
-  Wallet,
-} from "lucide-react";
+import { ExternalLink } from "lucide-react";
+import { NavigationMenu } from "./NavigationMenu";
 import { useEffect, useState } from "react";
 import {
   deleteBaseloadConfig,
@@ -64,14 +43,11 @@ import {
   writeStoredPageSettings,
 } from "./pageSettings";
 import {
-  buildRouteHref,
   getCurrentLocation,
   readAddressFromLocation,
   readEntityKeyFromLocation,
   readTransactionHashFromLocation,
   readViewFromLocation,
-  shouldHandleClientNavigation,
-  type View,
   writePermalink,
 } from "./permalinks";
 import { RangesView } from "./RangesView";
@@ -81,8 +57,6 @@ import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
 import { TransactionView } from "./TransactionView";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { OmniSearch } from "./OmniSearch";
 import { SearchView } from "./SearchView";
@@ -94,67 +68,6 @@ const FULL_WIDTH_STORAGE_KEY = "ui.fullWidth";
 const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
 
 type ThemeOverride = "light" | "dark" | "";
-
-const NAV_ICONS: Partial<Record<View, LucideIcon>> = {
-  home: Home,
-  search: Search,
-  blocks: Boxes,
-  block: Box,
-  transactions: Wallet,
-  entity: Layers,
-  address: Wallet,
-  data: Database,
-  "transaction-records": Receipt,
-  senders: Users,
-  ranges: ListOrdered,
-  charts: LineChart,
-  guzzlers: Activity,
-  health: HeartPulse,
-  admin: Shield,
-  baseload: Gauge,
-};
-
-// Anchor positioning keeps display controls on screen at narrow widths and
-// provides keyboard dismissal and focus restoration through the shared UI library.
-function DisplayMenu({
-  fullWidth, onToggleFullWidth, timeZone, onTimeZoneChange,
-}: {
-  fullWidth: boolean;
-  onToggleFullWidth: () => void;
-  timeZone: string;
-  onTimeZoneChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-}) {
-  return (
-    <Popover.Root>
-      <Popover.Trigger
-        title="Display settings"
-        aria-label="Display settings"
-        className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-open:bg-accent data-open:text-foreground"
-      >
-        <Settings2 className="size-4" />
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner sideOffset={6} align="end" collisionPadding={12} className="z-[60]">
-          <Popover.Popup aria-label="Display settings" className="w-64 max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium">Full width</span>
-              <Button type="button" variant={fullWidth ? "default" : "outline"} size="xs" onClick={onToggleFullWidth} aria-pressed={fullWidth}>
-                {fullWidth ? "On" : "Off"}
-              </Button>
-            </div>
-            <Separator className="my-3" />
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="display-time-zone" className="text-xs font-medium text-muted-foreground">Time zone</label>
-              <select id="display-time-zone" value={timeZone} onChange={onTimeZoneChange} className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground">
-                {TIME_ZONE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </div>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
 
 export function App() {
   const auth = useAuth();
@@ -316,12 +229,6 @@ export function App() {
     if (writePermalink(nextView, {})) {
       refreshFromLocation();
     }
-  };
-
-  const onNavClick = (targetView: View) => (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!shouldHandleClientNavigation(event)) return;
-    event.preventDefault();
-    setView(targetView);
   };
 
   const onTimeZoneChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -560,30 +467,6 @@ export function App() {
             </span>
           ) : null}
 
-          <nav aria-label="Primary navigation" className="flex flex-wrap items-center gap-1">
-            {navItems.map((item) => {
-              const Icon = NAV_ICONS[item.view] ?? Home;
-              const active = activeView === item.view;
-              return (
-                <a
-                  key={item.view}
-                  href={buildRouteHref(item.view, {})}
-                  aria-current={active ? "page" : undefined}
-                  onClick={onNavClick(item.view)}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors",
-                    active
-                      ? "bg-muted text-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-3" />
-                  {item.label}
-                </a>
-              );
-            })}
-          </nav>
-
           {activeView !== "search" ? <div className="header-search min-w-0 flex-1 basis-56"><OmniSearch onNavigate={navigateSearch} /></div> : null}
 
           <div className="flex flex-wrap items-center gap-2">
@@ -614,21 +497,17 @@ export function App() {
               <ExternalLink className="size-3" />
             </a>
 
-            <DisplayMenu
+            <NavigationMenu
+              activeView={activeView}
+              navItems={navItems}
+              onNavigate={setView}
               fullWidth={fullWidth}
               onToggleFullWidth={toggleFullWidth}
+              darkModeActive={darkModeActive}
+              onToggleDarkMode={toggleDarkMode}
               timeZone={timeZone}
               onTimeZoneChange={onTimeZoneChange}
             />
-
-            <button
-              type="button"
-              onClick={toggleDarkMode}
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title={darkModeActive ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {darkModeActive ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            </button>
           </div>
         </div>
       </header>
