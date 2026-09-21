@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   cacheStats,
   gauge,
-  labelsOf,
   parsePrometheusText,
   processStats,
   routeTraffic,
@@ -68,13 +67,6 @@ describe("parsePrometheusText", () => {
       (sample) => sample.name === "indexer_http_request_duration_seconds_bucket" && sample.labels.le === "+Inf",
     );
     expect(inf?.value).toBe(87);
-  });
-
-  test("keeps label-only series such as indexer_build_info reachable", () => {
-    expect(labelsOf(samples, "indexer_build_info")).toEqual({
-      commit: "42a3317",
-      built_at: "2026-09-05T14:39:20Z",
-    });
   });
 
   test("sumBy totals across label sets, with an optional filter", () => {

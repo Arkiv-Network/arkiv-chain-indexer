@@ -16,7 +16,6 @@ import {
   getTimeBombDetonationMs,
   getTimeBombRemainingSeconds,
   parseGweiToWei,
-  pickSoonestExpiringPoolEntry,
   pickSoonestExpiringPoolEntries,
   pruneExpiredPoolEntries,
   randomOwnerAddress,
@@ -156,13 +155,12 @@ describe("baseload task helpers", () => {
       "0x03",
     ]);
     expect(pruneExpiredPoolEntries(pool, 1_000, 2_000)).toHaveLength(3);
-    expect(pickSoonestExpiringPoolEntry(pool)?.entityKey).toBe("0x01");
     expect(pickSoonestExpiringPoolEntries(pool, 2).map((entry) => entry.entityKey)).toEqual([
       "0x01",
       "0x03",
     ]);
     expect(pickSoonestExpiringPoolEntries(pool, 0)).toEqual([]);
-    expect(pickSoonestExpiringPoolEntry([])).toBeNull();
+    expect(pickSoonestExpiringPoolEntries([], 1)).toEqual([]);
   });
 
   test("computes time bomb detonation and remaining TTL", () => {

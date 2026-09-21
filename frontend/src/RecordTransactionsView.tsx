@@ -122,16 +122,6 @@ function recordColumns(
   return sharedColumns.concat(metricColumns.filter((column) => column.key !== category.duplicateColumnKey));
 }
 
-export function recordColumnLabelsForCategory(
-  categoryKey: TransactionRecordCategory,
-  tokenSymbol: string,
-): string[] {
-  const category = categories(tokenSymbol).find((candidate) => candidate.key === categoryKey);
-  if (!category) return [];
-
-  return recordColumns(category, () => {}, "UTC", tokenSymbol).map((column) => column.label);
-}
-
 export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol }: RecordTransactionsViewProps) {
   const [data, setData] = useState<TransactionRecordsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);

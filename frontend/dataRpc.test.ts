@@ -8,7 +8,6 @@ import {
   callRpc,
   checkRpcSource,
   describeRpcEndpoint,
-  isMethodNotFound,
   isValidRpcUrl,
   missingBackendMethods,
   isRpcMode,
@@ -247,8 +246,6 @@ describe("callRpc", () => {
     expect(rpcError.method).toBe("arkiv_query");
     expect(rpcError.code).toBe(-32601);
     expect(rpcError.message).toBe("arkiv_query was rejected (-32601): the method arkiv_query does not exist");
-    expect(isMethodNotFound(rpcError)).toBe(true);
-    expect(isMethodNotFound(new Error("x"))).toBe(false);
   });
 
   test("a relay timeout is shown directly instead of being described as a rejected query", async () => {

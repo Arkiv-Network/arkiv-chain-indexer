@@ -61,12 +61,13 @@ docker compose up --build
   transaction rows. A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes
   the whole block retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
   `GET /transactions` rows that have stored operations.
-- `src/storage.ts` uses `pg` (node-postgres) with a connection pool. The whole storage API is async. Optionally
+- `src/storage.ts` uses the pooled Bun SQL client through `src/db.ts`. The whole storage API is async;
+  `db.transaction()` wraps `sql.begin()` so every write uses the same transaction connection. Storage optionally
   takes a `schema` so tests can run in isolated schemas against a shared database.
 - `src/scanner.ts` owns retry and resume behavior.
 - `src/metrics.ts` owns all block metric calculations.
 - `src/server.ts` exposes `GET /blocks` and `GET /ranges` (built on `Bun.serve`) plus a `GET /health` probe.
-  CORS headers are returned on every response so the static frontend can fetch from a different origin. All
+  Public reads return permissive CORS headers; auth/admin responses use private headers and exact Origin checks. All
   filters combine additively; results are always capped at the smallest 10,000 matching rows. Entry point:
   `src/serve.ts` (`bun run serve`). List endpoints (`/blocks`, `/ranges`, `/transactions`,
   `/transaction-records`, `/senders`, `/guzzlers`, and `/entity/:entityKey` operations) send compact rows —
@@ -115,8 +116,9 @@ docker compose up --build
   generated temporary access token. Successful scrapes are excluded from traffic metrics; rejected ones are counted.
 - `src/jsonRpc.ts` serves `POST /shadow-rpc` (`JSON_RPC_PATH` in `src/server.ts`; `/api/shadow-rpc` publicly,
   once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
-  data — the only path to a node is the opt-in passthrough below. The path demands an administrator session,
-  configured Origin and X-CSRF-Token (it spends the upstream's quota), while `/shadow-rpc/experimental` is open
+  data, with an allowlisted node passthrough below. The path demands administrator authentication: a session
+  with configured Origin and X-CSRF-Token, or a temporary access token (it spends the upstream's quota).
+  `/shadow-rpc/experimental` is open
   and explicitly receives no passthrough forwarder; the Data tab offers only the
   index and a custom node outside admin mode. `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
@@ -137,9 +139,9 @@ docker compose up --build
   the block hash of every returned log through one `getBlockHashesByNumber` call: doing it per block cost a
   round trip per distinct block in the result (~420ms for a 1,000-block query, versus ~10ms batched).
 - `src/jsonRpcPassthrough.ts` is the one hole in that: a transaction has to reach a node's mempool, so
-  `SHADOW_RPC_UPSTREAM` (see `serverConfig.ts`) relays an allowlist — `eth_sendRawTransaction` alone by
-  default, since wallets sign locally — to a real node and returns its answers unchanged. Unset, nothing is
-  forwarded and those methods stay `-32601`. Three rules hold: **allowlist only**, never an open proxy; a
+  `SHADOW_RPC_UPSTREAM` (see `serverConfig.ts`) relays an allowlist — `eth_sendRawTransaction` and the four
+  `ARKIV_READ_METHODS` by default — to a real node and returns its answers unchanged. With no explicit upstream, it resolves the
+  scanner-recorded node; until a node is available, forwarded methods return `-32000`. Three rules hold: **allowlist only**, never an open proxy; a
   listed method **outranks the local handler and the transaction-data gate**, which makes the list a general
   escape hatch (list `eth_getTransactionCount` to serve the node's live nonce instead of the indexed one);
   and **nothing about the upstream leaks** — the URL may embed a key, so only the node's own JSON-RPC `error`
@@ -196,7 +198,7 @@ docker compose up --build
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator
   (`bun run aggregate -- --range N`). The scanner does NOT aggregate inline.
 - `src/aggregateAll.ts` (`bun run aggregate-all`) walks every supported range size on a loop, sleeping
-  `AGGREGATE_INTERVAL_MS` (default 60s) between sweeps. This is the entry point the compose `aggregator` service
+  `AGGREGATE_INTERVAL_MS` (default 30s) between sweeps. This is the entry point the compose `aggregator` service
   uses.
 - `src/collectStatistics.ts` (`bun run collect-statistics`, Compose `statistics`) gathers a read-only,
   repeatable-read snapshot of existing tables on a separate one-connection worker. It atomically replaces

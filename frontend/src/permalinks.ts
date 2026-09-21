@@ -91,11 +91,6 @@ export function getCurrentLocation(): ClientLocation {
   return { pathname: window.location.pathname, search: window.location.search };
 }
 
-export function getCurrentSearch(): string {
-  if (typeof window === "undefined") return "";
-  return window.location.search;
-}
-
 function normalizePathname(pathname: string): string {
   const prefixed = pathname.startsWith("/") ? pathname : `/${pathname}`;
   if (prefixed.length > 1 && prefixed.endsWith("/")) {
@@ -281,14 +276,6 @@ export function readFiltersFromSearch<T extends Record<string, string>>(
     if (value !== null) next[key] = value;
   }
   return next as T;
-}
-
-export function hasAnyFilterParam<T extends Record<string, string>>(
-  search: string,
-  keys: readonly (keyof T & string)[],
-): boolean {
-  const params = new URLSearchParams(search);
-  return keys.some((key) => params.has(key));
 }
 
 export function filtersEqual<T extends Record<string, string>>(

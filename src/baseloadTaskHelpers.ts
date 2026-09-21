@@ -91,12 +91,6 @@ export function pruneExpiredPoolEntries(
   return pool.filter((entry) => entry.expiresAtMs - marginMs > nowMs);
 }
 
-export function pickSoonestExpiringPoolEntry(
-  pool: readonly BaseloadPoolEntry[],
-): BaseloadPoolEntry | null {
-  return pickSoonestExpiringPoolEntries(pool, 1)[0] ?? null;
-}
-
 export function pickSoonestExpiringPoolEntries(
   pool: readonly BaseloadPoolEntry[],
   count: number,
