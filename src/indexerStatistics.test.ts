@@ -18,12 +18,14 @@ import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperatio
 import type { RpcBlock, RpcReceipt } from "./types";
 
 describe("statistics coverage and worker config", () => {
-  test("uses row count and includes block zero, with precise large numbers", () => {
-    expect(scannedPercent("1", "0")).toBe(100);
-    expect(scannedPercent("0", "0")).toBe(0);
-    expect(scannedPercent("3", "9")).toBe(30);
+  test("excludes ten tip blocks, preserves older gaps and handles short chains and large counts", () => {
+    expect(scannedPercent("1", "10")).toBe(100);
+    expect(scannedPercent("0", "10")).toBe(0);
+    expect(scannedPercent("3", "19")).toBe(30);
+    expect(scannedPercent("0", "0")).toBeNull();
+    expect(scannedPercent("0", "9")).toBeNull();
     expect(scannedPercent("0", null)).toBeNull();
-    expect(scannedPercent("9007199254740992", "9007199254740992")).toBe(99.9999);
+    expect(scannedPercent("9007199254740992", "9007199254741002")).toBe(99.9999);
   });
   test("validates timing and supports one-shot output", () => {
     const config = parseStatisticsConfig(["--once", "--output", "/tmp/test-stats.json"], { DATABASE_URL: "postgres://test" });
@@ -38,7 +40,7 @@ function fileFixture(): IndexerStatistics {
   return {
     version: 1, gatheredAtUtc: "2026-09-21T10:00:00.000Z", completedAtUtc: "2026-09-21T10:00:00.100Z",
     durationMs: 100, refreshIntervalMs: 300_000,
-    chain: { id: null, observedHead: null, observedAtUtc: null, headObservationAgeSeconds: null, headObservationStale: true, blocksThroughObservedHead: null, indexedBlocksThroughObservedHead: null, scannedPercent: null },
+    chain: { id: null, observedHead: null, observedAtUtc: null, headObservationAgeSeconds: null, headObservationStale: true, blocksThroughObservedHead: null, indexedBlocksThroughObservedHead: null, coverageThroughBlock: null, coverageBlocks: null, indexedCoverageBlocks: null, scannedPercent: null },
     blocks: { indexed: "9007199254740993", first: "0", last: null, missingWithinStoredRange: "0", transactions: "0", inputBytes: "0", compressedInputBytes: "0" },
     transactions: { indexed: "0", withInput: "0", inputBytes: "0", compressedInputBytes: "0", maxInputBytes: "0" },
     operations: { byType: [], successfulCreatesWithoutKey: "0", successfulPayloadWrites: "0", successfulPayloadBytes: "0", successfulReferenceWrites: "0", referencedPayloadBytes: "0", referencesWithoutSize: "0" },
@@ -108,7 +110,7 @@ describe.skipIf(!hasPostgresForTests())("statistics PostgreSQL snapshot", () => 
       attributes: [{ name: "name", typeId: 8, valueText: "a", valueNum: null }],
     };
     try {
-      for (const height of [0, 2, 25]) {
+      for (const height of [0, 2, 19, 25]) {
         const block: RpcBlock = { number: `0x${height.toString(16)}`, timestamp: "0x1", gasUsed: "0x0", gasLimit: "0x100000", transactions: [] };
         const receipts: RpcReceipt[] = [];
         const ops: TransactionArkivOperations[] = [];
@@ -144,14 +146,27 @@ describe.skipIf(!hasPostgresForTests())("statistics PostgreSQL snapshot", () => 
       ]);
       await index.setProgress({ floorBlock: 0n, projectedThroughBlock: 20n });
       const stats = await gatherIndexerStatistics(db, { schema });
-      expect(stats.chain).toMatchObject({ id: "123", scannedPercent: 9.5238, indexedBlocksThroughObservedHead: "2", headObservationStale: true });
-      expect(stats.blocks).toMatchObject({ indexed: "3", missingWithinStoredRange: "23", transactions: "4", inputBytes: "9007199254741005" });
+      expect(stats.chain).toMatchObject({ id: "123", scannedPercent: 18.1818, indexedBlocksThroughObservedHead: "3", coverageThroughBlock: "10", coverageBlocks: "11", indexedCoverageBlocks: "2", headObservationStale: true });
+      expect(stats.blocks).toMatchObject({ indexed: "4", missingWithinStoredRange: "22", transactions: "4", inputBytes: "9007199254741005" });
       expect(stats.transactions).toMatchObject({ indexed: "4", inputBytes: "12", withInput: "4", maxInputBytes: "3" });
       expect(stats.operations.byType.find((r) => r.type === 2)).toMatchObject({ successful: "1", reverted: "1", unknownStatus: "1" });
       expect(stats.operations).toMatchObject({ successfulCreatesWithoutKey: "1", successfulPayloadBytes: "14", successfulReferenceWrites: "1", referencedPayloadBytes: "9007199254740993", referencesWithoutSize: "0" });
       expect(stats.entities).toMatchObject({ status: "available", known: "4", active: "2", expired: "1", deleted: "1", activeRecordedPayloadBytes: "20", activeAttributes: "1", maxAttributesPerActiveEntity: "1", activeWithAttributes: "1" });
       expect(stats.entities.attributeTypes).toEqual([{ typeId: 8, name: "str", count: "1" }]);
       expect(stats.entities.topContentTypes).toEqual([{ contentType: "text/plain", entities: "2", recordedPayloadBytes: "20" }]);
+      // Filling the older gaps reaches 100% even though nine of the newest ten blocks are absent.
+      for (const height of [1, 3, 4, 5, 6, 7, 8, 9, 10]) {
+        const block: RpcBlock = { number: `0x${height.toString(16)}`, timestamp: "0x1", gasUsed: "0x0", gasLimit: "0x100000", transactions: [] };
+        await storage.saveBlockMetrics(computeBlockMetrics(block, []));
+      }
+      expect((await gatherIndexerStatistics(db, { schema })).chain).toMatchObject({
+        scannedPercent: 100, coverageBlocks: "11", indexedCoverageBlocks: "11", indexedBlocksThroughObservedHead: "12",
+      });
+      await storage.saveChainProgress(9n, 9n);
+      expect((await gatherIndexerStatistics(db, { schema })).chain).toMatchObject({
+        scannedPercent: null, coverageThroughBlock: null, coverageBlocks: "0", indexedCoverageBlocks: "0",
+      });
+      await storage.saveChainProgress(20n, 20n);
       // Expiry changes with the projection block, without any new operations.
       await index.setProgress({ projectedThroughBlock: 100n });
       expect((await gatherIndexerStatistics(db, { schema })).entities.active).toBe("1");

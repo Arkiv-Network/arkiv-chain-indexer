@@ -4,11 +4,12 @@ import type { IndexerStatistics } from "./indexerStatisticsTypes";
 
 export const DEFAULT_STATISTICS_INTERVAL_MS = 300_000;
 export const DEFAULT_STATISTICS_FILE = "/tmp/arkiv-indexer-statistics.json";
+export const STATISTICS_HEAD_EXCLUSION_BLOCKS = 10n;
 
-/** Whole-chain coverage counts actual rows, including genesis, rather than scanner height. */
+/** Count only rows through observed head minus ten; normal tip lag does not reduce coverage. */
 export function scannedPercent(count: string, head: string | null): number | null {
   if (head === null) return null;
-  const total = BigInt(head) + 1n;
+  const total = BigInt(head) + 1n - STATISTICS_HEAD_EXCLUSION_BLOCKS;
   if (total <= 0n) return null;
   // Truncate at four decimal places so incomplete coverage never rounds up to 100%.
   return Number(BigInt(count) * 1_000_000n / total) / 10_000;
@@ -37,17 +38,19 @@ export async function gatherIndexerStatistics(
     );
     const state = new Map(stateRows.rows.map((r) => [r.key, r.value]));
     const head = state.get("latest_observed_block") ?? null;
+    const coverageHead = head === null ? null : BigInt(head) - STATISTICS_HEAD_EXCLUSION_BLOCKS;
     const observedAt = state.get("latest_observed_at") ?? null;
     const headAge = observedAt === null ? null : Math.max(0, (Date.parse(gatheredAtUtc) - Date.parse(observedAt)) / 1000);
-    const blocks = (await tx.query<IndexerStatistics["blocks"] & { throughHead: string }>(`
+    const blocks = (await tx.query<IndexerStatistics["blocks"] & { throughHead: string; throughCoverageHead: string }>(`
       SELECT count(*)::text AS indexed, min(block_number)::text AS first, max(block_number)::text AS last,
         (coalesce(max(block_number) - min(block_number) + 1, 0) - count(*))::text AS "missingWithinStoredRange",
         coalesce(sum(transaction_count), 0)::text AS transactions,
         coalesce(sum(total_input_data_size_bytes::numeric), 0)::text AS "inputBytes",
         coalesce(sum(total_input_data_compressed_size_bytes::numeric), 0)::text AS "compressedInputBytes",
-        count(*) FILTER (WHERE block_number <= $1::bigint)::text AS "throughHead"
-      FROM ${table("blocks")}`, [head])).rows[0]!;
-    const { throughHead, ...blockStats } = blocks;
+        count(*) FILTER (WHERE block_number <= $1::bigint)::text AS "throughHead",
+        count(*) FILTER (WHERE block_number <= $2::bigint)::text AS "throughCoverageHead"
+      FROM ${table("blocks")}`, [head, coverageHead?.toString() ?? null])).rows[0]!;
+    const { throughHead, throughCoverageHead, ...blockStats } = blocks;
     const transactions = (await tx.query<IndexerStatistics["transactions"]>(`
       SELECT count(*)::text AS indexed,
         count(*) FILTER (WHERE input_data_size_bytes::numeric > 0)::text AS "withInput",
@@ -143,7 +146,7 @@ export async function gatherIndexerStatistics(
       }
     }
     const limitations = [
-      "Coverage uses actual stored blocks divided by observed head + 1 (including genesis). The head observation can be stale.",
+      "Coverage excludes the newest 10 observed blocks from both the stored count and the chain total. Older gaps still reduce coverage; chains with 10 or fewer blocks have no coverage percentage yet. The head observation can be stale.",
       "All totals cover stored data only. Skipped transactions, disabled transaction storage, missing decoder history and unimported genesis entities cannot be recovered from these counts.",
       "Operation counts are attempts grouped by receipt outcome; only status 1 counts as successful. Repeated updates count separately. Genesis entities have no create transaction.",
       "Input bytes are calldata sizes, not full serialized signed transaction sizes. Historical size fields defaulted to zero and cannot be distinguished from measured zero without rescanning.",
@@ -159,7 +162,10 @@ export async function gatherIndexerStatistics(
         headObservationAgeSeconds: headAge, headObservationStale: headAge === null || headAge > 60,
         blocksThroughObservedHead: head === null ? null : (BigInt(head) + 1n).toString(),
         indexedBlocksThroughObservedHead: head === null ? null : throughHead,
-        scannedPercent: scannedPercent(throughHead, head),
+        coverageThroughBlock: coverageHead === null || coverageHead < 0n ? null : coverageHead.toString(),
+        coverageBlocks: coverageHead === null ? null : (coverageHead < 0n ? 0n : coverageHead + 1n).toString(),
+        indexedCoverageBlocks: head === null ? null : throughCoverageHead,
+        scannedPercent: scannedPercent(throughCoverageHead, head),
       },
       blocks: blockStats, transactions, operations, entities, limitations,
     };

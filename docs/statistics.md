@@ -52,14 +52,18 @@ when their volume survives. There is no historical statistics time series.
 
 Counts and byte totals are decimal strings in JSON, preserving integer precision.
 Only the percentage, durations, type IDs and timestamps use other representations.
+The page's **Byte units** selector offers exact bytes, automatic decimal units
+(kB/MB/GB/TB, base 1000; the default), and automatic binary units
+(KiB/MiB/GiB/TiB, base 1024). It also applies to mean input sizes and content-type
+payload totals, and remembers the selection in the browser.
 
 | Statistic | Definition |
 | --- | --- |
-| Chain scanned | Actual stored block rows at or below the last observed chain head / (`head + 1`) × 100. Includes genesis and accounts for gaps; never uses scanner height as a proxy for coverage. Null until a head is known. |
+| Chain scanned | Actual stored block rows at or below `observed head - 10` / (`head + 1 - 10`) × 100. Excludes the newest 10 blocks from both counts to allow normal tip lag. Includes genesis and still accounts for older gaps. Null until the observed chain has more than 10 blocks. `coverageThroughBlock`, `coverageBlocks` and `indexedCoverageBlocks` expose the cutoff and counts; the separate observed-head totals still include the tip. |
 | Indexed blocks | All rows in `blocks`, with first/last height and missing blocks inside that span. |
 | Transactions in block metrics | Sum of `blocks.transaction_count`; available even when transaction-row storage is disabled. Excludes transactions the scanner intentionally ignores. |
 | Indexed transactions | Rows in `transactions`. Can differ from the block-metric total if storage was disabled for some history. |
-| Created/updated/extended/deleted/owner changes/expiry operations | Decoded operations grouped by operation type and transaction receipt outcome. Status `1` is successful, `0` reverted; null/other/missing transaction status is reported separately. Multiple changes to one entity count separately. |
+| Created/updated/extended/deleted/owner changes | Decoded operations grouped by operation type and transaction receipt outcome. Status `1` is successful, `0` reverted; null/other/missing transaction status is reported separately. Multiple changes to one entity count separately. The page omits the expiry-operation row; API totals retain it. |
 | Known entities | Distinct projected entity states at the projection head, including active, expired and deleted entities, and imported genesis entities. Excludes unknown entities whose creates were never indexed. |
 | Active entities | Projected state with `deleted = false` and `expires_at > projection head`. Expiry is recalculated on every sweep, even without new operations. |
 | Input byte totals | Stored uncompressed and compressed calldata sizes, separately from block metrics and transaction rows. Transaction input count, mean and maximum are also shown. |

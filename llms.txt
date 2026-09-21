@@ -156,9 +156,12 @@ No database aggregation is performed by the request. Returns 503 with
 
 Fields: `gatheredAtUtc`, `completedAtUtc`, `durationMs`, `refreshIntervalMs`,
 `ageSeconds`, `stale`, `chain`, `blocks`, `transactions`, `operations`, `entities`
-and `limitations`. Counts and byte totals are decimal strings. Coverage uses
-actual stored blocks through the observed head divided by `head + 1`, including
-genesis; `chain.scannedPercent` is null without an observed head. Block-metric
+and `limitations`. Counts and byte totals are decimal strings. Coverage excludes
+the newest 10 observed blocks: actual stored blocks through `head - 10` divided
+by `head + 1 - 10`, including genesis. `chain.coverageThroughBlock`,
+`chain.coverageBlocks` and `chain.indexedCoverageBlocks` expose that cutoff and its
+counts; observed-head totals still include the tip. `chain.scannedPercent` is null
+without an observed head or when the chain has 10 or fewer blocks. Block-metric
 transaction totals and stored transaction-row counts are reported separately.
 Operation counts separate successful, reverted and unknown receipt outcomes.
 Entity counts refer to `entities.asOfBlock`, the projection head, and are null

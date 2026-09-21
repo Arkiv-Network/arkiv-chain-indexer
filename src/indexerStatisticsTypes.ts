@@ -13,6 +13,10 @@ export interface IndexerStatistics {
     headObservationStale: boolean;
     blocksThroughObservedHead: string | null;
     indexedBlocksThroughObservedHead: string | null;
+    /** Coverage excludes the newest ten blocks from both its numerator and denominator. */
+    coverageThroughBlock: string | null;
+    coverageBlocks: string | null;
+    indexedCoverageBlocks: string | null;
     scannedPercent: number | null;
   };
   blocks: {

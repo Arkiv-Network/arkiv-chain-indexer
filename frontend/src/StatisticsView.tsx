@@ -4,9 +4,12 @@ import type { StatisticsResponse } from "../../src/indexerStatisticsTypes";
 import { Stat, StatGrid } from "@/components/stat";
 import { Card, CardContent } from "@/components/ui/card";
 import { fmtDate } from "./format";
+import { selectClass } from "@/components/filters-panel";
+import { readStoredString, writeStoredString } from "./localStorage";
+import { formatStatisticsBytes, isStatisticsByteUnit, type StatisticsByteUnit } from "./statisticsFormat";
 
 const integer = (value: string | null) => value === null ? "Unavailable" : BigInt(value).toLocaleString("en-US");
-const bytes = (value: string | null) => value === null ? "Unavailable" : `${integer(value)} B`;
+const BYTE_UNIT_KEY = "statistics.byteUnit";
 const average = (total: string | null, count: string | null) => {
   if (total === null || count === null || count === "0") return "—";
   const hundredths = BigInt(total) * 100n / BigInt(count);
@@ -24,6 +27,9 @@ function Section({ title, note, children }: { title: string; note?: string; chil
 export function StatisticsView({ timeZone }: { timeZone: string }) {
   const [data, setData] = useState<StatisticsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [byteUnit, setByteUnit] = useState<StatisticsByteUnit>(() =>
+    readStoredString(BYTE_UNIT_KEY, "decimal", isStatisticsByteUnit) as StatisticsByteUnit);
+  const bytes = (value: string | null) => formatStatisticsBytes(value, byteUnit);
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -43,9 +49,24 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
 
   const entity = data?.entities;
   return <div className="space-y-6">
-    <div>
-      <h1 className="text-xl font-semibold">Statistics</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Cumulative indexed activity and entity state from the latest statistics snapshot.</p>
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 className="text-xl font-semibold">Statistics</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Cumulative indexed activity and entity state from the latest statistics snapshot.</p>
+      </div>
+      <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+        Byte units
+        <select className={selectClass} value={byteUnit} onChange={(event) => {
+          const value = event.target.value;
+          if (!isStatisticsByteUnit(value)) return;
+          setByteUnit(value);
+          writeStoredString(BYTE_UNIT_KEY, value);
+        }}>
+          <option value="bytes">Bytes (B)</option>
+          <option value="decimal">Kilobytes (kB, base 1000)</option>
+          <option value="binary">Kibibytes (KiB, base 1024)</option>
+        </select>
+      </label>
     </div>
     {error && <p role="alert" className="text-sm text-amber-600">{error}{data ? " Showing the last loaded snapshot." : ""}</p>}
     {!data && !error && <p role="status" className="text-sm text-muted-foreground">Loading statistics…</p>}
@@ -54,7 +75,7 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
         <p>Gathered {fmtDate(data.gatheredAtUtc, timeZone)} · Collection took {(data.durationMs / 1000).toFixed(1)}s · Refreshes about every {Math.round(data.refreshIntervalMs / 60_000)} minutes</p>
         {(data.stale || error) && <p className="font-medium text-amber-600">Snapshot is stale. Totals may have changed since collection.</p>}
       </CardContent></Card>
-      <Section title="Chain coverage" note="Counts every stored block, including genesis. Gaps and unscanned history reduce coverage.">
+      <Section title="Chain coverage" note="The scanned percentage excludes the newest 10 blocks to allow for normal indexing delay. Older gaps and unscanned history still reduce coverage.">
         <StatGrid>
           <Stat label="Chain scanned" size="lg">{data.chain.scannedPercent === null ? "Unknown" : `${data.chain.scannedPercent.toFixed(4)}%`}</Stat>
           <Stat label="Indexed blocks" size="lg">{integer(data.blocks.indexed)}</Stat>
@@ -73,7 +94,7 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
         <div className="overflow-x-auto border border-border">
           <table className="w-full text-left text-xs">
             <thead className="bg-muted"><tr>{["Operation", "Successful", "Reverted", "Unknown outcome"].map((h) => <th className="px-3 py-2 font-medium" key={h}>{h}</th>)}</tr></thead>
-            <tbody>{data.operations.byType.map((row) => <tr key={row.type} className="border-t border-border">
+            <tbody>{data.operations.byType.filter((row) => row.type !== 6).map((row) => <tr key={row.type} className="border-t border-border">
               <th className="px-3 py-2 font-medium">{row.name === "ownerChanged" ? "Owner changes" : row.name.charAt(0).toUpperCase() + row.name.slice(1)}</th>
               {[row.successful, row.reverted, row.unknownStatus].map((value, i) => <td key={i} className="px-3 py-2 font-mono tabular-nums">{integer(value)}</td>)}
             </tr>)}</tbody>
@@ -98,7 +119,7 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
           <Stat label="Compressed input in block metrics">{bytes(data.blocks.compressedInputBytes)}</Stat>
           <Stat label="Input bytes in transaction rows">{bytes(data.transactions.inputBytes)}</Stat>
           <Stat label="Transaction rows with input">{integer(data.transactions.withInput)}</Stat>
-          <Stat label="Mean input per transaction">{average(data.transactions.inputBytes, data.transactions.indexed)} B</Stat>
+          <Stat label="Mean input per transaction">{formatStatisticsBytes(data.transactions.inputBytes, byteUnit, data.transactions.indexed)}</Stat>
           <Stat label="Largest transaction input">{bytes(data.transactions.maxInputBytes)}</Stat>
           <Stat label="Successful writes with payload">{integer(data.operations.successfulPayloadWrites)}</Stat>
           <Stat label="Recorded payload bytes in successful ops">{bytes(data.operations.successfulPayloadBytes)}</Stat>
