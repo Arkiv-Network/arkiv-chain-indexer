@@ -33,6 +33,7 @@ import { GuzzlersView } from "./GuzzlersView";
 import { HealthView } from "./HealthView";
 import { SyncStatusBanner } from "./SyncStatusBanner";
 import { HomeView } from "./HomeView";
+import { StatisticsView } from "./StatisticsView";
 import { readStoredString, writeStoredString } from "./localStorage";
 import { requiresAdminView, visibleNavItems } from "./navigation";
 import {
@@ -524,6 +525,8 @@ export function App() {
       >
         {activeView === "search" ? (
           <SearchView locationSearch={locationSearch} onNavigate={navigateSearch} onLocationChange={refreshFromLocation} />
+        ) : activeView === "statistics" ? (
+          <StatisticsView timeZone={timeZone} />
         ) : activeView === "home" ? (
           <HomeView
             onLocationChange={refreshFromLocation}

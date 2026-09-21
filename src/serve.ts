@@ -3,6 +3,7 @@ import { AuthStorage } from "./authStorage";
 import { parseServerConfig, ServerHelpRequested } from "./serverConfig";
 import { buildSyncStatusResponse, createBlockServer } from "./server";
 import { ScannerStorage } from "./storage";
+import { StatisticsFileReader } from "./statisticsFile";
 import { RedisGuzzlerStore } from "./guzzlerStore";
 import { parseBaseloadRuntimeConfig, readBaseloadConfigFile } from "./baseloadConfig";
 import { BaseloadRuntime } from "./baseloadRuntime";
@@ -210,6 +211,7 @@ async function main(): Promise<void> {
     collectIndexerProgress(() => storageForMetrics.getScannerProgress());
     search = OmniSearch.open(config.databaseUrl, config.entityQueryIndex);
     const server = createBlockServer(storage, {
+      statisticsProvider: new StatisticsFileReader(config.statisticsFile),
       search,
       port: config.port,
       ...(config.hostname !== undefined ? { hostname: config.hostname } : {}),

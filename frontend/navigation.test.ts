@@ -8,11 +8,12 @@ function visibleLabels(adminVerified: boolean, transactionDataEnabled: boolean |
 describe("frontend navigation visibility", () => {
   test("direct admin views require the same access as their navigation items", () => {
     for (const view of ["admin", "baseload", "health"] as const) expect(requiresAdminView(view)).toBe(true);
-    for (const view of ["home", "data", "search", "entity", "transaction"] as const) expect(requiresAdminView(view)).toBe(false);
+    for (const view of ["statistics", "home", "data", "search", "entity", "transaction"] as const) expect(requiresAdminView(view)).toBe(false);
   });
   test("hides admin-only pages when admin mode is not verified", () => {
     expect(visibleLabels(false, true)).toEqual([
       "Home",
+      "Statistics",
       "Search",
       "Blocks",
       "Data",
@@ -30,6 +31,7 @@ describe("frontend navigation visibility", () => {
   test("shows admin-only pages when admin mode is verified", () => {
     expect(visibleLabels(true, true)).toEqual([
       "Home",
+      "Statistics",
       "Search",
       "Blocks",
       "Data",
@@ -50,6 +52,7 @@ describe("frontend navigation visibility", () => {
   test("keeps transaction-data pages hidden until the backend feature is available", () => {
     expect(visibleLabels(true, false)).toEqual([
       "Home",
+      "Statistics",
       "Search",
       "Blocks",
       "Data",

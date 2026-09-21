@@ -1,4 +1,5 @@
 export type View =
+  | "statistics"
   | "home"
   | "search"
   | "blocks"
@@ -21,6 +22,7 @@ export type View =
 
 const VIEW_PARAM = "view";
 const VIEW_PATHS: Record<View, string> = {
+  statistics: "/statistics",
   home: "/",
   search: "/search",
   blocks: "/blocks",
@@ -43,6 +45,7 @@ const VIEW_PATHS: Record<View, string> = {
 };
 
 const VIEW_PATH_ALIASES: Record<string, View> = {
+  "/statistics": "statistics",
   "/": "home",
   "/search": "search",
   "/blocks": "blocks",

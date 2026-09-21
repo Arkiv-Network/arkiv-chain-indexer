@@ -28,6 +28,7 @@ import type { EntityVersion } from "./entityIndex";
 import type { EntityIndexReader, EntityIndexStats, GenesisImportStatus } from "./entityIndexStorage";
 import { TYPE_TAGS_BY_ID, wireAttributeValue } from "./entityValues";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
+import type { StatisticsResponse } from "./indexerStatisticsTypes";
 import {
   buildPayloadProviderPaymentBreakdown,
   PayloadProviderPaymentResolver,
@@ -72,6 +73,8 @@ import {
 } from "./storage";
 
 export interface BlockServerOptions {
+  /** Worker-produced snapshot only; no database fallback on HTTP requests. */
+  statisticsProvider?: { get(): Promise<StatisticsResponse | null> };
   /** Read-only bounded omni search, with an independent small connection pool. */
   search?: SearchReader;
   /** Set to false to disable `GET /metrics` entirely. Defaults to true. */
@@ -666,6 +669,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
           ? { transactionCountCache: options.transactionCountCache }
           : {}),
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
+        ...(options.statisticsProvider ? { statisticsProvider: options.statisticsProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
         ...(options.search ? { search: options.search } : {}),
@@ -848,6 +852,14 @@ async function routeRequest(
 
   if (url.pathname === "/sync") {
     return handleGetSyncStatus(storage, options);
+  }
+
+  if (url.pathname === "/statistics") {
+    const snapshot = await options.statisticsProvider?.get();
+    return snapshot ? jsonResponse(snapshot) : jsonResponse(
+      { error: "Statistics are not available yet. Start the statistics worker and wait for its first sweep." },
+      { status: 503, headers: { "Retry-After": "30" } },
+    );
   }
 
   if (url.pathname === "/guzzlers") {

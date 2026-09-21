@@ -198,6 +198,12 @@ docker compose up --build
 - `src/aggregateAll.ts` (`bun run aggregate-all`) walks every supported range size on a loop, sleeping
   `AGGREGATE_INTERVAL_MS` (default 60s) between sweeps. This is the entry point the compose `aggregator` service
   uses.
+- `src/collectStatistics.ts` (`bun run collect-statistics`, Compose `statistics`) gathers a read-only,
+  repeatable-read snapshot of existing tables on a separate one-connection worker. It atomically replaces
+  `STATISTICS_FILE`, shared read-only with the backend, for `GET /statistics` and the frontend Statistics page.
+  Never fall back to full-table aggregation on an HTTP request. No database rows/schema are added for these
+  statistics. Counts/bytes stay decimal strings; active entities are evaluated at the declared projection
+  block, and unavailable entity state is null. See `docs/statistics.md` for coverage and measurement limits.
 - `block_ranges` rows are keyed by `(range_size, range_start)` so multiple range sizes can coexist.
 - `src/testPostgres.ts` provides `createIsolatedStorage()` for the integration tests — each test gets its own
   random schema and a cleanup function that drops it.

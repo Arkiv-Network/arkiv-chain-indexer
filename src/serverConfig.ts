@@ -1,4 +1,5 @@
 import { parseAuthConfig, type AuthConfig } from "./authConfig";
+import { DEFAULT_STATISTICS_FILE } from "./indexerStatistics";
 import {
   CliHelpRequested,
   coerceBoolean,
@@ -35,6 +36,7 @@ export interface JsonRpcPassthroughConfig {
 
 export interface ServerConfig {
   databaseUrl: string;
+  statisticsFile: string;
   port: number;
   hostname?: string;
   transactionDataEnabled: boolean;
@@ -95,6 +97,12 @@ const SPEC: CliSpec = {
   name: "serve",
   summary: "DATABASE_URL=postgres://user:pass@host:5432/db bun run serve",
   options: [
+    {
+      flags: "--statistics-file <path>",
+      description: "Read the statistics worker's JSON snapshot from this file (STATISTICS_FILE).",
+      env: ["STATISTICS_FILE"],
+      default: DEFAULT_STATISTICS_FILE,
+    },
     {
       flags: "--database-url <url>",
       description: "PostgreSQL connection string (or DATABASE_URL env).",
@@ -494,6 +502,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
 
   return {
     databaseUrl,
+    statisticsFile: cli.value("statistics-file") || DEFAULT_STATISTICS_FILE,
     port,
     ...(hostname ? { hostname } : {}),
     transactionDataEnabled,

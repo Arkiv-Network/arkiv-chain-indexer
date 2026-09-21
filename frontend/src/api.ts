@@ -1642,6 +1642,10 @@ export function fetchSenders(params: URLSearchParams): Promise<SendersResponse> 
   return getJson<CompactSendersResponse>("/senders", params).then(expandSendersResponse);
 }
 
+export function fetchStatistics(): Promise<import("../../src/indexerStatisticsTypes").StatisticsResponse> {
+  return getJson("/statistics", new URLSearchParams());
+}
+
 export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", new URLSearchParams());
 }

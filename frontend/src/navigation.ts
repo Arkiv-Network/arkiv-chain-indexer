@@ -9,6 +9,7 @@ export interface NavItem {
 
 export const ALL_NAV_ITEMS: readonly NavItem[] = [
   { view: "home", label: "Home" },
+  { view: "statistics", label: "Statistics" },
   { view: "search", label: "Search" },
   { view: "blocks", label: "Blocks" },
   { view: "data", label: "Data" },

@@ -105,6 +105,7 @@ Related scanner and worker settings:
 | `OPTIONS` | any | CORS preflight. |
 | `GET` | `/health` | Backend, scanner, database, feature, and guzzler cache health. |
 | `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
+| `GET` | `/statistics` | Worker snapshot of chain coverage, transaction/operation totals, entity state, payload sizes and attributes. |
 | `POST` | `/shadow-rpc` | Ethereum JSON-RPC 2.0 served from stored data, plus any methods the optional passthrough relays to a real node. |
 | `GET` | `/blocks` | Compact rows for stored per-block metrics. |
 | `GET` | `/blocks/:blockNumber` | One compact stored block row. |
@@ -146,6 +147,26 @@ Returns:
 - `guzzlers`: Redis cache health: `enabled`, `entryCount`, `bucketCount`, `oldestBucket`,
   `newestBucket`, `totalSizeBytes`.
 - `sync`: the same object served by `GET /sync`.
+
+## `GET /statistics`
+
+Returns the separate statistics worker's latest snapshot. No query parameters.
+No database aggregation is performed by the request. Returns 503 with
+`Retry-After: 30` before the first snapshot is available.
+
+Fields: `gatheredAtUtc`, `completedAtUtc`, `durationMs`, `refreshIntervalMs`,
+`ageSeconds`, `stale`, `chain`, `blocks`, `transactions`, `operations`, `entities`
+and `limitations`. Counts and byte totals are decimal strings. Coverage uses
+actual stored blocks through the observed head divided by `head + 1`, including
+genesis; `chain.scannedPercent` is null without an observed head. Block-metric
+transaction totals and stored transaction-row counts are reported separately.
+Operation counts separate successful, reverted and unknown receipt outcomes.
+Entity counts refer to `entities.asOfBlock`, the projection head, and are null
+when the projection is unavailable or importing genesis. Attribute counts and
+content-type summaries cover active entities at that block. Byte totals describe
+recorded calldata/payload sizes, not full signed transaction sizes or verified
+unique provider storage. A lagging projection cannot establish exact live-chain
+entity counts. Check `limitations`, snapshot age and observed/projection heads.
 
 ## `GET /sync`
 

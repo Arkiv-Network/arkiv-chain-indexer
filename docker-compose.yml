@@ -234,6 +234,26 @@ services:
     extra_hosts: *extra-hosts
     command: ["bun", "run", "aggregate-all"]
 
+  statistics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gas}:${POSTGRES_PASSWORD:-gas}@postgres:5432/${POSTGRES_DB:-gas}
+      STATISTICS_FILE: /app/statistics/snapshot.json
+      STATISTICS_INTERVAL_MS: ${STATISTICS_INTERVAL_MS:-300000}
+      STATISTICS_STATEMENT_TIMEOUT_MS: ${STATISTICS_STATEMENT_TIMEOUT_MS:-120000}
+    volumes:
+      - statisticsdata:/app/statistics
+    command: ["bun", "run", "collect-statistics"]
+
   sender-aggregator:
     build:
       context: .
@@ -308,6 +328,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
+      STATISTICS_FILE: /app/statistics/snapshot.json
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
       # Entity history slice + response cache; empty values fall back to the
       # backend defaults (100 ops / 10k entries / 64 MiB / 5 min TTL).
@@ -382,6 +403,7 @@ services:
       - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
     volumes:
       - ${BASELOAD_CONFIG_DIR:-./baseload-config}:/app/baseload-config:ro
+      - statisticsdata:/app/statistics:ro
       # baseload-config is read-only, so minted keys get their own writable volume;
       # keeping it across restarts saves a captcha solve per worker.
       - baseloadkeys:/app/baseload-keys
@@ -432,6 +454,7 @@ services:
       - "${FRONTEND_HOST:-127.0.0.1}:${FRONTEND_PORT:-23560}:23560"
 
 volumes:
+  statisticsdata:
   pgdata:
   redisdata:
   baseloadkeys:

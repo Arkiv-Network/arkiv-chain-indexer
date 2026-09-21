@@ -76,6 +76,12 @@ The aggregator container runs `bun run aggregate-all` which walks every supporte
 after its newest completed range, and sleeps for 30 seconds after each sweep (configurable via
 `AGGREGATE_INTERVAL_MS`).
 
+The separate statistics worker (`bun run collect-statistics`, Compose service `statistics`)
+publishes chain coverage, transaction/operation counts, active entities, payload-size
+metadata and attribute statistics to the **Statistics** page and `GET /statistics`.
+It only reads existing tables and shares a JSON snapshot with the backend; no new
+database storage is required. See [statistics setup and measurement limits](docs/statistics.md).
+
 The sender aggregator container runs `bun run aggregate-senders` which rebuilds address-level stats from stored
 transaction rows and sleeps for one minute between rebuilds (configurable via `SENDER_AGGREGATE_INTERVAL_MS`).
 
