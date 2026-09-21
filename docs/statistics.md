@@ -57,6 +57,14 @@ The page's **Byte units** selector offers exact bytes, automatic decimal units
 (KiB/MiB/GiB/TiB, base 1024). It also applies to mean input sizes and content-type
 payload totals, and remembers the selection in the browser.
 
+Every section, metric label and table header has an info icon explaining its
+meaning, database source, calculation, inclusion conditions and limitations.
+Hover or focus an icon to preview the explanation; click or tap to keep it open
+while reading or scrolling. With the icon focused, Down Arrow moves focus into
+the scrollable explanation. Escape dismisses it. The descriptions live in
+`frontend/src/statisticsHelp.ts` and should be updated whenever the worker's
+queries or the scanner's measurements change.
+
 | Statistic | Definition |
 | --- | --- |
 | Chain scanned | Actual stored block rows at or below `observed head - 10` / (`head + 1 - 10`) × 100. Excludes the newest 10 blocks from both counts to allow normal tip lag. Includes genesis and still accounts for older gaps. Null until the observed chain has more than 10 blocks. `coverageThroughBlock`, `coverageBlocks` and `indexedCoverageBlocks` expose the cutoff and counts; the separate observed-head totals still include the tip. |

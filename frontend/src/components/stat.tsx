@@ -18,7 +18,7 @@ export function Stat({
   wide = false,
   size = "sm",
 }: {
-  label: string;
+  label: ReactNode;
   children: ReactNode;
   title?: string;
   wide?: boolean;
