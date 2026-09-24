@@ -22,13 +22,3 @@ export function detectBrowserTimeZone(): string {
   const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return TIME_ZONE_OPTIONS.some((option) => option.value === detected) ? detected : "UTC";
 }
-
-export function isSupportedTimeZone(value: string | undefined): value is string {
-  if (!value) return false;
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
-    return true;
-  } catch {
-    return false;
-  }
-}

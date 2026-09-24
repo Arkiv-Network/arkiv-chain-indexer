@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ADDRESS_FACE_DATA_URI_PREFIX, addressFaceDataUri, blockieDataUri } from "./src/blockies";
+import { ADDRESS_FACE_DATA_URI_PREFIX, addressFaceDataUri } from "./src/blockies";
 
 const ADDRESS = "0x1234567890abcdef1234567890ABCDEF12345678";
 
@@ -28,9 +28,5 @@ describe("frontend address faces", () => {
     const second = addressFaceDataUri(ADDRESS.toLowerCase());
 
     expect(second).toBe(first);
-  });
-
-  test("keeps the legacy blockie helper on the same frontend implementation", () => {
-    expect(blockieDataUri(ADDRESS)).toBe(addressFaceDataUri(ADDRESS));
   });
 });

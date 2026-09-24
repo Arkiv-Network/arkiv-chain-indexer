@@ -1,5 +1,5 @@
 import { Check, Copy } from "lucide-react";
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { cn } from "@/lib/utils";
 
 export async function copyText(value: string): Promise<boolean> {
@@ -130,8 +130,4 @@ export function CopyCell({
       <CopyButton value={copyValue} label={copyLabel} />
     </span>
   );
-}
-
-export function MutedValue({ children }: { children: ReactNode }) {
-  return <span className="text-xs text-muted-foreground">{children}</span>;
 }

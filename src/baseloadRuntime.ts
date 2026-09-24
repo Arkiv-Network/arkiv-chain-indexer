@@ -1065,21 +1065,6 @@ function createRpcClient(
   };
 }
 
-export function readBaseloadCreatedEntityKeyFromSdkResult(
-  sdkEntityKey: unknown,
-  txHash: string,
-): HexString {
-  if (!isBytes32Hex(sdkEntityKey)) {
-    throw new Error(
-      `Unable to trust created entity key from transaction ${txHash}: SDK returned invalid entity key ${String(
-        sdkEntityKey,
-      )}`,
-    );
-  }
-
-  return sdkEntityKey;
-}
-
 export function readBaseloadEntityKeysFromSdkResult(
   sdkEntityKeys: unknown,
   txHash: string,

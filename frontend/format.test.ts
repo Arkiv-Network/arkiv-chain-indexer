@@ -5,7 +5,6 @@ import {
   fmtDurationSeconds,
   fmtEth,
   fmtGasPrice,
-  fmtGwei,
   fmtInteger,
   fmtTokenAmount,
   fmtMillions,
@@ -16,16 +15,6 @@ import {
 } from "./src/format";
 
 describe("frontend format helpers", () => {
-  test("formats wei values as Gwei with 4 significant digits", () => {
-    expect(fmtGwei(undefined)).toBe("—");
-    expect(fmtGwei(null)).toBe("—");
-    expect(fmtGwei("0")).toBe("0");
-    expect(fmtGwei("1000000000")).toBe("1");
-    expect(fmtGwei("1234567890")).toBe("1.235");
-    expect(fmtGwei("1234000000")).toBe("1.234");
-    expect(fmtGwei("not-a-number")).toBe("not-a-number");
-  });
-
   test("formats gas prices in the unit that can show them", () => {
     expect(fmtGasPrice(undefined)).toBe("—");
     expect(fmtGasPrice(null)).toBe("—");

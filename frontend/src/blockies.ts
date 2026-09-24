@@ -81,5 +81,3 @@ export function addressFaceDataUri(address: string): string {
   cache.set(key, uri);
   return uri;
 }
-
-export const blockieDataUri = addressFaceDataUri;

@@ -100,7 +100,7 @@ monitors worker configuration through `/api/baseload`.
 
 Configure Google login for administrator access to Baseload changes, saved configurations, the node relay,
 and server metrics. Public explorer views and status APIs remain public. See [Google login setup](docs/google-login.md)
-for credentials, callback registration, session cookies and the two narrowly scoped automation credentials.
+for credentials, callback registration, session cookies and temporary administrator access tokens.
 
 Set `BATCHER_COLLECTOR_URL` to attach recent batcher queue/threshold metadata to stored blocks. The collector
 only serves recent seconds, so the dedicated batcher collector service requests batcher data for stored blocks
@@ -186,7 +186,7 @@ Configuration can be passed through CLI flags or environment variables.
 | `--confirmation-depth` | `SCANNER_CONFIRMATION_DEPTH` | `3` | Number of blocks to stay behind the latest head. |
 | `--poll-ms` | `SCANNER_POLL_MS` | `2000` | Delay while waiting for new safe blocks. |
 | `--retry-ms` | `SCANNER_RETRY_MS` | `5000` | Delay before retrying the same failed block. |
-| `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Legacy setting accepted for compatibility; receipt RPC calls are fetched sequentially. |
+| `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Maximum concurrent receipt RPC requests per block; set to `1` for sequential reads. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
 | `--track-balances` | `SCANNER_TRACK_BALANCES` | `false` | Record each block's sender/recipient balances by reading them from the node (one batched `eth_getBalance` per block). Feeds `GET /balances` and `eth_getBalance`. |
 | `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict from a decoder that parses references. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
@@ -554,13 +554,15 @@ Each size lives independently in `block_ranges` keyed by `(range_size, range_sta
 | `total_max_gas` | Sum of `max_gas_in_block` across the window. |
 | `min_max_gas_in_block`, `max_max_gas_in_block` | Min and max block gas limit (`max_gas_in_block`) across the window. |
 | `transaction_count` | Sum of `transaction_count` across the window. |
-| `average_fee_price_wei` | `sum(block.average_fee_price_wei * block.transaction_count) / sum(block.transaction_count)`. |
-| `average_transaction_gas_used` | `sum(block.average_transaction_gas_used * block.transaction_count) / sum(block.transaction_count)`. |
+| `average_fee_price_wei` | `sum(block.fee_price_sum_wei) / sum(block.transaction_count)`. Older rows fall back to the block average times its transaction count. |
+| `average_transaction_gas_used` | `sum(block.total_gas_used) / sum(block.transaction_count)`. |
 | `average_priority_fee_weighted_wei` | `sum(block.priority_fee_gas_weighted_numerator_wei) / sum(block.total_gas_used)`. Legacy block rows without that exact field fall back to `sum(block.average_priority_fee_weighted_wei * block.total_gas_used) / sum(block.total_gas_used)`. |
-| `average_priority_fee_wei` | `sum(block.average_priority_fee_wei * block.transaction_count) / sum(block.transaction_count)`. |
+| `average_priority_fee_wei` | `sum(block.priority_fee_sum_wei) / sum(block.transaction_count)`. Older rows fall back to the block average times its transaction count. |
 | `is_complete` | Marks rows whose full block window was present when the range aggregate was written. |
 
 When `total_gas_used` or `transaction_count` for the window is `0` the corresponding average is stored as `0`.
+All divisions truncate fractional wei or gas. Legacy fallbacks can lose precision and may retain older
+priority-fee weighting semantics; rescan those blocks to obtain exact helper sums.
 
 #### Aggregator options
 
@@ -620,8 +622,8 @@ DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run serve
 bun run serve -- --database-url postgres://gas:gas@localhost:5432/gas --port 3000
 ```
 
-By default the server listens on port `3000`. CORS headers are set on every response so the static frontend can
-fetch from a different origin.
+By default the server listens on port `3000`. Public reads allow cross-origin requests. Auth/admin responses
+are private and require the configured Origin where applicable; see [Google login](docs/google-login.md).
 
 Set `SERVER_TRANSACTION_DATA_ENABLED=false` or `SAVE_TRANSACTION_DATA=false` to disable transaction inspection
 endpoints and advertise that state to the frontend through `GET /health`.
@@ -861,9 +863,10 @@ HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, 
 `/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
 under `features.jsonRpc`.
 
-It is an admin surface: every `POST` needs an administrator Google session, the configured `Origin`,
-and its `X-CSRF-Token` (`401`/`403` otherwise, `503` when login is unavailable), because the passthrough
-below spends the upstream node's quota and reaches its mempool. The experimental index path,
+It is an admin surface: every `POST` needs an administrator session with the configured `Origin` and
+`X-CSRF-Token`, or a generated temporary administrator access token. Missing or invalid credentials return
+`401`/`403`; unavailable authentication returns `503`. The passthrough spends the upstream node's quota
+and reaches its mempool. The experimental index path,
 `POST /shadow-rpc/experimental`, stays open to everyone.
 
 The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
@@ -932,10 +935,9 @@ Worth knowing before pointing a wallet at it:
   and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
   no business relying on. List it explicitly if a deployment's node really does.
 - **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`)
-  are forwarded by default too.** The index stores operation metadata, never an entity's live state, so on
-  this path nothing but the node answers them. The frontend's `/data` page queries entities through them. The
-  experimental entity index below is the opt-in second opinion: the same methods, answered from PostgreSQL,
-  on a path of their own.
+  are forwarded by default too.** On this path they read the node's entity state. The Data page defaults
+  to the experimental index on `/shadow-rpc/experimental`; administrators can select the backend relay
+  or compare both sources.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -1250,7 +1252,6 @@ The frontend container reads these env vars:
 | `VITE_NETWORK_NAME` | _(empty)_ | Network name (e.g. `Cheesecake`) shown as a badge next to the header brand and in the page title; blank hides it. |
 | `VITE_TOKEN_SYMBOL` | `ETH` | Three-letter token symbol used in frontend native-token labels. |
 | `VITE_TRANSACTION_DECODER_BASE_URL` | `https://decoder.atlas.arkiv-global.net/` | Base URL used for external transaction decoder permalinks (`/?tx=<hash>`). |
-| `VITE_TRANSACTION_EXPLORER_BASE_URL` | unset | Deprecated fallback for `VITE_TRANSACTION_DECODER_BASE_URL`. |
 | `VITE_NO_BATCHER` | `false` | Set to `true` for networks without batcher metrics; hides batcher panels, fields, and chart options. |
 
 ### Developing the frontend locally
@@ -1258,7 +1259,8 @@ The frontend container reads these env vars:
 ```sh
 cd frontend
 npm install
-npm run dev   # vite dev server on http://localhost:5173, proxies /api -> http://localhost:3000
+VITE_API_TARGET=http://localhost:3000 VITE_API_TARGET_STRIP_PREFIX=true npm run dev
+# Vite serves http://localhost:5173 and strips /api before forwarding to the local backend.
 ```
 
 Or build + run the production server locally:
@@ -1272,17 +1274,19 @@ NODE_ENV=production BACKEND_HOST=localhost BACKEND_PORT=3000 PORT=23560 node ser
 
 ## Tests
 
-Run unit tests:
+Install both packages, then run the tests without loading local application credentials:
 
 ```sh
-bun test
+bun install
+npm ci --prefix frontend
+bun --no-env-file test
 ```
 
 Pure-logic tests run without any external services. The storage / aggregator / server integration tests skip
 themselves unless you provide a real PostgreSQL instance via `TEST_DATABASE_URL`:
 
 ```sh
-TEST_DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun test
+TEST_DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun --no-env-file test
 ```
 
 Each integration test runs against its own randomly-named schema and drops it on cleanup, so tests can share a

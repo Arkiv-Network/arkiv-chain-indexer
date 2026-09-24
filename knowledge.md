@@ -146,7 +146,7 @@ Supported range sizes are `2, 5, 10, 20, 50, 100, 200, 500, 1000`, with boundari
 inline in the scanner. Range averages use transaction-count weighting; weighted
 priority uses its exact gas-weighted numerator. Legacy rows missing that numerator
 have an approximate fallback, not retroactively exact history. Details:
-[gas price weighting report](docs/gas-price-weighting-report.md).
+[stored metrics and range aggregation](README.md#stored-metrics).
 
 ## What was done: milestones
 

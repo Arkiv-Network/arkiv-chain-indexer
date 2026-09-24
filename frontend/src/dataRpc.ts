@@ -319,11 +319,6 @@ function jsonRpcErrorMessage(body: unknown): string | null {
   return null;
 }
 
-/** Whether the node said it does not know the method (EIP-1474 `-32601`). */
-export function isMethodNotFound(error: unknown): boolean {
-  return error instanceof RpcCallError && error.code === -32601;
-}
-
 // ---------------------------------------------------------------------------
 // Connection check
 

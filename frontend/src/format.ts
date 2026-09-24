@@ -10,15 +10,6 @@ const ZERO_THRESHOLD = 1e-8;
 const LARGE_THRESHOLD = 1000;
 const PRECISION_SCALE = 1_000_000_000_000n; // 1e12 — enough headroom for MAX_DECIMALS
 
-export function fmtGwei(weiStr: string | null | undefined): string {
-  if (weiStr === undefined || weiStr === null) return "—";
-  try {
-    return fmtSig(weiToScaledNumber(BigInt(weiStr), GWEI_IN_WEI));
-  } catch {
-    return String(weiStr);
-  }
-}
-
 /**
  * Render a gas price with the unit that keeps it readable, e.g. "9 wei" or
  * "1.235 gwei". Arkiv chains price gas in single-digit wei, and gwei cannot show
@@ -42,26 +33,6 @@ export function fmtGasPrice(weiStr: string | null | undefined): string {
 }
 
 export type GasPriceUnit = "wei" | "gwei";
-
-/**
- * Pick the unit a series of gas prices should be plotted in. Charting wei-scale
- * prices in gwei flattens the whole series onto zero, so a series that never
- * reaches 0.001 gwei is plotted in wei instead.
- */
-export function pickGasPriceUnit(weiValues: Iterable<string | null | undefined>): GasPriceUnit {
-  let max = 0n;
-  for (const value of weiValues) {
-    if (value === undefined || value === null) continue;
-    try {
-      const wei = BigInt(value);
-      const abs = wei < 0n ? -wei : wei;
-      if (abs > max) max = abs;
-    } catch {
-      // Unparseable values are skipped; they cannot be plotted either.
-    }
-  }
-  return max > 0n && max < GWEI_DISPLAY_FLOOR_WEI ? "wei" : "gwei";
-}
 
 /** Convert a wei amount into a chartable number in the given gas price unit. */
 export function weiToGasPriceNumber(

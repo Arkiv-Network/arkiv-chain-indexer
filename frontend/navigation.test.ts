@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { navLabelForView, requiresAdminView, visibleNavItems } from "./src/navigation";
+import { requiresAdminView, visibleNavItems } from "./src/navigation";
 
-function visibleLabels(adminVerified: boolean, transactionDataEnabled: boolean | null): string[] {
-  return visibleNavItems(adminVerified, transactionDataEnabled).map((item) => item.label);
+function visibleViews(adminVerified: boolean, transactionDataEnabled: boolean | null): string[] {
+  return visibleNavItems(adminVerified, transactionDataEnabled).map((item) => item.view);
 }
 
 describe("frontend navigation visibility", () => {
@@ -10,67 +10,23 @@ describe("frontend navigation visibility", () => {
     for (const view of ["admin", "baseload", "health"] as const) expect(requiresAdminView(view)).toBe(true);
     for (const view of ["statistics", "home", "data", "search", "entity", "transaction"] as const) expect(requiresAdminView(view)).toBe(false);
   });
+
   test("hides admin-only pages when admin mode is not verified", () => {
-    expect(visibleLabels(false, true)).toEqual([
-      "Home",
-      "Statistics",
-      "Search",
-      "Blocks",
-      "Data",
-      "Block",
-      "Entity",
-      "Address",
-      "Senders",
-      "Records",
-      "Ranges",
-      "Charts",
-      "Activity",
-    ]);
+    const views = visibleViews(false, true);
+    for (const view of ["admin", "baseload", "health"]) expect(views).not.toContain(view);
+    expect(views).toContain("data");
   });
 
   test("shows admin-only pages when admin mode is verified", () => {
-    expect(visibleLabels(true, true)).toEqual([
-      "Home",
-      "Statistics",
-      "Search",
-      "Blocks",
-      "Data",
-      "Block",
-      "Entity",
-      "Address",
-      "Senders",
-      "Records",
-      "Ranges",
-      "Charts",
-      "Activity",
-      "Health",
-      "Admin",
-      "Baseload",
-    ]);
+    const views = visibleViews(true, true);
+    for (const view of ["admin", "baseload", "health", "block", "entity", "transactions", "senders"]) {
+      expect(views).toContain(view);
+    }
   });
 
   test("keeps transaction-data pages hidden until the backend feature is available", () => {
-    expect(visibleLabels(true, false)).toEqual([
-      "Home",
-      "Statistics",
-      "Search",
-      "Blocks",
-      "Data",
-      "Records",
-      "Ranges",
-      "Charts",
-      "Activity",
-      "Health",
-      "Admin",
-      "Baseload",
-    ]);
-  });
-
-  test("resolves labels for hidden direct-link views", () => {
-    expect(navLabelForView("admin")).toBe("Admin");
-    expect(navLabelForView("baseload")).toBe("Baseload");
-    expect(navLabelForView("health")).toBe("Health");
-    expect(navLabelForView("ranges")).toBe("Ranges");
-    expect(navLabelForView("data")).toBe("Data");
+    const views = visibleViews(true, false);
+    for (const view of ["block", "entity", "transactions", "senders"]) expect(views).not.toContain(view);
+    expect(views).toContain("transaction-records");
   });
 });

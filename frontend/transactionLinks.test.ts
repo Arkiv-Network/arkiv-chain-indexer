@@ -6,9 +6,7 @@ import {
   payloadInfoHref,
   readPayloadProviderBaseUrl,
   readTransactionDecoderBaseUrl,
-  readTransactionExplorerBaseUrl,
   transactionDecoderHref,
-  transactionExplorerHref,
 } from "./src/transactionLinks";
 
 describe("transaction links", () => {
@@ -16,7 +14,6 @@ describe("transaction links", () => {
     const hash = "0xf8da0a7fd7af9dae0730e43b9d0184500de5c77975dd3e644e2da22c044891c6";
 
     expect(transactionDecoderHref(hash)).toBe(`${DEFAULT_TRANSACTION_DECODER_BASE_URL}?tx=${hash}`);
-    expect(transactionExplorerHref(hash)).toBe(`${DEFAULT_TRANSACTION_DECODER_BASE_URL}?tx=${hash}`);
   });
 
   test("reads configured transaction decoder base URLs", () => {
@@ -25,14 +22,6 @@ describe("transaction links", () => {
         VITE_TRANSACTION_DECODER_BASE_URL: "https://decoder.example.test",
       }),
     ).toBe("https://decoder.example.test/");
-  });
-
-  test("ignores configured transaction explorer base URLs for decoder links", () => {
-    expect(
-      readTransactionDecoderBaseUrl({
-        VITE_TRANSACTION_EXPLORER_BASE_URL: "https://legacy.example.test/tx",
-      }),
-    ).toBe(DEFAULT_TRANSACTION_DECODER_BASE_URL);
   });
 
   test("defaults invalid transaction decoder base URLs", () => {
@@ -44,15 +33,7 @@ describe("transaction links", () => {
     );
   });
 
-  test("still reads configured transaction explorer base URLs for compatibility", () => {
-    expect(
-      readTransactionExplorerBaseUrl({
-        VITE_TRANSACTION_EXPLORER_BASE_URL: "https://explorer.example.test/tx",
-      }),
-    ).toBe("https://explorer.example.test/tx/");
-  });
-
-  test("does not build explorer links for missing or malformed transaction hashes", () => {
+  test("does not build decoder links for missing or malformed transaction hashes", () => {
     expect(transactionDecoderHref(null)).toBeNull();
     expect(transactionDecoderHref("")).toBeNull();
     expect(transactionDecoderHref("0x1234")).toBeNull();
