@@ -223,6 +223,11 @@ docker compose up --build
   port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. Compose runs the
   released upstream image directly and sets `PORT` itself.
 - All required env vars live in `.env.example`.
+- `SOURCE_KIND=native-simulator` selects the separate native unsigned-simulator path (`src/simulator/`,
+  `frontend/src/SimulatorView.tsx` explorer and `DebugView.tsx` debug console, `compose.simulator.yml`,
+  `scripts/simulator.py`) before any Ethereum service mounts. Its contract, launcher and hosted deployment
+  are documented in `docs/simulator-run.md` and `docs/simulator-deployment.md`; keep Ethereum-only fields,
+  decoders and RPC clients out of that path.
 
 ## Google login and administrator access
 

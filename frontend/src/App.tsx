@@ -61,8 +61,9 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { OmniSearch } from "./OmniSearch";
 import { SearchView } from "./SearchView";
-import { fetchSourceKind } from "./simulatorApi";
+import { fetchSourceKind, uiMode } from "./simulatorApi";
 import { SimulatorView } from "./SimulatorView";
+import { DebugView } from "./DebugView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
@@ -83,7 +84,9 @@ export function App() {
     });
     return () => controller.abort();
   }, [attempt]);
-  if (source === "native-simulator") return <SimulatorView/>;
+  // One frontend image serves both native views; the container's runtime
+  // configuration selects the debug console or the explorer.
+  if (source === "native-simulator") return uiMode() === "debug" ? <DebugView/> : <SimulatorView/>;
   if (source === "ethereum") return <EthereumApp/>;
   return <main className="sim-shell"><h1>Arkiv explorer</h1><p role="status">{failure || "Reading source capabilities…"}</p>{failure && <button onClick={() => setAttempt((n) => n + 1)}>Retry connection</button>}</main>;
 }

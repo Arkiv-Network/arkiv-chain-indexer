@@ -9,6 +9,10 @@ describe("native simulator wire", () => {
   test("canonical header and exact u64/i64 metadata survive", () => {
     for (const b of history()) expect(parseFeedBlock(b)).toEqual(b);
     expect(parseStatus(status(genesis()))).toEqual(status(genesis()));
+    const withStorage = { ...status(genesis()), storage: { fileBytes: "87887872" } };
+    expect(parseStatus(withStorage)).toEqual(withStorage);
+    expect(() => parseStatus({ ...withStorage, storage: { fileBytes: 12 } })).toThrow();
+    expect(() => parseStatus({ ...withStorage, storage: { fileBytes: "1", extra: 1 } })).toThrow();
     expect(decimal("18446744073709551615")).toBe("18446744073709551615");
     expect(signed("-9223372036854775808")).toBe("-9223372036854775808");
   });

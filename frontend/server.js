@@ -40,6 +40,12 @@ const RUNTIME_CONFIG_ENV_NAMES = [
   "VITE_HISTOGRAM_REFRESH_MS",
   "VITE_HISTOGRAM_CLOCK_TICK_MS",
   "VITE_NO_BATCHER",
+  // Native simulator deployments: which view this container serves, where the
+  // /local-sim verifier runs relative to the browser, and operator links.
+  "VITE_UI_MODE",
+  "VITE_SIMULATOR_VERIFIER",
+  "VITE_SIMULATOR_PUBLIC_NODE_URL",
+  "VITE_SIMULATOR_PEER_UI_URL",
 ];
 
 const MIME_TYPES = {

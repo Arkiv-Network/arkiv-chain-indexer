@@ -3,6 +3,7 @@ import { parseAuthConfig } from "../authConfig";
 import { AuthStorage } from "../authStorage";
 import { SimulatorError } from "./common";
 import { parseSimulatorConfig } from "./config";
+import { NodeProbe } from "./nodes";
 import { runNativeScanner } from "./scanner";
 import { createNativeHandler } from "./server";
 import { HttpSimulatorSource } from "./source";
@@ -73,6 +74,14 @@ export async function nativeServeMain(): Promise<void> {
         ...(auth ? { auth } : {}),
         ...(config.controlUrl ? { controlUrl: config.controlUrl } : {}),
         ...(config.controlToken ? { controlToken: config.controlToken } : {}),
+        nodes: new NodeProbe(
+          {
+            producer: config.feedUrl,
+            ...(config.fullUrl ? { full: config.fullUrl } : {}),
+            ...(config.lightUrl ? { light: config.lightUrl } : {}),
+          },
+          config.identity,
+        ),
       }),
     });
     console.info("Native simulator API ready", {

@@ -417,3 +417,20 @@ pg("native PostgreSQL projection", () => {
       await expect(s.snapshot("3")).rejects.toThrow("CoverageUnavailable");
     }));
 });
+
+pg("native PostgreSQL search and size diagnostics", () => {
+  test("transaction digest filter is exact and the schema reports its relation bytes", () =>
+    isolated(async (s) => {
+      const blocks = history();
+      for (const b of blocks) await s.ingest(b);
+      const digest = blocks[1]!.transactions[0]!.digest;
+      const page = await s.page("transactions", { digest });
+      expect(page.rows.map((r) => (r as { height: string }).height)).toEqual(["1"]);
+      expect(page.nextCursor).toBeNull();
+      expect((await s.page("transactions", { digest: "0x" + "ee".repeat(32) })).rows).toEqual([]);
+      // A cursor minted for one filter cannot page another.
+      const all = await s.page("transactions", { limit: 1 });
+      await expect(s.page("transactions", { limit: 1, digest, cursor: all.nextCursor! })).rejects.toThrow("CursorMismatch");
+      expect(BigInt(await s.relationBytes())).toBeGreaterThan(0n);
+    }));
+});

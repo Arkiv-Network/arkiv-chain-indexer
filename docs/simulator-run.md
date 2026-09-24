@@ -1,9 +1,12 @@
 # Run the native simulator explorer
 
-The simulator uses an unsigned internal Rust producer, an independent PostgreSQL
-explorer, and a local Rust light verifier. The existing Ethereum stack and signed
-full/light demo remain separate. History is retained; no pruning or reset is
-performed by these commands.
+The simulator uses an unsigned internal Rust producer, an independently executing
+full follower, an independent PostgreSQL explorer, and a Rust light verifier. The
+existing Ethereum stack and signed full/light demo remain separate. History is
+retained; no pruning or reset is performed by these commands. The hosted
+deployment on `experimental.arkiv-global.net` and
+`explorer.experimental.arkiv-global.net` is described in
+[the deployment runbook](simulator-deployment.md).
 
 ## All-local Docker stack
 
@@ -20,14 +23,28 @@ python3 scripts/simulator.py status
 python3 scripts/simulator.py control pause
 python3 scripts/simulator.py stop
 python3 scripts/simulator.py up
+python3 scripts/simulator.py compose ps
+python3 scripts/simulator.py compose -- logs --tail 50 producer
 ```
 
 Open **http://localhost:23561**. The producer public endpoint is loopback port
-9400. Its private control/body port, PostgreSQL, and the light process are only
-on the compose network. `init` builds the images, starts a paused producer,
-records its random run ID and genesis hash, then starts consumers. `up` verifies
-those same pins before starting consumers. A mismatch stops the launcher; it
-never rebinds an existing database to a new chain.
+9400. Its private control/body port, PostgreSQL, the full follower and the light
+process are only on the compose network. `init` builds the images, starts a
+paused producer (`--producer-start running` makes every start resume production
+instead), records its random run ID and genesis hash, then starts the followers
+and consumers. `up` verifies those same pins before starting them. A mismatch
+stops the launcher; it never rebinds an existing database to a new chain.
+`compose` passes its arguments to Docker Compose with the same private env file,
+project name and profiles; put `--` before arguments that start with a dash.
+
+The primary frontend serves the explorer by default; `init --ui-mode debug`
+serves the operational debug console instead (topology and lag of every node,
+block inspector with budgets and ordered outcomes, historical record lookups,
+proof inspection with size and timing, producer controls). `--hosted-explorer`
+adds a second read-only backend/frontend pair without controls or login for a
+separate origin. Deployment-only values such as Google OAuth credentials, the
+exact public origin and operator URLs come from a private `KEY=VALUE` file passed
+as `init --private-env FILE`; they are never command-line arguments.
 
 Private passwords/tokens and identity pins live in `.simulator/.env.simulator.local`
 (mode 0600). Each state-directory path has its own compose project and named
@@ -63,8 +80,12 @@ configuration as administrator access.
    incarnation's operations. Every ordinary result is an **unverified projection**.
 3. In Query choose height **18**, namespace **1**, attribute **group**, type
    **u64**, value **1**, page size **3**. Read the SQL projection or select
-   **Verify Eq locally**. The local light process verifies the complete posting
-   witness and row proofs. Its result has five matching IDs, paged as 3 and 2.
+   **Verify Eq locally** (on a stack opened on the same machine; a hosted
+   deployment labels the same button and badge **server-side**, because the
+   light process then belongs to the server, not to the browser). The light
+   process verifies the complete posting witness and row proofs and reports the
+   proof size and its fetch/verify timing. Its result has five matching IDs,
+   paged as 3 and 2.
 4. Resume or step the producer while paging the historical result. The continuation
    retains height/hash/root/query/limit. Editing the form clears the old badge and
    results. A missing verifier, proof failure, or changed run produces no verified
@@ -75,10 +96,16 @@ configuration as administrator access.
 
 `latest` means the indexed head for SQL. Lag is relative to the last observed
 source head; it cannot detect an unobserved or withheld tip. The verified badge
-means **“proof verified against trusted simulator root; unsigned source.”** It
-is not consensus, a signature, execution validation, or global fork detection.
-Only observed conflicting headers can be detected. A full follower separately
-reexecutes canonical blocks and checks roots/outcomes.
+means **“proof verified against trusted simulator root; unsigned source”**,
+prefixed with where the verifying light process runs: **locally** only when the
+deployment explicitly sets `SIMULATOR_VERIFIER_LOCATION=local` (the launcher does
+so for a localhost origin), otherwise **server-side**. It is not consensus, a
+signature, execution validation, or global fork detection. Only observed
+conflicting headers can be detected. The bundled full follower separately
+reexecutes canonical blocks over the private replication listener and checks
+roots/outcomes; `GET /api/sim/v1/nodes` reports producer, full, light and
+explorer heads, health, probe latency and storage sizes without inventing values
+for nodes that are unconfigured or unreachable.
 
 Positive typed Eq is the only proof query profile. SQL metadata also supports
 numeric comparisons, string prefix, existence, AND/OR/NOT via the API. Unsupported
@@ -122,9 +149,13 @@ keeps projection-only badges.
 
 For a server hosting the complete stack, bind the existing loopback UI/public-node
 ports behind your HTTPS ingress, configure exact `AUTH_PUBLIC_ORIGIN` and Google
-OAuth settings in the private env file, and leave localhost token login disabled.
-No production deployment is performed by this work. Do not publish PostgreSQL or
-the producer's private listener to the Internet.
+OAuth settings through `init --auth-public-origin` and `--private-env`, and leave
+localhost token login disabled. Do not publish PostgreSQL or the producer's
+private listener to the Internet. The experimental deployment described in
+[simulator-deployment.md](simulator-deployment.md) publishes the producer's public
+listener at `https://experimental.arkiv-global.net/sim/v1/` behind nginx rate
+limits, so that origin is a valid `--peer` for the local light-client workflow
+above; the debug console prints the exact command with the run's pins.
 
 ## Direct Rust processes and optional full follower
 

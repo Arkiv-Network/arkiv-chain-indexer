@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "./authClient";
+import { envValues } from "./runtimeConfig";
 
 export interface NativeIdentity {
   sourceId: string;
@@ -18,17 +19,48 @@ export interface NativeWorkload {
   payloadBytes: number;
   extraRowsPerBlock: number;
 }
+/** A node's own public status as the backend observed or probed it. */
+export interface NativeSourceStatus extends NativeIdentity {
+  role: "producer" | "full" | "light";
+  head: NativeSnapshot;
+  paused: boolean;
+  health: string;
+  configRevision: string;
+  workload: NativeWorkload;
+  memory: Record<string, unknown>;
+  durability?: string;
+  observedPeerHeight?: string;
+  coverage?: { from: string; through: string; complete: boolean };
+  /** Present only when the node knows its retained file; never a fabricated zero. */
+  storage?: { fileBytes: string };
+}
+export type NodeRole = "producer" | "full" | "light";
+export interface NodeReport {
+  role: NodeRole;
+  configured: boolean;
+  available: boolean;
+  error: string | null;
+  latencyMs: number | null;
+  status: NativeSourceStatus | null;
+}
+export interface NativeNodes {
+  identity: NativeIdentity;
+  verification: "unverified-projection";
+  nodes: Record<NodeRole, NodeReport>;
+  explorer: {
+    health: string;
+    indexed: NativeSnapshot | null;
+    observed: NativeSourceStatus | null;
+    counters: Record<string, string>;
+    schema: string;
+    storage: { relationBytes: string | null };
+  };
+  controlAvailable: boolean;
+}
 export interface NativeStatus {
   identity: NativeIdentity;
   authentication: "unsigned-simulator-v1";
-  producer: {
-    head: NativeSnapshot;
-    paused: boolean;
-    health: string;
-    configRevision: string;
-    workload: NativeWorkload;
-    memory: Record<string, unknown>;
-  } | null;
+  producer: NativeSourceStatus | null;
   indexed: NativeSnapshot | null;
   health: string;
   controlAvailable: boolean;
@@ -59,6 +91,47 @@ export interface VerifiedPage extends NativeIdentity {
   rows: NativeRow[];
   continuation: string | null;
   postingCount: number;
+  /** The verifying light process's own telemetry about the complete proof it checked. */
+  diagnostics?: {
+    verifier: string;
+    proofBytes: string;
+    fetchMs: string;
+    verifyMs: string;
+  };
+}
+
+export type UiMode = "explorer" | "debug";
+/** Which native view this deployment serves; the explorer unless configured otherwise. */
+export function uiMode(): UiMode {
+  return envValues().VITE_UI_MODE === "debug" ? "debug" : "explorer";
+}
+export type VerifierLocation = "server" | "local";
+/** Where the light process behind /local-sim runs relative to this browser.
+ * Only an explicit deployment setting may claim it is local; the default never does. */
+export function verifierLocation(): VerifierLocation {
+  return envValues().VITE_SIMULATOR_VERIFIER === "local" ? "local" : "server";
+}
+export function publicNodeUrl(): string {
+  return envValues().VITE_SIMULATOR_PUBLIC_NODE_URL ?? "";
+}
+export function peerUiUrl(): string {
+  return envValues().VITE_SIMULATOR_PEER_UI_URL ?? "";
+}
+/** Wording that never claims browser-local verification for a server-side verifier. */
+export function verifierText(location: VerifierLocation = verifierLocation()) {
+  return location === "local"
+    ? {
+        button: "Verify Eq locally",
+        badge: "Proof verified locally against trusted simulator root; unsigned source",
+        where: "a light process running on this machine",
+        location: "local light process",
+      }
+    : {
+        button: "Verify Eq (server-side)",
+        badge: "Proof verified server-side against trusted simulator root; unsigned source",
+        where: "the deployment's light follower, not this browser",
+        location: "server-side light follower",
+      };
 }
 
 export class NativeHttpError extends Error {
@@ -159,6 +232,26 @@ export async function nativeGet(
       credentials: "same-origin",
     }),
   );
+}
+
+export async function nativeNodes(signal?: AbortSignal): Promise<NativeNodes> {
+  const data = await boundedJson(
+    await fetch("/api/sim/v1/nodes", {
+      signal: deadline(signal),
+      credentials: "same-origin",
+    }),
+    1024 * 1024,
+  );
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !("nodes" in data) ||
+    !("explorer" in data) ||
+    !("identity" in data) ||
+    (data as { verification?: unknown }).verification !== "unverified-projection"
+  )
+    throw new Error("InvalidTopologyResponse");
+  return data as NativeNodes;
 }
 
 export async function nativeQuery(

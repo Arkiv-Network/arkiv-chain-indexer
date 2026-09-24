@@ -41,6 +41,7 @@ const ROUTE_TEMPLATES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/sim\/v1\/blocks\/[0-9]+$/, "/sim/v1/blocks/:height"],
   [/^\/sim\/v1\/status$/, "/sim/v1/status"],
   [/^\/sim\/v1\/statistics$/, "/sim/v1/statistics"],
+  [/^\/sim\/v1\/nodes$/, "/sim/v1/nodes"],
   [/^\/sim\/v1\/blocks$/, "/sim/v1/blocks"],
   [/^\/sim\/v1\/transactions$/, "/sim/v1/transactions"],
   [/^\/sim\/v1\/operations$/, "/sim/v1/operations"],

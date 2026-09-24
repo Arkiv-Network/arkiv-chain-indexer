@@ -23,6 +23,7 @@ import {
   SimulatorError,
   text,
 } from "./common";
+import { NODE_ROLES, type NodeProbe, type NodeReports } from "./nodes";
 import { parsePredicate } from "./query";
 import type { PageOptions, SimulatorStorage } from "./storage";
 
@@ -86,6 +87,10 @@ export interface NativeServerOptions {
   controlUrl?: string;
   controlToken?: string;
   fetcher?: Fetcher;
+  /** Live producer/full/light status for the topology view; absent means unconfigured nodes. */
+  nodes?: NodeProbe;
+  /** Cache lifetime of the PostgreSQL relation-size catalog read. */
+  relationBytesTtlMs?: number;
 }
 function json(value: unknown, status = 200): Response {
   const body = JSON.stringify(value);
@@ -122,6 +127,7 @@ function pageOptions(params: URLSearchParams, allowed: string[]): PageOptions {
   if (v.actor !== undefined) result.actor = hex(v.actor, 20);
   if (v.status !== undefined)
     result.status = choice(v.status, ["committed", "failed"]);
+  if (v.digest !== undefined) result.digest = hex(v.digest, 32);
   if (v.recordKey !== undefined) result.recordKey = hex(v.recordKey, 32, 1);
   if (v.recordId !== undefined) result.recordId = decimal(v.recordId, true);
   return result;
@@ -129,7 +135,7 @@ function pageOptions(params: URLSearchParams, allowed: string[]): PageOptions {
 const COMMON = ["atHeight", "cursor", "limit"];
 const LISTS = {
   blocks: COMMON,
-  transactions: [...COMMON, "actor", "status"],
+  transactions: [...COMMON, "actor", "status", "digest"],
   operations: [...COMMON, "namespaceId", "recordKey", "recordId"],
   namespaces: COMMON,
   records: [...COMMON, "namespaceId", "recordKey", "recordId"],
@@ -142,6 +148,33 @@ export function createNativeHandler(
   const { storage, auth } = options;
   let controlInFlight = false;
   let requestsInFlight = 0;
+  // The catalog size read is cheap but not free; the topology view polls it.
+  let relationBytes: { at: number; value: Promise<string> } | undefined;
+  const relationBytesCached = (): Promise<string> => {
+    const ttl = options.relationBytesTtlMs ?? 10000;
+    if (!relationBytes || Date.now() - relationBytes.at >= ttl) {
+      const value = storage.relationBytes();
+      relationBytes = { at: Date.now(), value };
+      value.catch(() => {
+        relationBytes = undefined;
+      });
+    }
+    return relationBytes.value;
+  };
+  const unconfiguredNodes = (): NodeReports =>
+    Object.fromEntries(
+      NODE_ROLES.map((role) => [
+        role,
+        {
+          role,
+          configured: false,
+          available: false,
+          error: null,
+          latencyMs: null,
+          status: null,
+        },
+      ]),
+    ) as NodeReports;
   async function control(request: Request): Promise<Response> {
     const denied = await requireAdmin(request, auth);
     if (denied) return denied;
@@ -282,7 +315,49 @@ export function createNativeHandler(
           ethereum: false,
           proofs: "local-light-only",
           controls: !!options.controlUrl && !!options.controlToken,
+          nodes: !!options.nodes,
         },
+      });
+    }
+    if (path === "/sim/v1/nodes" && request.method === "GET") {
+      // Live topology: each node is probed separately and reported as configured,
+      // available or failed with a bounded code. Missing data stays null.
+      if (url.search) return fail();
+      const [nodes, p, bytes] = await Promise.all([
+        options.nodes ? options.nodes.probe() : unconfiguredNodes(),
+        storage.progress(),
+        relationBytesCached().then(
+          (value) => ({ relationBytes: value }),
+          () => ({ relationBytes: null }),
+        ),
+      ]);
+      const header = p.height === null ? null : await storage.header(p.height);
+      if (p.height !== null && !header) return fail("StorageCorrupt", 503);
+      return json({
+        sourceKind: "arkiv-native-simulator",
+        identity: storage.identity,
+        authentication: "unsigned-simulator-v1",
+        verification: "unverified-projection",
+        nodes,
+        explorer: {
+          health: p.health,
+          indexed: header
+            ? { height: header.height, hash: header.hash, stateRoot: header.stateRoot }
+            : null,
+          observed: p.observed,
+          counters: {
+            blocks: p.blocks,
+            transactions: p.transactions,
+            operations: p.operations,
+            spentUnits: p.spentUnits,
+            liveRecords: p.liveRecords,
+            namespaces: p.namespaces,
+            rawRecords: p.rawRecords,
+          },
+          schema: storage.schema,
+          storage: bytes,
+        },
+        controlAvailable: !!options.controlUrl && !!options.controlToken,
       });
     }
     if (path === "/sim/v1/query" && request.method === "POST") {

@@ -50,6 +50,7 @@ export interface PageOptions {
   namespaceId?: string;
   actor?: string;
   status?: string;
+  digest?: string;
   recordKey?: string;
   recordId?: string;
   predicate?: Predicate | null;
@@ -108,6 +109,7 @@ export class SimulatorStorage {
         `CREATE TABLE IF NOT EXISTS ${q}.blocks (run_pk bigint REFERENCES ${q}.runs, height ${q}.u64, hash text NOT NULL, parent_hash text NOT NULL, timestamp_ms ${q}.u64 NOT NULL, header jsonb NOT NULL, metadata text NOT NULL, fingerprint text NOT NULL, tx_count integer NOT NULL, op_count integer NOT NULL, spent_units ${q}.u64 NOT NULL, PRIMARY KEY(run_pk,height), UNIQUE(run_pk,hash))`,
         `CREATE TABLE IF NOT EXISTS ${q}.transactions (run_pk bigint, height ${q}.u64, position integer CHECK(position>=0), actor text NOT NULL, request_id text NOT NULL, digest text NOT NULL, status text NOT NULL, data jsonb NOT NULL, PRIMARY KEY(run_pk,height,position), FOREIGN KEY(run_pk,height) REFERENCES ${q}.blocks, UNIQUE(run_pk,actor,request_id))`,
         `CREATE INDEX IF NOT EXISTS sim_tx_actor ON ${q}.transactions(run_pk,actor,height,position)`,
+        `CREATE INDEX IF NOT EXISTS sim_tx_digest ON ${q}.transactions(run_pk,digest)`,
         `CREATE TABLE IF NOT EXISTS ${q}.operations (run_pk bigint, height ${q}.u64, phase integer, group_position integer, op_position integer, namespace_id ${q}.u64, record_id ${q}.u64, record_key text, data jsonb NOT NULL, PRIMARY KEY(run_pk,height,phase,group_position,op_position), FOREIGN KEY(run_pk,height) REFERENCES ${q}.blocks)`,
         `CREATE INDEX IF NOT EXISTS sim_op_record ON ${q}.operations(run_pk,namespace_id,record_key,height,phase,group_position,op_position)`,
         `CREATE TABLE IF NOT EXISTS ${q}.namespace_versions (run_pk bigint REFERENCES ${q}.runs, namespace_id ${q}.u64 CHECK(namespace_id>0), from_height ${q}.u64, to_height ${q}.u64, data text NOT NULL, PRIMARY KEY(run_pk,namespace_id,from_height), CHECK(to_height IS NULL OR to_height>from_height))`,
@@ -150,6 +152,15 @@ export class SimulatorStorage {
         [this.runPk],
       );
     });
+  }
+  /** Table, index and TOAST bytes of this projection schema, as reported by PostgreSQL. */
+  async relationBytes(): Promise<string> {
+    return (
+      await this.db.query<{ bytes: string }>(
+        "SELECT COALESCE(sum(pg_total_relation_size(c.oid)),0)::text AS bytes FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relkind='r'",
+        [this.schema],
+      )
+    ).rows[0]!.bytes;
   }
   async progress(): Promise<Progress> {
     return (
@@ -484,6 +495,7 @@ export class SimulatorStorage {
       namespaceId: options.namespaceId ?? null,
       actor: options.actor ?? null,
       status: options.status ?? null,
+      digest: options.digest ?? null,
       recordKey: options.recordKey ?? null,
       recordId: options.recordId ?? null,
       predicate: options.predicate ?? null,
@@ -530,7 +542,7 @@ export class SimulatorStorage {
       key = (r) => [String(r._height)];
     } else if (kind === "transactions") {
       if (last.length && last.length !== 2) return fail("CursorMismatch", 409);
-      sql = `SELECT height::text AS _height,position AS _position,data FROM ${q}.transactions WHERE run_pk=${run} AND height<=${height}${options.actor ? ` AND actor=${p.add(options.actor)}` : ""}${options.status ? ` AND status=${p.add(options.status)}` : ""}${last.length ? ` AND (height,position)>(${p.add(decimal(last[0]))},${p.add(integer(Number(last[1]), 65535))})` : ""} ORDER BY height,position`;
+      sql = `SELECT height::text AS _height,position AS _position,data FROM ${q}.transactions WHERE run_pk=${run} AND height<=${height}${options.actor ? ` AND actor=${p.add(options.actor)}` : ""}${options.status ? ` AND status=${p.add(options.status)}` : ""}${options.digest ? ` AND digest=${p.add(options.digest)}` : ""}${last.length ? ` AND (height,position)>(${p.add(decimal(last[0]))},${p.add(integer(Number(last[1]), 65535))})` : ""} ORDER BY height,position`;
       key = (r) => [String(r._height), String(r._position)];
     } else if (kind === "operations" || kind === "record-history") {
       if (last.length && last.length !== 4) return fail("CursorMismatch", 409);

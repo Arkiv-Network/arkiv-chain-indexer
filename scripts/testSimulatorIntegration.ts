@@ -52,11 +52,13 @@ const p = {
   light: port(),
   api: port(),
   ui: port(),
+  debug: port(),
 };
 const source = `http://127.0.0.1:${p.producer}`,
   light = `http://127.0.0.1:${p.light}`,
   api = `http://127.0.0.1:${p.api}`,
-  ui = `http://localhost:${p.ui}`;
+  ui = `http://localhost:${p.ui}`,
+  debugUi = `http://localhost:${p.debug}`;
 const secret = randomUUID() + randomUUID(),
   loginSecret = randomUUID();
 async function start(
@@ -212,6 +214,7 @@ try {
     SERVER_PORT: String(p.api),
     SIMULATOR_CONTROL_URL: `http://127.0.0.1:${p.admin}`,
     SIMULATOR_CONTROL_TOKEN: secret,
+    SIMULATOR_LIGHT_URL: light,
     AUTH_TOKEN_LOGIN_ENABLED: "true",
     AUTH_TOKEN_LOGIN_TOKEN: loginSecret,
     AUTH_ADMIN_EMAILS: "operator@example.test",
@@ -309,6 +312,7 @@ try {
     (x) => x.head.height === "24",
     "light durable reopen",
   );
+  // The light process runs on this machine, so this frontend may say "local".
   await start("frontend", ["node", "frontend/server.js"], {
     HOST: "127.0.0.1",
     PORT: String(p.ui),
@@ -316,6 +320,7 @@ try {
     BACKEND_PORT: String(p.api),
     LOCAL_SIMULATOR_LIGHT_HOST: "127.0.0.1",
     LOCAL_SIMULATOR_LIGHT_PORT: String(p.light),
+    VITE_SIMULATOR_VERIFIER: "local",
   });
   await until(
     () => fetch(ui + "/api/health").then((r) => r.json()),
@@ -497,6 +502,86 @@ try {
     "/local-sim/v1/control",
   ])
     assert.equal((await fetch(ui + path)).status, 404);
+
+  // Topology route: the producer and light are probed live, no full follower is configured.
+  const topology = await json(api + "/sim/v1/nodes");
+  assert.equal(topology.nodes.producer.available, true);
+  assert.equal(topology.nodes.producer.status.head.height, "25");
+  assert.equal(topology.nodes.light.available, true);
+  assert.equal(topology.nodes.light.status.role, "light");
+  assert.equal(topology.nodes.full.configured, false);
+  assert.equal(topology.explorer.indexed.height, "25");
+  assert.ok(BigInt(topology.explorer.storage.relationBytes) > 0n);
+  assert.equal(
+    (await json(api + `/sim/v1/transactions?digest=0x${"ab".repeat(32)}`)).rows.length,
+    0,
+  );
+
+  // The same image serves the debug console; the verifier is explicitly labelled server-side
+  // when the deployment does not claim the light process is local.
+  await start("debug-frontend", ["node", "frontend/server.js"], {
+    HOST: "127.0.0.1",
+    PORT: String(p.debug),
+    BACKEND_HOST: "127.0.0.1",
+    BACKEND_PORT: String(p.api),
+    LOCAL_SIMULATOR_LIGHT_HOST: "127.0.0.1",
+    LOCAL_SIMULATOR_LIGHT_PORT: String(p.light),
+    VITE_UI_MODE: "debug",
+    VITE_SIMULATOR_PUBLIC_NODE_URL: source,
+  });
+  await until(
+    () => fetch(debugUi + "/config.js").then((r) => r.text()),
+    (x) => x.includes("debug"),
+    "debug frontend",
+  );
+  const debug = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  debug.on("pageerror", (e) => errors.push(e.message));
+  debug.on("request", (r) => {
+    if (r.url().startsWith(debugUi)) routes.push(new URL(r.url()).pathname);
+  });
+  await debug.goto(debugUi);
+  await debug
+    .getByRole("heading", { name: "Simulator debug console", exact: true })
+    .waitFor();
+  await debug.locator(".dbg-card", { hasText: "Light follower" }).first().waitFor();
+  await until(
+    () => debug.locator(".dbg-card", { hasText: "Producer" }).first().textContent(),
+    (t) => !!t && t.includes("25"),
+    "producer card height",
+  );
+  assert.ok((await debug.locator(".dbg-card", { hasText: "Full follower" }).first().textContent())?.includes("not configured"));
+  assert.equal(await debug.getByRole("heading", { name: "Producer controls" }).count(), 1);
+  assert.equal(await debug.getByRole("button", { name: "Step", exact: true }).count(), 0);
+  await debug.getByLabel("Block height").fill("7");
+  await debug.getByRole("button", { name: "Inspect block", exact: true }).click();
+  await debug.locator(".dbg-chip", { hasText: "Rolled Back" }).waitFor();
+  await debug.getByLabel("Snapshot height").fill("18");
+  await debug.route(
+    "**/local-sim/v1/query/verified",
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.snapshot.height = "17";
+      await route.fulfill({ response, json: body });
+    },
+    { times: 1 },
+  );
+  await debug.getByRole("button", { name: "Verify Eq (server-side)", exact: true }).click();
+  await debug
+    .getByRole("alert")
+    .filter({ hasText: "VerifierBindingMismatch" })
+    .waitFor();
+  assert.equal(await debug.locator(".sim-badge.verified").count(), 0);
+  await debug.getByRole("button", { name: "Verify Eq (server-side)", exact: true }).click();
+  await debug.locator(".sim-badge.verified").waitFor();
+  assert.ok((await debug.locator(".sim-badge.verified").textContent())?.includes("server-side"));
+  await debug.locator(".dbg-chip", { hasText: "Proof size" }).waitFor();
+  assert.ok(!(await debug.locator(".dbg-chip", { hasText: "Proof size" }).textContent())?.includes("unavailable"));
+  await debug.getByRole("button", { name: "Read projection", exact: true }).click();
+  await until(() => debug.locator(".sim-table tbody tr").count(), (n) => n >= 3, "debug projection rows");
+  await debug.screenshot({ path: join(scratch, "screenshots", "debug-console.png"), fullPage: true });
+  assert.equal(routes.some((r) => /shadow-rpc|baseload|batcher|faucet|rpc-keys/.test(r)), false);
+  assert.deepEqual(errors, []);
   console.log(
     JSON.stringify(
       {
@@ -508,6 +593,8 @@ try {
         lightRestart: "durable catalog",
         browser:
           "projection, proof paging, stale badge clearing, admin step/logout, no Ethereum requests",
+        debugConsole:
+          "topology cards, block 7 rollback inspection, malformed proof rejection, server-side verified badge with proof diagnostics",
         artifacts: scratch,
       },
       null,

@@ -8,9 +8,10 @@ import {
   testAdminHeaders,
 } from "../testAuth";
 import { routeTemplate } from "../serverMetrics";
+import { NodeProbe } from "./nodes";
 import { createNativeHandler, parseControl } from "./server";
-import type { SimulatorStorage } from "./storage";
-import { genesis, ZERO } from "./testFixtures";
+import type { PageOptions, SimulatorStorage } from "./storage";
+import { genesis, status as sourceStatus, ZERO } from "./testFixtures";
 const g = genesis(),
   storage = { identity: g } as unknown as SimulatorStorage;
 const command = {
@@ -218,5 +219,81 @@ describe("native administrator control proxy", () => {
     expect(routeTemplate("/admin/sim/v1/control")).toBe(
       "/admin/sim/v1/control",
     );
+  });
+});
+
+describe("native topology and search routes", () => {
+  const progress = {
+    height: "0",
+    hash: g.header.hash,
+    observed: null,
+    blocks: "1",
+    transactions: "0",
+    operations: "0",
+    spentUnits: "0",
+    liveRecords: "0",
+    namespaces: "0",
+    rawRecords: "0",
+    health: "running",
+  };
+  const fakeStorage = (extra: Partial<SimulatorStorage> = {}) =>
+    ({
+      identity: g,
+      schema: "sim_test",
+      progress: async () => progress,
+      header: async (h: string) => (h === "0" ? g.header : null),
+      relationBytes: async () => "65536",
+      ...extra,
+    }) as unknown as SimulatorStorage;
+  test("reports configured, unavailable and unconfigured nodes plus explorer progress without zeros", async () => {
+    const nodes = new NodeProbe(
+      { producer: "http://producer:9400", light: "http://light:9402" },
+      g,
+      async (r) =>
+        r.url.startsWith("http://light")
+          ? new Response("busy", { status: 503 })
+          : Response.json({ ...sourceStatus(g), storage: { fileBytes: "2048" } }),
+    );
+    const handler = createNativeHandler({ storage: fakeStorage(), nodes });
+    const response = await handler(new Request("https://explorer.test/sim/v1/nodes"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    const body = await response.json();
+    expect(body.verification).toBe("unverified-projection");
+    expect(body.nodes.producer).toMatchObject({ available: true, status: { role: "producer", storage: { fileBytes: "2048" } } });
+    expect(body.nodes.light).toMatchObject({ configured: true, available: false, error: "UpstreamUnavailable", status: null });
+    expect(body.nodes.full).toMatchObject({ configured: false, available: false, error: null, latencyMs: null, status: null });
+    expect(body.explorer).toMatchObject({ health: "running", indexed: { height: "0", hash: g.header.hash }, schema: "sim_test", storage: { relationBytes: "65536" } });
+    expect(body.controlAvailable).toBe(false);
+    expect((await handler(new Request("https://explorer.test/sim/v1/nodes?x=1"))).status).toBe(400);
+  });
+  test("reports unconfigured nodes and null storage size when those readers are absent or failing", async () => {
+    const handler = createNativeHandler({
+      storage: fakeStorage({ relationBytes: async () => { throw new Error("catalog unavailable"); } } as Partial<SimulatorStorage>),
+    });
+    const body = await (await handler(new Request("https://explorer.test/sim/v1/nodes"))).json();
+    expect(body.nodes.producer).toMatchObject({ configured: false, status: null });
+    expect(body.explorer.storage).toEqual({ relationBytes: null });
+    expect(JSON.stringify(body)).not.toContain("catalog unavailable");
+    expect(routeTemplate("/sim/v1/nodes")).toBe("/sim/v1/nodes");
+  });
+  test("transaction pages accept an exact digest filter and reject malformed ones", async () => {
+    const seen: PageOptions[] = [];
+    const handler = createNativeHandler({
+      storage: fakeStorage({
+        page: async (_kind: string, options: PageOptions) => {
+          seen.push(options);
+          return { rows: [] };
+        },
+      } as unknown as Partial<SimulatorStorage>),
+    });
+    const digest = "0x" + "ab".repeat(32);
+    expect((await handler(new Request(`https://explorer.test/sim/v1/transactions?digest=${digest}`))).status).toBe(200);
+    expect(seen[0]).toEqual({ digest });
+    for (const bad of ["0x" + "ab".repeat(31), "abcd", "0x" + "AB".repeat(32)])
+      expect((await handler(new Request(`https://explorer.test/sim/v1/transactions?digest=${bad}`))).status).toBe(400);
+    expect((await handler(new Request(`https://explorer.test/sim/v1/blocks?digest=${digest}`))).status).toBe(400);
+    expect(seen.length).toBe(1);
   });
 });

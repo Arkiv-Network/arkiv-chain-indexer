@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { AccountControls } from "./AccountControls";
+import { ProducerControls } from "./ProducerControls";
 import { useAuth } from "./useAuth";
 import {
   displayNative,
   sameIdentity,
-  retrySameControl,
   localVerifiedQuery,
-  nativeControl,
   nativeGet,
+  nativeNodes,
   nativeQuery,
+  peerUiUrl,
+  verifierText,
   type EqSelection,
+  type NativeNodes,
   type NativePage,
   type NativeRow,
   type NativeStatus,
@@ -29,6 +32,22 @@ const tabs = [
   "query",
 ] as const;
 type Tab = (typeof tabs)[number];
+/** The filters a page load reads; explicit overrides let search act before state settles. */
+type Filters = {
+  tab: Tab;
+  height: string;
+  namespace: string;
+  recordKey: string;
+  recordId: string;
+  actor: string;
+  outcome: string;
+  digest: string;
+};
+const NODE_LABELS = {
+  producer: "Producer",
+  full: "Full follower",
+  light: "Light follower",
+} as const;
 const columns: Record<string, string[]> = {
   blocks: [
     "height",
@@ -196,15 +215,14 @@ export function SimulatorView() {
   const [verifiedRequest, setVerifiedRequest] = useState<EqSelection | null>(
     null,
   );
-  const [controlResult, setControlResult] = useState("");
-  const [controlError, setControlError] = useState("");
-  const [controlBusy, setControlBusy] = useState(false);
-  const [retryCommand, setRetryCommand] = useState<NativeRow | null>(null);
-  const [payloadBytes, setPayloadBytes] = useState(64);
-  const [extraRows, setExtraRows] = useState(0);
+  const [digest, setDigest] = useState("");
+  const [search, setSearch] = useState("");
+  const [sources, setSources] = useState<NativeNodes | null>(null);
+  const [sourcesError, setSourcesError] = useState("");
   const request = useRef(0);
   const identityKey = useRef("");
-  const controlGeneration = useRef(0);
+  const verifier = verifierText();
+  const peer = peerUiUrl();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -223,17 +241,12 @@ export function SimulatorView() {
         const key = JSON.stringify(result.identity);
         if (identityKey.current && identityKey.current !== key) {
           ++request.current;
-          ++controlGeneration.current;
-          setControlBusy(false);
           setBusy(false);
           setBlockDetail(null);
           setPage(null);
           setVerified(null);
           setVerifiedRequest(null);
           setDetail(null);
-          setRetryCommand(null);
-          setControlResult("");
-          setControlError("");
           setError("Source identity changed. Start a new snapshot query.");
         }
         identityKey.current = key;
@@ -255,6 +268,36 @@ export function SimulatorView() {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    document.title = "Arkiv simulator explorer";
+  }, []);
+
+  // Indexing progress across the deployment's nodes; only the overview shows it.
+  useEffect(() => {
+    if (tab !== "overview") return;
+    const controller = new AbortController();
+    let active = true;
+    const poll = async () => {
+      try {
+        const result = await nativeNodes(controller.signal);
+        if (active) {
+          setSources(result);
+          setSourcesError("");
+        }
+      } catch (e) {
+        if (active)
+          setSourcesError(e instanceof Error ? e.message : "Sources unavailable");
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5000);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [tab]);
 
   function navigate(next: Tab, selected?: NativeRow) {
     ++request.current;
@@ -293,11 +336,22 @@ export function SimulatorView() {
     }
     return value;
   };
-  async function load(cursor?: string) {
+  async function load(cursor?: string, overrides: Partial<Filters> = {}) {
     if (!status) {
       setError("Wait for source identity before querying.");
       return;
     }
+    const f: Filters = {
+      tab,
+      height,
+      namespace,
+      recordKey,
+      recordId,
+      actor,
+      outcome,
+      digest,
+      ...overrides,
+    };
     const generation = ++request.current;
     setBusy(true);
     setError("");
@@ -310,27 +364,28 @@ export function SimulatorView() {
     }
     try {
       const params: Record<string, string> = {
-        atHeight: height,
+        atHeight: f.height,
         limit: String(pageSize),
       };
       if (cursor) params.cursor = cursor;
       if (
         ["records", "raw", "record-history", "operations", "query"].includes(
-          tab,
+          f.tab,
         )
       )
-        params.namespaceId = namespace;
-      if (recordKey && ["records", "record-history"].includes(tab))
-        params.recordKey = recordKey;
-      if (recordId && ["records", "record-history"].includes(tab))
-        params.recordId = recordId;
-      if (actor && tab === "transactions") params.actor = actor;
-      if (outcome && tab === "transactions") params.status = outcome;
+        params.namespaceId = f.namespace;
+      if (f.recordKey && ["records", "record-history"].includes(f.tab))
+        params.recordKey = f.recordKey;
+      if (f.recordId && ["records", "record-history"].includes(f.tab))
+        params.recordId = f.recordId;
+      if (f.actor && f.tab === "transactions") params.actor = f.actor;
+      if (f.outcome && f.tab === "transactions") params.status = f.outcome;
+      if (f.digest && f.tab === "transactions") params.digest = f.digest;
       const data =
-        tab === "query"
+        f.tab === "query"
           ? await nativeQuery({
-              namespaceId: namespace,
-              atHeight: height,
+              namespaceId: f.namespace,
+              atHeight: f.height,
               limit: pageSize,
               ...(cursor ? { cursor } : {}),
               predicate:
@@ -345,14 +400,14 @@ export function SimulatorView() {
                       },
                     },
             })
-          : await nativeGet(tab, params);
+          : await nativeGet(f.tab, params);
       const next = data as NativePage;
       if (
         next.verification !== "unverified-projection" ||
         !Array.isArray(next.rows) ||
         !next.snapshot ||
         !sameIdentity(next.identity, status.identity) ||
-        (height !== "latest" && next.snapshot.height !== height)
+        (f.height !== "latest" && next.snapshot.height !== f.height)
       )
         throw new Error("Invalid projection response");
       if (generation === request.current) {
@@ -444,88 +499,85 @@ export function SimulatorView() {
           BigInt(status.producer.head.height) - BigInt(status.indexed.height)
         ).toString()
       : "—";
-  async function control(
-    action: "pause" | "resume" | "step" | "configure",
-    retry = false,
-  ) {
-    if (
-      !status?.producer ||
-      auth.session.role !== "admin" ||
-      !auth.session.csrfToken ||
-      controlBusy
-    )
-      return;
-    const generation = ++controlGeneration.current;
-    setControlBusy(true);
-    setControlError("");
-    setControlResult("");
-    const producer = status.producer;
-    const command =
-      retry && retryCommand
-        ? retryCommand
-        : {
-            commandId:
-              "0x" +
-              Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
-                b.toString(16).padStart(2, "0"),
-              ).join(""),
-            runId: status.identity.runId,
-            expectedRevision: producer.configRevision,
-            expectedHeight: action === "step" ? producer.head.height : null,
-            action,
-            config:
-              action === "configure"
-                ? {
-                    ...producer.workload,
-                    payloadBytes,
-                    extraRowsPerBlock: extraRows,
-                  }
-                : null,
-          };
+  async function openBlock(h: string) {
+    navigate("blocks");
+    const generation = ++request.current;
+    setDetail({ height: h });
     try {
-      const result = (await nativeControl(
-        command,
-        auth.session.csrfToken,
-      )) as NativeRow;
-      if (generation !== controlGeneration.current) return;
-      setRetryCommand(null);
-      setControlResult(
-        `${displayNative(result.status)} · head ${displayNative((result.head as NativeRow)?.height)} · revision ${displayNative(result.configRevision)}`,
-      );
+      const block = (await nativeGet(`blocks/${h}`)) as NativeRow;
+      if (
+        !status ||
+        !sameIdentity(block, status.identity) ||
+        (block.header as NativeRow)?.height !== h
+      )
+        throw new Error("Block binding mismatch");
+      if (generation === request.current) setBlockDetail(block);
     } catch (e) {
-      if (generation !== controlGeneration.current) return;
-      const uncertain = retrySameControl(e);
-      setRetryCommand(uncertain ? command : null);
-      setControlError(
-        `${e instanceof Error ? e.message : "Control unavailable"}. ${uncertain ? "Retry preserves this command ID; do not create another step to guess its outcome." : "Command rejected. Refreshing producer state; a new command can be submitted."}`,
-      );
-      if (!uncertain) {
-        try {
-          const current = (await nativeGet("statistics")) as NativeStatus;
-          if (
-            generation === controlGeneration.current &&
-            sameIdentity(current.identity, status.identity)
-          )
-            setStatus(current);
-        } catch {
-          /* Normal status polling will retry. */
-        }
-      }
-    } finally {
-      if (generation === controlGeneration.current) setControlBusy(false);
+      if (generation === request.current)
+        setError(
+          `Block ${h}: ${e instanceof Error ? e.message : "metadata unavailable"}`,
+        );
     }
   }
-
-  useEffect(() => {
-    ++controlGeneration.current;
-    setControlBusy(false);
-    setRetryCommand(null);
-    setControlResult("");
-    setControlError("");
-    return () => {
-      ++controlGeneration.current;
-    };
-  }, [auth.session.role, auth.session.user?.id]);
+  /** One box for the identifiers people paste: a height, a 20-byte actor, a
+   * 32-byte transaction digest (falling back to a 32-byte record key in the
+   * current namespace) or a shorter record key. */
+  async function find(term: string) {
+    if (!status) return;
+    const value = term.trim().toLowerCase();
+    if (/^[0-9]+$/.test(value)) {
+      await openBlock(value);
+      return;
+    }
+    if (!/^0x(?:[0-9a-f]{2}){1,32}$/.test(value)) {
+      setError(
+        "Enter a block height, a 32-byte transaction digest, a 20-byte actor or a 1–32-byte record key.",
+      );
+      return;
+    }
+    const size = (value.length - 2) / 2;
+    if (size === 20) {
+      setActor(value);
+      setDigest("");
+      setOutcome("");
+      navigate("transactions");
+      await load(undefined, {
+        tab: "transactions",
+        actor: value,
+        digest: "",
+        outcome: "",
+      });
+      return;
+    }
+    if (size === 32) {
+      try {
+        const probe = (await nativeGet("transactions", {
+          atHeight: height,
+          limit: "1",
+          digest: value,
+        })) as NativePage;
+        if (Array.isArray(probe.rows) && probe.rows.length) {
+          setDigest(value);
+          setActor("");
+          setOutcome("");
+          navigate("transactions");
+          await load(undefined, {
+            tab: "transactions",
+            digest: value,
+            actor: "",
+            outcome: "",
+          });
+          return;
+        }
+      } catch {
+        /* Fall through to the record-key interpretation. */
+      }
+    }
+    setRecordKey(value);
+    setRecordId("");
+    navigate("records");
+    await load(undefined, { tab: "records", recordKey: value, recordId: "" });
+  }
 
   return (
     <div className="sim-shell">
@@ -535,8 +587,33 @@ export function SimulatorView() {
           <h1>Chain simulator</h1>
           <p>Independent PostgreSQL explorer · complete retained history</p>
         </div>
-        <AccountControls auth={auth} />
+        <div className="sim-header-side">
+          <AccountControls auth={auth} />
+          {peer && (
+            <a className="sim-peer-link" href={peer}>
+              Debug console ↗
+            </a>
+          )}
+        </div>
       </header>
+      <form
+        className="sim-search"
+        role="search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void find(search);
+        }}
+      >
+        <input
+          aria-label="Search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Block height, transaction digest, actor or record key"
+        />
+        <button type="submit" disabled={!status || busy}>
+          Search
+        </button>
+      </form>
       <div className="sim-trust">
         <strong>Unsigned simulator</strong>
         <span>
@@ -599,6 +676,46 @@ export function SimulatorView() {
                   health: status.health,
                 }}
               />
+              <h2>Indexing progress</h2>
+              {sources ? (
+                <div className="sim-sources">
+                  {(["producer", "full", "light"] as const).map((role) => {
+                    const r = sources.nodes[role];
+                    return (
+                      <div key={role}>
+                        <span>{NODE_LABELS[role]}</span>
+                        <strong>
+                          {!r.configured
+                            ? "not configured"
+                            : !r.available
+                              ? `unavailable · ${r.error ?? "unknown"}`
+                              : `block ${r.status?.head.height} · ${r.status?.health}${r.status?.paused ? " · paused" : ""}`}
+                        </strong>
+                      </div>
+                    );
+                  })}
+                  <div>
+                    <span>Explorer projection</span>
+                    <strong>
+                      {sources.explorer.indexed
+                        ? `block ${sources.explorer.indexed.height} · ${sources.explorer.health}`
+                        : `nothing indexed · ${sources.explorer.health}`}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>PostgreSQL relation bytes</span>
+                    <strong>
+                      {sources.explorer.storage.relationBytes ?? "unavailable"}
+                    </strong>
+                  </div>
+                </div>
+              ) : (
+                <p className="sim-muted" role="status">
+                  {sourcesError
+                    ? `Sources unavailable: ${sourcesError}`
+                    : "Reading sources…"}
+                </p>
+              )}
               <h2>Native totals</h2>
               <Metadata value={statistics} />
               <p className="sim-muted">
@@ -614,83 +731,18 @@ export function SimulatorView() {
                       ...status.producer.workload,
                       configRevision: status.producer.configRevision,
                       ...status.producer.memory,
+                      ...(status.producer.storage ?? {}),
                     }}
                   />
                 </>
               )}
               {auth.session.role === "admin" && status.controlAvailable && (
-                <div className="sim-detail">
-                  <h2>Producer controls</h2>
-                  <p className="sim-muted">
-                    Pause and resume are volatile runtime controls. Step is
-                    idempotent and commits one normal block; workload changes
-                    take effect in the next block. Restart begins paused.
-                  </p>
-                  <div className="sim-filters">
-                    {(["pause", "step", "resume"] as const).map((action) => (
-                      <button
-                        key={action}
-                        disabled={
-                          controlBusy ||
-                          !!retryCommand ||
-                          !status.producer ||
-                          (action === "step" && !status.producer.paused)
-                        }
-                        onClick={() => void control(action)}
-                      >
-                        {title(action)}
-                      </button>
-                    ))}
-                    <label>
-                      Field payload bytes
-                      <input
-                        type="number"
-                        min={0}
-                        max={1024}
-                        value={payloadBytes}
-                        onChange={(e) =>
-                          setPayloadBytes(Number(e.target.value))
-                        }
-                      />
-                    </label>
-                    <label>
-                      Extra rows / block
-                      <input
-                        type="number"
-                        min={0}
-                        max={4}
-                        value={extraRows}
-                        onChange={(e) => setExtraRows(Number(e.target.value))}
-                      />
-                    </label>
-                    <button
-                      className="secondary"
-                      disabled={
-                        controlBusy || !!retryCommand || !status.producer
-                      }
-                      onClick={() => void control("configure")}
-                    >
-                      Queue workload configuration
-                    </button>
-                  </div>
-                  {controlResult && <p role="status">{controlResult}</p>}
-                  {controlError && (
-                    <div className="sim-error" role="alert">
-                      {controlError}
-                    </div>
-                  )}
-                  {retryCommand && (
-                    <button
-                      className="secondary"
-                      disabled={controlBusy}
-                      onClick={() =>
-                        void control(retryCommand.action as "step", true)
-                      }
-                    >
-                      Retry same command
-                    </button>
-                  )}
-                </div>
+                <ProducerControls
+                  key={JSON.stringify(status.identity)}
+                  status={status}
+                  auth={auth}
+                  onStatus={setStatus}
+                />
               )}
             </>
           ) : (
@@ -798,6 +850,14 @@ export function SimulatorView() {
                     <option value="failed">Failed</option>
                   </select>
                 </label>
+                <label>
+                  Digest
+                  <input
+                    value={digest}
+                    onChange={(e) => setDigest(e.target.value)}
+                    placeholder="0x… 32 bytes (optional)"
+                  />
+                </label>
               </>
             )}
             {tab === "query" && (
@@ -865,16 +925,16 @@ export function SimulatorView() {
                 disabled={busy || operator !== "eq" || !status}
                 onClick={() => void verify()}
               >
-                Verify Eq locally
+                {verifier.button}
               </button>
             )}
           </form>
           {tab === "query" && (
             <p className="sim-muted">
-              Local verification supports positive typed equality only. It uses
-              the local Rust light process and its pinned unsigned simulator
-              roots. A remote dashboard without that local path shows projection
-              results only.
+              Proof verification supports positive typed equality only. It runs
+              on {verifier.where}, using the Rust light process and its pinned
+              unsigned simulator roots; it is not consensus. A deployment
+              without that path shows projection results only.
             </p>
           )}
           {error && (
@@ -911,15 +971,21 @@ export function SimulatorView() {
           {verified && (
             <>
               <div className="sim-result-heading">
-                <span className="sim-badge verified">
-                  Proof verified against trusted simulator root; unsigned source
-                </span>
+                <span className="sim-badge verified">{verifier.badge}</span>
                 <span>
                   Block {verified.snapshot.height} · {verified.postingCount}{" "}
                   matching IDs
                 </span>
               </div>
               <code className="sim-root">{verified.snapshot.stateRoot}</code>
+              {verified.diagnostics && (
+                <p className="sim-muted">
+                  {verified.diagnostics.verifier} · proof{" "}
+                  {verified.diagnostics.proofBytes} bytes · fetched in{" "}
+                  {verified.diagnostics.fetchMs} ms · verified in{" "}
+                  {verified.diagnostics.verifyMs} ms
+                </p>
+              )}
               <Table rows={verified.rows} kind="records" />
               <button
                 className="secondary"

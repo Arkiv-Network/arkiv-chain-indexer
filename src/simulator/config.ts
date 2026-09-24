@@ -44,6 +44,10 @@ export interface SimulatorConfig {
   databaseUrl: string;
   schema: string;
   feedUrl: string;
+  /** Optional independently executing full follower, probed for the topology view only. */
+  fullUrl?: string;
+  /** Optional light follower (the server-side verifier), probed for the topology view only. */
+  lightUrl?: string;
   controlUrl?: string;
   controlToken?: string;
   host: string;
@@ -93,6 +97,12 @@ export function parseSimulatorConfig(
     databaseUrl: env.DATABASE_URL,
     schema,
     feedUrl: origin(env.SIMULATOR_URL || "", privateHttp === "true"),
+    ...(env.SIMULATOR_FULL_URL
+      ? { fullUrl: origin(env.SIMULATOR_FULL_URL, privateHttp === "true") }
+      : {}),
+    ...(env.SIMULATOR_LIGHT_URL
+      ? { lightUrl: origin(env.SIMULATOR_LIGHT_URL, privateHttp === "true") }
+      : {}),
     ...(env.SIMULATOR_CONTROL_URL
       ? {
           controlUrl: origin(env.SIMULATOR_CONTROL_URL, privateHttp === "true"),

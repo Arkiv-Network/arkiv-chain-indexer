@@ -4,7 +4,8 @@ The integration runs an explicitly unsigned durable Rust producer, an independen
 executing full follower, a header-only durable light client, and an independent
 PostgreSQL explorer. `SOURCE_KIND=native-simulator` selects a separate backend and
 frontend path before Ethereum services mount. Existing Ethereum mode and the signed
-Rust demo remain available. No production deployment or pruning is included.
+Rust demo remain available. No pruning is included; the hosted experimental deployment
+and its validation record are in [simulator-deployment.md](simulator-deployment.md).
 
 [Run it locally or against a remote source](simulator-run.md). The implementation
 contract and the bounded whole-block feed adjustment are in
@@ -167,7 +168,8 @@ is limited to 64 entries and is volatile; after restart, request the first page 
 the same historical query again. SQL cursors remain portable within the same run.
 
 Local Docker communication explicitly permits configured private HTTP peers; remote
-configuration defaults to HTTPS and redirects are refused. Remote deployment is
-provided as configuration/documentation, not a production rollout. Google OAuth
-live-account HTTPS callbacks were not exercised; existing mocked OAuth/JWKS and
-session/token security tests plus real localhost opt-in token login were exercised.
+configuration defaults to HTTPS and redirects are refused. The experimental hosted
+deployment ([runbook](simulator-deployment.md)) is an operator-run stack behind
+nginx, not a production rollout. Google OAuth live-account HTTPS callbacks were
+not exercised; existing mocked OAuth/JWKS and session/token security tests plus
+real localhost opt-in token login were exercised.

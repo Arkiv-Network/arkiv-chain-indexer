@@ -143,6 +143,8 @@ export interface SourceStatus extends SimulatorIdentity {
     residentManifests: number;
   };
   observedPeerHeight: string;
+  /** Retained history file size when the node knows its file; absent, never zero, otherwise. */
+  storage?: { fileBytes: string };
 }
 const identityKeys = ["sourceId", "runId", "genesisHash", "chainId"] as const;
 function identity(v: Record<string, unknown>): SimulatorIdentity {
@@ -507,28 +509,32 @@ export function parseFeedBlock(value: unknown): FeedBlock {
   return result;
 }
 export function parseStatus(value: unknown): SourceStatus {
-  const v = object(value, [
-    "apiVersion",
-    "feedVersion",
-    ...identityKeys,
-    "sourceKind",
-    "authentication",
-    "durability",
-    "head",
-    "paused",
-    "health",
-    "role",
-    "configRevision",
-    "projectionVersion",
-    "blockFormatVersion",
-    "protocolVersion",
-    "coverage",
-    "proofProfiles",
-    "limits",
-    "workload",
-    "memory",
-    "observedPeerHeight",
-  ]);
+  const v = object(
+    value,
+    [
+      "apiVersion",
+      "feedVersion",
+      ...identityKeys,
+      "sourceKind",
+      "authentication",
+      "durability",
+      "head",
+      "paused",
+      "health",
+      "role",
+      "configRevision",
+      "projectionVersion",
+      "blockFormatVersion",
+      "protocolVersion",
+      "coverage",
+      "proofProfiles",
+      "limits",
+      "workload",
+      "memory",
+      "observedPeerHeight",
+    ],
+    ["storage"],
+  );
   if (
     v.apiVersion !== 1 ||
     v.feedVersion !== 1 ||
@@ -608,5 +614,12 @@ export function parseStatus(value: unknown): SourceStatus {
       residentManifests: integer(memory.residentManifests, 2),
     },
     observedPeerHeight: decimal(v.observedPeerHeight),
+    ...(v.storage === undefined
+      ? {}
+      : {
+          storage: {
+            fileBytes: decimal(object(v.storage, ["fileBytes"]).fileBytes),
+          },
+        }),
   };
 }

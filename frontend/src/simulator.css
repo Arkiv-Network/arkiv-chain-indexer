@@ -59,6 +59,61 @@
   color: var(--foreground);
   background: #3ab89710;
 }
+.sim-header-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.sim-peer-link {
+  font-size: 12px;
+  color: #aaaaff;
+}
+.sim-search {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 0;
+}
+.sim-search input {
+  flex: 1;
+  min-width: 0;
+  background: var(--background, #11151d);
+  color: inherit;
+  border: 1px solid #7d879850;
+  border-radius: 5px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+.sim-search button {
+  padding: 9px 16px;
+  font-size: 12px;
+}
+.sim-sources {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 24px;
+}
+.sim-sources > div {
+  border: 1px solid #7d879829;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.sim-sources span {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+}
+.sim-sources strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
 .sim-metrics {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -266,6 +321,12 @@
   .sim-header {
     align-items: start;
     flex-direction: column;
+  }
+  .sim-header-side {
+    align-items: flex-start;
+  }
+  .sim-sources {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .sim-metadata {
     grid-template-columns: 1fr;

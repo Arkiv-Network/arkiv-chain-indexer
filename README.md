@@ -9,9 +9,13 @@ python3 scripts/simulator.py control resume
 ```
 
 See the [local/remote run guide](docs/simulator-run.md),
-[design](docs/simulator-integration-plan.md), and
-[acceptance report](docs/simulator-acceptance.md). The separate native stack uses
-`compose.simulator.yml`; the default runtime and instructions below remain Ethereum.
+[design](docs/simulator-integration-plan.md),
+[acceptance report](docs/simulator-acceptance.md) and the
+[experimental deployment runbook](docs/simulator-deployment.md)
+(`https://experimental.arkiv-global.net` debug console and public node endpoint,
+`https://explorer.experimental.arkiv-global.net` read-only explorer). The separate
+native stack uses `compose.simulator.yml`; the default runtime and instructions
+below remain Ethereum.
 
 A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block, with optional
 inspected transaction rows, in **PostgreSQL**.
