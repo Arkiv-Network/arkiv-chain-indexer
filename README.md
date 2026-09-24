@@ -1,5 +1,9 @@
 # gas-price-tracker
 
+On `experimental`, the [native chain simulator proposal](docs/simulator-integration-plan.md)
+describes integration with the Rust engine/node using a metadata-only feed and an
+unsigned internal producer. It is a plan; the runtime below remains the Ethereum scanner.
+
 A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block, with optional
 inspected transaction rows, in **PostgreSQL**.
 
