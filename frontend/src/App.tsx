@@ -61,6 +61,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { OmniSearch } from "./OmniSearch";
 import { SearchView } from "./SearchView";
+import { fetchSourceKind } from "./simulatorApi";
+import { SimulatorView } from "./SimulatorView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
@@ -71,6 +73,22 @@ const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
 type ThemeOverride = "light" | "dark" | "";
 
 export function App() {
+  const [source, setSource] = useState<"ethereum" | "native-simulator" | null>(null);
+  const [failure, setFailure] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController(); setFailure("");
+    void fetchSourceKind(controller.signal).then(setSource).catch((error) => {
+      if (!controller.signal.aborted) setFailure(error instanceof Error ? error.message : "Source unavailable");
+    });
+    return () => controller.abort();
+  }, [attempt]);
+  if (source === "native-simulator") return <SimulatorView/>;
+  if (source === "ethereum") return <EthereumApp/>;
+  return <main className="sim-shell"><h1>Arkiv explorer</h1><p role="status">{failure || "Reading source capabilities…"}</p>{failure && <button onClick={() => setAttempt((n) => n + 1)}>Retry connection</button>}</main>;
+}
+
+function EthereumApp() {
   const auth = useAuth();
   const [clientLocation, setClientLocation] = useState(getCurrentLocation);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);

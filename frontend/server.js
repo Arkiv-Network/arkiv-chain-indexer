@@ -10,6 +10,10 @@ const PORT = Number.parseInt(process.env.PORT ?? "23560", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
 const BACKEND_HOST = process.env.BACKEND_HOST ?? "backend";
 const BACKEND_PORT = Number.parseInt(process.env.BACKEND_PORT ?? "3000", 10);
+// Optional fixed local verifier. No page-supplied target, no forwarded session
+// credentials, and no canonical-body or control route through this proxy.
+const LOCAL_LIGHT_HOST = process.env.LOCAL_SIMULATOR_LIGHT_HOST ?? "";
+const LOCAL_LIGHT_PORT = Number.parseInt(process.env.LOCAL_SIMULATOR_LIGHT_PORT ?? "9402", 10);
 const STATIC_DIR = process.env.STATIC_DIR
   ? path.resolve(process.env.STATIC_DIR)
   : path.resolve(__dirname, "dist");
@@ -214,6 +218,60 @@ function proxyApi(req, res) {
   req.pipe(proxyReq);
 }
 
+let localVerifierRequests = 0;
+function proxyLocalVerifier(req, res) {
+  const path = req.url?.replace(/^\/local-sim/, "/sim") ?? "";
+  const allowed = (req.method === "GET" && path === "/sim/v1/status")
+    || (req.method === "POST" && path === "/sim/v1/query/verified");
+  const fail = (status, error) => {
+    if (res.writableEnded) return;
+    if (!res.headersSent) res.writeHead(status, {"content-type": "application/json", "cache-control": "no-store"});
+    res.end(JSON.stringify({error}));
+  };
+  if (!LOCAL_LIGHT_HOST || !allowed) { fail(404, "LocalVerifierUnavailable"); return; }
+  // Refuse cross-origin browser invocations; this route is a local view, not
+  // a public CORS shortcut to the user's verifier or an arbitrary URL relay.
+  const origin = req.headers.origin;
+  if (origin) {
+    let host;
+    try {host = new URL(origin).host;} catch {fail(403, "OriginMismatch");return;}
+    if (host !== req.headers.host) {fail(403, "OriginMismatch");return;}
+  }
+  if (localVerifierRequests >= 16) {fail(429, "LocalVerifierBusy");return;}
+  ++localVerifierRequests;
+  const deadline = setTimeout(() => {fail(504, "LocalVerifierUnavailable");req.resume();}, 15000);
+  res.once("close", () => {--localVerifierRequests;clearTimeout(deadline);});
+  const chunks = []; let size = 0;
+  req.on("data", (chunk) => {
+    if (res.writableEnded) return;
+    size += chunk.length;
+    if (size > 65536 || chunks.length >= 4096) {size = 65537;fail(413, "RequestTooLarge");return;}
+    chunks.push(chunk);
+  });
+  req.on("end", () => {
+    if (size > 65536 || res.writableEnded) return;
+    const upstream = http.request({hostname: LOCAL_LIGHT_HOST, port: LOCAL_LIGHT_PORT, path, method: req.method,
+      headers: {"content-type": "application/json", accept: "application/json", "content-length": String(size)}}, (reply) => {
+      const parts = []; let bytes = 0;
+      reply.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > 8 * 1024 * 1024 || parts.length >= 8192) {bytes = 8 * 1024 * 1024 + 1;upstream.destroy();fail(502, "VerifierResponseTooLarge");return;}
+        parts.push(chunk);
+      });
+      reply.on("end", () => {
+        if (res.writableEnded || bytes > 8 * 1024 * 1024) return;
+        res.writeHead(reply.statusCode ?? 502, {"content-type": "application/json", "cache-control": "no-store"});
+        res.end(Buffer.concat(parts, bytes));
+      });
+      reply.on("error", () => fail(502, "LocalVerifierUnavailable"));
+    });
+    upstream.setTimeout(10000, () => upstream.destroy());
+    upstream.on("error", () => {if (!res.writableEnded) fail(502, "LocalVerifierUnavailable");});
+    upstream.end(Buffer.concat(chunks, size));
+    res.on("close", () => upstream.destroy());
+  });
+}
+
 function serveRuntimeConfig(res) {
   const config = {};
   for (const name of RUNTIME_CONFIG_ENV_NAMES) {
@@ -268,6 +326,7 @@ async function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = req.url ?? "/";
+  if (url.startsWith("/local-sim/")) {proxyLocalVerifier(req, res);return;}
   if (url === "/config.js" || url.startsWith("/config.js?")) {
     serveRuntimeConfig(res);
     return;
