@@ -100,10 +100,11 @@ export interface VerifiedPage extends NativeIdentity {
   };
 }
 
-export type UiMode = "explorer" | "debug";
+export type UiMode = "explorer" | "debug" | "fullnode" | "lightnode";
 /** Which native view this deployment serves; the explorer unless configured otherwise. */
 export function uiMode(): UiMode {
-  return envValues().VITE_UI_MODE === "debug" ? "debug" : "explorer";
+  const mode = envValues().VITE_UI_MODE;
+  return mode === "debug" || mode === "fullnode" || mode === "lightnode" ? mode : "explorer";
 }
 export type VerifierLocation = "server" | "local";
 /** Where the light process behind /local-sim runs relative to this browser.

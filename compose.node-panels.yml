@@ -1,0 +1,35 @@
+# Overlay on compose.simulator.yml. Independent read-only node panels; no PG/API dependency.
+# docker compose --env-file PRIVATE_ENV -p PROJECT -f compose.simulator.yml \
+#   -f compose.node-panels.yml --profile node-panels up -d --build --no-deps fullnode-ui lightnode-ui
+x-panel: &panel
+  profiles: [node-panels]
+  build:
+    context: frontend
+    additional_contexts:
+      shared: ./src
+  healthcheck:
+    test: [CMD-SHELL, wget -qO- http://127.0.0.1:23560/node-sim/v1/status || exit 1]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 15s
+  restart: unless-stopped
+services:
+  fullnode-ui:
+    <<: *panel
+    environment:
+      VITE_UI_MODE: fullnode
+      DEBUG_NODE_HOST: full
+      DEBUG_NODE_PORT: "9403"
+      VITE_SIMULATOR_VERIFIER: server
+      VITE_SIMULATOR_PEER_UI_URL: ${SIMULATOR_LIGHT_PANEL_URL:-https://lightnode.experimental.arkiv-global.net}
+    ports: ["127.0.0.1:${SIMULATOR_FULL_PANEL_PORT:-23572}:23560"]
+  lightnode-ui:
+    <<: *panel
+    environment:
+      VITE_UI_MODE: lightnode
+      DEBUG_NODE_HOST: light
+      DEBUG_NODE_PORT: "9402"
+      VITE_SIMULATOR_VERIFIER: server
+      VITE_SIMULATOR_PEER_UI_URL: ${SIMULATOR_FULL_PANEL_URL:-https://fullnode.experimental.arkiv-global.net}
+    ports: ["127.0.0.1:${SIMULATOR_LIGHT_PANEL_PORT:-23573}:23560"]

@@ -1,0 +1,62 @@
+{
+  "startedAt": "2026-09-24T15:38:16.154Z",
+  "full": "https://fullnode.experimental.arkiv-global.net",
+  "light": "https://lightnode.experimental.arkiv-global.net",
+  "api": {
+    "runId": "39526034551af8f0c34c7579e2dbc3d9",
+    "snapshot": {
+      "hash": "0x66a716138e58d875a253224a4fa229d34a02351cf68ef594fffc25218262fc0b",
+      "height": "20",
+      "stateRoot": "0xc871f6480846963dd85592eff139a651204156c1d10d04a6e5a5cef4b54b13f6"
+    },
+    "firstPage": [
+      "3",
+      "4",
+      "5"
+    ],
+    "secondPage": [
+      "6",
+      "7"
+    ],
+    "absentRows": 0,
+    "beforeExpiry": 2,
+    "afterExpiry": 1,
+    "proofBytes": "3252",
+    "pointPaths": 8
+  },
+  "browser": {
+    "errors": [],
+    "lightRoutes": [
+      "/node-sim/v1/status",
+      "/node-sim/v1/query/inspect"
+    ],
+    "fullRoutes": [
+      "/node-sim/v1/status",
+      "/node-sim/v1/feed/blocks/895",
+      "/node-sim/v1/feed/blocks/7"
+    ],
+    "mobileWidth": 390,
+    "historicalPaginationWhileHeadAdvanced": true,
+    "wrongRunRejected": true,
+    "frozenNodeClearsTrust": true,
+    "invalidBlockClearsResult": true,
+    "bothPanelsMobileOverflow": false
+  },
+  "ok": true,
+  "finishedAt": "2026-09-24T15:38:24.803Z",
+  "offlineVerifier": {
+    "valid": {
+      "hasNextPage": true,
+      "height": "20",
+      "postingCount": 5,
+      "proofBytes": 3252,
+      "queryDigest": "0xbc063e53e257e9164dbaf8a2922901f4cbcf2f1b0d13a25f60e559490f81b215",
+      "result": "verified",
+      "rows": 3,
+      "stateRoot": "0xc871f6480846963dd85592eff139a651204156c1d10d04a6e5a5cef4b54b13f6",
+      "trust": "separately supplied unsigned simulator header"
+    },
+    "oneByteMutationRejected": true,
+    "rejection": "InvalidProof"
+  }
+}

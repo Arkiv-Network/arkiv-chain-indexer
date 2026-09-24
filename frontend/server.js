@@ -14,6 +14,10 @@ const BACKEND_PORT = Number.parseInt(process.env.BACKEND_PORT ?? "3000", 10);
 // credentials, and no canonical-body or control route through this proxy.
 const LOCAL_LIGHT_HOST = process.env.LOCAL_SIMULATOR_LIGHT_HOST ?? "";
 const LOCAL_LIGHT_PORT = Number.parseInt(process.env.LOCAL_SIMULATOR_LIGHT_PORT ?? "9402", 10);
+const NODE_MODE = ["fullnode", "lightnode"].includes(process.env.VITE_UI_MODE)
+  ? process.env.VITE_UI_MODE : null;
+const DEBUG_NODE_HOST = process.env.DEBUG_NODE_HOST ?? "";
+const DEBUG_NODE_PORT = Number.parseInt(process.env.DEBUG_NODE_PORT ?? "9402", 10);
 const STATIC_DIR = process.env.STATIC_DIR
   ? path.resolve(process.env.STATIC_DIR)
   : path.resolve(__dirname, "dist");
@@ -225,16 +229,20 @@ function proxyApi(req, res) {
 }
 
 let localVerifierRequests = 0;
-function proxyLocalVerifier(req, res) {
-  const path = req.url?.replace(/^\/local-sim/, "/sim") ?? "";
+function proxyLocalVerifier(req, res, nodePanel = false) {
+  const path = req.url?.replace(nodePanel ? /^\/node-sim/ : /^\/local-sim/, "/sim") ?? "";
+  const hostname = nodePanel ? DEBUG_NODE_HOST : LOCAL_LIGHT_HOST;
+  const port = nodePanel ? DEBUG_NODE_PORT : LOCAL_LIGHT_PORT;
   const allowed = (req.method === "GET" && path === "/sim/v1/status")
-    || (req.method === "POST" && path === "/sim/v1/query/verified");
+    || (!nodePanel && req.method === "POST" && path === "/sim/v1/query/verified")
+    || (nodePanel && NODE_MODE === "lightnode" && req.method === "POST" && path === "/sim/v1/query/inspect")
+    || (nodePanel && NODE_MODE === "fullnode" && req.method === "GET" && /^\/sim\/v1\/feed\/blocks\/(0|[1-9][0-9]{0,19})$/.test(path));
   const fail = (status, error) => {
     if (res.writableEnded) return;
     if (!res.headersSent) res.writeHead(status, {"content-type": "application/json", "cache-control": "no-store"});
     res.end(JSON.stringify({error}));
   };
-  if (!LOCAL_LIGHT_HOST || !allowed) { fail(404, "LocalVerifierUnavailable"); return; }
+  if (!hostname || !allowed || (nodePanel && !NODE_MODE)) { fail(404, "LocalVerifierUnavailable"); return; }
   // Refuse cross-origin browser invocations; this route is a local view, not
   // a public CORS shortcut to the user's verifier or an arbitrary URL relay.
   const origin = req.headers.origin;
@@ -256,7 +264,7 @@ function proxyLocalVerifier(req, res) {
   });
   req.on("end", () => {
     if (size > 65536 || res.writableEnded) return;
-    const upstream = http.request({hostname: LOCAL_LIGHT_HOST, port: LOCAL_LIGHT_PORT, path, method: req.method,
+    const upstream = http.request({hostname, port, path, method: req.method,
       headers: {"content-type": "application/json", accept: "application/json", "content-length": String(size)}}, (reply) => {
       const parts = []; let bytes = 0;
       reply.on("data", (chunk) => {
@@ -332,6 +340,13 @@ async function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = req.url ?? "/";
+  if (url.startsWith("/node-sim/")) {proxyLocalVerifier(req, res, true);return;}
+  // Dedicated node panels have no explorer/backend or administrative surface.
+  if (NODE_MODE && /^\/(api|local-sim|sim|control|replication|metrics)(\/|\?|$)/.test(url)) {
+    res.writeHead(404, {"content-type": "application/json", "cache-control": "no-store"});
+    res.end(JSON.stringify({error: "NotFound"}));
+    return;
+  }
   if (url.startsWith("/local-sim/")) {proxyLocalVerifier(req, res);return;}
   if (url === "/config.js" || url.startsWith("/config.js?")) {
     serveRuntimeConfig(res);

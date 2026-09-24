@@ -108,3 +108,55 @@ test("local verifier proxy strips credentials, bounds streams and cannot reach c
     await light.stop(true);
   }
 }, 15000);
+
+for (const mode of ["fullnode", "lightnode"]) {
+  test(`${mode} routes only its read-only node API and never forwards credentials`, async () => {
+    const received: Array<{ path: string; headers: Headers }> = [];
+    const node = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+      received.push({ path: new URL(request.url).pathname, headers: request.headers });
+      return Response.json({ role: mode });
+    }});
+    const allocation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+    const port = allocation.port!;
+    allocation.stop(true);
+    const origin = `http://127.0.0.1:${port}`;
+    const child = Bun.spawn(["node", resolve(import.meta.dir, "server.js")], {
+      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port), VITE_UI_MODE: mode,
+        DEBUG_NODE_HOST: "127.0.0.1", DEBUG_NODE_PORT: String(node.port),
+        BACKEND_HOST: "127.0.0.1", BACKEND_PORT: String(node.port),
+        LOCAL_SIMULATOR_LIGHT_HOST: "127.0.0.1", LOCAL_SIMULATOR_LIGHT_PORT: String(node.port) },
+      stdout: "ignore", stderr: "ignore",
+    });
+    try {
+      let ready = false;
+      for (let n = 0; n < 100; n++) {
+        try { if ((await fetch(origin + "/node-sim/v1/status")).ok) { ready = true; break; } } catch {}
+        await Bun.sleep(20);
+      }
+      expect(ready).toBe(true);
+      received.length = 0;
+      const route = mode === "lightnode" ? "/query/inspect" : "/feed/blocks/18";
+      const method = mode === "lightnode" ? "POST" : "GET";
+      const response = await fetch(origin + "/node-sim/v1" + route, { method,
+        headers: { origin, cookie: "secret=session", authorization: "Bearer secret", "x-csrf-token": "secret" },
+        ...(method === "POST" ? { body: "{}" } : {}),
+      });
+      expect(response.status).toBe(200);
+      expect(received).toHaveLength(1);
+      expect(received[0]!.path).toBe("/sim/v1" + route);
+      for (const name of ["authorization", "cookie", "x-csrf-token", "origin"])
+        expect(received[0]!.headers.has(name)).toBe(false);
+      const forbidden = ["/api/health", "/api/auth/session", "/api/control", "/local-sim/v1/status",
+        "/sim/v1/status", "/control", "/replication/blocks/1", "/metrics", "/node-sim/v1/control",
+        "/node-sim/v1/status?target=http://evil.invalid", "/node-sim/v1/feed/blocks/01"];
+      if (mode === "lightnode") forbidden.push("/node-sim/v1/feed/blocks/18");
+      for (const path of forbidden) expect((await fetch(origin + path)).status).toBe(404);
+      expect((await fetch(origin + "/node-sim/v1/query/verified", { method: "POST", body: "{}" })).status).toBe(404);
+      if (mode === "fullnode") expect((await fetch(origin + "/node-sim/v1/query/inspect", { method: "POST", body: "{}" })).status).toBe(404);
+      expect((await fetch(origin + "/node-sim/v1/status", { headers: { origin: "https://other.example" } })).status).toBe(403);
+      expect(received).toHaveLength(1);
+    } finally {
+      child.kill("SIGTERM"); await child.exited; await node.stop(true);
+    }
+  }, 15000);
+}

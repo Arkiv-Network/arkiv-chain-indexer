@@ -64,6 +64,7 @@ import { SearchView } from "./SearchView";
 import { fetchSourceKind, uiMode } from "./simulatorApi";
 import { SimulatorView } from "./SimulatorView";
 import { DebugView } from "./DebugView";
+import { NodeDebugView } from "./NodeDebugView";
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
@@ -74,6 +75,14 @@ const THEME_OVERRIDE_STORAGE_KEY = "ui.theme";
 type ThemeOverride = "light" | "dark" | "";
 
 export function App() {
+  // Node applications connect straight to their Rust process. Keep this outside
+  // SourceApp so no explorer health/auth/database requests run in these modes.
+  const mode = uiMode();
+  if (mode === "fullnode" || mode === "lightnode") return <NodeDebugView mode={mode}/>;
+  return <SourceApp/>;
+}
+
+function SourceApp() {
   const [source, setSource] = useState<"ethereum" | "native-simulator" | null>(null);
   const [failure, setFailure] = useState("");
   const [attempt, setAttempt] = useState(0);

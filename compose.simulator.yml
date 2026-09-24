@@ -135,7 +135,7 @@ services:
         --listen,
         "0.0.0.0:9402",
         --peer,
-        "${SIMULATOR_URL}",
+        "${SIMULATOR_LIGHT_PEER_URL:-${SIMULATOR_URL}}",
         --source-id,
         "${SIMULATOR_SOURCE_ID}",
         --run-id,
