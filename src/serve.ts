@@ -1,3 +1,4 @@
+import { sourceKind } from "./simulator/config";
 import { AuthService } from "./auth";
 import { AuthStorage } from "./authStorage";
 import { parseServerConfig, ServerHelpRequested } from "./serverConfig";
@@ -316,4 +317,7 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (sourceKind() === "native-simulator") {
+  const { nativeServeMain } = await import("./simulator/runtime");
+  await nativeServeMain();
+} else await main();

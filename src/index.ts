@@ -1,3 +1,4 @@
+import { sourceKind } from "./simulator/config";
 import { parseConfig, HelpRequested } from "./config";
 import { ArkivDecoderClient } from "./arkivOperations";
 import { HttpBatcherCollector } from "./batcher";
@@ -65,4 +66,7 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (sourceKind() === "native-simulator") {
+  const { nativeScanMain } = await import("./simulator/runtime");
+  await nativeScanMain();
+} else await main();

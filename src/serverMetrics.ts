@@ -38,6 +38,18 @@ const SCRAPE_ROUTES: ReadonlySet<string> = new Set(["/metrics", "/admin/metrics"
  * just under `other`.
  */
 const ROUTE_TEMPLATES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^\/sim\/v1\/blocks\/[0-9]+$/, "/sim/v1/blocks/:height"],
+  [/^\/sim\/v1\/status$/, "/sim/v1/status"],
+  [/^\/sim\/v1\/statistics$/, "/sim/v1/statistics"],
+  [/^\/sim\/v1\/blocks$/, "/sim/v1/blocks"],
+  [/^\/sim\/v1\/transactions$/, "/sim/v1/transactions"],
+  [/^\/sim\/v1\/operations$/, "/sim/v1/operations"],
+  [/^\/sim\/v1\/namespaces$/, "/sim/v1/namespaces"],
+  [/^\/sim\/v1\/records$/, "/sim/v1/records"],
+  [/^\/sim\/v1\/raw$/, "/sim/v1/raw"],
+  [/^\/sim\/v1\/record-history$/, "/sim/v1/record-history"],
+  [/^\/sim\/v1\/query$/, "/sim/v1/query"],
+  [/^\/admin\/sim\/v1\/control$/, "/admin/sim/v1/control"],
   [/^\/metrics$/, "/metrics"],
   [/^\/admin\/metrics$/, "/admin/metrics"],
   [/^\/health$/, "/health"],

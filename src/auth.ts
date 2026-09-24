@@ -102,7 +102,7 @@ export class AuthService {
       if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && !this.checkCsrf(request, session)) return authError(403, "Invalid CSRF token or origin");
       if (admin && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         const path = new URL(request.url).pathname;
-        const action = path === "/shadow-rpc" ? "node_rpc" : path === "/baseload" ? "baseload_update" : "baseload_config_change";
+        const action = path === "/admin/sim/v1/control" ? "simulator_control" : path === "/shadow-rpc" ? "node_rpc" : path === "/baseload" ? "baseload_update" : "baseload_config_change";
         console.info("auth audit", { userId:session.user.id,action });
       }
       return null;
