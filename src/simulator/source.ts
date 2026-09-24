@@ -37,7 +37,8 @@ export class HttpSimulatorSource implements SimulatorSource {
       return await boundedJson(response, cap);
     } catch (error) {
       if (error instanceof SimulatorError) {
-        if (error.code === "ReadTimeout") return fail("Transport", 503);
+        if (error.code === "ReadTimeout" || error.code === "InvalidRequest")
+          return fail("Transport", 503);
         throw error;
       }
       return fail("Transport", 503);

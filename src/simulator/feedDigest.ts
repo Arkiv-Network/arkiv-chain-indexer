@@ -50,7 +50,8 @@ export function encodeFeedValue(value: unknown, cap = BINARY_FEED_CAP): Buffer {
       return;
     }
     if (typeof v === "number") {
-      if (!Number.isInteger(v) || v < 0 || v > 0xffffffff) return fail();
+      if (!Number.isInteger(v) || Object.is(v, -0) || v < 0 || v > 0xffffffff)
+        return fail();
       tag(3);
       u32(v);
       return;

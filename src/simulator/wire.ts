@@ -605,7 +605,7 @@ export function parseStatus(value: unknown): SourceStatus {
     memory: {
       engineCacheBytes: decimal(memory.engineCacheBytes),
       engineCacheEntries: integer(memory.engineCacheEntries),
-      residentManifests: integer(memory.residentManifests, 1),
+      residentManifests: integer(memory.residentManifests, 2),
     },
     observedPeerHeight: decimal(v.observedPeerHeight),
   };

@@ -46,6 +46,7 @@ export function integer(value: unknown, max = 0xffffffff): number {
   if (
     typeof value !== "number" ||
     !Number.isSafeInteger(value) ||
+    Object.is(value, -0) ||
     value < 0 ||
     value > max
   )

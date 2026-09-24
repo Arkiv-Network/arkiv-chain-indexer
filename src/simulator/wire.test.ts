@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boundedJson, decimal, signed } from "./common";
+import { boundedJson, decimal, integer, signed } from "./common";
 import { parseSimulatorConfig, sourceKind } from "./config";
 import { parseFeedBlock, parseStatus, FEED_CAP } from "./wire";
 import { genesis, history, status, ZERO } from "./testFixtures";
@@ -138,6 +138,7 @@ describe("native simulator wire", () => {
       parseSimulatorConfig({
         DATABASE_URL: "postgres://test",
         SIMULATOR_URL: "http://producer:8080",
+        SIMULATOR_ALLOW_PRIVATE_HTTP: "true",
         SIMULATOR_SOURCE_ID: g.sourceId,
         SIMULATOR_RUN_ID: g.runId,
         SIMULATOR_GENESIS_HASH: g.genesisHash,
@@ -196,4 +197,54 @@ test("body read deadline cancels a stalled stream", async () => {
     "ReadTimeout",
   );
   expect(cancelled).toBe(true);
+});
+
+test("remote source/control transports require HTTPS or explicit private-network opt-in", () => {
+  const g = genesis(),
+    base = {
+      DATABASE_URL: "postgres://test",
+      SIMULATOR_SOURCE_ID: g.sourceId,
+      SIMULATOR_RUN_ID: g.runId,
+      SIMULATOR_GENESIS_HASH: g.genesisHash,
+      SIMULATOR_CHAIN_ID: g.chainId,
+    };
+  expect(() =>
+    parseSimulatorConfig({ ...base, SIMULATOR_URL: "http://remote.example" }),
+  ).toThrow("SimulatorHttpsRequired");
+  expect(
+    parseSimulatorConfig({ ...base, SIMULATOR_URL: "https://remote.example" })
+      .feedUrl,
+  ).toBe("https://remote.example");
+  expect(() =>
+    parseSimulatorConfig({
+      ...base,
+      SIMULATOR_URL: "http://127.0.0.1",
+      SIMULATOR_CONTROL_URL: "http://producer",
+    }),
+  ).toThrow("SimulatorHttpsRequired");
+  expect(() =>
+    parseSimulatorConfig({
+      ...base,
+      SIMULATOR_URL: "http://127.0.0.1",
+      SIMULATOR_SCHEMA: "public",
+    }),
+  ).toThrow("InvalidSchema");
+});
+
+test("fenced producer status may retain current plus prepared manifest", () => {
+  const s = status(genesis());
+  expect(
+    parseStatus({
+      ...s,
+      health: "storage-fenced",
+      memory: { ...s.memory, residentManifests: 2 },
+    }).memory.residentManifests,
+  ).toBe(2);
+  expect(() =>
+    parseStatus({ ...s, memory: { ...s.memory, residentManifests: 3 } }),
+  ).toThrow();
+});
+
+test("u32 wire integers reject noncanonical negative zero", () => {
+  expect(() => integer(-0)).toThrow();
 });

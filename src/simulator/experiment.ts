@@ -81,7 +81,10 @@ if (process.argv[2] === "cold") {
     65534,
   );
   const directory = await mkdtemp(
-      join(tmpdir(), "arkiv-sim-metadata-experiment-"),
+      join(
+        process.env.SIMULATOR_EXPERIMENT_DIRECTORY_ROOT ?? tmpdir(),
+        "arkiv-sim-metadata-experiment-",
+      ),
     ),
     token = randomBytes(32).toString("hex"),
     origin = `http://127.0.0.1:${port}`,

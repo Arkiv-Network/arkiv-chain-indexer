@@ -50,7 +50,7 @@ export interface SimulatorConfig {
   port: number;
   pollMs: number;
 }
-function origin(value: string): string {
+function origin(value: string, allowPrivateHttp: boolean): string {
   let u: URL;
   try {
     u = new URL(value);
@@ -66,12 +66,21 @@ function origin(value: string): string {
     u.pathname !== "/"
   )
     return fail("InvalidSimulatorUrl");
+  if (
+    u.protocol === "http:" &&
+    !["localhost", "127.0.0.1", "[::1]"].includes(u.hostname) &&
+    !allowPrivateHttp
+  )
+    return fail("SimulatorHttpsRequired");
   return u.origin;
 }
 export function parseSimulatorConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): SimulatorConfig {
   if (!env.DATABASE_URL) return fail("DatabaseUrlRequired");
+  const privateHttp = env.SIMULATOR_ALLOW_PRIVATE_HTTP || "false";
+  if (privateHttp !== "true" && privateHttp !== "false")
+    return fail("InvalidSimulatorConfig");
   const schema = env.SIMULATOR_SCHEMA || "sim_v1";
   if (!/^sim_[a-z0-9_]{1,44}$/.test(schema)) return fail("InvalidSchema");
   return {
@@ -83,9 +92,11 @@ export function parseSimulatorConfig(
     }),
     databaseUrl: env.DATABASE_URL,
     schema,
-    feedUrl: origin(env.SIMULATOR_URL || ""),
+    feedUrl: origin(env.SIMULATOR_URL || "", privateHttp === "true"),
     ...(env.SIMULATOR_CONTROL_URL
-      ? { controlUrl: origin(env.SIMULATOR_CONTROL_URL) }
+      ? {
+          controlUrl: origin(env.SIMULATOR_CONTROL_URL, privateHttp === "true"),
+        }
       : {}),
     ...(env.SIMULATOR_CONTROL_TOKEN
       ? { controlToken: env.SIMULATOR_CONTROL_TOKEN }

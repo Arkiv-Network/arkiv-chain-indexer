@@ -33,6 +33,23 @@ export async function runNativeScanner(
   pollMs = 1000,
   signal?: AbortSignal,
 ): Promise<void> {
+  // Container restarts must not erase a permanent identity/protocol/conflict fence.
+  // Only known availability failures may resume automatically; operator recovery
+  // uses a reviewed new projection schema/run, never a public clear-fence endpoint.
+  const { health } = await storage.progress();
+  if (
+    ![
+      "initializing",
+      "running",
+      "StorageUnavailable",
+      "StorageCorrupt",
+      "SourceBehind",
+      "Transport",
+      "HistoryUnavailable",
+      "UpstreamUnavailable",
+    ].includes(health)
+  )
+    return fail(health, 409);
   let failures = 0;
   while (!signal?.aborted) {
     try {
