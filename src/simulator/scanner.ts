@@ -14,6 +14,8 @@ export async function scanTick(
     count = 0;
   while (next <= BigInt(status.head.height) && count < maxBlocks) {
     const block = await source.block(next.toString());
+    if (Number.parseInt(block.header.headerBytes.slice(2, 10), 16) !== status.protocolVersion)
+      return fail("UnsupportedVersion");
     if (
       block.header.height === status.head.height &&
       (block.header.hash !== status.head.hash ||

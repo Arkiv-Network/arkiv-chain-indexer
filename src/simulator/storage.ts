@@ -118,12 +118,15 @@ export class SimulatorStorage {
         `CREATE UNIQUE INDEX IF NOT EXISTS sim_current_record ON ${q}.record_versions(run_pk,namespace_id,record_id) WHERE to_height IS NULL`,
         `CREATE UNIQUE INDEX IF NOT EXISTS sim_live_key ON ${q}.record_versions(run_pk,namespace_id,record_key) WHERE to_height IS NULL AND NOT deleted`,
         `CREATE INDEX IF NOT EXISTS sim_record_at ON ${q}.record_versions(run_pk,namespace_id,record_id,from_height,to_height)`,
-        `CREATE TABLE IF NOT EXISTS ${q}.record_attributes (run_pk bigint, namespace_id ${q}.u64, record_id ${q}.u64, from_height ${q}.u64, name bytea, type text NOT NULL, value_num numeric(20,0), value_bool boolean, value_bytes bytea, PRIMARY KEY(run_pk,namespace_id,record_id,from_height,name), FOREIGN KEY(run_pk,namespace_id,record_id,from_height) REFERENCES ${q}.record_versions)`,
+        `CREATE TABLE IF NOT EXISTS ${q}.record_attributes (run_pk bigint, namespace_id ${q}.u64, record_id ${q}.u64, from_height ${q}.u64, name bytea, type text NOT NULL, value_num numeric, value_bool boolean, value_bytes bytea, PRIMARY KEY(run_pk,namespace_id,record_id,from_height,name), FOREIGN KEY(run_pk,namespace_id,record_id,from_height) REFERENCES ${q}.record_versions)`,
         `CREATE INDEX IF NOT EXISTS sim_attribute_lookup ON ${q}.record_attributes(run_pk,namespace_id,name,type,value_num,record_id)`,
         `CREATE TABLE IF NOT EXISTS ${q}.raw_versions (run_pk bigint REFERENCES ${q}.runs, namespace_id ${q}.u64, raw_key text, from_height ${q}.u64, to_height ${q}.u64, deleted boolean NOT NULL, data jsonb NOT NULL, PRIMARY KEY(run_pk,namespace_id,raw_key,from_height), CHECK(to_height IS NULL OR to_height>from_height))`,
         `CREATE UNIQUE INDEX IF NOT EXISTS sim_current_raw ON ${q}.raw_versions(run_pk,namespace_id,raw_key) WHERE to_height IS NULL`,
       ])
         await tx.query(ddl);
+      // Upgrade legacy precision under the same advisory transaction lock. Unrestricted
+      // numeric preserves both all 78 u256 digits and the dec scale without rounding.
+      await tx.query(`DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='${q}.record_attributes'::regclass AND attname='value_num' AND atttypmod<>-1) THEN ALTER TABLE ${q}.record_attributes ALTER COLUMN value_num TYPE numeric; END IF; END $$`);
       const id = this.identity;
       await tx.query(
         `INSERT INTO ${q}.runs(source_id,run_id,genesis_hash,chain_id,version) VALUES($1,$2,$3,$4,1) ON CONFLICT(source_id,run_id) DO NOTHING`,
@@ -174,6 +177,13 @@ export class SimulatorStorage {
     if (!sameIdentity(status, this.identity))
       return fail("IdentityMismatch", 409);
     const progress = await this.progress();
+    if (progress.observed && progress.observed.protocolVersion !== status.protocolVersion)
+      return fail("UnsupportedVersion");
+    if (progress.height !== null) {
+      const known = await this.header(progress.height);
+      if (!known || Number.parseInt(known.headerBytes.slice(2, 10), 16) !== status.protocolVersion)
+        return fail("UnsupportedVersion");
+    }
     if (
       progress.height !== null &&
       BigInt(status.head.height) <= BigInt(progress.height)
@@ -237,14 +247,15 @@ export class SimulatorStorage {
         return fail("ChainConflict", 409);
       if (progress.height !== null) {
         const prior = (
-          await tx.query<{ timestamp_ms: string }>(
-            `SELECT timestamp_ms FROM ${q}.blocks WHERE run_pk=$1 AND height=$2`,
+          await tx.query<{ timestamp_ms: string; header: Header }>(
+            `SELECT timestamp_ms,header FROM ${q}.blocks WHERE run_pk=$1 AND height=$2`,
             [this.runPk, progress.height],
           )
         ).rows[0];
         if (
           !prior ||
-          BigInt(b.header.timestampMs) <= BigInt(prior.timestamp_ms)
+          BigInt(b.header.timestampMs) <= BigInt(prior.timestamp_ms) ||
+          b.header.headerBytes.slice(2, 10) !== prior.header.headerBytes.slice(2, 10)
         )
           return fail("InvalidHeader");
       }
@@ -419,9 +430,9 @@ export class SimulatorStorage {
               h,
               Buffer.from(a.name),
               a.type,
-              a.type === "u64" || a.type === "i64" ? a.value : null,
+              ["u64", "i64", "i32", "u256", "dec"].includes(a.type) ? a.value : null,
               a.type === "bool" ? a.value : null,
-              a.type === "str" ? Buffer.from(a.value as string) : null,
+              a.type === "str" ? Buffer.from(a.value as string) : ["addr", "key", "bytes32"].includes(a.type) ? Buffer.from((a.value as string).slice(2), "hex") : null,
             ],
           );
       return delta;

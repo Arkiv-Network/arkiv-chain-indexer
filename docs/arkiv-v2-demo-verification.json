@@ -1,0 +1,97 @@
+{
+  "startedAt": "2026-09-24T18:39:56.466Z",
+  "full": "https://fullnode.experimental.arkiv-global.net",
+  "light": "https://lightnode.experimental.arkiv-global.net",
+  "arkivExamples": [
+    {
+      "id": "membership",
+      "matches": 5
+    },
+    {
+      "id": "absence",
+      "matches": 0
+    },
+    {
+      "id": "before-expiry",
+      "matches": 4
+    },
+    {
+      "id": "after-expiry",
+      "matches": 3
+    },
+    {
+      "id": "owner",
+      "matches": 1
+    },
+    {
+      "id": "creator",
+      "matches": 5
+    },
+    {
+      "id": "decimal",
+      "matches": 5
+    },
+    {
+      "id": "u256",
+      "matches": 5
+    },
+    {
+      "id": "content-type",
+      "matches": 5
+    },
+    {
+      "id": "updated",
+      "matches": 1
+    },
+    {
+      "id": "reference",
+      "matches": 5
+    },
+    {
+      "id": "signed",
+      "matches": 5
+    }
+  ],
+  "api": {
+    "runId": "500ffaf8875dd09986d072214cf84af9",
+    "snapshot": {
+      "hash": "0xe98eef150ce3318b4b9b3d3bae1c2661e6be25ddf37e4ecbcb9186605af45fbc",
+      "height": "3",
+      "stateRoot": "0xb04cdf71ccebc0938a4b4a1a5910b96aea20f1c7a09d0024a10e7188ab280c7f"
+    },
+    "firstPage": [
+      "1",
+      "2",
+      "3"
+    ],
+    "secondPage": [
+      "4",
+      "5"
+    ],
+    "absentRows": 0,
+    "beforeExpiry": 4,
+    "afterExpiry": 3,
+    "proofBytes": "4980",
+    "pointPaths": 8
+  },
+  "browser": {
+    "errors": [],
+    "lightRoutes": [
+      "/node-sim/v1/status",
+      "/node-sim/v1/query/inspect"
+    ],
+    "fullRoutes": [
+      "/node-sim/v1/status",
+      "/node-sim/v1/feed/blocks/33",
+      "/node-sim/v1/feed/blocks/7"
+    ],
+    "mobileWidth": 390,
+    "historicalPaginationWhileHeadAdvanced": true,
+    "wrongRunRejected": true,
+    "frozenNodeClearsTrust": true,
+    "invalidBlockClearsResult": true,
+    "bothPanelsMobileOverflow": false
+  },
+  "ok": true,
+  "finishedAt": "2026-09-24T18:40:05.559Z"
+}

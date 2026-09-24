@@ -28,6 +28,8 @@ x-api-env: &api-env
 x-node-build: &node-build
   context: ${SIMULATOR_RUST_REPO:-../arkiv-db-pure-astra}
   dockerfile: Dockerfile.simulator
+  args:
+    SIMULATOR_FEATURES: ${SIMULATOR_FEATURES:-}
 x-node-health: &node-health
   interval: 5s
   timeout: 3s

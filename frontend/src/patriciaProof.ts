@@ -1,7 +1,7 @@
 /** Versioned trace returned only after the node's strict equality verifier succeeds. */
 export interface ProofInspection {
-  version: 1;
-  proofProfile: "eq-page-v1";
+  version: 1 | 2;
+  proofProfile: "eq-page-v1" | "eq-page-v2";
   queryDigest: string;
   stateComposition: {
     stateRoot: string;

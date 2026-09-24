@@ -32,14 +32,16 @@ function observe(page: Page) {
   page.on("request", r => routes.push(new URL(r.url()).pathname));
   return { errors, routes };
 }
-const selection = { height: "20", namespace: "1", attribute: "group", valueType: "u64", value: "1", limit: 3, cursor: null };
+let selection = { height: "20", namespace: "1", attribute: "group", valueType: "u64", value: "1", limit: 3, cursor: null };
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {}) });
 try {
   const fullStatus = await get(full + "/node-sim/v1/status"), lightStatus = await get(light + "/node-sim/v1/status");
   assert.equal(fullStatus.role, "full"); assert.equal(lightStatus.role, "light");
   for (const key of ["sourceId", "runId", "genesisHash", "chainId"]) assert.equal(fullStatus[key], lightStatus[key]);
   assert.ok(BigInt(lightStatus.head.height) >= 20n);
-  const block = await get(full + "/node-sim/v1/feed/blocks/20");
+  const v2 = lightStatus.capabilities?.profile === "arkiv-entity-v2";
+  if (v2) selection = {...selection, height: "3"};
+  const block = await get(full + "/node-sim/v1/feed/blocks/" + selection.height);
   const first = await get(light + "/node-sim/v1/query/inspect", selection);
   assert.equal(first.snapshot.stateRoot, block.header.stateRoot);
   assert.equal(first.inspection.stateComposition.stateRoot, block.header.stateRoot);
@@ -48,7 +50,7 @@ try {
   assert.equal(first.inspection.postingSet.recordIds.length, 5);
   assert.ok(first.inspection.pointPaths.some((p: any) => p.nodes.some((n: any) => n.kind === "branch")));
   await Bun.write(join(out, "membership-inspection.json"), JSON.stringify(first, null, 2));
-  await Bun.write(join(out, "trusted-block-20.json"), JSON.stringify(block, null, 2));
+  await Bun.write(join(out, `trusted-block-${selection.height}.json`), JSON.stringify(block, null, 2));
   const second = await get(light + "/node-sim/v1/query/inspect", { ...selection, cursor: first.continuation });
   assert.equal(second.rows.length, 2); assert.equal(second.continuation, null);
   assert.equal(second.snapshot.stateRoot, first.snapshot.stateRoot);
@@ -57,8 +59,21 @@ try {
   assert.equal(absent.rows.length, 0); assert.ok(absent.inspection.pointPaths.some((p: any) => p.terminal.kind === "absence"));
   const before = await get(light + "/node-sim/v1/query/inspect", { ...selection, height: "13" });
   const after = await get(light + "/node-sim/v1/query/inspect", { ...selection, height: "14" });
-  assert.equal(before.rows.length, 2); assert.equal(after.rows.length, 1);
-  report.api = { runId: first.runId, snapshot: first.snapshot, firstPage: first.rows.map((r: any) => r.recordId), secondPage: second.rows.map((r: any) => r.recordId), absentRows: 0, beforeExpiry: 2, afterExpiry: 1, proofBytes: first.diagnostics.proofBytes, pointPaths: first.inspection.pointPaths.length };
+  assert.equal(before.postingCount, v2 ? 4 : 2); assert.equal(after.postingCount, v2 ? 3 : 1);
+  if (v2) {
+    const { ARKIV_EXAMPLES } = await import("../frontend/src/nodeDebugApi");
+    report.arkivExamples = [];
+    for (const sample of ARKIV_EXAMPLES) {
+      const result = await get(light + "/node-sim/v1/query/inspect", sample.request);
+      assert.equal(result.profile, "arkiv-entity-v2");
+      assert.equal(result.inspection.version, 2);
+      assert.equal(result.entities.length, result.rows.length);
+      const expected = sample.id === "absence" ? 0 : ["owner", "updated"].includes(sample.id) ? 1 : sample.id === "before-expiry" ? 4 : sample.id === "after-expiry" ? 3 : 5;
+      assert.equal(result.postingCount, expected, sample.id);
+      report.arkivExamples.push({id:sample.id, matches:result.postingCount});
+    }
+  }
+  report.api = { runId: first.runId, snapshot: first.snapshot, firstPage: first.rows.map((r: any) => r.recordId), secondPage: second.rows.map((r: any) => r.recordId), absentRows: 0, beforeExpiry: before.postingCount, afterExpiry: after.postingCount, proofBytes: first.diagnostics.proofBytes, pointPaths: first.inspection.pointPaths.length };
   for (const origin of [full, light]) {
     for (const route of ["/api/health", "/api/admin/sim/v1/control", "/local-sim/v1/status", "/node-sim/v1/control", "/node-sim/v1/replication/blocks/1"])
       assert.equal((await fetch(origin + route)).status, 404, route);
@@ -75,22 +90,29 @@ try {
   await page.getByRole("button", { name: "Next page", exact: true }).click();
   await until(() => page.locator(".nd-result-card .nd-records > details").count(), n => n === 2, "second page rows");
   assert.ok(BigInt((await get(light + "/node-sim/v1/status")).head.height) > startHeight);
-  for (const [label, count] of [["02 / Absence", 0], ["03 / Before expiry", 2], ["04 / After expiry", 1]] as const) {
+  for (const [label, count] of [["02 / Absence", 0], ["03 / Before expiry", v2 ? 3 : 2], ["04 / After expiry", v2 ? 3 : 1]] as const) {
     const responsePromise = page.waitForResponse(r => r.url().endsWith("/node-sim/v1/query/inspect") && r.status() === 200);
     await page.getByRole("button", { name: new RegExp(label) }).click();
     const data = await (await responsePromise).json(); assert.equal(data.rows.length, count);
     await until(() => page.locator(".nd-result-card .nd-records > details").count(), n => n === count, label);
     if (count === 0) { await page.locator(".nd-absence").waitFor(); await page.screenshot({ path: join(out, "absence.png"), fullPage: true }); }
   }
+  if (v2) {
+    for (const label of ["05 / Ownership", "06 / Creator", "07 / Decimal", "08 / Wide integer", "09 / Content type", "10 / Updated block", "11 / Entity reference", "12 / Signed integer"]) {
+      const incoming = page.waitForResponse(r => r.url().endsWith("/node-sim/v1/query/inspect"));
+      await page.getByRole("button", {name:new RegExp(label)}).click();
+      const response = await incoming; assert.equal(response.status(), 200, label);
+      await page.locator(".nd-verified").waitFor();
+      assert.equal(await page.getByRole("alert").count(), 0, label);
+      await page.locator(".nd-record summary").first().click();
+      await page.getByRole("heading", {name:"Verified entity system fields",exact:true}).first().waitFor();
+    }
+  }
   await page.getByLabel("Snapshot block", { exact: true }).fill("999999999999");
   await page.getByRole("button", { name: "Run & verify query", exact: true }).click();
   await page.getByRole("alert").waitFor();
   assert.equal(await page.locator(".nd-result-card.has-result").count(), 0, "failed query must clear old success");
-  await page.route("**/node-sim/v1/query/inspect", async route => {
-    const response = await route.fetch(); const data = await response.json();
-    data.runId = "0".repeat(32);
-    await route.fulfill({ response, json: data });
-  });
+  await page.route("**/node-sim/v1/query/inspect", route => route.fulfill({ status: 200, json: { ...first, runId: "0".repeat(32) } }));
   const mismatchResponse = page.waitForResponse(r => r.url().endsWith("/node-sim/v1/query/inspect"));
   await page.getByRole("button", { name: /01 \/ Membership/ }).click();
   await mismatchResponse;

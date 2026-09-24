@@ -9,7 +9,7 @@ import {
   object,
   text,
 } from "./common";
-import { parseAttribute, type Attribute } from "./wire";
+import { attributeName, hexAttribute, numericAttribute, parseAttribute, type Attribute } from "./wire";
 export type Predicate =
   | { op: "eq" | "lt" | "lte" | "gt" | "gte" | "prefix"; attribute: Attribute }
   | { op: "exists"; name: string }
@@ -38,7 +38,7 @@ export function parsePredicate(value: unknown): Predicate | null {
     }
     if (v.op === "exists") {
       const p = object(v, ["op", "name"]);
-      return { op: "exists", name: text(p.name, 20, 1) };
+      return { op: "exists", name: attributeName(p.name) };
     }
     const p = object(v, ["op", "attribute"]);
     const op = choice(p.op, ["eq", "lt", "lte", "gt", "gte", "prefix"]);
@@ -46,7 +46,7 @@ export function parsePredicate(value: unknown): Predicate | null {
     if (
       op === "prefix"
         ? attribute.type !== "str"
-        : op !== "eq" && !["i64", "u64"].includes(attribute.type)
+        : op !== "eq" && !numericAttribute(attribute.type)
     )
       return fail("UnsupportedQuery", 422);
     return { op, attribute };
@@ -84,6 +84,8 @@ export function predicateSql(
         query.op === "prefix"
           ? ` AND substring(a.value_bytes FROM 1 FOR ${params.add(bytes.length)})=${params.add(bytes)}`
           : ` AND a.value_bytes=${params.add(bytes)}`;
+    } else if (hexAttribute(attr.type)) {
+      clause += ` AND a.value_bytes=${params.add(Buffer.from((attr.value as string).slice(2), "hex"))}`;
     } else {
       const operator = {
         eq: "=",

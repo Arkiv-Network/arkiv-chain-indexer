@@ -5,7 +5,10 @@ import {
 import type { ProofInspection } from "./patriciaProof";
 
 export type NodeUiMode = "fullnode" | "lightnode";
+export interface ArkivEntity { key: string; owner: string; creator: string; createdAt: string; updatedAt: string; expiresAt: string; contentType: string; payload: string; creationFlags: { raw: number; readonly: boolean; permissionlessExtension: boolean } }
 export interface InspectedPage extends VerifiedPage {
+  profile?: "arkiv-entity-v2";
+  entities?: ArkivEntity[];
   canonicalRequest: string;
   canonicalProof: string;
   inspection: ProofInspection;
@@ -35,6 +38,12 @@ export async function fetchNodeStatus(mode: NodeUiMode, signal?: AbortSignal): P
       (data.observedPeerHeight !== undefined && !uint(data.observedPeerHeight))) {
     throw new Error("NodeIdentityMismatch");
   }
+  if (data.capabilities) {
+    const c = data.capabilities;
+    const version = c.profile === "arkiv-entity-v2" ? 2 : c.profile === "generic-v1" ? 1 : 0;
+    const types = version === 2 ? ARKIV_TYPES : ["bool", "i64", "u64", "str"];
+    if (!version || c.layoutVersion !== version || c.codecVersion !== version || !Array.isArray(c.scalarTypes) || c.scalarTypes.length !== types.length || new Set(c.scalarTypes).size !== types.length || c.scalarTypes.some(t => !types.includes(t))) throw new Error("UnsupportedNodeProfile");
+  }
   return data;
 }
 
@@ -45,7 +54,10 @@ export function validateInspectedPage(data: unknown, identity: NativeIdentity, r
       !result.inspection || typeof result.inspection !== "object") {
     throw new Error("InvalidProofInspection");
   }
+  const v2 = isArkivProfile(identity as NativeSourceStatus);
+  if (result.inspection.version !== (v2 ? 2 : 1) || result.profile !== (v2 ? "arkiv-entity-v2" : undefined)) throw new Error("ProofProfileMismatch");
   validateInspectionStructure(result.inspection, result);
+  if (v2) validateEntities(result);
   return result;
 }
 
@@ -65,7 +77,7 @@ function requireInspection(condition: unknown): asserts condition {
 function validateInspectionStructure(unknownInspection: unknown, page: VerifiedPage) {
   requireInspection(record(unknownInspection));
   const i = unknownInspection;
-  requireInspection(i.version === 1 && i.proofProfile === "eq-page-v1" && hash(i.queryDigest));
+  requireInspection((i.version === 1 || i.version === 2) && i.proofProfile === `eq-page-v${i.version}` && hash(i.queryDigest));
   const state = i.stateComposition;
   requireInspection(record(state) && state.stateRoot === page.snapshot.stateRoot && state.domain === "arkiv/state/v1" &&
     hex(state.headerBytes) && hex(state.pricingBytes) && uint(state.nextNamespace) && map(state.catalog) && map(state.host));
@@ -159,12 +171,28 @@ export function pinSelection(request: EqSelection, head: string): EqSelection {
   if (request.valueType === "bool") {
     if (value !== true && value !== false && value !== "true" && value !== "false") throw new Error("InvalidBoolean");
     value = value === true || value === "true";
-  } else if (request.valueType === "u64" || request.valueType === "i64") {
+  } else if (["u64", "i64", "i32", "u256"].includes(request.valueType)) {
     if (typeof value !== "string" || !/^-?\d+$/.test(value)) throw new Error("InvalidInteger");
     const n = BigInt(value);
-    if (request.valueType === "u64" ? n < 0n || n > 18446744073709551615n : n < -9223372036854775808n || n > 9223372036854775807n) throw new Error("IntegerOutOfRange");
+    const bits = request.valueType === "u256" ? 256n : request.valueType === "i32" ? 32n : 64n;
+    const signed = request.valueType.startsWith("i");
+    if (n < (signed ? -(1n << (bits - 1n)) : 0n) || n >= (1n << (signed ? bits - 1n : bits))) throw new Error("IntegerOutOfRange");
     value = n.toString();
+  } else if (request.valueType === "dec") {
+    if (typeof value !== "string" || !/^-?\d+(?:\.\d{1,18})?$/.test(value)) throw new Error("InvalidDecimal");
+    const negative = value.startsWith("-");
+    const [whole, fraction = ""] = value.replace(/^-/, "").split(".");
+    const units = BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, "0"));
+    const signed = negative ? -units : units;
+    if (signed < -(1n << 255n) || signed >= (1n << 255n)) throw new Error("DecimalOutOfRange");
+    const trimmed = fraction.replace(/0+$/, "");
+    value = `${negative && units !== 0n ? "-" : ""}${BigInt(whole)}${trimmed ? "." + trimmed : ""}`;
+  } else if (["addr", "key", "bytes32"].includes(request.valueType)) {
+    const bytes = request.valueType === "addr" ? 20 : 32;
+    if (typeof value !== "string" || !new RegExp(`^0x[0-9a-fA-F]{${bytes * 2}}$`).test(value)) throw new Error("InvalidFixedBytes");
+    value = value.toLowerCase();
   }
+
   return { ...request, height: BigInt(height).toString(), namespace: BigInt(request.namespace).toString(), attribute: request.attribute.trim(), value };
 }
 
@@ -183,4 +211,39 @@ export function formatNodeBytes(value: unknown): string {
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KiB`;
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(2)} MiB`;
   return `${(n / 1024 ** 3).toFixed(2)} GiB`;
+}
+
+
+export const ARKIV_TYPES: EqSelection["valueType"][] = ["bool", "i32", "u64", "u256", "dec", "bytes32", "str", "addr", "key"];
+export function isArkivProfile(status: NativeSourceStatus | null | undefined) { return status?.capabilities?.profile === "arkiv-entity-v2"; }
+const v2base: EqSelection = { ...base, height: "3" };
+const sample = (id: string, label: string, title: string, explanation: string, changes: Partial<EqSelection>): QueryExample => ({id, label, title, explanation, request: {...v2base, ...changes}});
+export const ARKIV_EXAMPLES: QueryExample[] = [
+  sample("membership", "01 / Membership", "Five entities, one proof", "Block 3 contains five group = u64(1) entities. Fetch three, then verify the remaining two against the same root.", {}),
+  sample("absence", "02 / Absence", "Prove an empty answer", "The missing typed value produces a verified absence path.", {value:"999999"}),
+  sample("before-expiry", "03 / Before expiry", "Before the expiry boundary", "At block 13 four entities remain; one expires at block 14.", {height:"13"}),
+  sample("after-expiry", "04 / After expiry", "After the expiry boundary", "At block 14 only three entities remain in the verified live set.", {height:"14"}),
+  sample("owner", "05 / Ownership", "Find the transferred entity", "Alice creates the entity, transfers it to Bob at block 4, and Bob updates it at block 5. Creator stays Alice.", {height:"5",attribute:"$owner",valueType:"addr",value:"0x"+"b0".repeat(20)}),
+  sample("creator", "06 / Creator", "Original creator survives transfer", "All five entities still have Alice as creator after the ownership transfer.", {height:"5",attribute:"$creator",valueType:"addr",value:"0x"+"a1".repeat(20)}),
+  sample("decimal", "07 / Decimal", "Exact fixed-point values", "Signed decimals use 18 fractional digits and no floating-point conversion.", {attribute:"price",valueType:"dec",value:"-12.34567890123456789"}),
+  sample("u256", "08 / Wide integer", "The largest unsigned integer", "Query the exact 256-bit maximum without rounding through JavaScript numbers.", {attribute:"quantity",valueType:"u256",value:((1n<<256n)-1n).toString()}),
+  sample("content-type", "09 / Content type", "System string equality", "Query the committed content type. This is supported by this profile; current SDK query-builder support differs.", {attribute:"$contentType",valueType:"str",value:"application/json"}),
+  sample("updated", "10 / Updated block", "Host-maintained modification time", "Only the entity patched by Bob at block 5 has this update height. Querying this field is an extension to the current Arkiv node.", {height:"5",attribute:"$updatedAt",valueType:"u64",value:"5"}),
+  sample("reference", "11 / Entity reference", "Typed entity keys", "Entity references have a distinct key type; they are not interchangeable with bytes32.", {attribute:"reference",valueType:"key",value:"0x"+"77".repeat(32)}),
+  sample("signed", "12 / Signed integer", "The smallest i32", "The signed 32-bit boundary is indexed with exact numeric ordering.", {attribute:"counter",valueType:"i32",value:"-2147483648"}),
+];
+export function queryExamples(status: NativeSourceStatus | null) { return isArkivProfile(status) ? ARKIV_EXAMPLES : QUERY_EXAMPLES; }
+function validateEntities(page: InspectedPage) {
+  requireInspection(Array.isArray(page.entities) && page.entities.length === page.rows.length);
+  page.entities.forEach((e, index) => {
+    requireInspection(record(e) && hash(e.key) && e.key === page.rows[index].recordKey &&
+      typeof e.owner === "string" && /^0x[0-9a-f]{40}$/.test(e.owner) && typeof e.creator === "string" && /^0x[0-9a-f]{40}$/.test(e.creator) &&
+      uint(e.createdAt) && uint(e.updatedAt) && uint(e.expiresAt) && e.expiresAt === page.rows[index].expiresAtHeight &&
+      BigInt(e.createdAt) <= BigInt(e.updatedAt) && BigInt(e.updatedAt) <= BigInt(page.snapshot.height) && BigInt(e.expiresAt) > BigInt(page.snapshot.height) &&
+      typeof e.contentType === "string" && new TextEncoder().encode(e.contentType).length <= 128 && hex(e.payload) && e.payload.length <= 2 + 131072*2 &&
+      record(e.creationFlags) && natural(e.creationFlags.raw, 3) && e.creationFlags.readonly === ((e.creationFlags.raw & 1) !== 0) && e.creationFlags.permissionlessExtension === ((e.creationFlags.raw & 2) !== 0));
+    const attrs = page.rows[index].attributes as Array<{name:string;value:unknown}>;
+    for (const [name, value] of Object.entries({$key:e.key,$owner:e.owner,$creator:e.creator,$createdAt:e.createdAt,$updatedAt:e.updatedAt,$expiresAt:e.expiresAt,$contentType:e.contentType}))
+      requireInspection(attrs.some(a => a.name === name && a.value === value));
+  });
 }

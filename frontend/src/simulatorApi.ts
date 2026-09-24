@@ -21,6 +21,7 @@ export interface NativeWorkload {
 }
 /** A node's own public status as the backend observed or probed it. */
 export interface NativeSourceStatus extends NativeIdentity {
+  capabilities?: { profile: string; layoutVersion: number; codecVersion: number; scalarTypes: string[]; systemEquality: string[]; sdkRpcCompatible: boolean; signatures: boolean };
   role: "producer" | "full" | "light";
   head: NativeSnapshot;
   paused: boolean;
@@ -79,7 +80,7 @@ export interface EqSelection {
   height: string;
   namespace: string;
   attribute: string;
-  valueType: "bool" | "i64" | "u64" | "str";
+  valueType: "bool" | "i64" | "i32" | "u64" | "u256" | "dec" | "bytes32" | "str" | "addr" | "key";
   value: string | boolean;
   limit: number;
   cursor: string | null;

@@ -15,7 +15,27 @@ import {
 } from "./common";
 import { parseIdentity, type SimulatorIdentity } from "./config";
 export const FEED_CAP = 4 * 1024 * 1024;
-export const TYPES = ["bool", "i64", "u64", "str"] as const;
+export const LEGACY_TYPES = ["bool", "i64", "u64", "str"] as const;
+export const ARKIV_TYPES = ["bool", "i32", "u64", "u256", "dec", "bytes32", "str", "addr", "key"] as const;
+export const TYPES = [...LEGACY_TYPES, "i32", "u256", "dec", "bytes32", "addr", "key"] as const;
+export type ProtocolVersion = 2 | 3;
+/** Decimal values are signed 256-bit integers scaled by 10^18; never use JS numbers. */
+export function scaledDecimal(value: unknown): string {
+  const result = text(value, 80, 1);
+  if (!/^-?(0|[1-9][0-9]*)(\.[0-9]{1,18})?$/.test(result)) return fail();
+  const negative = result.startsWith("-");
+  const [whole, fraction = ""] = (negative ? result.slice(1) : result).split(".");
+  const n = BigInt(whole! + fraction.padEnd(18, "0")) * (negative ? -1n : 1n);
+  if (n < -(1n << 255n) || n >= (1n << 255n) || (negative && n === 0n)) return fail();
+  return result;
+}
+export function attributeName(value: unknown, protocol: ProtocolVersion = 3): string {
+  const name = text(value, protocol === 3 ? 32 : 20, 1);
+  if (!/^\$?[A-Za-z][A-Za-z0-9_.:-]*$/.test(name)) return fail();
+  return name;
+}
+export const numericAttribute = (type: string): boolean => ["i64", "i32", "u64", "u256", "dec"].includes(type);
+export const hexAttribute = (type: string): boolean => ["addr", "key", "bytes32"].includes(type);
 export type AttributeType = (typeof TYPES)[number];
 export interface Attribute {
   name: string;
@@ -124,9 +144,10 @@ export interface SourceStatus extends SimulatorIdentity {
   health: string;
   role: "producer" | "full" | "light";
   configRevision: string;
-  projectionVersion: 1;
-  blockFormatVersion: 1;
-  protocolVersion: 2;
+  projectionVersion: 1 | 2;
+  blockFormatVersion: 1 | 2;
+  protocolVersion: ProtocolVersion;
+  capabilities?: Record<string, unknown>;
   coverage: { from: string; through: string; complete: boolean };
   proofProfiles: string[];
   limits: { feedPageBytes: string; pageItems: number };
@@ -164,9 +185,10 @@ export function digest(domain: string, bytes: Uint8Array): string {
 export function headerBytes(
   chainId: string,
   h: Omit<Header, "hash" | "headerBytes">,
+  protocol: ProtocolVersion = 2,
 ): Buffer {
   const b = Buffer.alloc(156);
-  b.writeUInt32BE(2);
+  b.writeUInt32BE(protocol);
   b.writeBigUInt64BE(BigInt(chainId), 4);
   b.writeBigUInt64BE(BigInt(h.height), 12);
   Buffer.from(h.parentHash.slice(2), "hex").copy(b, 20);
@@ -197,17 +219,23 @@ export function parseHeader(value: unknown, chainId: string): Header {
     outcomesDigest: hex(v.outcomesDigest, 32),
     headerBytes: hex(v.headerBytes, 156),
   };
-  const bytes = headerBytes(chainId, h);
+  const protocol = Buffer.from(h.headerBytes.slice(2), "hex").readUInt32BE(0);
+  if (protocol !== 2 && protocol !== 3) return fail("UnsupportedVersion");
+  const bytes = headerBytes(chainId, h, protocol);
   if (
     h.headerBytes !== "0x" + bytes.toString("hex") ||
-    h.hash !== digest("arkiv/header/v2", bytes)
+    h.hash !== digest(`arkiv/header/v${protocol}`, bytes)
   )
     return fail("InvalidHeader");
   return h;
 }
-export function parseAttribute(value: unknown): Attribute {
+export function parseAttribute(value: unknown, protocol: ProtocolVersion = 3): Attribute {
   const v = object(value, ["name", "type", "value"]);
-  const type = choice(v.type, TYPES);
+  const type = choice(v.type, protocol === 2 ? LEGACY_TYPES : TYPES);
+  const name = attributeName(v.name, protocol);
+  // Payload and creation flags are descriptor-only system fields, never indexed values.
+  if (protocol === 3 && (name === "$payload" || name === "$creationFlags"))
+    return fail("InvalidProjection");
   let scalar: string | boolean;
   switch (type) {
     case "bool":
@@ -217,16 +245,35 @@ export function parseAttribute(value: unknown): Attribute {
     case "i64":
       scalar = signed(v.value);
       break;
+    case "i32": {
+      scalar = signed(v.value);
+      if (BigInt(scalar) < -(1n << 31n) || BigInt(scalar) >= (1n << 31n)) return fail();
+      break;
+    }
+    case "u256":
+      scalar = text(v.value, 78, 1);
+      if (!/^(0|[1-9][0-9]*)$/.test(scalar) || BigInt(scalar) >= (1n << 256n)) return fail();
+      break;
+    case "dec":
+      scalar = scaledDecimal(v.value);
+      break;
+    case "bytes32":
+    case "key":
+      scalar = hex(v.value, 32);
+      break;
+    case "addr":
+      scalar = hex(v.value, 20);
+      break;
     case "u64":
       scalar = decimal(v.value);
       break;
     case "str":
-      scalar = text(v.value, 64);
+      scalar = text(v.value, protocol === 3 ? 128 : 64);
       break;
   }
-  return { name: text(v.name, 20, 1), type, value: scalar };
+  return { name, type, value: scalar };
 }
-function parseField(value: unknown): Field {
+function parseField(value: unknown, protocol: ProtocolVersion): Field {
   const v = object(value, [
     "name",
     "type",
@@ -236,14 +283,14 @@ function parseField(value: unknown): Field {
   ]);
   if (v.reference !== null) return fail();
   return {
-    name: text(v.name, 20, 1),
-    type: choice(v.type, [...TYPES, "bytes"]),
+    name: attributeName(v.name, protocol),
+    type: choice(v.type, [...(protocol === 2 ? LEGACY_TYPES : TYPES), "bytes"]),
     byteLength: decimal(v.byteLength),
     digest: hex(v.digest, 32),
     reference: null,
   };
 }
-export function parseChange(value: unknown): Change {
+export function parseChange(value: unknown, protocol: ProtocolVersion = 3): Change {
   if (!value || typeof value !== "object" || !("kind" in value)) return fail();
   const common = ["kind", "namespaceId"];
   switch (value.kind) {
@@ -266,8 +313,8 @@ export function parseChange(value: unknown): Change {
         "attributes",
         "fields",
       ]);
-      const attributes = array(v.attributes, parseAttribute, 64),
-        fields = array(v.fields, parseField, 64);
+      const attributes = array(v.attributes, (a) => parseAttribute(a, protocol), 64),
+        fields = array(v.fields, (f) => parseField(f, protocol), 64);
       if (
         attributes.length + fields.length > 64 ||
         new Set([...attributes, ...fields].map((c) => c.name)).size !==
@@ -406,14 +453,16 @@ export function parseFeedBlock(value: unknown): FeedBlock {
   ]);
   if (v.feedVersion !== 1) return fail("UnsupportedVersion");
   const id = identity(v);
+  const header = parseHeader(v.header, id.chainId);
+  const protocol = Buffer.from(header.headerBytes.slice(2), "hex").readUInt32BE(0) as ProtocolVersion;
   const transactions = array(v.transactions, parseTransaction, 4096),
     operations = array(v.operations, parseOperation, 65536),
-    changes = array(v.changes, parseChange, 65536);
+    changes = array(v.changes, (c) => parseChange(c, protocol), 65536);
   const result: FeedBlock = {
     feedVersion: 1,
     feedDigest: hex(v.feedDigest, 32),
     ...id,
-    header: parseHeader(v.header, id.chainId),
+    header,
     transactions,
     operations,
     changes,
@@ -533,16 +582,17 @@ export function parseStatus(value: unknown): SourceStatus {
       "memory",
       "observedPeerHeight",
     ],
-    ["storage"],
+    ["storage", "capabilities"],
   );
   if (
     v.apiVersion !== 1 ||
     v.feedVersion !== 1 ||
-    v.projectionVersion !== 1 ||
-    v.blockFormatVersion !== 1 ||
-    v.protocolVersion !== 2
+    !((v.projectionVersion === 1 && v.blockFormatVersion === 1 && v.protocolVersion === 2 && v.capabilities === undefined) ||
+      (v.projectionVersion === 2 && v.blockFormatVersion === 2 && v.protocolVersion === 3 && v.capabilities !== undefined))
   )
     return fail("UnsupportedVersion");
+  const modern = v.protocolVersion === 3;
+  const capabilities = modern ? parseCapabilities(v.capabilities) : undefined;
   const head = object(v.head, ["height", "hash", "stateRoot"]);
   if (typeof v.paused !== "boolean") return fail();
   const coverage = object(v.coverage, ["from", "through", "complete"]);
@@ -561,7 +611,7 @@ export function parseStatus(value: unknown): SourceStatus {
       "residentManifests",
     ]);
   if (
-    workload.version !== 1 ||
+    workload.version !== (modern ? 2 : 1) ||
     decimal(coverage.from) !== "0" ||
     decimal(coverage.through) !== decimal(head.height) ||
     coverage.complete !== true ||
@@ -592,20 +642,21 @@ export function parseStatus(value: unknown): SourceStatus {
     ]),
     role: choice(v.role, ["producer", "full", "light"]),
     configRevision: decimal(v.configRevision),
-    projectionVersion: 1,
-    blockFormatVersion: 1,
-    protocolVersion: 2,
+    projectionVersion: modern ? 2 : 1,
+    blockFormatVersion: modern ? 2 : 1,
+    protocolVersion: modern ? 3 : 2,
+    ...(capabilities ? { capabilities } : {}),
     coverage: { from: "0", through: decimal(coverage.through), complete: true },
-    proofProfiles: array(v.proofProfiles, (p) => choice(p, ["eq-page-v1"]), 1),
+    proofProfiles: array(v.proofProfiles, (p) => choice(p, [modern ? "eq-page-v2" : "eq-page-v1"]), 1),
     limits: {
       feedPageBytes: decimal(limits.feedPageBytes),
       pageItems: integer(limits.pageItems, 256),
     },
     workload: {
-      version: 1,
+      version: modern ? 2 : 1,
       seed: decimal(workload.seed),
       blockPeriodMs: decimal(workload.blockPeriodMs, true),
-      payloadBytes: integer(workload.payloadBytes, 1024),
+      payloadBytes: integer(workload.payloadBytes, modern ? 131072 : 1024),
       extraRowsPerBlock: integer(workload.extraRowsPerBlock, 4),
     },
     memory: {
@@ -622,4 +673,22 @@ export function parseStatus(value: unknown): SourceStatus {
           },
         }),
   };
+}
+
+/** Explicit capability allowlist: never relay unknown metadata fields into stored status. */
+function parseCapabilities(value: unknown): Record<string, unknown> {
+  const expected = {
+    attributeNameBytes: 32, codecVersion: 2, currentSdkQueryExceptions: ["$createdAt", "$updatedAt", "$contentType"],
+    equalExpiryExtension: "updates-updatedAt", expiryPolicy: "purge-before-publication", indexedStringBytes: 128,
+    layoutVersion: 2, payloadBytes: 131072, productionStateRoots: false, profile: "arkiv-entity-v2",
+    proofTrust: "configured-unsigned-header-source", queryLanguage: "single-typed-equality", scalarTypes: [...ARKIV_TYPES],
+    sdkRpcCompatible: false, signatures: false,
+    systemEquality: ["$key", "$creator", "$owner", "$createdAt", "$updatedAt", "$expiresAt", "$contentType"],
+    systemProjection: ["$key", "$creator", "$owner", "$createdAt", "$updatedAt", "$expiresAt", "$contentType", "$payload", "$creationFlags"],
+  };
+  const actual = object(value, Object.keys(expected));
+  for (const [key, entry] of Object.entries(expected)) {
+    if (JSON.stringify(actual[key]) !== JSON.stringify(entry)) return fail("UnsupportedVersion");
+  }
+  return expected;
 }

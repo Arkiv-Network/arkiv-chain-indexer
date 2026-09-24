@@ -56,3 +56,8 @@
   .nd-block-query label { min-width: 140px; }
   .nd-identity-small code { display: block; margin: 4px 0 0; }
 }
+.nd-profile-note { border:1px solid var(--nd-line); border-radius:8px; padding:16px; margin:16px 0; background:#eef4e6; }
+.nd-profile-note p { margin-top:6px; font-size:15px; }
+.nd-system-fields { padding:16px 0; }
+.nd-system-fields h3 { margin-bottom:12px; }
+.nd-system-fields code { overflow-wrap:anywhere; }

@@ -1,5 +1,7 @@
 # Full and light node demonstration
 
+The current deployment uses the Arkiv entity v2 profile. See [the current deployment runbook](arkiv-v2-demo-deployment.md). The original verification and reset details below describe the earlier generic demo.
+
 The two dedicated debug panels are independent of the explorer and PostgreSQL:
 
 - `https://fullnode.experimental.arkiv-global.net`: full follower status, retained storage, and block metadata from its own node.
@@ -28,17 +30,17 @@ The existing `compose.simulator.yml` stack remains the producer/full/light/explo
 Use the existing private environment file and project name; never print the environment file or place secrets on the command line:
 
 ```sh
-docker compose --env-file /home/ubuntu/.config/arkiv-simulator/experimental/.env.simulator.local \
-  -p arkiv-sim-666374b2c8 -f compose.simulator.yml -f compose.node-panels.yml \
+docker compose --env-file /home/ubuntu/.config/arkiv-simulator/experimental-v2/.env.simulator.local \
+  -p arkiv-sim-b5a916006d -f compose.simulator.yml -f compose.node-panels.yml \
   --profile node-panels up -d --build --no-deps fullnode-ui lightnode-ui
 ```
 
 The light service requires a node build containing `/sim/v1/query/inspect`. A targeted light rebuild/recreation preserves its retained headers and avoids rebuilding the explorer:
 
 ```sh
-python3 scripts/simulator.py --state-dir /home/ubuntu/.config/arkiv-simulator/experimental \
+python3 scripts/simulator.py --state-dir /home/ubuntu/.config/arkiv-simulator/experimental-v2 \
   compose build light
-python3 scripts/simulator.py --state-dir /home/ubuntu/.config/arkiv-simulator/experimental \
+python3 scripts/simulator.py --state-dir /home/ubuntu/.config/arkiv-simulator/experimental-v2 \
   compose up -- -d --no-deps --no-build light
 ```
 
