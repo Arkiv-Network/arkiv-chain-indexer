@@ -79,6 +79,9 @@ after its newest completed range, and sleeps for 30 seconds after each sweep (co
 The separate statistics worker (`bun run collect-statistics`, Compose service `statistics`)
 publishes chain coverage, transaction/operation counts, active entities, payload-size
 metadata and attribute statistics to the **Statistics** page and `GET /statistics`.
+Activity periods cover 1h, 2h, 6h, 12h, 24h, 48h, 72h, 7 days and all time; current
+entity state stays tied to its projection block. Existing top-level API fields
+remain compatible, with period totals added under `windows`.
 It only reads existing tables and shares a JSON snapshot with the backend; no new
 database storage is required. See [statistics setup and measurement limits](docs/statistics.md).
 

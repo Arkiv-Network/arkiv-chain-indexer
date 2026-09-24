@@ -6,7 +6,7 @@ import { writeStatisticsFile } from "./statisticsFile";
 
 const SPEC: CliSpec = {
   name: "collect-statistics",
-  summary: "Periodically reads existing indexer tables and atomically publishes a JSON snapshot. No database writes or RPC calls.",
+  summary: "Periodically publishes all-time totals, 1h/2h/6h/12h/24h/48h/72h/7d activity and current entity state. No database writes or RPC calls.",
   options: [
     { flags: "--database-url <url>", description: "PostgreSQL connection string.", env: ["DATABASE_URL", "SCANNER_DATABASE_URL"] },
     { flags: "--output <path>", description: "Snapshot file shared with the backend.", env: ["STATISTICS_FILE"], default: DEFAULT_STATISTICS_FILE },

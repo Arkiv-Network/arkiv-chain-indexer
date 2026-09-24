@@ -1,6 +1,10 @@
 import type { Db } from "./db";
 import { TYPE_TAGS_BY_ID } from "./entityValues";
 import type { IndexerStatistics } from "./indexerStatisticsTypes";
+import {
+  blockStatisticsBounds, foldStatisticsActivity, foldStatisticsWindows, statisticsBandSql, statisticsWindowBounds,
+  sumStatistics, type BlockStatisticsBand, type OperationStatisticsBand, type TransactionStatisticsBand,
+} from "./statisticsWindows";
 
 export const DEFAULT_STATISTICS_INTERVAL_MS = 300_000;
 export const DEFAULT_STATISTICS_FILE = "/tmp/arkiv-indexer-statistics.json";
@@ -15,10 +19,6 @@ export function scannedPercent(count: string, head: string | null): number | nul
   return Number(BigInt(count) * 1_000_000n / total) / 10_000;
 }
 
-const OP_NAMES: Record<number, string> = {
-  1: "created", 2: "updated", 3: "extended", 4: "ownerChanged", 5: "deleted", 6: "expired",
-};
-
 /** No migrations or writes: one consistent database snapshot on the worker's own connection. */
 export async function gatherIndexerStatistics(
   db: Db,
@@ -30,8 +30,11 @@ export async function gatherIndexerStatistics(
   return db.transaction(async (tx) => {
     await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     await tx.query("SELECT set_config('statement_timeout', $1, true)", [String(options.statementTimeoutMs ?? 120_000)]);
-    const timing = await tx.query<{ at: string }>("SELECT transaction_timestamp()::text AS at");
+    const timing = await tx.query<{ at: string }>("SELECT date_trunc('milliseconds', transaction_timestamp())::text AS at");
     const gatheredAtUtc = new Date(timing.rows[0]!.at).toISOString();
+    // Match JSON timestamp precision exactly; every table and window uses these same UTC bounds.
+    const timeBounds = [gatheredAtUtc, ...statisticsWindowBounds(gatheredAtUtc).flatMap((bound) =>
+      bound.fromInclusiveUtc === null ? [] : [bound.fromInclusiveUtc])];
     // Never read scanner_rpc_url, which may contain credentials.
     const stateRows = await tx.query<{ key: string; value: string }>(
       `SELECT key, value FROM ${table("scanner_state")} WHERE key IN ('chain_id', 'latest_observed_block', 'latest_observed_at')`,
@@ -41,29 +44,26 @@ export async function gatherIndexerStatistics(
     const coverageHead = head === null ? null : BigInt(head) - STATISTICS_HEAD_EXCLUSION_BLOCKS;
     const observedAt = state.get("latest_observed_at") ?? null;
     const headAge = observedAt === null ? null : Math.max(0, (Date.parse(gatheredAtUtc) - Date.parse(observedAt)) / 1000);
-    const blocks = (await tx.query<IndexerStatistics["blocks"] & { throughHead: string; throughCoverageHead: string }>(`
-      SELECT count(*)::text AS indexed, min(block_number)::text AS first, max(block_number)::text AS last,
-        (coalesce(max(block_number) - min(block_number) + 1, 0) - count(*))::text AS "missingWithinStoredRange",
+    const blockBands = (await tx.query<BlockStatisticsBand>(`
+      SELECT ${statisticsBandSql("block_date")} AS band,
+        count(*)::text AS indexed, min(block_number)::text AS first, max(block_number)::text AS last,
         coalesce(sum(transaction_count), 0)::text AS transactions,
         coalesce(sum(total_input_data_size_bytes::numeric), 0)::text AS "inputBytes",
         coalesce(sum(total_input_data_compressed_size_bytes::numeric), 0)::text AS "compressedInputBytes",
-        count(*) FILTER (WHERE block_number <= $1::bigint)::text AS "throughHead",
-        count(*) FILTER (WHERE block_number <= $2::bigint)::text AS "throughCoverageHead"
-      FROM ${table("blocks")}`, [head, coverageHead?.toString() ?? null])).rows[0]!;
-    const { throughHead, throughCoverageHead, ...blockStats } = blocks;
-    const transactions = (await tx.query<IndexerStatistics["transactions"]>(`
-      SELECT count(*)::text AS indexed,
+        count(*) FILTER (WHERE block_number <= $10::bigint)::text AS "throughHead",
+        count(*) FILTER (WHERE block_number <= $11::bigint)::text AS "throughCoverageHead"
+      FROM ${table("blocks")} GROUP BY band`, [...timeBounds, head, coverageHead?.toString() ?? null])).rows;
+    const throughHead = sumStatistics(blockBands, "throughHead");
+    const throughCoverageHead = sumStatistics(blockBands, "throughCoverageHead");
+    const transactionBands = (await tx.query<TransactionStatisticsBand>(`
+      SELECT ${statisticsBandSql("block_date")} AS band, count(*)::text AS indexed,
         count(*) FILTER (WHERE input_data_size_bytes::numeric > 0)::text AS "withInput",
         coalesce(sum(input_data_size_bytes::numeric), 0)::text AS "inputBytes",
         coalesce(sum(input_data_compressed_size_bytes::numeric), 0)::text AS "compressedInputBytes",
         coalesce(max(input_data_size_bytes::numeric), 0)::text AS "maxInputBytes"
-      FROM ${table("transactions")}`)).rows[0]!;
-    const operationRows = (await tx.query<{
-      type: number; successful: string; reverted: string; unknownStatus: string;
-      createsWithoutKey: string; payloadWrites: string; payloadBytes: string;
-      referenceWrites: string; referenceBytes: string; referencesWithoutSize: string;
-    }>(`
-      SELECT o.operation_type AS type,
+      FROM ${table("transactions")} GROUP BY band`, timeBounds)).rows;
+    const operationBands = (await tx.query<OperationStatisticsBand>(`
+      SELECT ${statisticsBandSql("o.block_date")} AS band, o.operation_type AS type,
         count(*) FILTER (WHERE t.status = '1')::text AS successful,
         count(*) FILTER (WHERE t.status = '0')::text AS reverted,
         count(*) FILTER (WHERE t.status IS NULL OR t.status NOT IN ('0', '1'))::text AS "unknownStatus",
@@ -78,18 +78,11 @@ export async function gatherIndexerStatistics(
           AND coalesce(o.payload_reference->>'sizeBytes' ~ '^[0-9]+$', false) = false)::text AS "referencesWithoutSize"
       FROM ${table("transaction_operations")} o
       LEFT JOIN ${table("transactions")} t USING (block_number, position)
-      GROUP BY o.operation_type ORDER BY o.operation_type`)).rows;
-    const sum = (key: "createsWithoutKey" | "payloadWrites" | "payloadBytes" | "referenceWrites" | "referenceBytes" | "referencesWithoutSize") =>
-      operationRows.reduce((n, row) => n + BigInt(row[key]), 0n).toString();
-    const operations: IndexerStatistics["operations"] = {
-      byType: [...new Set([...Object.keys(OP_NAMES).map(Number), ...operationRows.map((r) => r.type)])].sort((a, b) => a - b).map((type) => {
-        const row = operationRows.find((r) => r.type === type);
-        return { type, name: OP_NAMES[type] ?? `unknown(${type})`, successful: row?.successful ?? "0", reverted: row?.reverted ?? "0", unknownStatus: row?.unknownStatus ?? "0" };
-      }),
-      successfulCreatesWithoutKey: sum("createsWithoutKey"), successfulPayloadWrites: sum("payloadWrites"),
-      successfulPayloadBytes: sum("payloadBytes"), successfulReferenceWrites: sum("referenceWrites"),
-      referencedPayloadBytes: sum("referenceBytes"), referencesWithoutSize: sum("referencesWithoutSize"),
-    };
+      GROUP BY band, o.operation_type`, timeBounds)).rows;
+    const activity = foldStatisticsActivity(blockBands, transactionBands, operationBands);
+    const blockStats = { ...activity.blocks, ...blockStatisticsBounds(blockBands) };
+    const { transactions, operations } = activity;
+    const windows = foldStatisticsWindows(gatheredAtUtc, blockBands, transactionBands, operationBands, activity);
     const entities: IndexerStatistics["entities"] = {
       status: "unavailable", floorBlock: null, asOfBlock: null, lagBehindObservedHead: null,
       lastFoldAtUtc: null, genesisStatus: null, known: null, active: null, expired: null, deleted: null,
@@ -148,6 +141,7 @@ export async function gatherIndexerStatistics(
     const limitations = [
       "Coverage excludes the newest 10 observed blocks from both the stored count and the chain total. Older gaps still reduce coverage; chains with 10 or fewer blocks have no coverage percentage yet. The head observation can be stale.",
       "All totals cover stored data only. Skipped transactions, disabled transaction storage, missing decoder history and unimported genesis entities cannot be recovered from these counts.",
+      "Finite activity windows use stored block timestamps, with an inclusive start and exclusive end at gatheredAtUtc. All time includes every stored row, including future-dated rows. Empty windows are zero stored activity, not proof of complete chain coverage. Current entity, payload and attribute state is not filtered by the selected period.",
       "Operation counts are attempts grouped by receipt outcome; only status 1 counts as successful. Repeated updates count separately. Genesis entities have no create transaction.",
       "Input bytes are calldata sizes, not full serialized signed transaction sizes. Historical size fields defaulted to zero and cannot be distinguished from measured zero without rescanning.",
       "Entity state and active counts are evaluated at the projection block, not the live chain at collection time. Missing creates, pending refolds and pre-log expiry estimates can limit accuracy.",
@@ -167,7 +161,7 @@ export async function gatherIndexerStatistics(
         indexedCoverageBlocks: head === null ? null : throughCoverageHead,
         scannedPercent: scannedPercent(throughCoverageHead, head),
       },
-      blocks: blockStats, transactions, operations, entities, limitations,
+      blocks: blockStats, transactions, operations, entities, windows, limitations,
     };
   });
 }

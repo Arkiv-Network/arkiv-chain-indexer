@@ -155,8 +155,8 @@ No database aggregation is performed by the request. Returns 503 with
 `Retry-After: 30` before the first snapshot is available.
 
 Fields: `gatheredAtUtc`, `completedAtUtc`, `durationMs`, `refreshIntervalMs`,
-`ageSeconds`, `stale`, `chain`, `blocks`, `transactions`, `operations`, `entities`
-and `limitations`. Counts and byte totals are decimal strings. Coverage excludes
+`ageSeconds`, `stale`, `chain`, `blocks`, `transactions`, `operations`, `entities`,
+`windows` and `limitations`. Counts and byte totals are decimal strings. Coverage excludes
 the newest 10 observed blocks: actual stored blocks through `head - 10` divided
 by `head + 1 - 10`, including genesis. `chain.coverageThroughBlock`,
 `chain.coverageBlocks` and `chain.indexedCoverageBlocks` expose that cutoff and its
@@ -170,6 +170,21 @@ content-type summaries cover active entities at that block. Byte totals describe
 recorded calldata/payload sizes, not full signed transaction sizes or verified
 unique provider storage. A lagging projection cannot establish exact live-chain
 entity counts. Check `limitations`, snapshot age and observed/projection heads.
+
+Snapshots retain version 1 and unchanged top-level all-time/current-state fields.
+New snapshots add `windows` keyed by `1h`, `2h`, `6h`, `12h`, `24h`, `48h`, `72h`,
+`7d` and `all`. Each contains `fromInclusiveUtc`, `toExclusiveUtc`, `blocks`
+(`indexed`, `transactions`, `inputBytes`, `compressedInputBytes`), `transactions`
+and `operations` (same shapes as their top-level counterparts). Finite windows
+use each table's stored `block_date`, with `start <= timestamp < gatheredAtUtc`;
+all share the transaction-start cutoff truncated to milliseconds. `7d` is exactly
+168 hours. `all` has null bounds and includes every stored row, including any
+future-dated rows. Orphan operations use their own block timestamp and count as
+unknown receipt outcomes. Empty periods are zero stored activity, not proof of
+complete coverage. Windows contain no entity gauges: current entity/payload and
+attribute state remains at `entities.asOfBlock`. Old worker files can lack
+`windows`; use top-level all-time fields and treat finite periods as unavailable.
+Period selection never triggers a database query or worker sweep.
 
 ## `GET /sync`
 
