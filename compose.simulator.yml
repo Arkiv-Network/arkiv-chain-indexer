@@ -1,0 +1,123 @@
+# Independent native stack. Existing Ethereum compose files are unchanged.
+x-native-env: &native-env
+  SOURCE_KIND: native-simulator
+  SIMULATOR_ALLOW_PRIVATE_HTTP: ${SIMULATOR_ALLOW_PRIVATE_HTTP:-false}
+  DATABASE_URL: postgres://simulator:${SIMULATOR_DB_PASSWORD:?required}@postgres:5432/simulator
+  SIMULATOR_SCHEMA: ${SIMULATOR_SCHEMA:-sim_v1}
+  SIMULATOR_URL: ${SIMULATOR_URL:?required}
+  SIMULATOR_SOURCE_ID: ${SIMULATOR_SOURCE_ID:?required}
+  SIMULATOR_RUN_ID: ${SIMULATOR_RUN_ID:?required}
+  SIMULATOR_GENESIS_HASH: ${SIMULATOR_GENESIS_HASH:?required}
+  SIMULATOR_CHAIN_ID: ${SIMULATOR_CHAIN_ID:-9001}
+  SIMULATOR_POLL_MS: "200"
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: simulator
+      POSTGRES_PASSWORD: ${SIMULATOR_DB_PASSWORD:?required}
+      POSTGRES_DB: simulator
+    volumes: [simulator-postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U simulator -d simulator]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+  producer:
+    profiles: [local]
+    build:
+      context: ${SIMULATOR_RUST_REPO:-../arkiv-db-pure-astra}
+      dockerfile: Dockerfile.simulator
+    command:
+      [
+        producer,
+        --unsigned-simulator,
+        --run-dir,
+        /data,
+        --listen,
+        "0.0.0.0:9400",
+        --admin-listen,
+        "0.0.0.0:9401",
+        --source-id,
+        "${SIMULATOR_SOURCE_ID}",
+        --chain-id,
+        "${SIMULATOR_CHAIN_ID:-9001}",
+        --interval-ms,
+        "1000",
+      ]
+    environment:
+      SIMULATOR_ADMIN_TOKEN: ${SIMULATOR_CONTROL_TOKEN:?required}
+    ports: ["127.0.0.1:${SIMULATOR_PUBLIC_PORT:-9400}:9400"]
+    volumes: [simulator-node:/data]
+    restart: unless-stopped
+  light:
+    build:
+      context: ${SIMULATOR_RUST_REPO:-../arkiv-db-pure-astra}
+      dockerfile: Dockerfile.simulator
+    command:
+      [
+        light,
+        --unsigned-simulator,
+        --run-dir,
+        /data,
+        --listen,
+        "0.0.0.0:9402",
+        --peer,
+        "${SIMULATOR_URL}",
+        --source-id,
+        "${SIMULATOR_SOURCE_ID}",
+        --run-id,
+        "${SIMULATOR_RUN_ID}",
+        --genesis-hash,
+        "${SIMULATOR_GENESIS_HASH}",
+        --chain-id,
+        "${SIMULATOR_CHAIN_ID:-9001}",
+      ]
+    environment:
+      SIMULATOR_ALLOW_PRIVATE_HTTP: ${SIMULATOR_ALLOW_PRIVATE_HTTP:-false}
+    volumes: [simulator-light:/data]
+    restart: unless-stopped
+  scanner:
+    build: .
+    command: [bun, --no-env-file, run, scan]
+    environment: *native-env
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+  backend:
+    build: .
+    command: [bun, --no-env-file, run, serve]
+    environment:
+      <<: *native-env
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "3000"
+      SIMULATOR_CONTROL_URL: ${SIMULATOR_CONTROL_URL:-}
+      SIMULATOR_CONTROL_TOKEN: ${SIMULATOR_CONTROL_TOKEN:-}
+      AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-http://localhost:23561}
+      AUTH_INSECURE_LOCALHOST: ${AUTH_INSECURE_LOCALHOST:-false}
+      AUTH_TOKEN_LOGIN_ENABLED: ${AUTH_TOKEN_LOGIN_ENABLED:-false}
+      AUTH_TOKEN_LOGIN_TOKEN: ${AUTH_TOKEN_LOGIN_TOKEN:-}
+      AUTH_ADMIN_EMAILS: ${AUTH_ADMIN_EMAILS:-sieciech.czajka@golem.network}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+  frontend:
+    build:
+      context: frontend
+      additional_contexts:
+        shared: ./src
+    environment:
+      BACKEND_HOST: backend
+      BACKEND_PORT: "3000"
+      LOCAL_SIMULATOR_LIGHT_HOST: light
+      LOCAL_SIMULATOR_LIGHT_PORT: "9402"
+    ports: ["127.0.0.1:${SIMULATOR_FRONTEND_PORT:-23561}:23560"]
+    depends_on: [backend, light]
+    restart: unless-stopped
+volumes:
+  simulator-postgres:
+  simulator-node:
+  simulator-light:

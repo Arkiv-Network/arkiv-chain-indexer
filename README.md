@@ -1,8 +1,17 @@
 # gas-price-tracker
 
-On `experimental`, the [native chain simulator proposal](docs/simulator-integration-plan.md)
-describes integration with the Rust engine/node using a metadata-only feed and an
-unsigned internal producer. It is a plan; the runtime below remains the Ethereum scanner.
+On `experimental`, the **native unsigned simulator** is runnable with its own
+PostgreSQL explorer and a local Rust light verifier:
+
+```sh
+python3 scripts/simulator.py init
+python3 scripts/simulator.py control resume
+```
+
+See the [local/remote run guide](docs/simulator-run.md),
+[design](docs/simulator-integration-plan.md), and
+[acceptance report](docs/simulator-acceptance.md). The separate native stack uses
+`compose.simulator.yml`; the default runtime and instructions below remain Ethereum.
 
 A Bun + TypeScript Ethereum block scanner that stores gas and priority-fee metrics per block, with optional
 inspected transaction rows, in **PostgreSQL**.

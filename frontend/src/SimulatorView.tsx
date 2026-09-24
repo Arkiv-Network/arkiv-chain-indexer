@@ -559,7 +559,10 @@ export function SimulatorView() {
           [
             "Producer",
             status?.producer
-              ? `${status.producer.health} · ${status.producer.paused ? "paused" : "active"}`
+              ? status.producer.health ===
+                (status.producer.paused ? "paused" : "running")
+                ? title(status.producer.health)
+                : `${status.producer.health} · ${status.producer.paused ? "paused" : "active"}`
               : "Unavailable",
           ],
         ].map(([label, text]) => (

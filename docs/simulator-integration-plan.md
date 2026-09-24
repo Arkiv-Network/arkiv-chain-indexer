@@ -1,7 +1,20 @@
 # Native chain simulator integration proposal
 
-Status: proposal for review, 2026-09-24. No simulator implementation is included.
-Target branch: `arkiv-chain-indexer/experimental`, based on `395e6b7`.
+Status: implemented on `arkiv-chain-indexer-experimental/experimental` and the
+Rust playground `main`, 2026-09-24. Cross-repository implementation was explicitly
+authorized after review. See [the runnable guide](simulator-run.md),
+[acceptance evidence](simulator-acceptance.md), and
+[measured 10,000-block results](simulator-measurements.md).
+
+Implementation decisions: the bounded selected genesis serves one complete 4 MiB
+metadata block, with a prepublication transportability gate, instead of fragmented
+1 MiB sections. SQL/proof responses remain separate. Native statistics are atomic
+progress counters and bounded indexed reads; native responses use ordinary JSON
+without adding another caching/aggregation daemon. The operation DTO references
+its parent transaction for actor/request identity and keeps terminal after-images
+separate from ordered outcomes. The internal v1 trace emits no pricing-admin work.
+These concrete choices supersede the earlier optional transport/UI sketches.
+The volatile preview slice was skipped: the delivered host is durable.
 Node baseline: [`arkiv-db-pure-astra@63d8548`](https://github.com/Arkiv-Network/arkiv-db-pure-astra/tree/63d8548).
 
 ## Decision and minimum useful result
@@ -155,7 +168,7 @@ Use the existing storage tables as follows (new profile golden vectors required)
 | `Manifests`, sequence `u64` | Existing engine manifest format, one terminal publication per node block; enforce `sequence == height` including genesis |
 | Durable store `Head` | Existing engine sequence + **manifest digest**, not node block hash; do not reinterpret it |
 | `BlockIndex`, manifest digest | Existing manifest-to-sequence index; do not also put node block hashes in this key space |
-| `Blocks`, height `u64` | Versioned node envelope: canonical `Block` (inputs and outcomes included), header hash, engine manifest digest, bounded sanitized feed sections/digest, committed workload configuration/revision and optional control result; genesis has an explicit genesis form |
+| `Blocks`, height `u64` | Versioned node envelope: canonical `Block` (inputs and outcomes included), header hash, engine manifest digest, bounded sanitized feed block/digest, committed workload configuration/revision and optional control result; genesis has an explicit genesis form |
 | `Inclusions`, disjoint tagged keys | Existing 61-byte request encoding starts with `0x00`/`0x01` (tx/admin); control key is `0x02 || commandId[32]`. Versioned values identify request digest/height/position or command digest/result height. Canonical outcomes remain in the block |
 
 Height lookup is mandatory; node hash lookup can initially use height+hash in the
@@ -180,7 +193,7 @@ Production sequence:
 1. Under one writer, pin parent and select bounded ordered inputs. Fix timestamp,
    workload position and request IDs once. `execute_block(spec, branch, ...)` uses
    a branch begun on the durable head with the existing block budget.
-2. Build canonical header/body/outcomes and all sanitized feed sections; validate
+2. Build canonical header/body/outcomes and the sanitized feed block; validate
    transport-servability before committing. Build inclusion records. No dirty
    branch/state escapes. An execution/storage/expiry-sweep failure aborts the entire
    block candidate; transaction failures remain included outcomes inside a valid block.
@@ -199,7 +212,7 @@ Production sequence:
    packet as well as engine metadata. Missing host data below a head is corruption.
 
 The immutable committed node envelope is the durable outbox. A feed view can be
-re-served after lost HTTP responses without another append. Store sanitized sections
+re-served after lost HTTP responses without another append. Store sanitized metadata
 in that same envelope so decoder/projection upgrades cannot change old events; no
 independent outbox acknowledgement is required on the producer. PostgreSQL owns its
 own durable consumption cursor. Keep every old envelope/snapshot; disk-full halts
@@ -281,7 +294,7 @@ validated fixed-width values, not accepted literal input):
 | --- | --- |
 | `GET /sim/v1/status`, `/genesis` | Fixed bounded identity/capabilities/head; strict canonical genesis/header bytes separately available; health distinguishes running, paused, capacity, storage-fenced |
 | `GET /sim/v1/feed/blocks?afterHeight=H&afterHash=X&limit=N` | Consecutive block descriptors only, ascending; sample head once and return `throughHeight/throughHash`; bootstrap explicitly requests genesis, not unsigned `-1` |
-| `GET /sim/v1/feed/blocks/H/sections?blockHash=X&cursor=C` | Bounded immutable metadata chunks of one block; totals/section identity/digest; never a transaction body |
+| `GET /sim/v1/feed/blocks/H` | Complete bounded immutable metadata block plus feed digest; never a canonical transaction body |
 | `GET /api/sim/v1/blocks`, `/blocks/H`, `/transactions`, `/namespaces`, `/records`, `/record-history` | PG metadata pages pinned to an indexed block/hash/run; composite record identity mandatory |
 | `POST /sim/v1/query/eq` | Full-node proof service: existing canonical Eq request/proof, explicit snapshot reference and limits; no silent downgrade to SQL |
 | Local-light `POST /sim/v1/query/verified` | Resolve an accepted local header, fetch/verify Eq proof from configured full source and return verified rows/continuation; optional explicit historical height |
@@ -289,39 +302,30 @@ validated fixed-width values, not accepted literal input):
 | `POST /api/admin/sim/v1/control` | Existing admin session/token policy; pause/resume/step/workload config, expected run/head/config revision and idempotency key |
 | Restricted `/sim/v1/replication/blocks` | Full canonical inputs/outcomes for trusted full followers/replay only; indexer never calls this capability |
 
-Keep feed descriptors small and split large *metadata* blocks into bounded sections.
-Proposed defaults: one scanner block in flight, descriptor page 64 (max 256), section
-uncompressed JSON max 1 MiB, node metadata envelope max 4 MiB/block, total stored node envelope max 8 MiB, request 64 KiB,
-read deadline 5 s, retry backoff 250 ms–5 s with jitter. Count actual decompressed
-stream bytes, not just `Content-Length`; cap the assembled body before `JSON.parse`,
-then validate array/string/count limits before building typed collections or SQL.
-The bounded parser allocation is separate from the encoded-body byte count. Refuse an individual oversize metadata item/candidate
-before durable publication; never truncate it or skip its block. Canonical block and
-proof byte limits remain separately constrained by genesis and current proof caps.
-The total node envelope and trie staging share the bounded preparation/clone budget;
-node reads must use pre-copy bounded record reads (at most the 8 MiB envelope cap).
-Cold open point-reads fixed metadata, engine head/manifest and one head node record;
-it never scans prior blocks. A compatibility check must prove the chosen genesis
-can produce serviceable sections. Protect against proof/feed concurrency with an
-explicit semaphore (default four active read calls), bounded pending requests and
-no unbounded per-client continuation registry.
+The implemented profile uses descriptor/header batches of at most 64 and a single
+complete metadata block of at most 4 MiB uncompressed JSON. The selected immutable
+genesis bounds 128 user operations, 16 expiry steps, 16 cells and 1,024-byte values.
+The producer validates serialized metadata and the total 8 MiB stored node-envelope
+bound **before publication**; an unservable block cannot become the committed head.
+The scanner has one block in flight and caps actual streamed bytes before parsing.
+Partial HTTP downloads retry the same height without a PostgreSQL write. Request,
+proof, node count/work and concurrency bounds remain separate. These caps protect
+specific ownership paths, not whole-process RSS.
 
-Each block manifest names canonical header bytes/hash, input/outcome digests, state
-root, timestampMs, section count/digests, transaction/operation counts and aggregate
-units. The TypeScript header decoder verifies the strict protocol-2 canonical header
-bytes, their digest and agreement with all repeated JSON header fields using shared
-Rust/TS golden fixtures; it cannot verify input/outcome digests against redacted
-inputs it did not receive. Feed-section integrity uses a versioned deterministic
-binary metadata codec and
-`digest("arkiv/simulator-feed-section/v1", encode(sectionV1))`; that preimage binds
-run ID, genesis hash, block height/hash, section index/kind/count and ordered items.
-JSON is only transport. This detects transfer/storage
-mismatch but does not turn the feed into a proof of header-committed contents.
-An optional full follower can independently reproduce metadata from canonical bodies.
+Header DTOs carry strict canonical protocol-2 bytes plus height/hash/parent/root,
+timestamp and input/outcome digests. TypeScript checks their canonical digest and
+all repeated fields against Rust golden fixtures. It cannot recompute input/outcome
+digests from redacted metadata. Feed integrity is
+`digest("arkiv/simulator-feed-block/v1", encodeMetadata(blockWithoutFeedDigest))`;
+the binary tagged codec is frozen in the [run guide](simulator-run.md#wire-and-resource-contract)
+and matching Rust/TS fixtures. It binds full run identity, header and ordered items;
+JSON key order is irrelevant. This does not turn the feed into a proof of
+header-committed contents. A full follower independently reproduces metadata from
+canonical bodies.
 
 An operation summary has `(height, phase, transactionPosition?, operationPosition)`,
-`kind`, actor, namespace, key where available, digest/request identity, outcome,
-optional effect and receipt `{modelVersion,scheduleId,spentUnits}`. Phases are admin,
+`kind`, namespace/key/record ID where available, outcome and optional receipt `{modelVersion,scheduleId,spentUnits}`. Actor, digest and request identity are in the parent transaction, referenced by
+`groupPosition`. Terminal state effects are separate changes. Phases are admin,
 expiry, user in that order. Preserve Applied, RolledBack, Rejected,
 AdmissionRejected, HostRejected, NotExecuted separately; absent receipt is not a
 fabricated zero receipt. Included failed transactions still have identities and
@@ -430,9 +434,9 @@ Ethereum `entityGenesis` RPC/dump importers against this source.
 
 Start at genesis; the native scanner never jumps to the latest head and never
 runs descending backfill. A single advisory-locked consumer per run downloads
-and validates all sections of the next height outside a DB transaction, with
+and validates the complete metadata block at the next height outside a DB transaction, with
 one bounded block resident. Partial downloads are discarded/retried; progress
-never advances from a descriptor or incomplete section set. Request a sampled
+never advances from a descriptor or partial HTTP response. Request a sampled
 head and match the preceding hash; do not mix pages from different identities.
 
 Inside one pooled-client PostgreSQL transaction: lock `progress`, recheck expected
@@ -448,7 +452,7 @@ not duplicate operation history. Different content at an existing height is
 
 Notifications invalidate run-scoped caches after commit; TTL/reconnect invalidation
 remains a fallback. Notify payloads are keys/height only. Scanner logs contain
-run, height, section, bounded error code, latency/counts—not bodies, attributes,
+run, height, bounded error code, latency/counts—not bodies, attributes,
 credentials or operation values. Retries use backoff without skipping malformed
 or failed blocks; permanent identity/version/conflict errors mark health and halt.
 PostgreSQL outage pauses ingestion while producer history continues on disk.
@@ -613,12 +617,12 @@ Ethereum node is allowed.
 
 ## Delivery slices and exact planned changes
 
-| Slice | Indexer branch changes | Rust node changes (separate future authorization/review) | Exit gate |
+| Slice | Indexer branch changes | Rust node changes (explicitly authorized) | Exit gate |
 | --- | --- | --- | --- |
 | 0. Freeze fixtures and DTOs | New `src/simulator/{types,codec,source}.ts`, shared JSON/schema fixtures, docs | Simulator contract/metadata codec fixtures, source/run genesis profile | TS/Rust agree on integer/type/identity and bounded metadata examples; no payload fields |
 | 1. Unsigned volatile vertical slice | Native source/scanner fixture adapter, minimal `sim_v1` storage and block UI | New `src/simulator/{trust,wire,runtime}.rs`, `src/bin/arkiv-simulator.rs`; reuse block/exec/select/identity/workload; memory backend explicitly temporary | Run 40 deterministic blocks, show outcomes and historical Eq; restart starts a new run and UI says volatile |
 | 2. Durable host and metadata outbox | Consume unchanged versioned feed from durable source | `arkiv-db/src/durable/{mod,format,prepare}.rs` narrow host profile seam; `arkiv-node/src/durable.rs` coordinator/catalog; `exec.rs` plus `arkiv-db/src/host.rs` optional bounded metadata capture; adapter profile tests | State/body/inclusion/feed/head atomically survive crashes; cold reopen does not replay or load history; no per-height RAM vector |
-| 3. Complete native projection/API | New `src/simulator/{scanner,storage,projector,query,server,config}.ts`; wire `index.ts`, `serve.ts`, `server.ts`, health/cache/metrics; keep legacy modules separate | Feed sections, explicit terminal metadata and read errors; bounded query/replication endpoints | All heights ingest atomically from 0, idempotent retry and historical SQL parity for supported metadata/attributes |
+| 3. Complete native projection/API | New `src/simulator/{scanner,storage,projector,query,server,config}.ts`; wire `index.ts`, `serve.ts`, `server.ts`, health/cache/metrics; keep legacy modules separate | Bounded complete feed blocks, explicit terminal metadata and read errors; bounded query/replication endpoints | All heights ingest atomically from 0, idempotent retry and historical SQL parity for supported metadata/attributes |
 | 4. Explorer + local proof view | `frontend/src/{simulatorApi,SimulatorView}.tsx/ts`, App/API capability switch and adapted views; native admin controller; auth regression tests | Separate unsigned light host/header-only catalog using existing verifier; pinned historical Eq/continuations; controls and persisted command idempotency | Local and remote-producer demos; correct badges, no payload DB/logs, no unsigned fallback in signed demo |
 | 5. Package and validate | `compose.simulator.yml`, `.env.simulator.example`, package scripts, runnable guide; native statistics only if needed | Pinned container build + smoke harness, no signing secrets | Durable end-to-end restart/reindex/lag/proof failure scenarios below; report real performance limits |
 
@@ -646,13 +650,13 @@ node publication or label volatile state durable because N3c exists.
 | Order/recreation | Two namespaces share the same key; create keys in reverse lexical order; multiple ops in one tx, delete/recreate in same and later blocks; rolled-back allocation followed by successful reused ID; SQL rows and native ID order match |
 | Outcomes/expiry | Mid-transaction failure, charged rollback/rejection, host rejection, unexecuted tail, namespace transfer/stale revision, expiry extension/capacity and expiry-only block. Exactly terminal Applied changes enter state, all outcomes/charges remain visible |
 | Atomic node crash | Cut before commit, during object/body/inclusion writes and sync, after disk commit before response. Reopen complete parent or candidate only, including body/feed/inclusion/snapshot; indeterminate result does not expose acknowledged feed progress; definite retry uses same bytes |
-| Atomic PG crash | Kill during section download and every DB write/progress boundary; retry after lost DB COMMIT response. No partial block or duplicate history, no skipped height, conflicting duplicate freezes |
+| Atomic PG crash | Interrupt a bounded block download and every DB write/progress boundary; retry after lost DB COMMIT response. No partial block or duplicate history, no skipped height, conflicting duplicate freezes |
 | Historical coverage | 10,000 bounded blocks; rebuild empty PG from 0; every header/empty block retained and resolvable, old typed/raw/namespace versions accessible. Sample and boundary queries match Rust reference; no genesis import heuristics |
 | Pinned paging | Pause scanner at H while producer advances; SQL latest stays H. Advance during pagination, restart services and continue same fixed block; reject cursor reuse with changed run/root/filter/namespace/order |
 | Proof verification | Positive, empty and namespace-absent Eq, multi-page queries, deletion/recreation and expiry history; compare memory/durable proof bytes and results. Mutate header/root/node/row/cursor/terminal marker, omit a matching row or cross snapshot: no verified output |
 | Proof limits/trust | Oversize posting returns limit error, unsupported SQL/range/raw proof returns UnsupportedProof. Unsigned conflicting header freezes source. UI says unsigned trusted-root verification, never consensus; local light performs zero block-body requests and has no Engine/MemoryChain |
 | Admin/transport | Pause/step/resume use one writer; repeat lost step response does not append twice; wrong run/revision conflicts. Existing OAuth/session/token revocation, exact Origin and CSRF checks pass; public endpoints cannot trigger control or proxy arbitrary URLs |
-| Bounds/performance | Record release-mode feed bytes, indexing throughput/lag, cold-open reads, cache/staging peaks, PG growth, bounded queue/sections/proof work and RSS at 100/1,000/10,000 blocks. No whole-body scanner fetch, full-history in-memory catalog or unbounded cursor cache; disk-full halts without deleting history |
+| Bounds/performance | Record release-mode feed bytes, indexing throughput/lag, cold-open reads, cache/staging peaks, PG growth, bounded queue/feed/proof work and RSS at 100/1,000/10,000 blocks. No whole-body scanner fetch, full-history in-memory catalog or unbounded cursor cache; disk-full halts without deleting history |
 
 Demo sequence: start seed 7 paused; step 20 blocks; inspect block 7 rollback,
 block 8 delete and block 9 recreation, block 12 namespace transfer and the resolved
@@ -674,22 +678,19 @@ types and after-image fold; pinned pagination; Eq-only proofs with explicit unsi
 root trust; payload-free metadata, but canonical bodies/full-row witnesses remain
 where execution/verification require them.
 
-The largest prerequisite is the bounded node-host composition seam: current
-`DurableEngine` deliberately owns its manifest/head batch and cannot already append
-node bodies atomically. Review this as a focused N4 subset with crash tests, not
-as a TypeScript adapter task. The second risk is metadata capture around rollback,
-ID reuse and expiry; the existing outcomes lack enough row metadata for a naive
-post-hoc projector. Freeze trace fixtures before building UI against it.
+The bounded node-host composition seam is implemented as a focused N4 subset with
+crash tests: engine state and node records now share one atomic batch. Metadata
+capture around rollback, ID reuse and expiry is checked against an independent
+lifecycle model; terminal changes are captured during execution.
 
-Implementation must finalize the exact canonical node envelope/metadata-section
-binary tags, closed JSON field inventories, storage profile compatibility predicate,
-per-table indexes and private control transport. These are bounded details within
-the decisions above, with golden fixtures and independent review before encoding is
-frozen. Proposed transport/default limits are starting values to check against the
-selected genesis, not measured capacity promises. A later proof profile or signature
+The canonical node envelope, metadata binary tags, closed JSON inventories,
+storage compatibility predicate, indexes and private transport are frozen by the
+implemented profile and cross-language fixtures. The selected genesis enforces
+the concrete transport caps documented in the run guide. A later proof profile or signature
 scheme requires an explicit new capability/trust profile; it cannot silently change
 this run's interpretation.
 
-No runtime implementation, rollout, cloud resource change or edit to the Rust node
-is performed by this proposal. Approval can select slices without reopening the
-payload/identity/durability/trust constraints that make the simulator coherent.
+Runtime implementation and local validation are recorded in the linked acceptance
+report. No production deployment or change to another company repository is part
+of this work. Payload, identity, durability and unsigned trust boundaries remain
+the constraints for later extensions.

@@ -23,3 +23,6 @@ __pycache__/
 
 # Locally built Arkiv SDK, produced by scripts/syncLocalSdk.sh
 vendor/
+
+# Isolated native simulator private configuration
+/.simulator/

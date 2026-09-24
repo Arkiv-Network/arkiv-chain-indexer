@@ -39,7 +39,7 @@
   font-size: 13px;
 }
 .sim-trust strong {
-  color: #d4a154;
+  color: var(--foreground);
 }
 .sim-trust span:nth-child(2) {
   flex: 1;
@@ -52,11 +52,11 @@
   border-radius: 5px;
   font-size: 11px;
   white-space: normal;
-  color: #aeb7cb;
+  color: var(--muted-foreground);
 }
 .sim-badge.verified {
   border-color: #3ab89780;
-  color: #61d7b7;
+  color: var(--foreground);
   background: #3ab89710;
 }
 .sim-metrics {
@@ -83,6 +83,7 @@
   margin-top: 9px;
   font-size: 23px;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .sim-nav {
   display: flex;
@@ -272,5 +273,13 @@
   .sim-section-heading {
     align-items: start;
     flex-direction: column;
+  }
+}
+@media (max-width: 540px) {
+  .sim-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sim-table {
+    min-width: 700px;
   }
 }
