@@ -3,11 +3,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseStatisticsConfig } from "./collectStatistics";
-import { openDb } from "./db";
+import { openDb, type Db } from "./db";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import type { EntityVersion } from "./entityIndex";
 import { gatherIndexerStatistics, scannedPercent } from "./indexerStatistics";
-import type { IndexerStatistics } from "./indexerStatisticsTypes";
+import { STATISTICS_PERIODS, type IndexerStatistics } from "./indexerStatisticsTypes";
+import { foldStatisticsActivity, foldStatisticsWindows, statisticsWindowBounds } from "./statisticsWindows";
 import { StatisticsFileReader, writeStatisticsFile } from "./statisticsFile";
 import { createBlockServer } from "./server";
 import type { ScannerStorage } from "./storage";
@@ -33,6 +34,23 @@ describe("statistics coverage and worker config", () => {
     expect(() => parseStatisticsConfig([], {})).toThrow("DATABASE_URL");
     expect(() => parseStatisticsConfig(["--interval-ms", "0"], { DATABASE_URL: "postgres://test" })).toThrow();
     expect(() => parseStatisticsConfig(["--statement-timeout-ms", "-1"], { DATABASE_URL: "postgres://test" })).toThrow();
+  });
+  test("window durations use exact UTC hours across DST and zero stored activity stays distinct from unavailable state", () => {
+    const cutoff = "2026-10-25T03:00:00.123Z";
+    const bounds = statisticsWindowBounds(cutoff);
+    expect(bounds[0]).toEqual({ fromInclusiveUtc: "2026-10-25T02:00:00.123Z", toExclusiveUtc: cutoff });
+    expect(bounds[7]).toEqual({ fromInclusiveUtc: "2026-10-18T03:00:00.123Z", toExclusiveUtc: cutoff });
+    expect(bounds[8]).toEqual({ fromInclusiveUtc: null, toExclusiveUtc: null });
+    const allTime = foldStatisticsActivity([], [], []);
+    const windows = foldStatisticsWindows(cutoff, [], [], [], allTime);
+    expect(Object.keys(windows)).toEqual(["1h", "2h", "6h", "12h", "24h", "48h", "72h", "7d", "all"]);
+    for (const window of Object.values(windows)) {
+      expect(window.blocks.indexed).toBe("0");
+      expect(window.transactions.maxInputBytes).toBe("0");
+      expect(window.operations.byType).toHaveLength(6);
+      expect(window.operations.byType.every((row) => row.successful === "0" && row.reverted === "0" && row.unknownStatus === "0")).toBe(true);
+      expect("entities" in window).toBe(false);
+    }
   });
 });
 
@@ -67,6 +85,15 @@ test("serves worker snapshots through the real HTTP server without accessing sto
     expect(response.status).toBe(200);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     expect(await response.json()).toMatchObject({ blocks: { indexed: "9007199254740993" }, stale: false });
+    // A rolling upgrade must serve old files unchanged, then expose windows without touching storage.
+    fixture.windows = foldStatisticsWindows(fixture.gatheredAtUtc, [], [], [], fixture);
+    await writeStatisticsFile(path, fixture);
+    now += 1100;
+    const windowResponse = await fetch(`http://127.0.0.1:${server.port}/statistics`);
+    expect(await windowResponse.json()).toMatchObject({ windows: {
+      "1h": { fromInclusiveUtc: "2026-09-21T09:00:00.000Z", toExclusiveUtc: fixture.gatheredAtUtc, blocks: { indexed: "0" } },
+      all: { fromInclusiveUtc: null, toExclusiveUtc: null, blocks: fixture.blocks },
+    } });
     await writeFile(path, "invalid JSON");
     now += 601_000;
     expect(await reader.get()).toMatchObject({ blocks: fixture.blocks, stale: true });
@@ -95,7 +122,101 @@ describe.skipIf(!hasPostgresForTests())("statistics PostgreSQL snapshot", () => 
       expect(stats.blocks.indexed).toBe("0");
       expect(stats.transactions.indexed).toBe("0");
       expect(stats.entities).toMatchObject({ status: "unavailable", known: null, active: null });
+      expect(stats.windows?.["1h"].blocks.indexed).toBe("0");
+      expect(stats.windows?.all.operations).toEqual(stats.operations);
       expect((await tables()).rows).toEqual(before.rows);
+    } finally { await db.close(); await cleanup(); }
+  });
+
+  test("all eight windows have inclusive starts/exclusive shared cutoff, nest exactly, and preserve all-time and orphan operations", async () => {
+    const { storage, schema, cleanup } = await createIsolatedStorage("statistics_windows");
+    const db = openDb(TEST_DATABASE_URL!, { max: 1 });
+    const cutoff = "2026-09-24T12:00:00.123Z";
+    const cutoffMs = Date.parse(cutoff);
+    const offsets = [
+      ...STATISTICS_PERIODS.flatMap(({ hours }) => hours === null ? [] : [-hours * 3_600_000 - 1, -hours * 3_600_000, -hours * 3_600_000 + 1]),
+      -1, 0, 1, 3_600_000, -8 * 86_400_000,
+    ];
+    const fixtures = offsets.map((offset, i) => ({
+      date: new Date(cutoffMs + offset).toISOString(),
+      // The most recent operation deliberately has no transaction row.
+      status: i === 24 || i % 3 === 2 ? null : i % 3 === 0 ? "1" : "0",
+      orphan: i === 24,
+      inputBytes: i === 24 ? "9007199254740993" : String(i + 1),
+      reference: i % 2 === 0,
+      referenceSize: i === 0 ? null : "9007199254740993",
+      type: i === 23 ? 99 : 2,
+    }));
+    const historyQueries: string[] = [];
+    // Keep the real read-only transaction and queries, but give boundary fixtures a deterministic cutoff.
+    const fixedClockDb: Db = { ...db, transaction: (fn) => db.transaction((tx) => fn({
+      query: async <R>(sql: string, params?: unknown[]) => {
+        if (sql.includes("transaction_timestamp()")) return { rows: [{ at: cutoff }] as R[], rowCount: 1 };
+        if (sql.includes(`FROM "${schema}".blocks`) || sql.includes(`FROM "${schema}".transactions`) || sql.includes(`FROM "${schema}".transaction_operations`)) historyQueries.push(sql);
+        return tx.query<R>(sql, params);
+      },
+    })) };
+    try {
+      for (const [i, fixture] of fixtures.entries()) {
+        const hash = `0x${(i + 1).toString(16).padStart(64, "0")}` as const;
+        const block: RpcBlock = {
+          number: `0x${i.toString(16)}`, timestamp: "0x1", gasUsed: "0x1", gasLimit: "0x100000",
+          transactions: [{ hash, from: "0xaa", to: "0xbb", input: "0xab" }],
+        };
+        const receipt: RpcReceipt = { transactionHash: hash, gasUsed: "0x1", ...(fixture.status === null ? {} : { status: fixture.status === "1" ? "0x1" as const : "0x0" as const }) };
+        const metrics = computeBlockMetrics(block, [receipt]);
+        metrics.blockDate = fixture.date;
+        metrics.totalInputDataSizeBytes = fixture.inputBytes;
+        const transactions = inspectBlockFromRpc(block, [receipt]).transactions;
+        transactions[0]!.inputDataSizeBytes = fixture.inputBytes;
+        const operation: ArkivOperation = {
+          opIndex: 0, operationType: fixture.type, operation: "update", entityKey: "same-entity",
+          contentType: "text/plain", payloadSizeBytes: 7, attributes: [], expiresAtBlocks: 10,
+          newOwner: null, isReference: fixture.reference, payloadReference: null,
+          referenceVerification: null, referenceError: null,
+        };
+        await storage.saveBlockMetrics(metrics, { kind: "lastSuccessfulBlock" }, transactions, [], [{ position: 0, hash, operations: [operation] }]);
+        if (fixture.referenceSize !== null) await db.query(`UPDATE "${schema}".transaction_operations SET payload_reference = $1::jsonb WHERE block_number = $2`, [{ sizeBytes: fixture.referenceSize }, i]);
+        if (fixture.orphan) await db.query(`DELETE FROM "${schema}".transactions WHERE block_number = $1`, [i]);
+      }
+      const stats = await gatherIndexerStatistics(fixedClockDb, { schema });
+      expect(stats.gatheredAtUtc).toBe(cutoff);
+      expect(historyQueries).toHaveLength(3);
+      expect(stats.blocks).toMatchObject({ indexed: String(fixtures.length), first: "0", last: String(fixtures.length - 1), missingWithinStoredRange: "0" });
+      expect(stats.windows!.all.blocks).toMatchObject({ indexed: stats.blocks.indexed, inputBytes: stats.blocks.inputBytes });
+      expect(stats.windows!.all.transactions).toEqual(stats.transactions);
+      expect(stats.windows!.all.operations).toEqual(stats.operations);
+      let previousCount = 0n;
+      for (const { id, hours } of STATISTICS_PERIODS) {
+        const selected = fixtures.filter(({ date }) => hours === null || (Date.parse(date) >= cutoffMs - hours * 3_600_000 && Date.parse(date) < cutoffMs));
+        const window = stats.windows![id];
+        const successful = selected.filter((row) => row.status === "1");
+        const sum = (rows: typeof selected, key: "inputBytes" | "referenceSize") => rows.reduce((total, row) => total + BigInt(row[key] ?? "0"), 0n).toString();
+        expect(window.blocks).toMatchObject({ indexed: String(selected.length), transactions: String(selected.length), inputBytes: sum(selected, "inputBytes") });
+        expect(window.transactions).toMatchObject({ indexed: String(selected.filter((row) => !row.orphan).length), inputBytes: sum(selected.filter((row) => !row.orphan), "inputBytes") });
+        expect(window.operations).toMatchObject({
+          successfulPayloadWrites: String(successful.length), successfulPayloadBytes: String(successful.length * 7),
+          successfulReferenceWrites: String(successful.filter((row) => row.reference).length),
+          referencedPayloadBytes: sum(successful.filter((row) => row.reference), "referenceSize"),
+          referencesWithoutSize: String(successful.filter((row) => row.reference && row.referenceSize === null).length),
+        });
+        for (const type of [2, 99]) {
+          const rows = selected.filter((row) => row.type === type);
+          const actual = window.operations.byType.find((row) => row.type === type);
+          if (rows.length || type === 2) expect(actual).toMatchObject({
+            successful: String(rows.filter((row) => row.status === "1").length),
+            reverted: String(rows.filter((row) => row.status === "0").length),
+            unknownStatus: String(rows.filter((row) => row.status === null).length),
+          });
+        }
+        expect(BigInt(window.blocks.indexed)).toBeGreaterThanOrEqual(previousCount);
+        previousCount = BigInt(window.blocks.indexed);
+        expect(window.toExclusiveUtc).toBe(hours === null ? null : cutoff);
+        expect("entities" in window).toBe(false);
+      }
+      expect(stats.windows!["1h"].blocks.indexed).toBe("3"); // exact lower bound, 1 ms later, 1 ms before cutoff
+      expect(stats.windows!["7d"].blocks.indexed).toBe("24");
+      expect(stats.entities.active).toBeNull();
     } finally { await db.close(); await cleanup(); }
   });
 
