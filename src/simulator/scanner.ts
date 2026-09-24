@@ -16,7 +16,8 @@ export async function scanTick(
     const block = await source.block(next.toString());
     if (
       block.header.height === status.head.height &&
-      block.header.hash !== status.head.hash
+      (block.header.hash !== status.head.hash ||
+        block.header.stateRoot !== status.head.stateRoot)
     )
       return fail("ChainConflict", 409);
     await storage.ingest(block);

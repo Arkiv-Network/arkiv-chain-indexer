@@ -165,14 +165,24 @@ export class SimulatorStorage {
     const progress = await this.progress();
     if (
       progress.height !== null &&
-      BigInt(status.head.height) < BigInt(progress.height)
-    )
-      return fail("ChainConflict", 409);
+      BigInt(status.head.height) <= BigInt(progress.height)
+    ) {
+      const known = await this.header(status.head.height);
+      if (!known) return fail("StorageCorrupt", 503);
+      if (
+        known.hash !== status.head.hash ||
+        known.stateRoot !== status.head.stateRoot
+      )
+        return fail("ChainConflict", 409);
+      // An authentic retained prefix is an availability problem, never a fork or rollback.
+      if (BigInt(status.head.height) < BigInt(progress.height))
+        return fail("SourceBehind", 503);
+    }
     if (
-      progress.height === status.head.height &&
-      progress.hash !== status.head.hash
+      progress.observed &&
+      BigInt(status.head.height) < BigInt(progress.observed.head.height)
     )
-      return fail("ChainConflict", 409);
+      return;
     await this.db.query(
       `UPDATE ${this.q}.progress SET observed=$2 WHERE run_pk=$1`,
       [this.runPk, status],

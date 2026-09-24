@@ -380,4 +380,40 @@ pg("native PostgreSQL projection", () => {
         ).status,
       ).toBe(405);
     }));
+  test("explicit new run isolates progress, old cursors and data remain bound to original run", () =>
+    isolated(async (s, schema) => {
+      for (const b of history()) await s.ingest(b);
+      const old = await s.page("blocks", { limit: 1 });
+      const fresh = redigest({ ...genesis(), runId: "22".repeat(16) }),
+        other = await SimulatorStorage.open(url!, fresh, schema);
+      try {
+        expect((await other.progress()).height).toBeNull();
+        await other.ingest(fresh);
+        expect((await other.progress()).height).toBe("0");
+        expect((await s.progress()).height).toBe("2");
+        await expect(
+          other.page("blocks", { limit: 1, cursor: old.nextCursor! }),
+        ).rejects.toThrow("CursorMismatch");
+      } finally {
+        await other.close();
+      }
+    }));
+  test("covered missing block is corruption, future block is unavailable, authentic stale source retries", () =>
+    isolated(async (s, schema) => {
+      const blocks = history();
+      for (const b of blocks) await s.ingest(b);
+      await expect(s.observe(status(blocks[1]!))).rejects.toThrow(
+        "SourceBehind",
+      );
+      expect((await s.progress()).height).toBe("2");
+      await expect(
+        s.observe({
+          ...status(blocks[1]!),
+          head: { ...status(blocks[1]!).head, hash: ZERO },
+        }),
+      ).rejects.toThrow("ChainConflict");
+      await s.db.query(`DELETE FROM "${schema}".blocks WHERE height=0`);
+      await expect(s.snapshot("0")).rejects.toThrow("StorageCorrupt");
+      await expect(s.snapshot("3")).rejects.toThrow("CoverageUnavailable");
+    }));
 });
