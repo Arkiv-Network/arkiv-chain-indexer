@@ -41,12 +41,66 @@ also suppresses those totals until it finishes.
 | `STATISTICS_INTERVAL_MS` | `300000` | Pause after each sweep. Expensive sweeps wait at least four times their duration before retrying. |
 | `STATISTICS_STATEMENT_TIMEOUT_MS` | `120000` | Maximum duration of an individual aggregation query. |
 
-The worker has one connection and runs its queries sequentially. Full counts
-still scan the stored history, so increase the interval on large deployments.
+The worker has one connection and runs its queries sequentially. The existing
+block, transaction and operation scans each group history into disjoint time
+bands once; the worker folds those small aggregates into nested periods with
+`bigint`. Nine periods do not cause nine full-history scans. Full counts still
+scan the stored history, so increase the interval on large deployments.
 No sweep overlaps the next. A failed sweep leaves the last successful file
 intact; the API marks an old snapshot `stale`. Before the first snapshot, it
 returns HTTP 503 with `Retry-After: 30`. Snapshots survive worker/backend restarts
 when their volume survives. There is no historical statistics time series.
+
+## Activity periods and API compatibility
+
+The **Activity period** selector offers exactly **1 hour, 2 hours, 6 hours,
+12 hours, 24 hours, 48 hours, 72 hours, 7 days, and All time**. All time is the
+default; the browser remembers your choice. Selection changes indexed activity,
+entity operation attempts and transaction input/payload write totals using the
+already loaded snapshot. It does not trigger a sweep or database query.
+
+`GET /api/statistics` still takes no query parameters. Snapshot `version: 1`
+and all existing top-level fields retain their previous meanings: `blocks`,
+`transactions` and `operations` cover **all stored history**, `chain` describes
+overall coverage, and `entities` describes the current projected state. This
+keeps existing consumers, including Hub, compatible.
+
+New snapshots add `windows` with keys `1h`, `2h`, `6h`, `12h`, `24h`, `48h`,
+`72h`, `7d` and `all`. Each value contains:
+
+- `fromInclusiveUtc` and `toExclusiveUtc`: ISO UTC timestamps for finite windows;
+  both are `null` for `all`, which includes every stored row in the snapshot.
+- `blocks`: `indexed`, `transactions`, `inputBytes` and `compressedInputBytes`.
+- `transactions`: the same fields as the top-level transaction totals.
+- `operations`: the same fields as the top-level operation totals, including
+  success/revert/unknown counts by type and successful payload/reference sizes.
+
+All finite periods share the exact `gatheredAtUtc` cutoff, taken from the
+PostgreSQL transaction start and truncated to milliseconds to match JSON time
+precision. A row contributes when **start ≤ block timestamp < cutoff**. The
+7-day period is exactly 168 hours, independent of time zones or daylight saving
+time. Activity uses each table's stored `block_date`, not `scanned_at`; a
+backfilled old block contributes according to its original block time.
+Operation timestamps come from `transaction_operations.block_date`, so an
+operation lacking a transaction row still contributes to the unknown outcome
+count. Rows at/after the cutoff do not enter finite periods, but remain in
+all-time totals. Boundaries are reported in the page's selected display time zone.
+
+Finite periods are nested, with exact decimal-string counts and byte totals.
+No matching stored rows means **zero stored activity**, not unavailable data or
+proof that the period was completely scanned. Existing coverage limits still
+apply separately to blocks, transaction details and decoded operations.
+
+**Current entity state, active payload state, attributes and content types do
+not change with the activity period.** They retain their explicitly reported
+projection block. There is no historical gauge filtering, subtraction or
+attempt to infer entity-state deltas from operations. Unavailable projected
+state remains `null`, rather than a fabricated zero.
+
+Older files without `windows` remain readable by the API. The page shows their
+original all-time totals, disables the finite options and explains that period
+results are unavailable until an updated worker publishes a snapshot. Missing
+window data is never displayed as zero.
 
 ## Definitions and available data
 

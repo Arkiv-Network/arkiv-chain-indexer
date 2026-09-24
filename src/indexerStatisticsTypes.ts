@@ -1,3 +1,30 @@
+export const STATISTICS_PERIODS = [
+  { id: "1h", label: "1 hour", hours: 1 },
+  { id: "2h", label: "2 hours", hours: 2 },
+  { id: "6h", label: "6 hours", hours: 6 },
+  { id: "12h", label: "12 hours", hours: 12 },
+  { id: "24h", label: "24 hours", hours: 24 },
+  { id: "48h", label: "48 hours", hours: 48 },
+  { id: "72h", label: "72 hours", hours: 72 },
+  { id: "7d", label: "7 days", hours: 168 },
+  { id: "all", label: "All time", hours: null },
+] as const;
+
+export type StatisticsPeriod = typeof STATISTICS_PERIODS[number]["id"];
+
+/** Stored activity only. Current entity state never belongs to a time window. */
+export interface StatisticsActivity {
+  blocks: Pick<IndexerStatistics["blocks"], "indexed" | "transactions" | "inputBytes" | "compressedInputBytes">;
+  transactions: IndexerStatistics["transactions"];
+  operations: IndexerStatistics["operations"];
+}
+
+export interface StatisticsWindow extends StatisticsActivity {
+  /** Null bounds mean all stored history, including any future-dated rows. */
+  fromInclusiveUtc: string | null;
+  toExclusiveUtc: string | null;
+}
+
 /** Counts and byte totals are decimal strings so JSON never loses integer precision. */
 export interface IndexerStatistics {
   version: 1;
@@ -64,6 +91,8 @@ export interface IndexerStatistics {
     attributeTypes: Array<{ typeId: number; name: string; count: string }>;
     topContentTypes: Array<{ contentType: string; entities: string; recordedPayloadBytes: string }>;
   };
+  /** Optional so readers can continue to serve snapshots from older workers. */
+  windows?: Record<StatisticsPeriod, StatisticsWindow>;
   limitations: string[];
 }
 

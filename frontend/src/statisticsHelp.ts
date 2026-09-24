@@ -10,27 +10,48 @@ export interface StatisticsExplanation {
 const explain = (meaning: string, source: string, calculation: string, conditions: string, caveats: string): StatisticsExplanation =>
   ({ meaning, source, calculation, conditions, caveats });
 
-const STORED_HISTORY = "All rows visible when the statistics worker takes its database snapshot. These totals include the newest blocks; only the scanned percentage excludes the newest ten.";
-const TX_SCOPE = "Includes successful, reverted and unknown-outcome transactions that were stored. The scanner excludes its system sender (0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001).";
+const ACTIVITY_SCOPE = "Uses the selected activity period and stored block timestamps: start inclusive, collection cutoff exclusive. All time includes every stored row. Empty periods report zero stored activity; missing history is not estimated.";
+const TX_SCOPE = "Includes successful, reverted and unknown-outcome transactions that were stored. The scanner excludes its system sender (0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001). " + ACTIVITY_SCOPE;
 const INPUT_LIMITS = "This measures calldata only, without signatures or transaction-envelope overhead. Older size columns defaulted to zero, so historical zero values may mean the size was not recorded. No calldata bytes are stored.";
 const ENTITY_SOURCE = "entity_versions, evaluated at entity_index_state.projected_through_block (the projection block shown above).";
 const VERSION_SCOPE = "Choose the version with from_block ≤ projection block and to_block > projection block, or no to_block. Each known entity contributes once; superseded and future versions do not contribute.";
 const ACTIVE_SCOPE = "Use the version valid at the projection block, require deleted = false and expires_at > that block. An entity expiring exactly at that block is already inactive.";
-const ENTITY_LIMITS = "Unavailable means the projection is missing, has no head, or is importing genesis. Missing creates, an incomplete genesis import, pending historical refolds and inferred pre-log expiries can limit accuracy. This is not a live-node census.";
+const ENTITY_LIMITS = "Unavailable means the projection is missing, has no head, or is importing genesis. Missing creates, an incomplete genesis import, pending historical refolds and inferred pre-log expiries can limit accuracy. This is not a live-node census. Entity, payload and attribute state always uses the current projection block, independent of the activity period.";
 const PAYLOAD_LIMITS = "The projection carries recorded size metadata, not payload contents. A reference receipt's size can differ from the referenced entity bytes. Totals do not prove provider availability, current provider storage usage or deduplication.";
-const OP_SOURCE = "transaction_operations joined to transactions by (block_number, position); operation_type selects the operation and the stored receipt status selects its outcome.";
-const SUCCESS_SCOPE = "Only operations whose transaction has receipt status 1. Reverted, unknown-status and missing-transaction rows are excluded. Every operation counts separately, including multiple operations in one transaction or repeated writes to one entity.";
+const OP_SOURCE = "The selected period filters transaction_operations.block_date, even for operations without a transaction row. transaction_operations joined to transactions by (block_number, position); operation_type selects the operation and the stored receipt status selects its outcome.";
+const SUCCESS_SCOPE = "Only operations whose transaction has receipt status 1. Reverted, unknown-status and missing-transaction rows are excluded. Every operation counts separately, including multiple operations in one transaction or repeated writes to one entity. " + ACTIVITY_SCOPE;
 const OP_LIMITS = "Only stored, decoded operations are covered. Disabled transaction storage or missing decoder history leaves gaps. Imported genesis entities have no create transaction. These are operation counts, not counts of distinct entities.";
 const ATTRIBUTE_SOURCE = "The attributes JSON array on each active entity's selected entity_versions row.";
 const ATTRIBUTE_LIMITS = "Counts describe projected attributes, not encoded bytes or distinct attribute names across the chain. Unset attributes and old values are excluded; unsupported or malformed attribute types can be skipped by the projector.";
 
 export const STATISTICS_HELP = {
   "Statistics": explain(
-    "A cumulative overview of what this indexer has stored, plus the entity state it has reconstructed.",
+    "An overview of stored activity for the selected period, plus current reconstructed entity state.",
     "GET /api/statistics serves a JSON file produced by a separate statistics worker from existing PostgreSQL tables.",
     "Each sweep reads one consistent, read-only database snapshot. Counts and byte totals remain exact decimal integers in the API; display formatting does not change the source values.",
-    "Block and transaction totals cover stored history. Entity totals use the separately reported projection block. Loading this page does not run full-table counts or query the blockchain node.",
+    "Activity totals use the selected period. Chain coverage and entity state stay independent of that selection. Entity totals use the separately reported projection block. Loading this page does not run full-table counts or query the blockchain node.",
     "The worker normally refreshes about every five minutes. Missing indexed history remains missing; statistics are not estimates of unscanned data. Open each info icon for the particular metric's rules.",
+  ),
+  "Activity period": explain(
+    "Selects the time range for indexed blocks, transactions, entity operation attempts and input/payload writes.",
+    "The windows object in the precomputed snapshot. Finite periods share gatheredAtUtc as their UTC cutoff; no query or new sweep is triggered by selection.",
+    "1, 2, 6, 12, 24, 48 or 72 hours, or exactly 7 × 24 hours, ending at the collection cutoff. A block timestamp equal to the start is included; one equal to the cutoff is excluded. All time includes every stored row, including future-dated rows.",
+    "The period filters each table's stored block_date, not scan/import time. All time is the default and your selection is remembered in this browser. Older snapshots without windows support only All time.",
+    "Chain coverage and current projected entity, active payload and attribute state do not change with this selection. Zero is no matching stored activity, not proof the period was fully indexed. Future-dated rows are excluded from finite periods.",
+  ),
+  "Indexed activity": explain(
+    "Stored block and transaction counts in the selected activity period.",
+    "blocks and transactions, grouped by their stored block_date by the statistics worker.",
+    "Count block rows and transaction rows separately, and sum the transaction counts recorded in block metrics.",
+    ACTIVITY_SCOPE,
+    "The tables can have different historical coverage. These totals do not estimate unindexed history and do not count scan or backfill jobs.",
+  ),
+  "Current active payload state": explain(
+    "Recorded payload sizes of entities active at the current projection block.",
+    ENTITY_SOURCE,
+    "Select one version per active entity, then count nonzero sizes and calculate the sum and maximum recorded size.",
+    ACTIVE_SCOPE + " These state gauges are independent of the activity period.",
+    PAYLOAD_LIMITS,
   ),
   "Byte units": explain(
     "Controls the display of all byte sizes on this page, including means and content-type totals.",
@@ -41,7 +62,7 @@ export const STATISTICS_HELP = {
   ),
   "Gathered": explain(
     "The time represented by the statistics snapshot, displayed in your selected time zone.",
-    "gatheredAtUtc is PostgreSQL's transaction_timestamp() at the start of the worker's read-only, repeatable-read transaction.",
+    "gatheredAtUtc is PostgreSQL's transaction_timestamp(), truncated to millisecond precision, at the start of the worker's read-only, repeatable-read transaction.",
     "All queries in that sweep see a consistent database snapshot, even if the scanner stores more blocks while the sweep runs.",
     "This is the start of collection, not the page-load time, latest block timestamp, or end of collection.",
     "After a failed sweep the previous snapshot remains visible. The API marks it stale when its age exceeds twice the recorded refresh interval plus its collection duration; a failed page refresh also shows a warning.",
@@ -63,7 +84,7 @@ export const STATISTICS_HELP = {
   "Chain coverage": explain(
     "Shows how much block history is present and which part of the chain those rows cover.",
     "Stored block rows and the scanner's latest observed chain head in scanner_state.",
-    "Only Chain scanned excludes the newest ten blocks. First/last height, total indexed blocks and internal gaps still describe all stored blocks.",
+    "Only Chain scanned excludes the newest ten blocks. First/last height and internal gaps still describe all stored blocks. The separate Indexed activity section uses the selected period.",
     "Genesis is block 0 and counts as a block. Missing history reduces coverage even if the scanner is already following the latest head.",
     "The chain head is the scanner's last observation, not a fresh node query from this page. An observation older than 60 seconds at collection is flagged; an unknown observation cannot establish coverage.",
   ),
@@ -75,10 +96,10 @@ export const STATISTICS_HELP = {
     "Unknown when no head is recorded or the chain has ten or fewer blocks. The percentage is truncated to four decimals so incomplete coverage never rounds up to 100%. A stale head can make coverage look better than the current chain.",
   ),
   "Indexed blocks": explain(
-    "The exact number of block rows currently stored by this indexer.",
+    "The exact number of stored block rows in the selected activity period.",
     "COUNT(*) over the blocks table.",
     "Each block number contributes one row. Rescanning the same block replaces its row rather than adding another count.",
-    STORED_HISTORY,
+    ACTIVITY_SCOPE,
     "This is not the highest block number plus one: the index may start after genesis or have gaps. It does not imply that every block has stored transaction details or decoded Arkiv operations.",
   ),
   "Observed chain head": explain(
@@ -112,8 +133,8 @@ export const STATISTICS_HELP = {
   "Transactions in block metrics": explain(
     "The total number of included transactions counted when the stored blocks were scanned.",
     "SUM(blocks.transaction_count), calculated by the scanner from each block's included transactions.",
-    "Add the transaction count in every stored block; an empty block contributes zero. Transaction receipt outcome does not filter this total.",
-    "Block metrics can exist even when detailed transaction-row storage is disabled. The scanner omits its system sender (0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001).",
+    "Add the transaction count in each stored block in the selected activity period; an empty block contributes zero. Transaction receipt outcome does not filter this total.",
+    "Block metrics can exist even when detailed transaction-row storage is disabled. The scanner omits its system sender (0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001). " + ACTIVITY_SCOPE,
     "This can exceed Indexed transaction rows when detail storage was disabled for part of the history. It covers scanned blocks, not all transactions on an incompletely scanned chain.",
   ),
   "Indexed transaction rows": explain(
@@ -194,17 +215,17 @@ export const STATISTICS_HELP = {
     "This is a distinct-entity state count, not the Deleted operation total. An entity can also be absent from the projection because its create was never known; that is not counted as a deletion. " + ENTITY_LIMITS,
   ),
   "Transaction input and payloads": explain(
-    "Three different views of data volume: transaction calldata, payload writes in successful operations, and recorded payload sizes of currently active entities.",
-    "Stored block/transaction input-size fields, decoded transaction_operations payload metadata, and projected entity_versions payload_size.",
-    "Historical input and operation totals sum stored activity; active-entity totals select one state per active entity at the projection block.",
-    "Input totals include reverted transactions. Successful operation totals require receipt status 1. Active-state totals exclude expired and deleted entities.",
+    "Activity data volume in the selected period: transaction calldata and payload writes in successful operations.",
+    "Stored block/transaction input-size fields and decoded transaction_operations payload metadata, filtered by stored block_date.",
+    "Sum input and successful-operation metadata within the selected period. Current active payload state is shown separately and does not use the selected period.",
+    "Input totals include reverted transactions. Successful operation totals require receipt status 1. " + ACTIVITY_SCOPE,
     "These categories overlap and must not be added into one storage total. Calldata can contain operation metadata or reference receipts rather than entity bytes, and repeated writes are not deduplicated.",
   ),
   "Input bytes in block metrics": explain(
     "Total uncompressed transaction input/calldata bytes recorded across the stored blocks.",
     "SUM(blocks.total_input_data_size_bytes), originally computed from included transactions' input hex decoded to bytes.",
     "Sum each included transaction's input length inside its block, then sum the stored block totals. Empty input contributes zero; hex notation itself is not counted as text bytes.",
-    STORED_HISTORY + " Successful and reverted transactions both contribute; the scanner's system-sender exclusion applies.",
+    ACTIVITY_SCOPE + " Successful and reverted transactions both contribute; the scanner's system-sender exclusion applies.",
     INPUT_LIMITS,
   ),
   "Compressed input in block metrics": explain(
