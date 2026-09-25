@@ -74,3 +74,38 @@ The captured 3,252-byte witness was additionally verified using the separate Rus
 Frontend/proxy validation passed 25 tests with 177 assertions, frontend test TypeScript checking, and the production build. The Rust change passed trie/node regression tests, the equality-proof suite, adversarial socket tests, and Clippy. The original explorer remains healthy on the fresh run; its frontend container/image and both original nginx site files were unchanged.
 
 Block timestamps are deterministic simulated time, not wall-clock production time. The full-node block inspector labels them accordingly.
+
+## Signed chain deployments
+
+Set `DEBUG_NODE_PROTOCOL=signed` on each panel server to route the existing
+read-only panel paths to `/signed/v1` on its fixed `DEBUG_NODE_HOST` and
+`DEBUG_NODE_PORT`. The default remains `sim`. Configure navigation with
+`VITE_NODE_FULL_UI_URL`, `VITE_NODE_LIGHT_UI_URL`, and `VITE_NODE_EXPLORER_URL`.
+Use `VITE_UI_MODE=fullnode` or `lightnode` as before.
+
+Signed status selects authenticated single-proposer trust wording and live
+`$contentType` examples instead of the old simulator's fixed block fixtures.
+The membership example selects `application/octet-stream`, as used by the
+explorer's Baseload workers; operators can edit the query for their data.
+The node must provide the single-block feed route, original query and verified
+entity creation flags. Signed inspection responses retain their nested identity
+and certificate; the client rejects mismatched identity, query, snapshot, or
+verification mode. The hosted Rust process verifies proofs, not the browser.
+Missing storage/cache/peer telemetry is shown as unavailable, never as zero.
+
+Rogue One runs the panels on loopback ports 23572 and 23573. Nginx serves browser
+GET/HEAD `/` and static assets through the panels, while JSON-RPC POST `/`,
+WebSocket upgrades, and `/signed/v1/` continue to reach the respective nodes.
+Private controls and replication remain blocked. Its light follower requests
+proofs from its full follower. Deployment configuration lives outside the repo
+at `/home/ubuntu/.config/rogue-one-9008/compose.json`.
+
+Read-only live verification (requires Baseload entities and Playwright Chromium):
+
+```sh
+bun --no-env-file scripts/checkSignedNodePanels.ts
+```
+
+Override `FULL_PANEL_URL`, `LIGHT_PANEL_URL`, or `PANEL_CHECK_OUT` as needed.
+The check covers matching identities, block/proof roots, membership, pagination,
+absence, desktop/mobile rendering, restricted paths, HTTP RPC, and WebSockets.

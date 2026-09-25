@@ -33,3 +33,20 @@ test("new numeric types normalize without loss and reject overflows", () => {
   expect(()=>value("key","0x"+"ab".repeat(20))).toThrow();
   expect(ARKIV_EXAMPLES.every(s=>pinSelection(s.request,"100").height===s.request.height)).toBe(true);
 });
+
+test("signed inspection binds the nested identity, query and authentication mode", () => {
+  const signedIdentity = {...identity, authentication: "signed-proposer-v1" as const};
+  const signed = {...fixture, identity, certificateBytes: "0x1234", verification: "proof verified against authenticated single-proposer header"};
+  expect(validateInspectedPage(signed, signedIdentity, request).entities).toHaveLength(3);
+  expect(() => validateInspectedPage(fixture, signedIdentity, request)).toThrow();
+  expect(() => validateInspectedPage(signed, identity, request)).toThrow();
+  for (const mutate of [
+    (r:any) => r.identity = {...identity, runId: "other"},
+    (r:any) => r.query.value = "2",
+    (r:any) => r.snapshot.height = "4",
+    (r:any) => r.certificateBytes = "0x0",
+  ]) {
+    const changed = structuredClone(signed); mutate(changed);
+    expect(() => validateInspectedPage(changed, signedIdentity, request)).toThrow();
+  }
+});

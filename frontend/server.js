@@ -16,6 +16,8 @@ const LOCAL_LIGHT_HOST = process.env.LOCAL_SIMULATOR_LIGHT_HOST ?? "";
 const LOCAL_LIGHT_PORT = Number.parseInt(process.env.LOCAL_SIMULATOR_LIGHT_PORT ?? "9402", 10);
 const NODE_MODE = ["fullnode", "lightnode"].includes(process.env.VITE_UI_MODE)
   ? process.env.VITE_UI_MODE : null;
+const DEBUG_NODE_PROTOCOL = process.env.DEBUG_NODE_PROTOCOL ?? "sim";
+if (!["sim", "signed"].includes(DEBUG_NODE_PROTOCOL)) throw new Error("Invalid DEBUG_NODE_PROTOCOL");
 const DEBUG_NODE_HOST = process.env.DEBUG_NODE_HOST ?? "";
 const DEBUG_NODE_PORT = Number.parseInt(process.env.DEBUG_NODE_PORT ?? "9402", 10);
 const STATIC_DIR = process.env.STATIC_DIR
@@ -47,6 +49,9 @@ const RUNTIME_CONFIG_ENV_NAMES = [
   // Native simulator deployments: which view this container serves, where the
   // /local-sim verifier runs relative to the browser, and operator links.
   "VITE_UI_MODE",
+  "VITE_NODE_FULL_UI_URL",
+  "VITE_NODE_LIGHT_UI_URL",
+  "VITE_NODE_EXPLORER_URL",
   "VITE_SIMULATOR_VERIFIER",
   "VITE_SIMULATOR_PUBLIC_NODE_URL",
   "VITE_SIMULATOR_PEER_UI_URL",
@@ -264,7 +269,7 @@ function proxyLocalVerifier(req, res, nodePanel = false) {
   });
   req.on("end", () => {
     if (size > 65536 || res.writableEnded) return;
-    const upstream = http.request({hostname, port, path, method: req.method,
+    const upstream = http.request({hostname, port, path: nodePanel && DEBUG_NODE_PROTOCOL === "signed" ? path.replace(/^\/sim\//, "/signed/") : path, method: req.method,
       headers: {"content-type": "application/json", accept: "application/json", "content-length": String(size)}}, (reply) => {
       const parts = []; let bytes = 0;
       reply.on("data", (chunk) => {

@@ -2,6 +2,7 @@ import { authenticatedFetch } from "./authClient";
 import { envValues } from "./runtimeConfig";
 
 export interface NativeIdentity {
+  authentication?: "unsigned-simulator-v1" | "signed-proposer-v1";
   sourceId: string;
   runId: string;
   genesisHash: string;
@@ -86,7 +87,7 @@ export interface EqSelection {
   cursor: string | null;
 }
 export interface VerifiedPage extends NativeIdentity {
-  verification: "proof verified against trusted simulator root; unsigned source";
+  verification: "proof verified against trusted simulator root; unsigned source" | "proof verified against authenticated single-proposer header";
   snapshot: NativeSnapshot;
   query: Omit<EqSelection, "height" | "cursor">;
   rows: NativeRow[];
@@ -307,10 +308,14 @@ export function validateVerifiedPage(
 ): VerifiedPage {
   if (!data || typeof data !== "object")
     throw new Error("InvalidVerifierResponse");
-  const p = data as VerifiedPage;
+  const raw = data as VerifiedPage & { identity?: NativeIdentity; certificateBytes?: string };
+  const signed = identity.authentication === "signed-proposer-v1";
+  if (signed && (!sameIdentity(raw.identity, identity) || !/^0x(?:[0-9a-f]{2})+$/.test(raw.certificateBytes ?? "")))
+    throw new Error("VerifierBindingMismatch");
+  const p = signed ? { ...raw, sourceId: raw.identity!.sourceId, runId: raw.identity!.runId, genesisHash: raw.identity!.genesisHash, chainId: raw.identity!.chainId } : raw;
   if (
     p.verification !==
-      "proof verified against trusted simulator root; unsigned source" ||
+      (signed ? "proof verified against authenticated single-proposer header" : "proof verified against trusted simulator root; unsigned source") ||
     !sameIdentity(p, identity) ||
     !p.snapshot ||
     p.snapshot.height !== request.height ||

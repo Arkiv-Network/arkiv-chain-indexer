@@ -109,8 +109,8 @@ test("local verifier proxy strips credentials, bounds streams and cannot reach c
   }
 }, 15000);
 
-for (const mode of ["fullnode", "lightnode"]) {
-  test(`${mode} routes only its read-only node API and never forwards credentials`, async () => {
+for (const protocol of ["sim", "signed"]) for (const mode of ["fullnode", "lightnode"]) {
+  test(`${protocol} ${mode} routes only its read-only node API and never forwards credentials`, async () => {
     const received: Array<{ path: string; headers: Headers }> = [];
     const node = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
       received.push({ path: new URL(request.url).pathname, headers: request.headers });
@@ -121,7 +121,7 @@ for (const mode of ["fullnode", "lightnode"]) {
     allocation.stop(true);
     const origin = `http://127.0.0.1:${port}`;
     const child = Bun.spawn(["node", resolve(import.meta.dir, "server.js")], {
-      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port), VITE_UI_MODE: mode,
+      env: { ...process.env, HOST: "127.0.0.1", PORT: String(port), VITE_UI_MODE: mode, DEBUG_NODE_PROTOCOL: protocol,
         DEBUG_NODE_HOST: "127.0.0.1", DEBUG_NODE_PORT: String(node.port),
         BACKEND_HOST: "127.0.0.1", BACKEND_PORT: String(node.port),
         LOCAL_SIMULATOR_LIGHT_HOST: "127.0.0.1", LOCAL_SIMULATOR_LIGHT_PORT: String(node.port) },
@@ -143,7 +143,7 @@ for (const mode of ["fullnode", "lightnode"]) {
       });
       expect(response.status).toBe(200);
       expect(received).toHaveLength(1);
-      expect(received[0]!.path).toBe("/sim/v1" + route);
+      expect(received[0]!.path).toBe(`/${protocol}/v1` + route);
       for (const name of ["authorization", "cookie", "x-csrf-token", "origin"])
         expect(received[0]!.headers.has(name)).toBe(false);
       const forbidden = ["/api/health", "/api/auth/session", "/api/control", "/local-sim/v1/status",

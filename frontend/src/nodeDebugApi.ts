@@ -232,7 +232,16 @@ export const ARKIV_EXAMPLES: QueryExample[] = [
   sample("reference", "11 / Entity reference", "Typed entity keys", "Entity references have a distinct key type; they are not interchangeable with bytes32.", {attribute:"reference",valueType:"key",value:"0x"+"77".repeat(32)}),
   sample("signed", "12 / Signed integer", "The smallest i32", "The signed 32-bit boundary is indexed with exact numeric ordering.", {attribute:"counter",valueType:"i32",value:"-2147483648"}),
 ];
-export function queryExamples(status: NativeSourceStatus | null) { return isArkivProfile(status) ? ARKIV_EXAMPLES : QUERY_EXAMPLES; }
+export function queryExamples(status: NativeSourceStatus | null) {
+  if (status?.authentication === "signed-proposer-v1") {
+    const request: EqSelection = {height: "latest", namespace: "1", attribute: "$contentType", valueType: "str", value: "application/octet-stream", limit: 3, cursor: null};
+    return [
+      {id: "membership", label: "01 / Live entities", title: "Inspect live test entities", explanation: "Pin the current block and verify matching binary entities from the test traffic. Follow any continuation at the same snapshot.", request},
+      {id: "absence", label: "02 / Absence", title: "Check an unused value", explanation: "Verify the answer for a deliberately unusual content type. An empty result includes an absence proof.", request: {...request, value: "application/x-arkiv-absent-demo"}},
+    ];
+  }
+  return isArkivProfile(status) ? ARKIV_EXAMPLES : QUERY_EXAMPLES;
+}
 function validateEntities(page: InspectedPage) {
   requireInspection(Array.isArray(page.entities) && page.entities.length === page.rows.length);
   page.entities.forEach((e, index) => {
