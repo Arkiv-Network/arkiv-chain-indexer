@@ -35,7 +35,9 @@ export async function fetchNodeStatus(mode: NodeUiMode, signal?: AbortSignal): P
       typeof data.genesisHash !== "string" || typeof data.chainId !== "string" ||
       typeof data.health !== "string" || typeof data.paused !== "boolean" ||
       !data.head || !uint(data.head.height) || !hash(data.head.hash) || !hash(data.head.stateRoot) ||
-      (data.observedPeerHeight !== undefined && !uint(data.observedPeerHeight))) {
+      (data.observedPeerHeight !== undefined && !uint(data.observedPeerHeight)) ||
+      (data.proofProfiles !== undefined && (!Array.isArray(data.proofProfiles) || data.proofProfiles.some(profile => typeof profile !== "string"))) ||
+      (data.proposer !== undefined && typeof data.proposer !== "string")) {
     throw new Error("NodeIdentityMismatch");
   }
   if (data.capabilities) {

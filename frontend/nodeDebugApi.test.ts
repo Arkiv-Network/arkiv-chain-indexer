@@ -70,6 +70,13 @@ describe("dedicated node client", () => {
     expect(calls).toEqual(["/node-sim/v1/status", "/node-sim/v1/status"]);
   });
 
+  test("malformed advertised proof profiles and proposer fail before rendering", async () => {
+    for (const extra of [{ proofProfiles: {} }, { proofProfiles: "range-complete-v1" }, { proofProfiles: [null] }, { proposer: {} }]) {
+      globalThis.fetch = (async () => Response.json({ ...fixture, role: "light", health: "following", paused: false, head: fixture.snapshot, ...extra })) as unknown as typeof fetch;
+      await expect(fetchNodeStatus("lightnode")).rejects.toThrow("NodeIdentityMismatch");
+    }
+  });
+
   test("a block from another run is rejected", async () => {
     globalThis.fetch = (async () => Response.json({ ...fixture, runId: "old", header: { height: "20" }, transactions: [], operations: [], changes: [] })) as unknown as typeof fetch;
     await expect(fetchNodeBlock(fixture, "20")).rejects.toThrow("BlockIdentityMismatch");

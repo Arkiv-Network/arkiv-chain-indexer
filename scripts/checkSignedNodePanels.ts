@@ -17,7 +17,10 @@ async function api(origin:string,path:string,body?:unknown):Promise<any> {
 }
 const fs=await api(full,'/node-sim/v1/status'),ls=await api(light,'/node-sim/v1/status');
 assert.equal(fs.role,'full');assert.equal(ls.role,'light');
-assert.equal(ls.authentication,'signed-proposer-v1');assert.deepEqual(fs.identity,ls.identity);
+assert.equal(ls.authentication,'signed-proposer-v1');
+for(const field of ['sourceId','runId','genesisHash','chainId','authentication']) {
+ assert.equal(typeof ls[field],'string',field);assert.equal(fs[field],ls[field],field);
+}
 const query={height:ls.head.height,namespace:'1',attribute:'$contentType',valueType:'str',value:'application/octet-stream',limit:3,cursor:null};
 const proof=await api(light,'/node-sim/v1/query/inspect',query);
 assert.equal(proof.verification,'proof verified against authenticated single-proposer header');
@@ -58,6 +61,6 @@ try {
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));
  }
  assert.deepEqual(errors,[]);
- const report={chainId:ls.chainId,identity:ls.identity,height:query.height,matchingEntities:proof.postingCount,proofBytes:(proof.canonicalProof.length-2)/2,checks:['full block inspector','membership','pagination','absence','witness visualizer','mobile layouts','HTTP RPC','WebSockets','restricted routes'],errors};
+ const report={chainId:ls.chainId,identity:{sourceId:ls.sourceId,runId:ls.runId,genesisHash:ls.genesisHash,chainId:ls.chainId},height:query.height,matchingEntities:proof.postingCount,proofBytes:(proof.canonicalProof.length-2)/2,checks:['full block inspector','membership','pagination','absence','witness visualizer','mobile layouts','HTTP RPC','WebSockets','restricted routes'],errors};
  await Bun.write(out+'/report.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 } finally {await browser.close();}

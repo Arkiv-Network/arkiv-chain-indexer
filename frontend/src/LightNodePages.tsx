@@ -67,7 +67,7 @@ export function LightNodePages({ page, status, error, frozen, updated, fullUrl, 
       </>}
       <details className="nd-node-details nd-raw"><summary>Live node identity and status <ChevronRight size={15}/></summary><div className="nd-raw-body">{status ? <><p>Chain {status.chainId} · header #{status.head.height}. A status reading is separate from the fixed snapshot of a query result.</p><pre tabIndex={0}>{JSON.stringify(status, null, 2)}</pre></> : <p>Waiting for the node status.</p>}</div></details>
     </main>
-    <footer className="nd-footer"><span><strong>arkiv</strong> / experimental light node</span><a href={fullUrl}>Full node <ArrowUpRight size={14}/></a><a href={explorerUrl}>Explorer <ArrowUpRight size={14}/></a></footer>
+    <footer className="nd-footer"><span><strong>arkiv</strong> / experimental light node</span><a href="/node-design.html">Node design &amp; review <ArrowUpRight size={13}/></a><a href={fullUrl}>Full node <ArrowUpRight size={14}/></a><a href={explorerUrl}>Explorer <ArrowUpRight size={14}/></a></footer>
   </div>;
 }
 

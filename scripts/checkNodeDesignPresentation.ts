@@ -1,0 +1,43 @@
+/** Read-only browser acceptance for the standalone node design presentation. */
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { chromium } from 'playwright';
+const origin = process.env.LIGHT_PANEL_URL ?? 'http://127.0.0.1:23574';
+const out = process.env.PANEL_CHECK_OUT ?? '/tmp/arkiv-node-design-presentation';
+await mkdir(out, { recursive: true });
+const browser = await chromium.launch({ headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const response = await page.goto(origin + '/node-design.html');
+  assert.equal(response?.status(), 200);
+  assert.equal(await page.locator('.slide').count(), 15);
+  assert.equal(await page.locator('h1').count(), 1);
+  assert.equal(await page.locator('script[src],link[rel=stylesheet]').count(), 0);
+  await page.screenshot({ path: out + '/desktop.png' });
+  await page.locator('#next').click();
+  await page.waitForFunction(() => document.querySelector('#count')?.textContent === '2 / 15');
+  await page.locator('header summary').click();
+  await page.locator('header nav a[href="#transaction"]').click();
+  await page.getByRole('button', { name: '4. Persist', exact: true }).click();
+  assert.equal(await page.locator('#stage-title').innerText(), 'Durably publish the exact candidate');
+  await page.getByRole('button', { name: '5. Replay', exact: true }).click();
+  assert.ok((await page.locator('#stage-text').innerText()).includes('compares resulting commitments'));
+  await page.screenshot({ path: out + '/transaction.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(origin + '/node-design.html#range');
+  await page.locator('#range').scrollIntoViewIfNeeded();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await page.screenshot({ path: out + '/mobile.png' });
+  const brokenAnchors = await page.evaluate(() => [...document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')].filter(a => !document.getElementById(a.hash.slice(1))).map(a => a.hash));
+  assert.deepEqual(brokenAnchors, []);
+  await page.emulateMedia({ media: 'print' });
+  assert.equal(await page.locator('.pager').isVisible(), false);
+  assert.equal(await page.locator('.slide:visible').count(), 15);
+  await page.pdf({ path: out + '/node-design-review.pdf', format: 'A4', printBackground: true });
+  assert.deepEqual(errors, []);
+  const report = { origin, checks: ['15 readable sections', 'self-contained assets', 'contents and next navigation', 'interactive transaction walkthrough', 'mobile width', 'local anchors', 'print/PDF'], errors };
+  await Bun.write(out + '/report.json', JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
+} finally { await browser.close(); }
