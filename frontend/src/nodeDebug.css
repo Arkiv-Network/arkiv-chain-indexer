@@ -61,3 +61,6 @@
 .nd-system-fields { padding:16px 0; }
 .nd-system-fields h3 { margin-bottom:12px; }
 .nd-system-fields code { overflow-wrap:anywhere; }
+
+/* Light nodes show only telemetry provided by their status endpoint. */
+.nd-light .nd-stats{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
