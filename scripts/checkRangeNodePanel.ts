@@ -12,7 +12,7 @@ const results: Array<{ name: string; height: string; rows: number; terms: number
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin);
+  await page.goto(origin + "/queries");
   const lab = page.locator("#range-query");
   await lab.waitFor();
 
@@ -56,6 +56,7 @@ try {
     throw new Error("Range endpoint remained busy");
   }
 
+  await lab.getByText("More range examples", { exact: true }).click();
   const recent = lab.getByRole("button", { name: /Recent creations/ });
   const initial = await run(recent, "recent");
   assert.ok(initial.rows.length > 0, "live creation example should demonstrate matching records");
@@ -72,6 +73,9 @@ try {
   assert.match(await lab.locator(".nd-records").innerText(), /price = 10/);
   assert.match(await lab.locator(".nd-records").innerText(), /price = 15/);
   await lab.screenshot({ path: `${out}/price-desktop.png` });
+  assert.deepEqual(prices(await run(lab.getByRole("button", { name: /10 ≤ price ≤ 20/ }), "price-inclusive")), ["10", "15", "20"]);
+  assert.deepEqual(prices(await run(lab.getByRole("button", { name: /price > 20/ }), "price-one-sided")), ["21"]);
+  assert.equal((await run(lab.getByRole("button", { name: /10 < price < 15/ }), "price-empty-gap")).rows.length, 0);
   await run(recent, "recent-before-custom");
 
   const submit = lab.getByRole("button", { name: "Run & verify range", exact: true });

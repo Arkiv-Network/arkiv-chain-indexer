@@ -80,7 +80,7 @@ try {
   }
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const observed = observe(page);
-  await page.goto(light, { waitUntil: "networkidle" });
+  await page.goto(light + "/proof-inspector", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Next page", exact: true }).waitFor();
   await until(() => page.locator(".nd-result-card .nd-records > details").count(), n => n === 3, "default rows");
   await page.screenshot({ path: join(out, "lightnode-desktop-viewport.png") });

@@ -42,7 +42,7 @@ try {
  await page.goto(full);await page.locator('.nd-block-result').waitFor({timeout:30000});
  assert.ok((await page.locator('body').innerText()).includes('SIGNED PROPOSER'));
  await page.screenshot({path:out+'/full.png',fullPage:true});
- await page.goto(light);await page.locator('.nd-verified').waitFor({timeout:30000});
+ await page.goto(light + '/proof-inspector');await page.locator('.nd-verified').waitFor({timeout:30000});
  assert.equal(await page.locator('.nd-records > details').count(),3);
  await page.getByRole('button',{name:'Next page',exact:true}).click();
  await page.getByText('PAGE 2',{exact:true}).waitFor();
@@ -53,7 +53,7 @@ try {
  await page.locator('.nd-verified').waitFor();
  await page.screenshot({path:out+'/light.png',fullPage:true});
  for(const origin of [full,light]) {
-  await page.setViewportSize({width:390,height:844});await page.goto(origin);
+  await page.setViewportSize({width:390,height:844});await page.goto(origin === light ? light + '/proof-inspector' : origin);
   await page.locator(origin===full?'.nd-block-result':'.nd-verified').waitFor();
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));
  }

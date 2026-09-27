@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { pinRange, rangeExamples, validateRangeResponse, verifyRange, RANGE_PROFILE } from "./src/rangeProofApi";
+import { pinRange, rangeExamples, rangeExpression, validateRangeResponse, verifyRange, RANGE_PROFILE } from "./src/rangeProofApi";
 const identity = { sourceId: "source", runId: "run", genesisHash: "0x" + "11".repeat(32), chainId: "9009" };
-const request = rangeExamples("100")[0].request;
+const request = rangeExamples("100").find(example => example.id === "recent")!.request;
 const response = {
   identity, query: request, snapshot: {height:"100", hash: "0x"+"22".repeat(32), stateRoot: "0x"+"33".repeat(32)},
   verification: "proof verified against authenticated single-proposer header", verificationStatus: {status:"verified", profile:RANGE_PROFILE},
@@ -12,10 +12,10 @@ const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 test("range examples pin exact bigint heights and boundary choices", () => {
   const examples = rangeExamples("9007199254740995");
-  expect(examples[0].request.lower?.value).toBe("9007199254740993");
-  expect(examples[1].request.lower?.value).toBe("9007199254740996");
-  expect(examples[2].request.upper?.inclusive).toBe(false);
-  expect(rangeExamples("1")[0].request.lower?.value).toBe("0");
+  expect(examples.find(example => example.id === "recent")!.request.lower?.value).toBe("9007199254740993");
+  expect(examples.find(example => example.id === "empty")!.request.lower?.value).toBe("9007199254740996");
+  expect(examples.find(example => example.id === "exclusive")!.request.upper?.inclusive).toBe(false);
+  expect(rangeExamples("1").find(example => example.id === "recent")!.request.lower?.value).toBe("0");
   expect(pinRange({...request,height:"latest",lower:undefined},"120").height).toBe("120");
   expect(() => pinRange({...request,lower:undefined,upper:undefined},"100")).toThrow();
   expect(() => pinRange({...request,lower:{value:"-1",inclusive:true}},"100")).toThrow();
@@ -61,4 +61,16 @@ test("range uses credential-free same-origin route and exact non-paged request",
     return Response.json(response);
   }) as typeof fetch;
   expect((await verifyRange(identity,request,new AbortController().signal)).complete).toBe(true);
+});
+
+test("range example labels represent the actual request including one-sided bounds", () => {
+  const examples = rangeExamples("100");
+  expect(examples[0].id).toBe("price");
+  for (const example of examples.filter(example => example.id.startsWith("price"))) {
+    expect(rangeExpression(example.request)).toBe(example.title);
+    expect(example.request.attribute).toBe("price");
+    expect(example.request.valueType).toBe("u64");
+  }
+  expect(rangeExpression({attribute:"price",upper:{value:"20",inclusive:false}})).toBe("price < 20");
+  expect(rangeExpression({attribute:"price",lower:{value:"10",inclusive:true}})).toBe("price ≥ 10");
 });

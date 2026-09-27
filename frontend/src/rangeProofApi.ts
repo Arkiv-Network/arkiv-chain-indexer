@@ -28,11 +28,22 @@ export function rangeExamples(head: string) {
   const lower = height > 2n ? height - 2n : 0n;
   const base: RangeSelection = { height: height.toString(), namespace: "1", attribute: "$createdAt", valueType: "u64" };
   return [
+    { id: "price", title: "10 ≤ price < 20", description: "Find prices 10 and 15. Include 10; leave 20 outside.", request: { ...base, attribute: "price", lower: {value: "10", inclusive: true}, upper: {value: "20", inclusive: false} } },
+    { id: "price-inclusive", title: "10 ≤ price ≤ 20", description: "Include both endpoints. The demo also returns price 20.", request: { ...base, attribute: "price", lower: {value: "10", inclusive: true}, upper: {value: "20", inclusive: true} } },
+    { id: "price-above", title: "price > 20", description: "Use only a lower bound. The demo returns price 21.", request: { ...base, attribute: "price", lower: {value: "20", inclusive: false} } },
+    { id: "price-empty", title: "10 < price < 15", description: "An empty gap in the demo, with proof that nothing was skipped.", request: { ...base, attribute: "price", lower: {value: "10", inclusive: false}, upper: {value: "15", inclusive: false} } },
     { id: "recent", title: "Recent creations", description: "All live entities created in the last three blocks at this snapshot.", request: { ...base, lower: {value: lower.toString(), inclusive: true}, upper: {value: head, inclusive: true} } },
     { id: "empty", title: "Prove an empty range", description: "Creation heights after this snapshot cannot contain live entities.", request: { ...base, lower: {value: (height + 1n).toString(), inclusive: true}, upper: {value: (height + 2n).toString(), inclusive: true} } },
     { id: "exclusive", title: "Exclude the endpoints", description: "The same recent interval, with both boundary values excluded.", request: { ...base, lower: {value: lower.toString(), inclusive: false}, upper: {value: head, inclusive: false} } },
-    { id: "price", title: "10 ≤ price < 20", description: "A custom indexed attribute. Demo prices 10 and 15 match; 9, 20 and 21 stay outside.", request: { ...base, attribute: "price", lower: {value: "10", inclusive: true}, upper: {value: "20", inclusive: false} } },
   ];
+}
+
+export function rangeExpression(query: Pick<RangeSelection, "attribute" | "lower" | "upper">) {
+  const name = query.attribute || "attribute";
+  if (!query.lower && !query.upper) return `Choose a bound for ${name}`;
+  if (!query.lower) return `${name} ${query.upper!.inclusive ? "≤" : "<"} ${query.upper!.value}`;
+  if (!query.upper) return `${name} ${query.lower.inclusive ? "≥" : ">"} ${query.lower.value}`;
+  return `${query.lower.value} ${query.lower.inclusive ? "≤" : "<"} ${name} ${query.upper.inclusive ? "≤" : "<"} ${query.upper.value}`;
 }
 
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
