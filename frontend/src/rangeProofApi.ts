@@ -31,6 +31,7 @@ export function rangeExamples(head: string) {
     { id: "recent", title: "Recent creations", description: "All live entities created in the last three blocks at this snapshot.", request: { ...base, lower: {value: lower.toString(), inclusive: true}, upper: {value: head, inclusive: true} } },
     { id: "empty", title: "Prove an empty range", description: "Creation heights after this snapshot cannot contain live entities.", request: { ...base, lower: {value: (height + 1n).toString(), inclusive: true}, upper: {value: (height + 2n).toString(), inclusive: true} } },
     { id: "exclusive", title: "Exclude the endpoints", description: "The same recent interval, with both boundary values excluded.", request: { ...base, lower: {value: lower.toString(), inclusive: false}, upper: {value: head, inclusive: false} } },
+    { id: "price", title: "10 ≤ price < 20", description: "A custom indexed attribute. Demo prices 10 and 15 match; 9, 20 and 21 stay outside.", request: { ...base, attribute: "price", lower: {value: "10", inclusive: true}, upper: {value: "20", inclusive: false} } },
   ];
 }
 

@@ -22,6 +22,23 @@ test("range examples pin exact bigint heights and boundary choices", () => {
   expect(() => pinRange({...request,height:"101"},"100")).toThrow();
   expect(pinRange({...request,valueType:"dec",lower:{value:"-0001.200",inclusive:false}},"100").lower?.value).toBe("-1.2");
 });
+test("price preset sends exact bounds and rejects a response with different inclusivity", async () => {
+  const example = rangeExamples("100").find(example => example.id === "price")!;
+  const priceRequest = pinRange(example.request, "100");
+  expect(priceRequest).toEqual({height:"100",namespace:"1",attribute:"price",valueType:"u64",lower:{value:"10",inclusive:true},upper:{value:"20",inclusive:false}});
+  const priceResponse = {
+    ...response, query:priceRequest, termCount:2, postingCount:2,
+    rows:["10", "15"].map((value, index) => ({...response.rows[0], recordId:String(index + 1), attributes:[{name:"price",type:"u64",value}]})),
+  };
+  globalThis.fetch = (async (_url:unknown, init:RequestInit) => {
+    expect(JSON.parse(String(init.body))).toEqual(priceRequest);
+    return Response.json(priceResponse);
+  }) as typeof fetch;
+  const verified = await verifyRange(identity, priceRequest, new AbortController().signal);
+  expect(verified.rows).toHaveLength(2);
+  expect(verified.complete).toBe(true);
+  expect(() => validateRangeResponse({...priceResponse, query:{...priceRequest,upper:{value:"20",inclusive:true}}},identity,priceRequest)).toThrow();
+});
 test("only bound complete responses and well-formed ordered metadata are shown", () => {
   expect(validateRangeResponse(response,identity,request).rows).toHaveLength(1);
   const changes: Array<(r:any)=>void> = [

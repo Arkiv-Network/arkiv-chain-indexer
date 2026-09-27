@@ -43,7 +43,7 @@ try {
       assert.equal(body.snapshot.height, request.height);
       assert.equal(body.postingCount, body.rows.length);
       for (const row of body.rows) {
-        const value = BigInt(row.attributes.find((a: any) => a.name === "$createdAt").value);
+        const value = BigInt(row.attributes.find((a: any) => a.name === request.attribute).value);
         if (request.lower) assert.ok(request.lower.inclusive ? value >= BigInt(request.lower.value) : value > BigInt(request.lower.value));
         if (request.upper) assert.ok(request.upper.inclusive ? value <= BigInt(request.upper.value) : value < BigInt(request.upper.value));
       }
@@ -66,6 +66,13 @@ try {
   assert.equal(empty.rows.length, 0);
   await lab.getByText("Verified empty range", { exact: true }).waitFor();
   await run(lab.getByRole("button", { name: /Exclude the endpoints/ }), "exclusive");
+  const priceButton = lab.getByRole("button", { name: /10 ≤ price < 20/ });
+  const prices = (result: any) => result.rows.map((row: any) => row.attributes.find((a: any) => a.name === "price").value).sort();
+  assert.deepEqual(prices(await run(priceButton, "price")), ["10", "15"]);
+  assert.match(await lab.locator(".nd-records").innerText(), /price = 10/);
+  assert.match(await lab.locator(".nd-records").innerText(), /price = 15/);
+  await lab.screenshot({ path: `${out}/price-desktop.png` });
+  await run(recent, "recent-before-custom");
 
   const submit = lab.getByRole("button", { name: "Run & verify range", exact: true });
   await lab.getByLabel("Range lower bound", { exact: true }).fill((BigInt(initial.snapshot.height) + 1000n).toString());
@@ -76,11 +83,11 @@ try {
   await run(submit, "oversized", true);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await run(recent, "mobile-recent");
+  assert.deepEqual(prices(await run(priceButton, "mobile-price")), ["10", "15"]);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "mobile page overflows");
   await lab.screenshot({ path: `${out}/mobile.png` });
   assert.deepEqual(errors, []);
-  const report = { origin, checks: ["recent creations", "empty range", "exclusive bounds", "one-sided range", "limit error clears results", "request JSON", "desktop/mobile", "no pagination"], results, errors };
+  const report = { origin, checks: ["recent creations", "empty range", "exclusive bounds", "price attribute 10 inclusive to 20 exclusive", "visible matching attribute values", "one-sided range", "limit error clears results", "request JSON", "desktop/mobile", "no pagination"], results, errors };
   await Bun.write(`${out}/report.json`, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {
