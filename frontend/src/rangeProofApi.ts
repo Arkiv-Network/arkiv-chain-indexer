@@ -62,8 +62,8 @@ export function validateRangeResponse(data: unknown, identity: NativeIdentity, r
       !object(data.query) || data.query.height !== request.height || data.query.namespace !== request.namespace ||
       data.query.attribute !== request.attribute || data.query.valueType !== request.valueType ||
       !sameBound(data.query.lower, request.lower) || !sameBound(data.query.upper, request.upper) ||
-      !Array.isArray(data.rows) || data.rows.length > 64 || data.postingCount !== data.rows.length ||
-      !Number.isInteger(data.termCount) || (data.termCount as number) < 0 || (data.termCount as number) > 64 ||
+      !Array.isArray(data.rows) || data.postingCount !== data.rows.length ||
+      !Number.isInteger(data.termCount) || (data.termCount as number) < 0 ||
       (data.termCount as number) > data.rows.length || (data.rows.length > 0 && data.termCount === 0)) throw new Error("Range response does not match the requested complete result.");
   let previous = -1n;
   for (const row of data.rows) {

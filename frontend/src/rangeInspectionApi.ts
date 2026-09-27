@@ -44,7 +44,7 @@ export function validateRangeInspection(data: unknown, identity: NativeIdentity,
     hex(state.headerBytes) && hex(state.pricingBytes) && uint(state.nextNamespace) && map(state.catalog) && map(state.host));
   const ns = state.namespace;
   requireTrace(object(ns) && ns.id === request.namespace && uint(ns.nextRecord) && [ns.records, ns.rows, ns.keys, ns.terms].every(map));
-  validateInspectionPaths(i.pointPaths, state, request.namespace);
+  validateInspectionPaths(i.pointPaths, state, request.namespace, 1 + response.rows.length * 2);
   requireTrace(i.pointPaths.length === 1 + response.rows.length * 2 && i.pointPaths.filter((p: any) => p.map === "catalog").length === 1);
   for (const row of response.rows) for (const name of ["rows", "keys"]) {
     requireTrace(i.pointPaths.filter((p: any) => p.map === name && p.recordId === row.recordId).length === 1);
@@ -98,7 +98,7 @@ export function validateRangeInspection(data: unknown, identity: NativeIdentity,
     requireTrace(object(posting) && natural(posting.termNodeIndex, nodes.length - 1) && !termNodes.has(posting.termNodeIndex) &&
       hex(posting.termKey) && typeof posting.termValue === "string" && posting.termType === request.valueType &&
       posting.method === "complete-set-reconstruction" && posting.termPresent === true && hash(posting.authenticatedRoot) &&
-      posting.reconstructedRoot === posting.authenticatedRoot && natural(posting.count, 64) && posting.count > 0 &&
+      posting.reconstructedRoot === posting.authenticatedRoot && natural(posting.count, response.rows.length) && posting.count > 0 &&
       Array.isArray(posting.recordIds) && posting.recordIds.length === posting.count && posting.recordIds.every(uint) &&
       Array.isArray(posting.selectedRecordIds) && JSON.stringify(posting.recordIds) === JSON.stringify(posting.selectedRecordIds));
     const leaf = nodes[posting.termNodeIndex].leaf;

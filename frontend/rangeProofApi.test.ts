@@ -74,3 +74,12 @@ test("range example labels represent the actual request including one-sided boun
   expect(rangeExpression({attribute:"price",upper:{value:"20",inclusive:false}})).toBe("price < 20");
   expect(rangeExpression({attribute:"price",lower:{value:"10",inclusive:true}})).toBe("price ≥ 10");
 });
+
+test("range responses support 1000 rows and operator-configured larger results", () => {
+  for (const count of [1000, 1001]) {
+    const data = {...response, termCount: count, postingCount: count,
+      rows: Array.from({length: count}, (_, index) => ({...response.rows[0], recordId: String(index + 1)}))};
+    expect(validateRangeResponse(data, identity, request).rows).toHaveLength(count);
+    expect(() => validateRangeResponse({...data, postingCount: count - 1}, identity, request)).toThrow();
+  }
+});

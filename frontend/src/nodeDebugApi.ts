@@ -76,10 +76,10 @@ function requireInspection(condition: unknown): asserts condition {
 }
 
 /** Shared decoded point-path validation for equality and range inspections. */
-export function validateInspectionPaths(paths: unknown, state: Record<string, unknown>, namespace: string) {
+export function validateInspectionPaths(paths: unknown, state: Record<string, unknown>, namespace: string, maxPaths = 130) {
   const ns = state.namespace;
   requireInspection(record(ns));
-  requireInspection(Array.isArray(paths) && paths.length >= 1 && paths.length <= 130);
+  requireInspection(Array.isArray(paths) && paths.length >= 1 && paths.length <= maxPaths);
   const ids = new Set<string>();
   for (const path of paths) {
     requireInspection(record(path) && text(path.id) && !ids.has(path.id) &&
