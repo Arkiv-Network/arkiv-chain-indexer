@@ -109,3 +109,43 @@ bun --no-env-file scripts/checkSignedNodePanels.ts
 Override `FULL_PANEL_URL`, `LIGHT_PANEL_URL`, or `PANEL_CHECK_OUT` as needed.
 The check covers matching identities, block/proof roots, membership, pagination,
 absence, desktop/mobile rendering, restricted paths, HTTP RPC, and WebSockets.
+
+## Range witness inspection
+
+`/proof-inspector` now opens the complete numeric range witness in the existing
+Patricia inspector. `?proof=equality` selects the existing equality view. The
+inspector no longer appends a second range playground, large raw-response section
+or node-identity section underneath the tree.
+
+The range view requests `/node-sim/v1/query/range/inspect`, allowlisted only for a
+signed light panel. The proxy forwards to the light node's native inspection
+endpoint. The response contains the exact canonical request/proof and a trace
+returned only after strict verification. The frontend validates shape, snapshot,
+map roots, parent/child links, witness indexing and posting/row associations;
+it does not independently perform cryptographic proof verification.
+
+The interval tree distinguishes opened nodes, opaque outside-range references,
+authenticated empty slots and excluded boundary leaves. The supplied witness
+list uses indices from the actual terms-witness array; inline nodes reference
+their containing entry instead of inventing another supplied node. Catalog,
+row and key point-path views reuse the equality inspector. Each matching term
+shows its complete ID set and the reconstructed/committed posting roots.
+
+Tree/list navigation bounds the rendered view, not the query result. Inspection
+has additional resource limits and fails as a whole if those are exceeded.
+Editing, a failed request, changed chain identity or an unavailable/frozen node
+clears the old witness. Download remains available as one bundle button.
+
+Validation commands:
+
+```sh
+bun --no-env-file test frontend
+bun --no-env-file run typecheck:frontend-tests
+npm --prefix frontend run build
+# Read-only live acceptance; or RANGE_INSPECT_FIXTURE=1 against a local preview.
+bun --no-env-file scripts/checkRangeInspector.ts
+```
+
+The checked-in `frontend/fixtures/range-inspection/price.json` is a captured real
+proof from chain 9009, block 42884: prices 10 and 15 match; the opened price-20
+leaf is excluded boundary evidence. It contains public data only.

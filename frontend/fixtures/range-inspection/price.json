@@ -1,0 +1,2532 @@
+{
+  "canonicalProof": "0x0000000103000000026dc9df7aad9f879f56b85387b2afe6c7c1822d13f6ecb97f35f8d20d180f91e3000000000000a78448fa05a99b378ac0bd36f10096fccf200dd4c2be2d144a268eb2d27ef8e6422e55df7bd64a0146b9b7e22ecd2c4dec19c8063847ede79f22e298ce9a7cdbeb305b7e84eba3634761fb1ee9ad799dc22edfd7ef7be795737003af45ef890f4c1200000002cda27ea4830e058ec9ef1ff4b50b115a3c7bef77034f891855c330300dd6b14e00000000000000010000000000000002474c4d010000001f00000000000000640000000000004e200000000000002710000000000000271000000000000027100000000000000004000000000000000400000000000000640000000000000064000000000000000a00000000000000010000000000004e200000000000002ee0000000000000271000000000000000fa0000000000000004000000000000006400000000000001f40000000000000000000000000000012c00000000000000640000000000000064000000000000000a000000000000000a000000000000000a000000000000000a000000000000000a00000000000000640000000000000002000000000000000a0000000000000001cbee80efe625d0732fa457ccde955bfdbc557970d16e9a44be312d28929998f60000000000000dd900000001000000e6f8e489200000000000000001b8d8000000000000000100000008656e746974696573d0dbd34188ddb9e656e6b2bb94cb01f2a4307ec40000000000000000000000000001247056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42100000000000000001b885e3306ecf5350ec25b0866e032f612ec89a015026b11adb2720f3c55d0d90000000000000b8cf55aee21564734392cbcb5b1506c44569ade7b485a6605f8e1510b25f1e54d0d0000000000000b8c83b75834725f7b1701243edd7f690caeba7a04325f517692a685d400e7e8bbf20000000000007c8e0000000d00000073f8718080a01ff35da73d12d2976d8fe9de5c2d2603faed16700799e2b114a7ebb420492fc5808080a04320b7632c2bb0e6aae2d8103340a33526fa491d0bfa766acbb92083dbf99f9ba0bac2f33ec98113427b65345a376baa4b1e3b962ecbea0b4ee53b3c2faa65827c80808080808080808000000053f851a0648b4166e4c3012d7c2f4b3ecb0b79c9e2355ab6c7361de3b49ccc6ac75c916880a0808411e9ce1ee9daefe7b07213fce102d86cfc299c0867683e62c8f7450855e6808080808080808080808080808000000025e4821726a03596dc2405fe8e72bf61e66ea20f28c7934b1df65da3c41b3045dae216edb4ee00000053f851808080808080808080a007e86ef5f1862e5cc5710cfe0b119e3ffbba2cefac34e5c8c51ac75b30f7ca258080808080a001886853241c98f5ab1d23bbd88b7008922cf8ea9a2670fbeeff77ae654b7aea8000000044f842a01636500000000000000000000000000000000000000000000000000000005030a08cbdcbdd3fb7c7dbe0872b8d4c8735c93d31a88f2c628b3eca74db6d43e8db1a00000053f851a04133a9ceff94292e003a17c31a8e72b27dada6aba23e8cd6ccb5ce59b76e9497a0f9f31416a9996044fbe35d4e207b56ad52b92dec9a40d0a3584a94679a49414d8080808080808080808080808080800000002bea880000000000000000a058da113ad8214f4ae19a968604cdded9761afaf452e402c1af2171bb92512dc000000053f851a0e94fca970e526876948116b411c64a8c23c7a7e20123c638b4e365aefc4fa575a077658242ec914c8fec70682569f79f3016265058e016bf37461461518507c41380808080808080808080808080808000000073f871808080808080808080a055ebe36fb0cde71d064accdfd6ba6a39edab8f87a8aa9ee7ec5a4305484b2ff1a084a994e7e1d8253cbbce0e866ef4dd3b297279e473f8685bc5740c12f7359b4580808080a09e15ec79fea41ca19ccb706d9a0f846046a2a7515d16c32f7583eca24ba7221280000000a7f8a5b87a2000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008a8af7eed2300f5b59fe1e441ebf606f873ac33a00f70c7982f79c6b1566d94ab4b0000000000000001000000a7f8a5b87a2000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008a8046da5e146a8d64b9a9d153912210656ee1a012af7a214a2f951c52f82a53fb0000000000000000100000053f85180808080a0d242ce47b6b07ceea0c13feb918e78f2e8ebc6402cda15c70a61260ee8b51b59a06bfbfbd0eb4a06f33e191d95f9907518d5a47bf9a0bfa48b38a62db7db9940de8080808080808080808080000000a7f8a5b87a2000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008a88b2f478b4647b19fc82004f38dc57408972c0d692f2524c152f3fb3f568da062000000000000000100000001000000000000badf00000001000000000000bae000000002000000000000badf0000000600000029e886100000000000a082eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c00000053f851a09f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69caa0d4dcced5e2c793e6db2b21ffa5822bc5a3bdf419102d0de3c4b1c158e948ebc180808080808080808080808080808000000025e48200baa0c51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad700000053f85180808080808080808080808080a04daf679036fcc04e9da7a0dbb10e0ee4c7ca4a000baaca33d08bb1add878fd77a05d0b26786564f88ed6394c9e67ead303c6548481df3564ee271c34e23bc322e6808000000053f8518080808080808080808080808080a07559c97ed68e20fd7c2f27793b615768ff0d4b3c4dd8b9f1a783bce7ae0985c7a0c516c13ba8a150b7eeea2d4a756221b0f30794e2dc5f16ee8e0f6732393c1404800000018ff9018c20b901882057cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b80000000b0000000c24636f6e74656e74547970650104000000106170706c69636174696f6e2f6a736f6e0000000a246372656174656441740103000000000000761d0000000e246372656174696f6e466c61677302030000000000000000000000082463726561746f72010aa2ecc4b51a87b862c53432bcd877c35acd6200bb0000000a24657870697265734174010300000000000fb85c00000004246b6579010b57cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b800000006246f776e6572010aa2ecc4b51a87b862c53432bcd877c35acd6200bb00000008247061796c6f61640205000000217b2264656d6f223a2270726963652d72616e6765222c227072696365223a31307d0000000a247570646174656441740103000000000000761d0000000464656d6f01040000001972616e67652d70726f6f662d70726963652d6578616d706c650000000570726963650103000000000000000a0000000500000025e4820020a0af8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c100000214f90211a053c9280fcdddd8650c0cc50c64b38c30ede0cf4323d3660e544a9d4f7a85fa97a0b4fd7b06dbb5f41e3298202e2d83dec4c098e319165f79863379ceb0e13c4e73a011039b50a19ba2c60a997c50496b3cda7dcea773186170ef9cea294e417743b3a03e0f5929c726d3338c37160990fbdee0c4ee1fc74e4b01549cf4023984d56303a061c8953aad4806054d80d22d3325d842f314ca2bf2b9a8889d7e43ad12fa05f9a0523fd2e63011e515fcfa1243d2c18b73f7a94c2cc4d08b8fc0258cfa6b5425b5a0bff275572e1482e360d21d767c93998a86c62f7bad7a5b49cb7e0d1ab211f22da0faac341cfd59ef45bc4a8c1334f9065eff4455d3b46fa6ea80c6f080d69d49f2a03514c3b05ea9d3a4a2c2810c763e80dd19dfe1b4b3e7fe0572bb999be3644831a007f6aa3efbda277a7a0894e651b785fcc8c68a715912f0f182ebb7fef290120ca0523391c002acfb444df42a0ea1032634df9eddbb4d2f7e743eb4589be951fc20a09979bcd5a08da49f8e9888977194e67b5ab4700c91765298cdeef3ae74fff284a005e72f46afa5bef7f067348e07f3edb08f2f16d296b40551e6b840b3bf5c7924a04b15549a706b6af3eed103378035143faa578a962f7a091b528e5800438ffbe5a0a9787b25fdbbff38eafe1a0fe997e2d2e0394d69ae1e14960c0318d2e169f886a056aa0a473df8c76e7c2a86308ce6a87b249464ab0286858c415561fb441552f08000000214f90211a069b7be7820d78b1d6d48ae0033126570654d397f03d744d3d231969f665c4b4ea0cf2bbec0b0d44418636d8db25d63d51e052c0de037014253a9df730e5dada543a041735194d6149326e075216de50e3334f0797fbee6ee09930b5796375fa6f5fea0b07b0e4dd013efdae63dbbaece836bc0b0cc4811d2a5fd97ec01d1235034b2e2a04ebd78ef6536e9e65fbade1c06395b4b5d47d4ff460c483181e3b6a1ef728a58a0ce6441de3f9536be4719c893e9239709e912a3fcf13907a0a657b2c90e85daa4a017abd0dbecec79a6755ec13c95cd19b327af89c1098f5e481dc91af13ed08b24a04c34904a3948c0bc45ed3fa1405d7f46767b756a9012d0663267016ae214a130a0c0afca5df9b6083a37ec737b56e50b93502f8811be5e5322b2f55f2fc516fb51a04533d1d9ab634ced9a0883e610a7ee577840dd0723022aa93916b565d4d78dada02854c9446e8ca7a8247680cf83527971cb76d4f4d9bd977fdda71acbc09ea77aa0046fe5ab77c395eb6e569c5c10f20393cf2d7ae2282cb198af30ae6a57eef6d8a04f68bf37b26606c3edde12cadd4c9a66d53a1a5505da47e4efd46bbe1781aafea00591b82b29c686efc63a890cc2e1db3fcc5dca01c0fa6602a1edc00c139a2ed4a0890c80e1cfd63fefd897e01993a41eb304840e23ac00139959fe9ed2f7810cf8a0d81cf939c1c04249a1cd68c570af43b0d75a84300306c8d501073c12d745c3068000000134f90131a03bbb91844cd9a006e0d1c140a48116a978c9289594212fb5e0447d10b2bde1a9a0dad284c0ae0502db1be99dff96c3bddb224bd8441b7c95588a3979e655a76fd1a06f69b16cb089c018c59eb8aff99299f31e41dab717f3815ef53f6c8ea9e77c21a0c672eacb132032c94372f5a65aac15064bb69581213342ec7ed1844b438e1c50808080a0f222a79171a48bf1994c2c5f85e6706cb64cfedb05ca7bc89e4034f77e5679fda00ad5ddfad547e6721d27ce66b468a1ebad24a6c73961a0e9eb28ebbe45f2ea6ca029da5b6bba6f0391cb88c9e250f66194d49f6fa5e10110e463fb1a815b73cc5c8080a080f441f3017c521bd96cf76520378b1da2a3c762b584d2a88ac26d3bdfa661798080a0c51542bc2f1f1094ee0e131eb4628211ce1644d940d7900ee615639abaac8f7f800000002ae99f3dbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b888000000000000badf000000000000bae00000000600000029e886100000000000a082eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c00000053f851a09f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69caa0d4dcced5e2c793e6db2b21ffa5822bc5a3bdf419102d0de3c4b1c158e948ebc180808080808080808080808080808000000025e48200baa0c51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad700000053f85180808080808080808080808080a04daf679036fcc04e9da7a0dbb10e0ee4c7ca4a000baaca33d08bb1add878fd77a05d0b26786564f88ed6394c9e67ead303c6548481df3564ee271c34e23bc322e6808000000073f871a03d980b9725da2fa50e65d0f5a5fce7eadda98372153a61638134d1e2101780f6a03059bca32003f70b564846adadac644cd7b4fccd9abcd37b00cadb8de559c3aca0ad2ce46fb0f8cbadc431d041e9ee895901363cd36af462e3e87441631d4e833780808080808080808080808080800000018ff9018c20b9018820deebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a0000000b0000000c24636f6e74656e74547970650104000000106170706c69636174696f6e2f6a736f6e0000000a246372656174656441740103000000000000761d0000000e246372656174696f6e466c61677302030000000000000000000000082463726561746f72010aa2ecc4b51a87b862c53432bcd877c35acd6200bb0000000a24657870697265734174010300000000000fb85c00000004246b6579010bdeebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a00000006246f776e6572010aa2ecc4b51a87b862c53432bcd877c35acd6200bb00000008247061796c6f61640205000000217b2264656d6f223a2270726963652d72616e6765222c227072696365223a31357d0000000a247570646174656441740103000000000000761d0000000464656d6f01040000001972616e67652d70726f6f662d70726963652d6578616d706c650000000570726963650103000000000000000f0000000500000025e4820020a0af8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c100000214f90211a053c9280fcdddd8650c0cc50c64b38c30ede0cf4323d3660e544a9d4f7a85fa97a0b4fd7b06dbb5f41e3298202e2d83dec4c098e319165f79863379ceb0e13c4e73a011039b50a19ba2c60a997c50496b3cda7dcea773186170ef9cea294e417743b3a03e0f5929c726d3338c37160990fbdee0c4ee1fc74e4b01549cf4023984d56303a061c8953aad4806054d80d22d3325d842f314ca2bf2b9a8889d7e43ad12fa05f9a0523fd2e63011e515fcfa1243d2c18b73f7a94c2cc4d08b8fc0258cfa6b5425b5a0bff275572e1482e360d21d767c93998a86c62f7bad7a5b49cb7e0d1ab211f22da0faac341cfd59ef45bc4a8c1334f9065eff4455d3b46fa6ea80c6f080d69d49f2a03514c3b05ea9d3a4a2c2810c763e80dd19dfe1b4b3e7fe0572bb999be3644831a007f6aa3efbda277a7a0894e651b785fcc8c68a715912f0f182ebb7fef290120ca0523391c002acfb444df42a0ea1032634df9eddbb4d2f7e743eb4589be951fc20a09979bcd5a08da49f8e9888977194e67b5ab4700c91765298cdeef3ae74fff284a005e72f46afa5bef7f067348e07f3edb08f2f16d296b40551e6b840b3bf5c7924a04b15549a706b6af3eed103378035143faa578a962f7a091b528e5800438ffbe5a0a9787b25fdbbff38eafe1a0fe997e2d2e0394d69ae1e14960c0318d2e169f886a056aa0a473df8c76e7c2a86308ce6a87b249464ab0286858c415561fb441552f08000000214f90211a0635965c1ede979cea38c46a95af07c9efb0f7f2eb2e0cb8a1e1b7cb224f3276ca08fe0b0031e18f30a80c8d2e6fedc2e637585decffe531701a7e61a2945f5f3b7a0a5399e5e61b7c48206c1aefb18ff7f7a84e39f5cdd9b411ded8f970a315a734ea02dbe3a868c84a7a2035fb4a61024ba045bca74261049b1995944bf2f24c4d1b8a0b149a6220313dbf4d675adbaa4b605c487d84668cabc4fe65e3439f69bb2b8daa023172711287b8c3ff41b2cfe96034ab26c4580552902b8ed4714525218fa8889a02987d9736ee2ea21f3954d7935af6b222b3fd4da1cac40d0ac75640791d27f27a09360cb4abe1467351dabdbd4575db9ebd001479cb57039bf5d2e697e5ead88e3a0c4719f0747dd27881ef8bf5c07485f65843494c620f6f458f2d70427c23d18aaa01e906c2196219bd67364fa850d45fbfa33dfbeaadb8854c87454f7f06dcf127aa08fa7bde749befd8a7561a0e30b9f61d5715d95d8f7d0e34afe0038f479b0ef74a04131b83086d395d1a2ff1e8c44c56e39c12078dea236afc33bc2961eeac13ab9a04b733299fe55d44f7ee47022db07dc1a3cd09ed592519dedd0d91b1c4c885673a094817572ac892bf5cb4c8c5be2ce9b22ba477c6aa23c3a0618584ed3fedc2a77a04a15a549fac411bf976411b83ae09ca8982ed1c1e7a7cc56bf61a494b693d82fa0d31ffdf85b1b9488b4679b7263a54aca1444111313a1d6531926f1de96491b1180000001b4f901b180a02f61a822724dc945d64a34a3afb7c70c8eb115c5c795b72ee739f8c378d2fecea0012793a28b828ac10f4f82fdecfdd27907c0646f5025c7a15754d309efbda375a0b4959a23e863d5c05f39ae556d47bdff4ed128de84dedd501719583ea0743e39a00551973c0cec3167e49bc73b8f62d0bce89083efa311a29581df922ec85dd75ca015d618f6d74c4241ae3b2658723c8e277f0321a554204098372caaae074be2f1a0f4ac4812bb14451853ee9b29e53aa299fcfa34a046d06f53e00b77d333e4b1e980a07f447fb76b5e8a5a1c765530a3037c9b25e79f029f57c82aa813191a1e3798d5a0e5ba6a8b9a8b9d583f7915eb30b4b8980d8e8c1f28621214d883f827c92e5393a0a07fb7f7e73bf38ae3bf7b3d99d0b24af7b5f725902af6a4acd38a7c0802396ea020ea050da9542f3e948d73724dad406631bae083be67aceb3dfad89ce572bf6fa04234026c060deb49f498c82020535cf5c0be60a2a313620988e6057e8992fb07a00d998a6a7392e14db1814c52c14a11a4a818ece3b4499e05ef317020cdf9793ba06f3f9771e3c9a3c9ca04e94ae189a922d21671444ea865ada91ebdd36f4c457380800000002ae99f3bb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a88000000000000bae0",
+  "canonicalRequest": "0x000000026dc9df7aad9f879f56b85387b2afe6c7c1822d13f6ecb97f35f8d20d180f91e3000000000000a78448fa05a99b378ac0bd36f10096fccf200dd4c2be2d144a268eb2d27ef8e6422e55df7bd64a0146b9b7e22ecd2c4dec19c8063847ede79f22e298ce9a7cdbeb300000000100000000000000010000000570726963650103000000000000000a020300000000000000140101",
+  "certificateBytes": "0x000000016dc9df7aad9f879f56b85387b2afe6c7c1822d13f6ecb97f35f8d20d180f91e3000000030000000000002331000000000000a7845cb51ab2fcd4632f262d05f50e602d80dbb8f19e06761c43bf796d742aed4ba9000001a0e4822ea0b795ae094a654dd6eb32970680d76d2e4f8c7fa3dc60160896d5f49a82cce232c78239468883bd944b2b3cbf535cef5366e2e51eac7ed790f2b93c2eebcb679955df7bd64a0146b9b7e22ecd2c4dec19c8063847ede79f22e298ce9a7cdbeb30d8be942a19c1c933c6716a5a46b63bc60d2e852ca2c6c85ac9f576f484f580302c557aea7e6261e30c7336597aef67f1a01d1d8cf1119ccd9a204232f46cb1d801",
+  "complete": true,
+  "identity": {
+    "chainId": "9009",
+    "genesisHash": "0x6dc9df7aad9f879f56b85387b2afe6c7c1822d13f6ecb97f35f8d20d180f91e3",
+    "runId": "d7a8aca9d0ffc2ccfd819d91bbc6d468",
+    "sourceId": "00000000-0000-4000-8000-000000000001"
+  },
+  "inspection": {
+    "interval": {
+      "emptyReason": null,
+      "id": "terms:range",
+      "lowerKey": "0x7072696365000000000000000000000000000000000000000000000000000000050301000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+      "lowerKeyNibbles": "7072696365000000000000000000000000000000000000000000000000000000050301000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+      "map": "terms",
+      "namespaceId": "1",
+      "nodes": [
+        {
+          "children": [
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "0"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "1"
+            },
+            {
+              "childIndex": null,
+              "decision": "outside",
+              "hash": "0x1ff35da73d12d2976d8fe9de5c2d2603faed16700799e2b114a7ebb420492fc5",
+              "kind": "hash",
+              "slot": "2"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "3"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "4"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "5"
+            },
+            {
+              "childIndex": null,
+              "decision": "outside",
+              "hash": "0x4320b7632c2bb0e6aae2d8103340a33526fa491d0bfa766acbb92083dbf99f9b",
+              "kind": "hash",
+              "slot": "6"
+            },
+            {
+              "childIndex": 1,
+              "decision": "open",
+              "hash": "0xbac2f33ec98113427b65345a376baa4b1e3b962ecbea0b4ee53b3c2faa65827c",
+              "kind": "hash",
+              "slot": "7"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "8"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "9"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "a"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "b"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "c"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "d"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "e"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "f"
+            }
+          ],
+          "compressedPath": "",
+          "depth": 0,
+          "hash": "0x83b75834725f7b1701243edd7f690caeba7a04325f517692a685d400e7e8bbf2",
+          "index": 0,
+          "kind": "branch",
+          "leaf": null,
+          "parentIndex": null,
+          "parentSlot": null,
+          "prefix": "",
+          "proofIndex": 0,
+          "rlp": "0xf8718080a01ff35da73d12d2976d8fe9de5c2d2603faed16700799e2b114a7ebb420492fc5808080a04320b7632c2bb0e6aae2d8103340a33526fa491d0bfa766acbb92083dbf99f9ba0bac2f33ec98113427b65345a376baa4b1e3b962ecbea0b4ee53b3c2faa65827c808080808080808080",
+          "selectedNibble": null,
+          "source": "root",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": 2,
+              "decision": "open",
+              "hash": "0x648b4166e4c3012d7c2f4b3ecb0b79c9e2355ab6c7361de3b49ccc6ac75c9168",
+              "kind": "hash",
+              "slot": "0"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "1"
+            },
+            {
+              "childIndex": null,
+              "decision": "outside",
+              "hash": "0x808411e9ce1ee9daefe7b07213fce102d86cfc299c0867683e62c8f7450855e6",
+              "kind": "hash",
+              "slot": "2"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "3"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "4"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "5"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "6"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "7"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "8"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "9"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "a"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "b"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "c"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "d"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "e"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "f"
+            }
+          ],
+          "compressedPath": "",
+          "depth": 1,
+          "hash": "0xbac2f33ec98113427b65345a376baa4b1e3b962ecbea0b4ee53b3c2faa65827c",
+          "index": 1,
+          "kind": "branch",
+          "leaf": null,
+          "parentIndex": 0,
+          "parentSlot": "7",
+          "prefix": "7",
+          "proofIndex": 1,
+          "rlp": "0xf851a0648b4166e4c3012d7c2f4b3ecb0b79c9e2355ab6c7361de3b49ccc6ac75c916880a0808411e9ce1ee9daefe7b07213fce102d86cfc299c0867683e62c8f7450855e68080808080808080808080808080",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": 3,
+              "decision": "open",
+              "hash": "0x3596dc2405fe8e72bf61e66ea20f28c7934b1df65da3c41b3045dae216edb4ee",
+              "kind": "hash",
+              "slot": null
+            }
+          ],
+          "compressedPath": "726",
+          "depth": 2,
+          "hash": "0x648b4166e4c3012d7c2f4b3ecb0b79c9e2355ab6c7361de3b49ccc6ac75c9168",
+          "index": 2,
+          "kind": "extension",
+          "leaf": null,
+          "parentIndex": 1,
+          "parentSlot": "0",
+          "prefix": "70",
+          "proofIndex": 2,
+          "rlp": "0xe4821726a03596dc2405fe8e72bf61e66ea20f28c7934b1df65da3c41b3045dae216edb4ee",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "0"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "1"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "2"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "3"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "4"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "5"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "6"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "7"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "8"
+            },
+            {
+              "childIndex": 4,
+              "decision": "open",
+              "hash": "0x07e86ef5f1862e5cc5710cfe0b119e3ffbba2cefac34e5c8c51ac75b30f7ca25",
+              "kind": "hash",
+              "slot": "9"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "a"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "b"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "c"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "d"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "e"
+            },
+            {
+              "childIndex": null,
+              "decision": "outside",
+              "hash": "0x01886853241c98f5ab1d23bbd88b7008922cf8ea9a2670fbeeff77ae654b7aea",
+              "kind": "hash",
+              "slot": "f"
+            }
+          ],
+          "compressedPath": "",
+          "depth": 5,
+          "hash": "0x3596dc2405fe8e72bf61e66ea20f28c7934b1df65da3c41b3045dae216edb4ee",
+          "index": 3,
+          "kind": "branch",
+          "leaf": null,
+          "parentIndex": 2,
+          "parentSlot": null,
+          "prefix": "70726",
+          "proofIndex": 3,
+          "rlp": "0xf851808080808080808080a007e86ef5f1862e5cc5710cfe0b119e3ffbba2cefac34e5c8c51ac75b30f7ca258080808080a001886853241c98f5ab1d23bbd88b7008922cf8ea9a2670fbeeff77ae654b7aea80",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": 5,
+              "decision": "open",
+              "hash": "0x8cbdcbdd3fb7c7dbe0872b8d4c8735c93d31a88f2c628b3eca74db6d43e8db1a",
+              "kind": "hash",
+              "slot": null
+            }
+          ],
+          "compressedPath": "636500000000000000000000000000000000000000000000000000000005030",
+          "depth": 6,
+          "hash": "0x07e86ef5f1862e5cc5710cfe0b119e3ffbba2cefac34e5c8c51ac75b30f7ca25",
+          "index": 4,
+          "kind": "extension",
+          "leaf": null,
+          "parentIndex": 3,
+          "parentSlot": "9",
+          "prefix": "707269",
+          "proofIndex": 4,
+          "rlp": "0xf842a01636500000000000000000000000000000000000000000000000000000005030a08cbdcbdd3fb7c7dbe0872b8d4c8735c93d31a88f2c628b3eca74db6d43e8db1a",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": null,
+              "decision": "outside",
+              "hash": "0x4133a9ceff94292e003a17c31a8e72b27dada6aba23e8cd6ccb5ce59b76e9497",
+              "kind": "hash",
+              "slot": "0"
+            },
+            {
+              "childIndex": 6,
+              "decision": "open",
+              "hash": "0xf9f31416a9996044fbe35d4e207b56ad52b92dec9a40d0a3584a94679a49414d",
+              "kind": "hash",
+              "slot": "1"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "2"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "3"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "4"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "5"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "6"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "7"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "8"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "9"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "a"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "b"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "c"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "d"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "e"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "f"
+            }
+          ],
+          "compressedPath": "",
+          "depth": 69,
+          "hash": "0x8cbdcbdd3fb7c7dbe0872b8d4c8735c93d31a88f2c628b3eca74db6d43e8db1a",
+          "index": 5,
+          "kind": "branch",
+          "leaf": null,
+          "parentIndex": 4,
+          "parentSlot": null,
+          "prefix": "707269636500000000000000000000000000000000000000000000000000000005030",
+          "proofIndex": 5,
+          "rlp": "0xf851a04133a9ceff94292e003a17c31a8e72b27dada6aba23e8cd6ccb5ce59b76e9497a0f9f31416a9996044fbe35d4e207b56ad52b92dec9a40d0a3584a94679a49414d808080808080808080808080808080",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": 7,
+              "decision": "open",
+              "hash": "0x58da113ad8214f4ae19a968604cdded9761afaf452e402c1af2171bb92512dc0",
+              "kind": "hash",
+              "slot": null
+            }
+          ],
+          "compressedPath": "00000000000000",
+          "depth": 70,
+          "hash": "0xf9f31416a9996044fbe35d4e207b56ad52b92dec9a40d0a3584a94679a49414d",
+          "index": 6,
+          "kind": "extension",
+          "leaf": null,
+          "parentIndex": 5,
+          "parentSlot": "1",
+          "prefix": "7072696365000000000000000000000000000000000000000000000000000000050301",
+          "proofIndex": 6,
+          "rlp": "0xea880000000000000000a058da113ad8214f4ae19a968604cdded9761afaf452e402c1af2171bb92512dc0",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": 8,
+              "decision": "open",
+              "hash": "0xe94fca970e526876948116b411c64a8c23c7a7e20123c638b4e365aefc4fa575",
+              "kind": "hash",
+              "slot": "0"
+            },
+            {
+              "childIndex": 11,
+              "decision": "open",
+              "hash": "0x77658242ec914c8fec70682569f79f3016265058e016bf37461461518507c413",
+              "kind": "hash",
+              "slot": "1"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "2"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "3"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "4"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "5"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "6"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "7"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "8"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "9"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "a"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "b"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "c"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "d"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "e"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "f"
+            }
+          ],
+          "compressedPath": "",
+          "depth": 84,
+          "hash": "0x58da113ad8214f4ae19a968604cdded9761afaf452e402c1af2171bb92512dc0",
+          "index": 7,
+          "kind": "branch",
+          "leaf": null,
+          "parentIndex": 6,
+          "parentSlot": null,
+          "prefix": "707269636500000000000000000000000000000000000000000000000000000005030100000000000000",
+          "proofIndex": 7,
+          "rlp": "0xf851a0e94fca970e526876948116b411c64a8c23c7a7e20123c638b4e365aefc4fa575a077658242ec914c8fec70682569f79f3016265058e016bf37461461518507c413808080808080808080808080808080",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "0"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "1"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "2"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "3"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "4"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "5"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "6"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "7"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "8"
+            },
+            {
+              "childIndex": null,
+              "decision": "outside",
+              "hash": "0x55ebe36fb0cde71d064accdfd6ba6a39edab8f87a8aa9ee7ec5a4305484b2ff1",
+              "kind": "hash",
+              "slot": "9"
+            },
+            {
+              "childIndex": 9,
+              "decision": "open",
+              "hash": "0x84a994e7e1d8253cbbce0e866ef4dd3b297279e473f8685bc5740c12f7359b45",
+              "kind": "hash",
+              "slot": "a"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "b"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "c"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "d"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "e"
+            },
+            {
+              "childIndex": 10,
+              "decision": "open",
+              "hash": "0x9e15ec79fea41ca19ccb706d9a0f846046a2a7515d16c32f7583eca24ba72212",
+              "kind": "hash",
+              "slot": "f"
+            }
+          ],
+          "compressedPath": "",
+          "depth": 85,
+          "hash": "0xe94fca970e526876948116b411c64a8c23c7a7e20123c638b4e365aefc4fa575",
+          "index": 8,
+          "kind": "branch",
+          "leaf": null,
+          "parentIndex": 7,
+          "parentSlot": "0",
+          "prefix": "7072696365000000000000000000000000000000000000000000000000000000050301000000000000000",
+          "proofIndex": 8,
+          "rlp": "0xf871808080808080808080a055ebe36fb0cde71d064accdfd6ba6a39edab8f87a8aa9ee7ec5a4305484b2ff1a084a994e7e1d8253cbbce0e866ef4dd3b297279e473f8685bc5740c12f7359b4580808080a09e15ec79fea41ca19ccb706d9a0f846046a2a7515d16c32f7583eca24ba7221280",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [],
+          "compressedPath": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+          "depth": 86,
+          "hash": "0x84a994e7e1d8253cbbce0e866ef4dd3b297279e473f8685bc5740c12f7359b45",
+          "index": 9,
+          "kind": "leaf",
+          "leaf": {
+            "attribute": "price",
+            "included": true,
+            "key": "0x7072696365000000000000000000000000000000000000000000000000000000050301000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+            "postingCount": 1,
+            "postingRoot": "0xaf7eed2300f5b59fe1e441ebf606f873ac33a00f70c7982f79c6b1566d94ab4b",
+            "value": "10",
+            "valueType": "u64"
+          },
+          "parentIndex": 8,
+          "parentSlot": "a",
+          "prefix": "7072696365000000000000000000000000000000000000000000000000000000050301000000000000000a",
+          "proofIndex": 9,
+          "rlp": "0xf8a5b87a2000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008a8af7eed2300f5b59fe1e441ebf606f873ac33a00f70c7982f79c6b1566d94ab4b0000000000000001",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "40"
+        },
+        {
+          "children": [],
+          "compressedPath": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+          "depth": 86,
+          "hash": "0x9e15ec79fea41ca19ccb706d9a0f846046a2a7515d16c32f7583eca24ba72212",
+          "index": 10,
+          "kind": "leaf",
+          "leaf": {
+            "attribute": "price",
+            "included": true,
+            "key": "0x7072696365000000000000000000000000000000000000000000000000000000050301000000000000000f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+            "postingCount": 1,
+            "postingRoot": "0x046da5e146a8d64b9a9d153912210656ee1a012af7a214a2f951c52f82a53fb0",
+            "value": "15",
+            "valueType": "u64"
+          },
+          "parentIndex": 8,
+          "parentSlot": "f",
+          "prefix": "7072696365000000000000000000000000000000000000000000000000000000050301000000000000000f",
+          "proofIndex": 10,
+          "rlp": "0xf8a5b87a2000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008a8046da5e146a8d64b9a9d153912210656ee1a012af7a214a2f951c52f82a53fb00000000000000001",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "40"
+        },
+        {
+          "children": [
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "0"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "1"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "2"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "3"
+            },
+            {
+              "childIndex": 12,
+              "decision": "open",
+              "hash": "0xd242ce47b6b07ceea0c13feb918e78f2e8ebc6402cda15c70a61260ee8b51b59",
+              "kind": "hash",
+              "slot": "4"
+            },
+            {
+              "childIndex": null,
+              "decision": "outside",
+              "hash": "0x6bfbfbd0eb4a06f33e191d95f9907518d5a47bf9a0bfa48b38a62db7db9940de",
+              "kind": "hash",
+              "slot": "5"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "6"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "7"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "8"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "9"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "a"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "b"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "c"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "d"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "e"
+            },
+            {
+              "childIndex": null,
+              "decision": "empty",
+              "kind": "empty",
+              "slot": "f"
+            }
+          ],
+          "compressedPath": "",
+          "depth": 85,
+          "hash": "0x77658242ec914c8fec70682569f79f3016265058e016bf37461461518507c413",
+          "index": 11,
+          "kind": "branch",
+          "leaf": null,
+          "parentIndex": 7,
+          "parentSlot": "1",
+          "prefix": "7072696365000000000000000000000000000000000000000000000000000000050301000000000000001",
+          "proofIndex": 11,
+          "rlp": "0xf85180808080a0d242ce47b6b07ceea0c13feb918e78f2e8ebc6402cda15c70a61260ee8b51b59a06bfbfbd0eb4a06f33e191d95f9907518d5a47bf9a0bfa48b38a62db7db9940de8080808080808080808080",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "0"
+        },
+        {
+          "children": [],
+          "compressedPath": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+          "depth": 86,
+          "hash": "0xd242ce47b6b07ceea0c13feb918e78f2e8ebc6402cda15c70a61260ee8b51b59",
+          "index": 12,
+          "kind": "leaf",
+          "leaf": {
+            "attribute": "price",
+            "included": false,
+            "key": "0x7072696365000000000000000000000000000000000000000000000000000000050301000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+            "postingCount": 1,
+            "postingRoot": "0x8b2f478b4647b19fc82004f38dc57408972c0d692f2524c152f3fb3f568da062",
+            "value": "20",
+            "valueType": "u64"
+          },
+          "parentIndex": 11,
+          "parentSlot": "4",
+          "prefix": "70726963650000000000000000000000000000000000000000000000000000000503010000000000000014",
+          "proofIndex": 12,
+          "rlp": "0xf8a5b87a2000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008a88b2f478b4647b19fc82004f38dc57408972c0d692f2524c152f3fb3f568da0620000000000000001",
+          "selectedNibble": null,
+          "source": "hash",
+          "valueBytes": "40"
+        }
+      ],
+      "root": "0x83b75834725f7b1701243edd7f690caeba7a04325f517692a685d400e7e8bbf2",
+      "suppliedNodeCount": 13,
+      "upperKey": "0x7072696365000000000000000000000000000000000000000000000000000000050301000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007",
+      "upperKeyNibbles": "7072696365000000000000000000000000000000000000000000000000000000050301000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007"
+    },
+    "pointPaths": [
+      {
+        "id": "catalog",
+        "key": "0x0000000000000001",
+        "keyNibbles": "0000000000000001",
+        "map": "catalog",
+        "namespaceId": null,
+        "nodes": [
+          {
+            "children": [],
+            "compressedPath": "0000000000000001",
+            "depth": 0,
+            "hash": "0xcda27ea4830e058ec9ef1ff4b50b115a3c7bef77034f891855c330300dd6b14e",
+            "index": 0,
+            "kind": "leaf",
+            "proofIndex": 0,
+            "rlp": "0xf8e489200000000000000001b8d8000000000000000100000008656e746974696573d0dbd34188ddb9e656e6b2bb94cb01f2a4307ec40000000000000000000000000001247056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42100000000000000001b885e3306ecf5350ec25b0866e032f612ec89a015026b11adb2720f3c55d0d90000000000000b8cf55aee21564734392cbcb5b1506c44569ade7b485a6605f8e1510b25f1e54d0d0000000000000b8c83b75834725f7b1701243edd7f690caeba7a04325f517692a685d400e7e8bbf20000000000007c8e",
+            "selectedNibble": null,
+            "source": "root",
+            "valueBytes": "216"
+          }
+        ],
+        "recordId": null,
+        "root": "0xcda27ea4830e058ec9ef1ff4b50b115a3c7bef77034f891855c330300dd6b14e",
+        "suppliedNodeCount": 1,
+        "terminal": {
+          "kind": "inclusion",
+          "reason": "leaf-match"
+        }
+      },
+      {
+        "id": "rows:47839",
+        "key": "0x000000000000badf",
+        "keyNibbles": "000000000000badf",
+        "map": "rows",
+        "namespaceId": "1",
+        "nodes": [
+          {
+            "children": [
+              {
+                "hash": "0x82eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c",
+                "kind": "hash",
+                "slot": null
+              }
+            ],
+            "compressedPath": "00000000000",
+            "depth": 0,
+            "hash": "0xf55aee21564734392cbcb5b1506c44569ade7b485a6605f8e1510b25f1e54d0d",
+            "index": 0,
+            "kind": "extension",
+            "proofIndex": 0,
+            "rlp": "0xe886100000000000a082eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c",
+            "selectedNibble": null,
+            "source": "root",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x9f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69ca",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0xd4dcced5e2c793e6db2b21ffa5822bc5a3bdf419102d0de3c4b1c158e948ebc1",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "kind": "empty",
+                "slot": "2"
+              },
+              {
+                "kind": "empty",
+                "slot": "3"
+              },
+              {
+                "kind": "empty",
+                "slot": "4"
+              },
+              {
+                "kind": "empty",
+                "slot": "5"
+              },
+              {
+                "kind": "empty",
+                "slot": "6"
+              },
+              {
+                "kind": "empty",
+                "slot": "7"
+              },
+              {
+                "kind": "empty",
+                "slot": "8"
+              },
+              {
+                "kind": "empty",
+                "slot": "9"
+              },
+              {
+                "kind": "empty",
+                "slot": "a"
+              },
+              {
+                "kind": "empty",
+                "slot": "b"
+              },
+              {
+                "kind": "empty",
+                "slot": "c"
+              },
+              {
+                "kind": "empty",
+                "slot": "d"
+              },
+              {
+                "kind": "empty",
+                "slot": "e"
+              },
+              {
+                "kind": "empty",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 11,
+            "hash": "0x82eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c",
+            "index": 1,
+            "kind": "branch",
+            "proofIndex": 1,
+            "rlp": "0xf851a09f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69caa0d4dcced5e2c793e6db2b21ffa5822bc5a3bdf419102d0de3c4b1c158e948ebc1808080808080808080808080808080",
+            "selectedNibble": "0",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0xc51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad7",
+                "kind": "hash",
+                "slot": null
+              }
+            ],
+            "compressedPath": "ba",
+            "depth": 12,
+            "hash": "0x9f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69ca",
+            "index": 2,
+            "kind": "extension",
+            "proofIndex": 2,
+            "rlp": "0xe48200baa0c51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad7",
+            "selectedNibble": null,
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "kind": "empty",
+                "slot": "0"
+              },
+              {
+                "kind": "empty",
+                "slot": "1"
+              },
+              {
+                "kind": "empty",
+                "slot": "2"
+              },
+              {
+                "kind": "empty",
+                "slot": "3"
+              },
+              {
+                "kind": "empty",
+                "slot": "4"
+              },
+              {
+                "kind": "empty",
+                "slot": "5"
+              },
+              {
+                "kind": "empty",
+                "slot": "6"
+              },
+              {
+                "kind": "empty",
+                "slot": "7"
+              },
+              {
+                "kind": "empty",
+                "slot": "8"
+              },
+              {
+                "kind": "empty",
+                "slot": "9"
+              },
+              {
+                "kind": "empty",
+                "slot": "a"
+              },
+              {
+                "kind": "empty",
+                "slot": "b"
+              },
+              {
+                "kind": "empty",
+                "slot": "c"
+              },
+              {
+                "hash": "0x4daf679036fcc04e9da7a0dbb10e0ee4c7ca4a000baaca33d08bb1add878fd77",
+                "kind": "hash",
+                "slot": "d"
+              },
+              {
+                "hash": "0x5d0b26786564f88ed6394c9e67ead303c6548481df3564ee271c34e23bc322e6",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "kind": "empty",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 14,
+            "hash": "0xc51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad7",
+            "index": 3,
+            "kind": "branch",
+            "proofIndex": 3,
+            "rlp": "0xf85180808080808080808080808080a04daf679036fcc04e9da7a0dbb10e0ee4c7ca4a000baaca33d08bb1add878fd77a05d0b26786564f88ed6394c9e67ead303c6548481df3564ee271c34e23bc322e68080",
+            "selectedNibble": "d",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "kind": "empty",
+                "slot": "0"
+              },
+              {
+                "kind": "empty",
+                "slot": "1"
+              },
+              {
+                "kind": "empty",
+                "slot": "2"
+              },
+              {
+                "kind": "empty",
+                "slot": "3"
+              },
+              {
+                "kind": "empty",
+                "slot": "4"
+              },
+              {
+                "kind": "empty",
+                "slot": "5"
+              },
+              {
+                "kind": "empty",
+                "slot": "6"
+              },
+              {
+                "kind": "empty",
+                "slot": "7"
+              },
+              {
+                "kind": "empty",
+                "slot": "8"
+              },
+              {
+                "kind": "empty",
+                "slot": "9"
+              },
+              {
+                "kind": "empty",
+                "slot": "a"
+              },
+              {
+                "kind": "empty",
+                "slot": "b"
+              },
+              {
+                "kind": "empty",
+                "slot": "c"
+              },
+              {
+                "kind": "empty",
+                "slot": "d"
+              },
+              {
+                "hash": "0x7559c97ed68e20fd7c2f27793b615768ff0d4b3c4dd8b9f1a783bce7ae0985c7",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "hash": "0xc516c13ba8a150b7eeea2d4a756221b0f30794e2dc5f16ee8e0f6732393c1404",
+                "kind": "hash",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 15,
+            "hash": "0x4daf679036fcc04e9da7a0dbb10e0ee4c7ca4a000baaca33d08bb1add878fd77",
+            "index": 4,
+            "kind": "branch",
+            "proofIndex": 4,
+            "rlp": "0xf8518080808080808080808080808080a07559c97ed68e20fd7c2f27793b615768ff0d4b3c4dd8b9f1a783bce7ae0985c7a0c516c13ba8a150b7eeea2d4a756221b0f30794e2dc5f16ee8e0f6732393c140480",
+            "selectedNibble": "f",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [],
+            "compressedPath": "",
+            "depth": 16,
+            "hash": "0xc516c13ba8a150b7eeea2d4a756221b0f30794e2dc5f16ee8e0f6732393c1404",
+            "index": 5,
+            "kind": "leaf",
+            "proofIndex": 5,
+            "rlp": "0xf9018c20b901882057cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b80000000b0000000c24636f6e74656e74547970650104000000106170706c69636174696f6e2f6a736f6e0000000a246372656174656441740103000000000000761d0000000e246372656174696f6e466c61677302030000000000000000000000082463726561746f72010aa2ecc4b51a87b862c53432bcd877c35acd6200bb0000000a24657870697265734174010300000000000fb85c00000004246b6579010b57cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b800000006246f776e6572010aa2ecc4b51a87b862c53432bcd877c35acd6200bb00000008247061796c6f61640205000000217b2264656d6f223a2270726963652d72616e6765222c227072696365223a31307d0000000a247570646174656441740103000000000000761d0000000464656d6f01040000001972616e67652d70726f6f662d70726963652d6578616d706c650000000570726963650103000000000000000a",
+            "selectedNibble": null,
+            "source": "hash",
+            "valueBytes": "392"
+          }
+        ],
+        "recordId": "47839",
+        "root": "0xf55aee21564734392cbcb5b1506c44569ade7b485a6605f8e1510b25f1e54d0d",
+        "suppliedNodeCount": 6,
+        "terminal": {
+          "kind": "inclusion",
+          "reason": "leaf-match"
+        }
+      },
+      {
+        "id": "keys:47839",
+        "key": "0x2057cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b8",
+        "keyNibbles": "2057cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b8",
+        "map": "keys",
+        "namespaceId": "1",
+        "nodes": [
+          {
+            "children": [
+              {
+                "hash": "0xaf8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c1",
+                "kind": "hash",
+                "slot": null
+              }
+            ],
+            "compressedPath": "20",
+            "depth": 0,
+            "hash": "0x1b885e3306ecf5350ec25b0866e032f612ec89a015026b11adb2720f3c55d0d9",
+            "index": 0,
+            "kind": "extension",
+            "proofIndex": 0,
+            "rlp": "0xe4820020a0af8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c1",
+            "selectedNibble": null,
+            "source": "root",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x53c9280fcdddd8650c0cc50c64b38c30ede0cf4323d3660e544a9d4f7a85fa97",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0xb4fd7b06dbb5f41e3298202e2d83dec4c098e319165f79863379ceb0e13c4e73",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "hash": "0x11039b50a19ba2c60a997c50496b3cda7dcea773186170ef9cea294e417743b3",
+                "kind": "hash",
+                "slot": "2"
+              },
+              {
+                "hash": "0x3e0f5929c726d3338c37160990fbdee0c4ee1fc74e4b01549cf4023984d56303",
+                "kind": "hash",
+                "slot": "3"
+              },
+              {
+                "hash": "0x61c8953aad4806054d80d22d3325d842f314ca2bf2b9a8889d7e43ad12fa05f9",
+                "kind": "hash",
+                "slot": "4"
+              },
+              {
+                "hash": "0x523fd2e63011e515fcfa1243d2c18b73f7a94c2cc4d08b8fc0258cfa6b5425b5",
+                "kind": "hash",
+                "slot": "5"
+              },
+              {
+                "hash": "0xbff275572e1482e360d21d767c93998a86c62f7bad7a5b49cb7e0d1ab211f22d",
+                "kind": "hash",
+                "slot": "6"
+              },
+              {
+                "hash": "0xfaac341cfd59ef45bc4a8c1334f9065eff4455d3b46fa6ea80c6f080d69d49f2",
+                "kind": "hash",
+                "slot": "7"
+              },
+              {
+                "hash": "0x3514c3b05ea9d3a4a2c2810c763e80dd19dfe1b4b3e7fe0572bb999be3644831",
+                "kind": "hash",
+                "slot": "8"
+              },
+              {
+                "hash": "0x07f6aa3efbda277a7a0894e651b785fcc8c68a715912f0f182ebb7fef290120c",
+                "kind": "hash",
+                "slot": "9"
+              },
+              {
+                "hash": "0x523391c002acfb444df42a0ea1032634df9eddbb4d2f7e743eb4589be951fc20",
+                "kind": "hash",
+                "slot": "a"
+              },
+              {
+                "hash": "0x9979bcd5a08da49f8e9888977194e67b5ab4700c91765298cdeef3ae74fff284",
+                "kind": "hash",
+                "slot": "b"
+              },
+              {
+                "hash": "0x05e72f46afa5bef7f067348e07f3edb08f2f16d296b40551e6b840b3bf5c7924",
+                "kind": "hash",
+                "slot": "c"
+              },
+              {
+                "hash": "0x4b15549a706b6af3eed103378035143faa578a962f7a091b528e5800438ffbe5",
+                "kind": "hash",
+                "slot": "d"
+              },
+              {
+                "hash": "0xa9787b25fdbbff38eafe1a0fe997e2d2e0394d69ae1e14960c0318d2e169f886",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "hash": "0x56aa0a473df8c76e7c2a86308ce6a87b249464ab0286858c415561fb441552f0",
+                "kind": "hash",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 2,
+            "hash": "0xaf8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c1",
+            "index": 1,
+            "kind": "branch",
+            "proofIndex": 1,
+            "rlp": "0xf90211a053c9280fcdddd8650c0cc50c64b38c30ede0cf4323d3660e544a9d4f7a85fa97a0b4fd7b06dbb5f41e3298202e2d83dec4c098e319165f79863379ceb0e13c4e73a011039b50a19ba2c60a997c50496b3cda7dcea773186170ef9cea294e417743b3a03e0f5929c726d3338c37160990fbdee0c4ee1fc74e4b01549cf4023984d56303a061c8953aad4806054d80d22d3325d842f314ca2bf2b9a8889d7e43ad12fa05f9a0523fd2e63011e515fcfa1243d2c18b73f7a94c2cc4d08b8fc0258cfa6b5425b5a0bff275572e1482e360d21d767c93998a86c62f7bad7a5b49cb7e0d1ab211f22da0faac341cfd59ef45bc4a8c1334f9065eff4455d3b46fa6ea80c6f080d69d49f2a03514c3b05ea9d3a4a2c2810c763e80dd19dfe1b4b3e7fe0572bb999be3644831a007f6aa3efbda277a7a0894e651b785fcc8c68a715912f0f182ebb7fef290120ca0523391c002acfb444df42a0ea1032634df9eddbb4d2f7e743eb4589be951fc20a09979bcd5a08da49f8e9888977194e67b5ab4700c91765298cdeef3ae74fff284a005e72f46afa5bef7f067348e07f3edb08f2f16d296b40551e6b840b3bf5c7924a04b15549a706b6af3eed103378035143faa578a962f7a091b528e5800438ffbe5a0a9787b25fdbbff38eafe1a0fe997e2d2e0394d69ae1e14960c0318d2e169f886a056aa0a473df8c76e7c2a86308ce6a87b249464ab0286858c415561fb441552f080",
+            "selectedNibble": "5",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x69b7be7820d78b1d6d48ae0033126570654d397f03d744d3d231969f665c4b4e",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0xcf2bbec0b0d44418636d8db25d63d51e052c0de037014253a9df730e5dada543",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "hash": "0x41735194d6149326e075216de50e3334f0797fbee6ee09930b5796375fa6f5fe",
+                "kind": "hash",
+                "slot": "2"
+              },
+              {
+                "hash": "0xb07b0e4dd013efdae63dbbaece836bc0b0cc4811d2a5fd97ec01d1235034b2e2",
+                "kind": "hash",
+                "slot": "3"
+              },
+              {
+                "hash": "0x4ebd78ef6536e9e65fbade1c06395b4b5d47d4ff460c483181e3b6a1ef728a58",
+                "kind": "hash",
+                "slot": "4"
+              },
+              {
+                "hash": "0xce6441de3f9536be4719c893e9239709e912a3fcf13907a0a657b2c90e85daa4",
+                "kind": "hash",
+                "slot": "5"
+              },
+              {
+                "hash": "0x17abd0dbecec79a6755ec13c95cd19b327af89c1098f5e481dc91af13ed08b24",
+                "kind": "hash",
+                "slot": "6"
+              },
+              {
+                "hash": "0x4c34904a3948c0bc45ed3fa1405d7f46767b756a9012d0663267016ae214a130",
+                "kind": "hash",
+                "slot": "7"
+              },
+              {
+                "hash": "0xc0afca5df9b6083a37ec737b56e50b93502f8811be5e5322b2f55f2fc516fb51",
+                "kind": "hash",
+                "slot": "8"
+              },
+              {
+                "hash": "0x4533d1d9ab634ced9a0883e610a7ee577840dd0723022aa93916b565d4d78dad",
+                "kind": "hash",
+                "slot": "9"
+              },
+              {
+                "hash": "0x2854c9446e8ca7a8247680cf83527971cb76d4f4d9bd977fdda71acbc09ea77a",
+                "kind": "hash",
+                "slot": "a"
+              },
+              {
+                "hash": "0x046fe5ab77c395eb6e569c5c10f20393cf2d7ae2282cb198af30ae6a57eef6d8",
+                "kind": "hash",
+                "slot": "b"
+              },
+              {
+                "hash": "0x4f68bf37b26606c3edde12cadd4c9a66d53a1a5505da47e4efd46bbe1781aafe",
+                "kind": "hash",
+                "slot": "c"
+              },
+              {
+                "hash": "0x0591b82b29c686efc63a890cc2e1db3fcc5dca01c0fa6602a1edc00c139a2ed4",
+                "kind": "hash",
+                "slot": "d"
+              },
+              {
+                "hash": "0x890c80e1cfd63fefd897e01993a41eb304840e23ac00139959fe9ed2f7810cf8",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "hash": "0xd81cf939c1c04249a1cd68c570af43b0d75a84300306c8d501073c12d745c306",
+                "kind": "hash",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 3,
+            "hash": "0x523fd2e63011e515fcfa1243d2c18b73f7a94c2cc4d08b8fc0258cfa6b5425b5",
+            "index": 2,
+            "kind": "branch",
+            "proofIndex": 2,
+            "rlp": "0xf90211a069b7be7820d78b1d6d48ae0033126570654d397f03d744d3d231969f665c4b4ea0cf2bbec0b0d44418636d8db25d63d51e052c0de037014253a9df730e5dada543a041735194d6149326e075216de50e3334f0797fbee6ee09930b5796375fa6f5fea0b07b0e4dd013efdae63dbbaece836bc0b0cc4811d2a5fd97ec01d1235034b2e2a04ebd78ef6536e9e65fbade1c06395b4b5d47d4ff460c483181e3b6a1ef728a58a0ce6441de3f9536be4719c893e9239709e912a3fcf13907a0a657b2c90e85daa4a017abd0dbecec79a6755ec13c95cd19b327af89c1098f5e481dc91af13ed08b24a04c34904a3948c0bc45ed3fa1405d7f46767b756a9012d0663267016ae214a130a0c0afca5df9b6083a37ec737b56e50b93502f8811be5e5322b2f55f2fc516fb51a04533d1d9ab634ced9a0883e610a7ee577840dd0723022aa93916b565d4d78dada02854c9446e8ca7a8247680cf83527971cb76d4f4d9bd977fdda71acbc09ea77aa0046fe5ab77c395eb6e569c5c10f20393cf2d7ae2282cb198af30ae6a57eef6d8a04f68bf37b26606c3edde12cadd4c9a66d53a1a5505da47e4efd46bbe1781aafea00591b82b29c686efc63a890cc2e1db3fcc5dca01c0fa6602a1edc00c139a2ed4a0890c80e1cfd63fefd897e01993a41eb304840e23ac00139959fe9ed2f7810cf8a0d81cf939c1c04249a1cd68c570af43b0d75a84300306c8d501073c12d745c30680",
+            "selectedNibble": "7",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x3bbb91844cd9a006e0d1c140a48116a978c9289594212fb5e0447d10b2bde1a9",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0xdad284c0ae0502db1be99dff96c3bddb224bd8441b7c95588a3979e655a76fd1",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "hash": "0x6f69b16cb089c018c59eb8aff99299f31e41dab717f3815ef53f6c8ea9e77c21",
+                "kind": "hash",
+                "slot": "2"
+              },
+              {
+                "hash": "0xc672eacb132032c94372f5a65aac15064bb69581213342ec7ed1844b438e1c50",
+                "kind": "hash",
+                "slot": "3"
+              },
+              {
+                "kind": "empty",
+                "slot": "4"
+              },
+              {
+                "kind": "empty",
+                "slot": "5"
+              },
+              {
+                "kind": "empty",
+                "slot": "6"
+              },
+              {
+                "hash": "0xf222a79171a48bf1994c2c5f85e6706cb64cfedb05ca7bc89e4034f77e5679fd",
+                "kind": "hash",
+                "slot": "7"
+              },
+              {
+                "hash": "0x0ad5ddfad547e6721d27ce66b468a1ebad24a6c73961a0e9eb28ebbe45f2ea6c",
+                "kind": "hash",
+                "slot": "8"
+              },
+              {
+                "hash": "0x29da5b6bba6f0391cb88c9e250f66194d49f6fa5e10110e463fb1a815b73cc5c",
+                "kind": "hash",
+                "slot": "9"
+              },
+              {
+                "kind": "empty",
+                "slot": "a"
+              },
+              {
+                "kind": "empty",
+                "slot": "b"
+              },
+              {
+                "hash": "0x80f441f3017c521bd96cf76520378b1da2a3c762b584d2a88ac26d3bdfa66179",
+                "kind": "hash",
+                "slot": "c"
+              },
+              {
+                "kind": "empty",
+                "slot": "d"
+              },
+              {
+                "kind": "empty",
+                "slot": "e"
+              },
+              {
+                "hash": "0xc51542bc2f1f1094ee0e131eb4628211ce1644d940d7900ee615639abaac8f7f",
+                "kind": "hash",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 4,
+            "hash": "0x4c34904a3948c0bc45ed3fa1405d7f46767b756a9012d0663267016ae214a130",
+            "index": 3,
+            "kind": "branch",
+            "proofIndex": 3,
+            "rlp": "0xf90131a03bbb91844cd9a006e0d1c140a48116a978c9289594212fb5e0447d10b2bde1a9a0dad284c0ae0502db1be99dff96c3bddb224bd8441b7c95588a3979e655a76fd1a06f69b16cb089c018c59eb8aff99299f31e41dab717f3815ef53f6c8ea9e77c21a0c672eacb132032c94372f5a65aac15064bb69581213342ec7ed1844b438e1c50808080a0f222a79171a48bf1994c2c5f85e6706cb64cfedb05ca7bc89e4034f77e5679fda00ad5ddfad547e6721d27ce66b468a1ebad24a6c73961a0e9eb28ebbe45f2ea6ca029da5b6bba6f0391cb88c9e250f66194d49f6fa5e10110e463fb1a815b73cc5c8080a080f441f3017c521bd96cf76520378b1da2a3c762b584d2a88ac26d3bdfa661798080a0c51542bc2f1f1094ee0e131eb4628211ce1644d940d7900ee615639abaac8f7f80",
+            "selectedNibble": "c",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [],
+            "compressedPath": "dbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b8",
+            "depth": 5,
+            "hash": "0x80f441f3017c521bd96cf76520378b1da2a3c762b584d2a88ac26d3bdfa66179",
+            "index": 4,
+            "kind": "leaf",
+            "proofIndex": 4,
+            "rlp": "0xe99f3dbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b888000000000000badf",
+            "selectedNibble": null,
+            "source": "hash",
+            "valueBytes": "8"
+          }
+        ],
+        "recordId": "47839",
+        "root": "0x1b885e3306ecf5350ec25b0866e032f612ec89a015026b11adb2720f3c55d0d9",
+        "suppliedNodeCount": 5,
+        "terminal": {
+          "kind": "inclusion",
+          "reason": "leaf-match"
+        }
+      },
+      {
+        "id": "rows:47840",
+        "key": "0x000000000000bae0",
+        "keyNibbles": "000000000000bae0",
+        "map": "rows",
+        "namespaceId": "1",
+        "nodes": [
+          {
+            "children": [
+              {
+                "hash": "0x82eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c",
+                "kind": "hash",
+                "slot": null
+              }
+            ],
+            "compressedPath": "00000000000",
+            "depth": 0,
+            "hash": "0xf55aee21564734392cbcb5b1506c44569ade7b485a6605f8e1510b25f1e54d0d",
+            "index": 0,
+            "kind": "extension",
+            "proofIndex": 0,
+            "rlp": "0xe886100000000000a082eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c",
+            "selectedNibble": null,
+            "source": "root",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x9f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69ca",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0xd4dcced5e2c793e6db2b21ffa5822bc5a3bdf419102d0de3c4b1c158e948ebc1",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "kind": "empty",
+                "slot": "2"
+              },
+              {
+                "kind": "empty",
+                "slot": "3"
+              },
+              {
+                "kind": "empty",
+                "slot": "4"
+              },
+              {
+                "kind": "empty",
+                "slot": "5"
+              },
+              {
+                "kind": "empty",
+                "slot": "6"
+              },
+              {
+                "kind": "empty",
+                "slot": "7"
+              },
+              {
+                "kind": "empty",
+                "slot": "8"
+              },
+              {
+                "kind": "empty",
+                "slot": "9"
+              },
+              {
+                "kind": "empty",
+                "slot": "a"
+              },
+              {
+                "kind": "empty",
+                "slot": "b"
+              },
+              {
+                "kind": "empty",
+                "slot": "c"
+              },
+              {
+                "kind": "empty",
+                "slot": "d"
+              },
+              {
+                "kind": "empty",
+                "slot": "e"
+              },
+              {
+                "kind": "empty",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 11,
+            "hash": "0x82eb833beae425d2d9f6467288c69c30e3624c0a56149f698175412192c1236c",
+            "index": 1,
+            "kind": "branch",
+            "proofIndex": 1,
+            "rlp": "0xf851a09f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69caa0d4dcced5e2c793e6db2b21ffa5822bc5a3bdf419102d0de3c4b1c158e948ebc1808080808080808080808080808080",
+            "selectedNibble": "0",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0xc51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad7",
+                "kind": "hash",
+                "slot": null
+              }
+            ],
+            "compressedPath": "ba",
+            "depth": 12,
+            "hash": "0x9f4f55e57f7c92ef78dfd059e4cfcfa8c60f8dfd64c6718f33647b50bd9a69ca",
+            "index": 2,
+            "kind": "extension",
+            "proofIndex": 2,
+            "rlp": "0xe48200baa0c51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad7",
+            "selectedNibble": null,
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "kind": "empty",
+                "slot": "0"
+              },
+              {
+                "kind": "empty",
+                "slot": "1"
+              },
+              {
+                "kind": "empty",
+                "slot": "2"
+              },
+              {
+                "kind": "empty",
+                "slot": "3"
+              },
+              {
+                "kind": "empty",
+                "slot": "4"
+              },
+              {
+                "kind": "empty",
+                "slot": "5"
+              },
+              {
+                "kind": "empty",
+                "slot": "6"
+              },
+              {
+                "kind": "empty",
+                "slot": "7"
+              },
+              {
+                "kind": "empty",
+                "slot": "8"
+              },
+              {
+                "kind": "empty",
+                "slot": "9"
+              },
+              {
+                "kind": "empty",
+                "slot": "a"
+              },
+              {
+                "kind": "empty",
+                "slot": "b"
+              },
+              {
+                "kind": "empty",
+                "slot": "c"
+              },
+              {
+                "hash": "0x4daf679036fcc04e9da7a0dbb10e0ee4c7ca4a000baaca33d08bb1add878fd77",
+                "kind": "hash",
+                "slot": "d"
+              },
+              {
+                "hash": "0x5d0b26786564f88ed6394c9e67ead303c6548481df3564ee271c34e23bc322e6",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "kind": "empty",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 14,
+            "hash": "0xc51c19b56627c44653ca1a85bfdabc07301031f5b2c973d4f815ec377b6e3ad7",
+            "index": 3,
+            "kind": "branch",
+            "proofIndex": 3,
+            "rlp": "0xf85180808080808080808080808080a04daf679036fcc04e9da7a0dbb10e0ee4c7ca4a000baaca33d08bb1add878fd77a05d0b26786564f88ed6394c9e67ead303c6548481df3564ee271c34e23bc322e68080",
+            "selectedNibble": "e",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x3d980b9725da2fa50e65d0f5a5fce7eadda98372153a61638134d1e2101780f6",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0x3059bca32003f70b564846adadac644cd7b4fccd9abcd37b00cadb8de559c3ac",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "hash": "0xad2ce46fb0f8cbadc431d041e9ee895901363cd36af462e3e87441631d4e8337",
+                "kind": "hash",
+                "slot": "2"
+              },
+              {
+                "kind": "empty",
+                "slot": "3"
+              },
+              {
+                "kind": "empty",
+                "slot": "4"
+              },
+              {
+                "kind": "empty",
+                "slot": "5"
+              },
+              {
+                "kind": "empty",
+                "slot": "6"
+              },
+              {
+                "kind": "empty",
+                "slot": "7"
+              },
+              {
+                "kind": "empty",
+                "slot": "8"
+              },
+              {
+                "kind": "empty",
+                "slot": "9"
+              },
+              {
+                "kind": "empty",
+                "slot": "a"
+              },
+              {
+                "kind": "empty",
+                "slot": "b"
+              },
+              {
+                "kind": "empty",
+                "slot": "c"
+              },
+              {
+                "kind": "empty",
+                "slot": "d"
+              },
+              {
+                "kind": "empty",
+                "slot": "e"
+              },
+              {
+                "kind": "empty",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 15,
+            "hash": "0x5d0b26786564f88ed6394c9e67ead303c6548481df3564ee271c34e23bc322e6",
+            "index": 4,
+            "kind": "branch",
+            "proofIndex": 4,
+            "rlp": "0xf871a03d980b9725da2fa50e65d0f5a5fce7eadda98372153a61638134d1e2101780f6a03059bca32003f70b564846adadac644cd7b4fccd9abcd37b00cadb8de559c3aca0ad2ce46fb0f8cbadc431d041e9ee895901363cd36af462e3e87441631d4e83378080808080808080808080808080",
+            "selectedNibble": "0",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [],
+            "compressedPath": "",
+            "depth": 16,
+            "hash": "0x3d980b9725da2fa50e65d0f5a5fce7eadda98372153a61638134d1e2101780f6",
+            "index": 5,
+            "kind": "leaf",
+            "proofIndex": 5,
+            "rlp": "0xf9018c20b9018820deebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a0000000b0000000c24636f6e74656e74547970650104000000106170706c69636174696f6e2f6a736f6e0000000a246372656174656441740103000000000000761d0000000e246372656174696f6e466c61677302030000000000000000000000082463726561746f72010aa2ecc4b51a87b862c53432bcd877c35acd6200bb0000000a24657870697265734174010300000000000fb85c00000004246b6579010bdeebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a00000006246f776e6572010aa2ecc4b51a87b862c53432bcd877c35acd6200bb00000008247061796c6f61640205000000217b2264656d6f223a2270726963652d72616e6765222c227072696365223a31357d0000000a247570646174656441740103000000000000761d0000000464656d6f01040000001972616e67652d70726f6f662d70726963652d6578616d706c650000000570726963650103000000000000000f",
+            "selectedNibble": null,
+            "source": "hash",
+            "valueBytes": "392"
+          }
+        ],
+        "recordId": "47840",
+        "root": "0xf55aee21564734392cbcb5b1506c44569ade7b485a6605f8e1510b25f1e54d0d",
+        "suppliedNodeCount": 6,
+        "terminal": {
+          "kind": "inclusion",
+          "reason": "leaf-match"
+        }
+      },
+      {
+        "id": "keys:47840",
+        "key": "0x20deebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a",
+        "keyNibbles": "20deebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a",
+        "map": "keys",
+        "namespaceId": "1",
+        "nodes": [
+          {
+            "children": [
+              {
+                "hash": "0xaf8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c1",
+                "kind": "hash",
+                "slot": null
+              }
+            ],
+            "compressedPath": "20",
+            "depth": 0,
+            "hash": "0x1b885e3306ecf5350ec25b0866e032f612ec89a015026b11adb2720f3c55d0d9",
+            "index": 0,
+            "kind": "extension",
+            "proofIndex": 0,
+            "rlp": "0xe4820020a0af8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c1",
+            "selectedNibble": null,
+            "source": "root",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x53c9280fcdddd8650c0cc50c64b38c30ede0cf4323d3660e544a9d4f7a85fa97",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0xb4fd7b06dbb5f41e3298202e2d83dec4c098e319165f79863379ceb0e13c4e73",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "hash": "0x11039b50a19ba2c60a997c50496b3cda7dcea773186170ef9cea294e417743b3",
+                "kind": "hash",
+                "slot": "2"
+              },
+              {
+                "hash": "0x3e0f5929c726d3338c37160990fbdee0c4ee1fc74e4b01549cf4023984d56303",
+                "kind": "hash",
+                "slot": "3"
+              },
+              {
+                "hash": "0x61c8953aad4806054d80d22d3325d842f314ca2bf2b9a8889d7e43ad12fa05f9",
+                "kind": "hash",
+                "slot": "4"
+              },
+              {
+                "hash": "0x523fd2e63011e515fcfa1243d2c18b73f7a94c2cc4d08b8fc0258cfa6b5425b5",
+                "kind": "hash",
+                "slot": "5"
+              },
+              {
+                "hash": "0xbff275572e1482e360d21d767c93998a86c62f7bad7a5b49cb7e0d1ab211f22d",
+                "kind": "hash",
+                "slot": "6"
+              },
+              {
+                "hash": "0xfaac341cfd59ef45bc4a8c1334f9065eff4455d3b46fa6ea80c6f080d69d49f2",
+                "kind": "hash",
+                "slot": "7"
+              },
+              {
+                "hash": "0x3514c3b05ea9d3a4a2c2810c763e80dd19dfe1b4b3e7fe0572bb999be3644831",
+                "kind": "hash",
+                "slot": "8"
+              },
+              {
+                "hash": "0x07f6aa3efbda277a7a0894e651b785fcc8c68a715912f0f182ebb7fef290120c",
+                "kind": "hash",
+                "slot": "9"
+              },
+              {
+                "hash": "0x523391c002acfb444df42a0ea1032634df9eddbb4d2f7e743eb4589be951fc20",
+                "kind": "hash",
+                "slot": "a"
+              },
+              {
+                "hash": "0x9979bcd5a08da49f8e9888977194e67b5ab4700c91765298cdeef3ae74fff284",
+                "kind": "hash",
+                "slot": "b"
+              },
+              {
+                "hash": "0x05e72f46afa5bef7f067348e07f3edb08f2f16d296b40551e6b840b3bf5c7924",
+                "kind": "hash",
+                "slot": "c"
+              },
+              {
+                "hash": "0x4b15549a706b6af3eed103378035143faa578a962f7a091b528e5800438ffbe5",
+                "kind": "hash",
+                "slot": "d"
+              },
+              {
+                "hash": "0xa9787b25fdbbff38eafe1a0fe997e2d2e0394d69ae1e14960c0318d2e169f886",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "hash": "0x56aa0a473df8c76e7c2a86308ce6a87b249464ab0286858c415561fb441552f0",
+                "kind": "hash",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 2,
+            "hash": "0xaf8b285abc7510b8596ccdb852023799aa2d53c70c19269e13887d2538e046c1",
+            "index": 1,
+            "kind": "branch",
+            "proofIndex": 1,
+            "rlp": "0xf90211a053c9280fcdddd8650c0cc50c64b38c30ede0cf4323d3660e544a9d4f7a85fa97a0b4fd7b06dbb5f41e3298202e2d83dec4c098e319165f79863379ceb0e13c4e73a011039b50a19ba2c60a997c50496b3cda7dcea773186170ef9cea294e417743b3a03e0f5929c726d3338c37160990fbdee0c4ee1fc74e4b01549cf4023984d56303a061c8953aad4806054d80d22d3325d842f314ca2bf2b9a8889d7e43ad12fa05f9a0523fd2e63011e515fcfa1243d2c18b73f7a94c2cc4d08b8fc0258cfa6b5425b5a0bff275572e1482e360d21d767c93998a86c62f7bad7a5b49cb7e0d1ab211f22da0faac341cfd59ef45bc4a8c1334f9065eff4455d3b46fa6ea80c6f080d69d49f2a03514c3b05ea9d3a4a2c2810c763e80dd19dfe1b4b3e7fe0572bb999be3644831a007f6aa3efbda277a7a0894e651b785fcc8c68a715912f0f182ebb7fef290120ca0523391c002acfb444df42a0ea1032634df9eddbb4d2f7e743eb4589be951fc20a09979bcd5a08da49f8e9888977194e67b5ab4700c91765298cdeef3ae74fff284a005e72f46afa5bef7f067348e07f3edb08f2f16d296b40551e6b840b3bf5c7924a04b15549a706b6af3eed103378035143faa578a962f7a091b528e5800438ffbe5a0a9787b25fdbbff38eafe1a0fe997e2d2e0394d69ae1e14960c0318d2e169f886a056aa0a473df8c76e7c2a86308ce6a87b249464ab0286858c415561fb441552f080",
+            "selectedNibble": "d",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "hash": "0x635965c1ede979cea38c46a95af07c9efb0f7f2eb2e0cb8a1e1b7cb224f3276c",
+                "kind": "hash",
+                "slot": "0"
+              },
+              {
+                "hash": "0x8fe0b0031e18f30a80c8d2e6fedc2e637585decffe531701a7e61a2945f5f3b7",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "hash": "0xa5399e5e61b7c48206c1aefb18ff7f7a84e39f5cdd9b411ded8f970a315a734e",
+                "kind": "hash",
+                "slot": "2"
+              },
+              {
+                "hash": "0x2dbe3a868c84a7a2035fb4a61024ba045bca74261049b1995944bf2f24c4d1b8",
+                "kind": "hash",
+                "slot": "3"
+              },
+              {
+                "hash": "0xb149a6220313dbf4d675adbaa4b605c487d84668cabc4fe65e3439f69bb2b8da",
+                "kind": "hash",
+                "slot": "4"
+              },
+              {
+                "hash": "0x23172711287b8c3ff41b2cfe96034ab26c4580552902b8ed4714525218fa8889",
+                "kind": "hash",
+                "slot": "5"
+              },
+              {
+                "hash": "0x2987d9736ee2ea21f3954d7935af6b222b3fd4da1cac40d0ac75640791d27f27",
+                "kind": "hash",
+                "slot": "6"
+              },
+              {
+                "hash": "0x9360cb4abe1467351dabdbd4575db9ebd001479cb57039bf5d2e697e5ead88e3",
+                "kind": "hash",
+                "slot": "7"
+              },
+              {
+                "hash": "0xc4719f0747dd27881ef8bf5c07485f65843494c620f6f458f2d70427c23d18aa",
+                "kind": "hash",
+                "slot": "8"
+              },
+              {
+                "hash": "0x1e906c2196219bd67364fa850d45fbfa33dfbeaadb8854c87454f7f06dcf127a",
+                "kind": "hash",
+                "slot": "9"
+              },
+              {
+                "hash": "0x8fa7bde749befd8a7561a0e30b9f61d5715d95d8f7d0e34afe0038f479b0ef74",
+                "kind": "hash",
+                "slot": "a"
+              },
+              {
+                "hash": "0x4131b83086d395d1a2ff1e8c44c56e39c12078dea236afc33bc2961eeac13ab9",
+                "kind": "hash",
+                "slot": "b"
+              },
+              {
+                "hash": "0x4b733299fe55d44f7ee47022db07dc1a3cd09ed592519dedd0d91b1c4c885673",
+                "kind": "hash",
+                "slot": "c"
+              },
+              {
+                "hash": "0x94817572ac892bf5cb4c8c5be2ce9b22ba477c6aa23c3a0618584ed3fedc2a77",
+                "kind": "hash",
+                "slot": "d"
+              },
+              {
+                "hash": "0x4a15a549fac411bf976411b83ae09ca8982ed1c1e7a7cc56bf61a494b693d82f",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "hash": "0xd31ffdf85b1b9488b4679b7263a54aca1444111313a1d6531926f1de96491b11",
+                "kind": "hash",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 3,
+            "hash": "0x4b15549a706b6af3eed103378035143faa578a962f7a091b528e5800438ffbe5",
+            "index": 2,
+            "kind": "branch",
+            "proofIndex": 2,
+            "rlp": "0xf90211a0635965c1ede979cea38c46a95af07c9efb0f7f2eb2e0cb8a1e1b7cb224f3276ca08fe0b0031e18f30a80c8d2e6fedc2e637585decffe531701a7e61a2945f5f3b7a0a5399e5e61b7c48206c1aefb18ff7f7a84e39f5cdd9b411ded8f970a315a734ea02dbe3a868c84a7a2035fb4a61024ba045bca74261049b1995944bf2f24c4d1b8a0b149a6220313dbf4d675adbaa4b605c487d84668cabc4fe65e3439f69bb2b8daa023172711287b8c3ff41b2cfe96034ab26c4580552902b8ed4714525218fa8889a02987d9736ee2ea21f3954d7935af6b222b3fd4da1cac40d0ac75640791d27f27a09360cb4abe1467351dabdbd4575db9ebd001479cb57039bf5d2e697e5ead88e3a0c4719f0747dd27881ef8bf5c07485f65843494c620f6f458f2d70427c23d18aaa01e906c2196219bd67364fa850d45fbfa33dfbeaadb8854c87454f7f06dcf127aa08fa7bde749befd8a7561a0e30b9f61d5715d95d8f7d0e34afe0038f479b0ef74a04131b83086d395d1a2ff1e8c44c56e39c12078dea236afc33bc2961eeac13ab9a04b733299fe55d44f7ee47022db07dc1a3cd09ed592519dedd0d91b1c4c885673a094817572ac892bf5cb4c8c5be2ce9b22ba477c6aa23c3a0618584ed3fedc2a77a04a15a549fac411bf976411b83ae09ca8982ed1c1e7a7cc56bf61a494b693d82fa0d31ffdf85b1b9488b4679b7263a54aca1444111313a1d6531926f1de96491b1180",
+            "selectedNibble": "e",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [
+              {
+                "kind": "empty",
+                "slot": "0"
+              },
+              {
+                "hash": "0x2f61a822724dc945d64a34a3afb7c70c8eb115c5c795b72ee739f8c378d2fece",
+                "kind": "hash",
+                "slot": "1"
+              },
+              {
+                "hash": "0x012793a28b828ac10f4f82fdecfdd27907c0646f5025c7a15754d309efbda375",
+                "kind": "hash",
+                "slot": "2"
+              },
+              {
+                "hash": "0xb4959a23e863d5c05f39ae556d47bdff4ed128de84dedd501719583ea0743e39",
+                "kind": "hash",
+                "slot": "3"
+              },
+              {
+                "hash": "0x0551973c0cec3167e49bc73b8f62d0bce89083efa311a29581df922ec85dd75c",
+                "kind": "hash",
+                "slot": "4"
+              },
+              {
+                "hash": "0x15d618f6d74c4241ae3b2658723c8e277f0321a554204098372caaae074be2f1",
+                "kind": "hash",
+                "slot": "5"
+              },
+              {
+                "hash": "0xf4ac4812bb14451853ee9b29e53aa299fcfa34a046d06f53e00b77d333e4b1e9",
+                "kind": "hash",
+                "slot": "6"
+              },
+              {
+                "kind": "empty",
+                "slot": "7"
+              },
+              {
+                "hash": "0x7f447fb76b5e8a5a1c765530a3037c9b25e79f029f57c82aa813191a1e3798d5",
+                "kind": "hash",
+                "slot": "8"
+              },
+              {
+                "hash": "0xe5ba6a8b9a8b9d583f7915eb30b4b8980d8e8c1f28621214d883f827c92e5393",
+                "kind": "hash",
+                "slot": "9"
+              },
+              {
+                "hash": "0xa07fb7f7e73bf38ae3bf7b3d99d0b24af7b5f725902af6a4acd38a7c0802396e",
+                "kind": "hash",
+                "slot": "a"
+              },
+              {
+                "hash": "0x20ea050da9542f3e948d73724dad406631bae083be67aceb3dfad89ce572bf6f",
+                "kind": "hash",
+                "slot": "b"
+              },
+              {
+                "hash": "0x4234026c060deb49f498c82020535cf5c0be60a2a313620988e6057e8992fb07",
+                "kind": "hash",
+                "slot": "c"
+              },
+              {
+                "hash": "0x0d998a6a7392e14db1814c52c14a11a4a818ece3b4499e05ef317020cdf9793b",
+                "kind": "hash",
+                "slot": "d"
+              },
+              {
+                "hash": "0x6f3f9771e3c9a3c9ca04e94ae189a922d21671444ea865ada91ebdd36f4c4573",
+                "kind": "hash",
+                "slot": "e"
+              },
+              {
+                "kind": "empty",
+                "slot": "f"
+              }
+            ],
+            "compressedPath": "",
+            "depth": 4,
+            "hash": "0x4a15a549fac411bf976411b83ae09ca8982ed1c1e7a7cc56bf61a494b693d82f",
+            "index": 3,
+            "kind": "branch",
+            "proofIndex": 3,
+            "rlp": "0xf901b180a02f61a822724dc945d64a34a3afb7c70c8eb115c5c795b72ee739f8c378d2fecea0012793a28b828ac10f4f82fdecfdd27907c0646f5025c7a15754d309efbda375a0b4959a23e863d5c05f39ae556d47bdff4ed128de84dedd501719583ea0743e39a00551973c0cec3167e49bc73b8f62d0bce89083efa311a29581df922ec85dd75ca015d618f6d74c4241ae3b2658723c8e277f0321a554204098372caaae074be2f1a0f4ac4812bb14451853ee9b29e53aa299fcfa34a046d06f53e00b77d333e4b1e980a07f447fb76b5e8a5a1c765530a3037c9b25e79f029f57c82aa813191a1e3798d5a0e5ba6a8b9a8b9d583f7915eb30b4b8980d8e8c1f28621214d883f827c92e5393a0a07fb7f7e73bf38ae3bf7b3d99d0b24af7b5f725902af6a4acd38a7c0802396ea020ea050da9542f3e948d73724dad406631bae083be67aceb3dfad89ce572bf6fa04234026c060deb49f498c82020535cf5c0be60a2a313620988e6057e8992fb07a00d998a6a7392e14db1814c52c14a11a4a818ece3b4499e05ef317020cdf9793ba06f3f9771e3c9a3c9ca04e94ae189a922d21671444ea865ada91ebdd36f4c45738080",
+            "selectedNibble": "e",
+            "source": "hash",
+            "valueBytes": "0"
+          },
+          {
+            "children": [],
+            "compressedPath": "bb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a",
+            "depth": 5,
+            "hash": "0x6f3f9771e3c9a3c9ca04e94ae189a922d21671444ea865ada91ebdd36f4c4573",
+            "index": 4,
+            "kind": "leaf",
+            "proofIndex": 4,
+            "rlp": "0xe99f3bb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a88000000000000bae0",
+            "selectedNibble": null,
+            "source": "hash",
+            "valueBytes": "8"
+          }
+        ],
+        "recordId": "47840",
+        "root": "0x1b885e3306ecf5350ec25b0866e032f612ec89a015026b11adb2720f3c55d0d9",
+        "suppliedNodeCount": 5,
+        "terminal": {
+          "kind": "inclusion",
+          "reason": "leaf-match"
+        }
+      }
+    ],
+    "postingSet": null,
+    "postingSets": [
+      {
+        "authenticatedRoot": "0xaf7eed2300f5b59fe1e441ebf606f873ac33a00f70c7982f79c6b1566d94ab4b",
+        "count": 1,
+        "method": "complete-set-reconstruction",
+        "reconstructedRoot": "0xaf7eed2300f5b59fe1e441ebf606f873ac33a00f70c7982f79c6b1566d94ab4b",
+        "recordIds": [
+          "47839"
+        ],
+        "selectedRecordIds": [
+          "47839"
+        ],
+        "termKey": "0x7072696365000000000000000000000000000000000000000000000000000000050301000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+        "termNodeIndex": 9,
+        "termPresent": true,
+        "termType": "u64",
+        "termValue": "10"
+      },
+      {
+        "authenticatedRoot": "0x046da5e146a8d64b9a9d153912210656ee1a012af7a214a2f951c52f82a53fb0",
+        "count": 1,
+        "method": "complete-set-reconstruction",
+        "reconstructedRoot": "0x046da5e146a8d64b9a9d153912210656ee1a012af7a214a2f951c52f82a53fb0",
+        "recordIds": [
+          "47840"
+        ],
+        "selectedRecordIds": [
+          "47840"
+        ],
+        "termKey": "0x7072696365000000000000000000000000000000000000000000000000000000050301000000000000000f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008",
+        "termNodeIndex": 10,
+        "termPresent": true,
+        "termType": "u64",
+        "termValue": "15"
+      }
+    ],
+    "proofProfile": "range-complete-v1",
+    "queryDigest": "0x5b7e84eba3634761fb1ee9ad799dc22edfd7ef7be795737003af45ef890f4c12",
+    "stateComposition": {
+      "catalog": {
+        "entries": "1",
+        "root": "0xcda27ea4830e058ec9ef1ff4b50b115a3c7bef77034f891855c330300dd6b14e"
+      },
+      "domain": "arkiv/state/v1",
+      "headerBytes": "0x00000002cda27ea4830e058ec9ef1ff4b50b115a3c7bef77034f891855c330300dd6b14e00000000000000010000000000000002474c4d010000001f00000000000000640000000000004e200000000000002710000000000000271000000000000027100000000000000004000000000000000400000000000000640000000000000064000000000000000a00000000000000010000000000004e200000000000002ee0000000000000271000000000000000fa0000000000000004000000000000006400000000000001f40000000000000000000000000000012c00000000000000640000000000000064000000000000000a000000000000000a000000000000000a000000000000000a000000000000000a00000000000000640000000000000002000000000000000a0000000000000001cbee80efe625d0732fa457ccde955bfdbc557970d16e9a44be312d28929998f60000000000000dd9",
+      "host": {
+        "entries": "3545",
+        "root": "0xcbee80efe625d0732fa457ccde955bfdbc557970d16e9a44be312d28929998f6"
+      },
+      "namespace": {
+        "id": "1",
+        "keys": {
+          "entries": "2956",
+          "root": "0x1b885e3306ecf5350ec25b0866e032f612ec89a015026b11adb2720f3c55d0d9"
+        },
+        "nextRecord": "74864",
+        "records": {
+          "entries": "0",
+          "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+        },
+        "rows": {
+          "entries": "2956",
+          "root": "0xf55aee21564734392cbcb5b1506c44569ade7b485a6605f8e1510b25f1e54d0d"
+        },
+        "terms": {
+          "entries": "31886",
+          "root": "0x83b75834725f7b1701243edd7f690caeba7a04325f517692a685d400e7e8bbf2"
+        }
+      },
+      "nextNamespace": "2",
+      "pricingBytes": "0x474c4d010000001f00000000000000640000000000004e200000000000002710000000000000271000000000000027100000000000000004000000000000000400000000000000640000000000000064000000000000000a00000000000000010000000000004e200000000000002ee0000000000000271000000000000000fa0000000000000004000000000000006400000000000001f40000000000000000000000000000012c00000000000000640000000000000064000000000000000a000000000000000a000000000000000a000000000000000a000000000000000a00000000000000640000000000000002000000000000000a0000000000000001",
+      "stateRoot": "0x55df7bd64a0146b9b7e22ecd2c4dec19c8063847ede79f22e298ce9a7cdbeb30"
+    },
+    "version": 2
+  },
+  "postingCount": 2,
+  "proofProfile": "range-complete-v1",
+  "query": {
+    "attribute": "price",
+    "height": "42884",
+    "lower": {
+      "inclusive": true,
+      "value": "10"
+    },
+    "namespace": "1",
+    "upper": {
+      "inclusive": false,
+      "value": "20"
+    },
+    "valueType": "u64"
+  },
+  "rows": [
+    {
+      "attributes": [
+        {
+          "name": "$contentType",
+          "type": "str",
+          "value": "application/json"
+        },
+        {
+          "name": "$createdAt",
+          "type": "u64",
+          "value": "30237"
+        },
+        {
+          "name": "$creator",
+          "type": "addr",
+          "value": "0xa2ecc4b51a87b862c53432bcd877c35acd6200bb"
+        },
+        {
+          "name": "$expiresAt",
+          "type": "u64",
+          "value": "1030236"
+        },
+        {
+          "name": "$key",
+          "type": "key",
+          "value": "0x57cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b8"
+        },
+        {
+          "name": "$owner",
+          "type": "addr",
+          "value": "0xa2ecc4b51a87b862c53432bcd877c35acd6200bb"
+        },
+        {
+          "name": "$updatedAt",
+          "type": "u64",
+          "value": "30237"
+        },
+        {
+          "name": "demo",
+          "type": "str",
+          "value": "range-proof-price-example"
+        },
+        {
+          "name": "price",
+          "type": "u64",
+          "value": "10"
+        }
+      ],
+      "expiresAtHeight": "1030236",
+      "fields": [
+        {
+          "byteLength": "8",
+          "digest": "0x2683eeb330e551188f806de544aa3550bfe8070d8d59fe03e1cb2d1aa6690329",
+          "name": "$creationFlags",
+          "reference": null,
+          "type": "u64"
+        },
+        {
+          "byteLength": "33",
+          "digest": "0x02cb3401a4a0228ba04ec758124930608236973bdadde2a9d2f47a46b2aed247",
+          "name": "$payload",
+          "reference": null,
+          "type": "bytes"
+        }
+      ],
+      "kind": "recordUpsert",
+      "namespaceId": "1",
+      "recordId": "47839",
+      "recordKey": "0x57cdbb1abdcbed6c0bb4f1ab0acc8e8f72dd5e7abc6125fa0bc7838f7ea1f1b8"
+    },
+    {
+      "attributes": [
+        {
+          "name": "$contentType",
+          "type": "str",
+          "value": "application/json"
+        },
+        {
+          "name": "$createdAt",
+          "type": "u64",
+          "value": "30237"
+        },
+        {
+          "name": "$creator",
+          "type": "addr",
+          "value": "0xa2ecc4b51a87b862c53432bcd877c35acd6200bb"
+        },
+        {
+          "name": "$expiresAt",
+          "type": "u64",
+          "value": "1030236"
+        },
+        {
+          "name": "$key",
+          "type": "key",
+          "value": "0xdeebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a"
+        },
+        {
+          "name": "$owner",
+          "type": "addr",
+          "value": "0xa2ecc4b51a87b862c53432bcd877c35acd6200bb"
+        },
+        {
+          "name": "$updatedAt",
+          "type": "u64",
+          "value": "30237"
+        },
+        {
+          "name": "demo",
+          "type": "str",
+          "value": "range-proof-price-example"
+        },
+        {
+          "name": "price",
+          "type": "u64",
+          "value": "15"
+        }
+      ],
+      "expiresAtHeight": "1030236",
+      "fields": [
+        {
+          "byteLength": "8",
+          "digest": "0x2683eeb330e551188f806de544aa3550bfe8070d8d59fe03e1cb2d1aa6690329",
+          "name": "$creationFlags",
+          "reference": null,
+          "type": "u64"
+        },
+        {
+          "byteLength": "33",
+          "digest": "0xcee5b652c41d899c7c4f47a1121c1843989a0f2bece6a819c9bf858e63993ad4",
+          "name": "$payload",
+          "reference": null,
+          "type": "bytes"
+        }
+      ],
+      "kind": "recordUpsert",
+      "namespaceId": "1",
+      "recordId": "47840",
+      "recordKey": "0xdeebb8c9ef2de28a70bf8ea6347916d2415ce728798f2105a66507a27d0b0e9a"
+    }
+  ],
+  "snapshot": {
+    "hash": "0x48fa05a99b378ac0bd36f10096fccf200dd4c2be2d144a268eb2d27ef8e6422e",
+    "height": "42884",
+    "stateRoot": "0x55df7bd64a0146b9b7e22ecd2c4dec19c8063847ede79f22e298ce9a7cdbeb30"
+  },
+  "termCount": 2,
+  "verification": "proof verified against authenticated single-proposer header",
+  "verificationStatus": {
+    "profile": "range-complete-v1",
+    "status": "verified"
+  }
+}

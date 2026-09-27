@@ -115,3 +115,86 @@ export function pointPathLabel(path: PatriciaPointPath): string {
 export function defaultPointPath(paths: PatriciaPointPath[]): PatriciaPointPath | undefined {
   return paths.find((path) => path.map === "terms") ?? paths[0];
 }
+
+/** Range traces are decoded only after strict complete-range verification. */
+export interface RangeProofInspection extends Omit<ProofInspection, "proofProfile" | "postingSet"> {
+  proofProfile: "range-complete-v1";
+  postingSet: null;
+  postingSets: Array<NonNullable<ProofInspection["postingSet"]> & {
+    termNodeIndex: number;
+    termKey: string;
+    termValue: string;
+    termType: string;
+    termPresent: true;
+    authenticatedRoot: string;
+  }>;
+  interval: {
+    id: "terms:range";
+    map: "terms";
+    namespaceId: string;
+    root: string;
+    lowerKey: string;
+    upperKey: string;
+    lowerKeyNibbles: string;
+    upperKeyNibbles: string;
+    suppliedNodeCount: number;
+    emptyReason: null | "reversed-bounds" | "empty-root";
+    nodes: RangePathNode[];
+  };
+}
+export interface RangeChild extends PatriciaChild {
+  decision: "open" | "outside" | "empty";
+  childIndex: number | null;
+}
+export interface RangePathNode extends Omit<PatriciaPathNode, "children"> {
+  parentIndex: number | null;
+  parentSlot: string | null;
+  prefix: string;
+  children: RangeChild[];
+  leaf: null | {
+    key: string;
+    attribute: string;
+    valueType: string;
+    value: string | boolean | null;
+    included: boolean;
+    postingRoot: string;
+    postingCount: number;
+  };
+}
+export type AnyProofInspection = ProofInspection | RangeProofInspection;
+
+/** Inline nodes belong to their supplied ancestor; they never mint a new W entry. */
+export function rangeWitnessNodes(nodes: RangePathNode[]): RangePathNode[] {
+  return nodes.filter(node => node.source !== "inline");
+}
+export function rangeNodeExplanation(node: RangePathNode): string {
+  if (node.leaf) return node.leaf.included
+    ? "This leaf's full indexed key is inside the requested interval. Its complete posting set contributes to the answer."
+    : "This boundary leaf was opened because its parent prefix could intersect the interval. Its full key lies outside the bounds, so it contributes no result.";
+  return node.kind === "extension"
+    ? "This node compresses a shared key prefix. The verifier checks whether that prefix can still lead to an indexed key inside the interval."
+    : "This branch authenticates all 16 next-nibble slots. Every populated child whose key prefix overlaps the interval is opened; outside prefixes stay committed and unopened.";
+}
+export function rangeChildExplanation(child: RangeChild): string {
+  return child.decision === "empty"
+    ? "The authenticated parent contains an empty slot. There is no subtree here; this is different from an unopened hash."
+    : child.decision === "outside"
+      ? "This child's key prefix cannot intersect the encoded query interval. Its reference remains authenticated by the parent, but its subtree need not be opened."
+      : "This child's key prefix can intersect the interval. The verifier opens its node and checks its reference; a leaf may still fall outside the exact bounds.";
+}
+
+/** A bounded visible subtree. Remaining real child references become navigation links. */
+export function rangeTreeWindow(nodes: RangePathNode[], rootIndex: number, maxDepth = 3, maxNodes = 32): Set<number> {
+  const byIndex = new Map(nodes.map(node => [node.index, node]));
+  const shown = new Set<number>();
+  const queue: Array<[number, number]> = [[rootIndex, 0]];
+  for (let cursor = 0; cursor < queue.length && shown.size < maxNodes; cursor++) {
+    const [index, depth] = queue[cursor];
+    const node = byIndex.get(index);
+    if (!node || shown.has(index)) continue;
+    shown.add(index);
+    if (depth >= maxDepth) continue;
+    for (const child of node.children) if (child.decision === "open" && child.childIndex !== null) queue.push([child.childIndex, depth + 1]);
+  }
+  return shown;
+}

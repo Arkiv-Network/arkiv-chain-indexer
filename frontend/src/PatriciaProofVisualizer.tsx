@@ -17,7 +17,9 @@ import {
   type PatriciaPathNode,
   type PatriciaPointPath,
   type ProofInspection,
+  type AnyProofInspection,
 } from "./patriciaProof";
+import { RangeWitnessTree } from "./RangeWitnessTree";
 import "./patriciaProof.css";
 
 export type { ProofInspection } from "./patriciaProof";
@@ -68,12 +70,12 @@ function MapCard({ name, commitment, active, onChoose, note }: {
 }
 
 function StateComposition({ inspection, currentMap, onMap }: {
-  inspection: ProofInspection;
+  inspection: AnyProofInspection;
   currentMap: PatriciaMap | undefined;
   onMap: (map: PatriciaMap) => void;
 }) {
   const state = inspection.stateComposition;
-  const hasMap = (map: PatriciaMap) => inspection.pointPaths.some((path) => path.map === map);
+  const hasMap = (map: PatriciaMap) => (map === "terms" && inspection.proofProfile === "range-complete-v1") || inspection.pointPaths.some((path) => path.map === map);
   return <div className="pv-composition">
     <div className="pv-state-root">
       <div className="pv-root-label"><Layers size={17}/><span>State commitment</span><span className="pv-label">Domain-separated header</span></div>
@@ -98,7 +100,7 @@ function StateComposition({ inspection, currentMap, onMap }: {
           commitment={state.namespace![map]}
           active={currentMap === map}
           onChoose={map !== "records" && hasMap(map) ? () => onMap(map) : undefined}
-          note={map !== "records" && hasMap(map) ? "inspect path" : "commitment only"}
+          note={map === "terms" && inspection.proofProfile === "range-complete-v1" ? "inspect interval tree" : map !== "records" && hasMap(map) ? "inspect path" : "commitment only"}
         />)}
       </div>
     </div> : <p className="pv-composition-note">The catalog path proves this namespace absent; there are no namespace map roots to expand.</p>}
@@ -244,7 +246,10 @@ function PostingCompleteness({ posting }: { posting: ProofInspection["postingSet
   </div>;
 }
 
-export function PatriciaProofVisualizer({ inspection }: { inspection: ProofInspection }) {
+export function PatriciaProofVisualizer({ inspection }: { inspection: AnyProofInspection }) {
+  const range = inspection.proofProfile === "range-complete-v1";
+  const [view, setView] = useState<"interval" | "point">(range ? "interval" : "point");
+  useEffect(() => { setView(range ? "interval" : "point"); }, [inspection, range]);
   const headingId = useId();
   const pathSelectId = useId();
   const [selectedPathId, setSelectedPathId] = useState(() => defaultPointPath(inspection.pointPaths)?.id);
@@ -254,17 +259,19 @@ export function PatriciaProofVisualizer({ inspection }: { inspection: ProofInspe
   const pathPage = Math.floor(pathIndex / PATRICIA_PATH_PAGE_SIZE) * PATRICIA_PATH_PAGE_SIZE;
   const paths = inspection.pointPaths.slice(pathPage, pathPage + PATRICIA_PATH_PAGE_SIZE);
   return <section className="pv-proof" aria-labelledby={headingId}>
-    <header className="pv-heading"><div><span className="pv-eyebrow">Inside the proof</span><h3 id={headingId}>Patricia witness explorer</h3><p>Follow the actual authenticated path from state commitment to query evidence.</p></div><span className="pv-profile"><GitBranch size={14}/>{inspection.proofProfile}</span></header>
-    <StateComposition inspection={inspection} currentMap={path?.map} onMap={(map) => setSelectedPathId(inspection.pointPaths.find((item) => item.map === map)?.id)}/>
-    <div className="pv-path-section">
+    <header className="pv-heading"><div><span className="pv-eyebrow">Inside the proof</span><h3 id={headingId}>Patricia witness explorer</h3><p>{range ? "Follow every opened branch and see why outside subtrees are skipped." : "Follow the actual authenticated path from state commitment to query evidence."}</p></div><span className="pv-profile"><GitBranch size={14}/>{inspection.proofProfile}</span></header>
+    <StateComposition inspection={inspection} currentMap={range && view === "interval" ? "terms" : path?.map} onMap={(map) => { if (range && map === "terms") setView("interval"); else { setView("point"); setSelectedPathId(inspection.pointPaths.find((item) => item.map === map)?.id); } }}/>
+    {range && <div className="rw-mode-tabs" aria-label="Witness views"><button type="button" aria-pressed={view === "interval"} onClick={() => setView("interval")}>Range interval tree</button><button type="button" aria-pressed={view === "point"} onClick={() => setView("point")}>Catalog, rows & keys</button></div>}
+    {range && view === "interval" && <RangeWitnessTree key={`${inspection.stateComposition.stateRoot}:${inspection.queryDigest}`} inspection={inspection}/>}
+    {(!range || view === "point") && <div className="pv-path-section">
       <div className="pv-path-toolbar"><div><span className="pv-eyebrow">Point proof</span><h4>{path ? `${path.map[0].toUpperCase()}${path.map.slice(1)} map path` : "No point paths"}</h4></div>
         {path && <div className="pv-path-select"><label htmlFor={pathSelectId}>Inspect path</label><select id={pathSelectId} value={path.id} onChange={(event) => setSelectedPathId(event.target.value)}>{paths.map((item) => <option key={item.id} value={item.id}>{pointPathLabel(item)}</option>)}</select>
           {inspection.pointPaths.length > PATRICIA_PATH_PAGE_SIZE && <div className="pv-stepper"><button type="button" aria-label="Previous group of proof paths" disabled={pathPage === 0} onClick={() => setSelectedPathId(inspection.pointPaths[pathPage - PATRICIA_PATH_PAGE_SIZE].id)}><ChevronLeft size={15}/></button><span>{pathPage + 1}–{pathPage + paths.length} / {inspection.pointPaths.length}</span><button type="button" aria-label="Next group of proof paths" disabled={pathPage + paths.length >= inspection.pointPaths.length} onClick={() => setSelectedPathId(inspection.pointPaths[pathPage + PATRICIA_PATH_PAGE_SIZE].id)}><ChevronRight size={15}/></button></div>}
         </div>}
       </div>
       {path && <><p className="pv-path-purpose">{mapPurpose[path.map]}{path.recordId !== null && <> Record ID <code>{path.recordId}</code>.</>}</p><PathWorkbench key={`${inspection.stateComposition.stateRoot}:${path.id}:${inspection.queryDigest}`} path={path}/></>}
-    </div>
-    <PostingCompleteness key={`${inspection.stateComposition.stateRoot}:${inspection.queryDigest}`} posting={inspection.postingSet}/>
+    </div>}
+    {!range && <PostingCompleteness key={`${inspection.stateComposition.stateRoot}:${inspection.queryDigest}`} posting={inspection.postingSet}/>}
     <footer className="pv-footer"><span>Source: node's strict verifier trace</span><span>{inspection.pointPaths.length} point paths · full witness bytes available in the canonical proof</span></footer>
   </section>;
 }

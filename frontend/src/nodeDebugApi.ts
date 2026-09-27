@@ -75,24 +75,17 @@ function requireInspection(condition: unknown): asserts condition {
   if (!condition) throw new Error("InvalidProofInspection");
 }
 
-/** Shape and response bindings only. Cryptographic verification stays in Rust. */
-function validateInspectionStructure(unknownInspection: unknown, page: VerifiedPage) {
-  requireInspection(record(unknownInspection));
-  const i = unknownInspection;
-  requireInspection((i.version === 1 || i.version === 2) && i.proofProfile === `eq-page-v${i.version}` && hash(i.queryDigest));
-  const state = i.stateComposition;
-  requireInspection(record(state) && state.stateRoot === page.snapshot.stateRoot && state.domain === "arkiv/state/v1" &&
-    hex(state.headerBytes) && hex(state.pricingBytes) && uint(state.nextNamespace) && map(state.catalog) && map(state.host));
+/** Shared decoded point-path validation for equality and range inspections. */
+export function validateInspectionPaths(paths: unknown, state: Record<string, unknown>, namespace: string) {
   const ns = state.namespace;
-  requireInspection(record(ns) && ns.id === page.query.namespace && uint(ns.nextRecord) &&
-    [ns.records, ns.rows, ns.keys, ns.terms].every(map));
-  requireInspection(Array.isArray(i.pointPaths) && i.pointPaths.length >= 2 && i.pointPaths.length <= 130);
+  requireInspection(record(ns));
+  requireInspection(Array.isArray(paths) && paths.length >= 1 && paths.length <= 130);
   const ids = new Set<string>();
-  for (const path of i.pointPaths) {
+  for (const path of paths) {
     requireInspection(record(path) && text(path.id) && !ids.has(path.id) &&
       oneOf(path.map, ["catalog", "terms", "rows", "keys"]) && hash(path.root) && hex(path.key) &&
       text(path.keyNibbles) && /^[0-9a-f]*$/.test(path.keyNibbles) && path.keyNibbles === path.key.slice(2) &&
-      (path.namespaceId === null || path.namespaceId === page.query.namespace) && (path.recordId === null || uint(path.recordId)) &&
+      (path.namespaceId === null || path.namespaceId === namespace) && (path.recordId === null || uint(path.recordId)) &&
       natural(path.suppliedNodeCount, 2048) && Array.isArray(path.nodes) && path.nodes.length <= 2048 && record(path.terminal) &&
       oneOf(path.terminal.kind, ["inclusion", "absence"]) &&
       oneOf(path.terminal.reason, ["leaf-match", "empty-root", "divergent-leaf", "divergent-extension", "empty-branch-slot"]));
@@ -113,6 +106,21 @@ function validateInspectionStructure(unknownInspection: unknown, page: VerifiedP
       }
     }
   }
+}
+
+/** Shape and response bindings only. Cryptographic verification stays in Rust. */
+function validateInspectionStructure(unknownInspection: unknown, page: VerifiedPage) {
+  requireInspection(record(unknownInspection));
+  const i = unknownInspection;
+  requireInspection((i.version === 1 || i.version === 2) && i.proofProfile === `eq-page-v${i.version}` && hash(i.queryDigest));
+  const state = i.stateComposition;
+  requireInspection(record(state) && state.stateRoot === page.snapshot.stateRoot && state.domain === "arkiv/state/v1" &&
+    hex(state.headerBytes) && hex(state.pricingBytes) && uint(state.nextNamespace) && map(state.catalog) && map(state.host));
+  const ns = state.namespace;
+  requireInspection(record(ns) && ns.id === page.query.namespace && uint(ns.nextRecord) &&
+    [ns.records, ns.rows, ns.keys, ns.terms].every(map));
+  requireInspection(Array.isArray(i.pointPaths) && i.pointPaths.length >= 2);
+  validateInspectionPaths(i.pointPaths, state, page.query.namespace);
   const posting = i.postingSet;
   requireInspection(record(posting) && posting.method === "complete-set-reconstruction" && typeof posting.termPresent === "boolean" &&
     natural(posting.count, 4096) && posting.count === page.postingCount && hash(posting.reconstructedRoot) &&

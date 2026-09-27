@@ -95,7 +95,7 @@ try {
   await page.getByRole("button", { name: "Run & verify query", exact: true }).click();
   await waitForEquality();
   assert.equal(await page.locator(".nd-proof-heading").count(), 0, "simple equality must not render the full inspector");
-  await page.goto(origin + "/proof-inspector");
+  await page.goto(origin + "/proof-inspector?proof=equality");
   await waitForEquality();
   await page.getByText("Trace the answer to the root.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Next page", exact: true }).click();

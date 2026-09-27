@@ -63,7 +63,7 @@ export function LightNodePages({ page, status, error, frozen, updated, fullUrl, 
           <summary><div><strong>Equality queries</strong><span>Find an exact typed value, with verified pages.</span></div><ChevronRight size={19}/></summary>
           {equalityOpen && equality}
         </details>
-        <p className="nd-query-more">For the decoded equality witness and trie visualization, open the <a href="/proof-inspector">proof inspector <ArrowRight size={14}/></a>.</p>
+        <p className="nd-query-more">For the decoded equality witness and trie visualization, open the <a href="/proof-inspector?proof=equality">proof inspector <ArrowRight size={14}/></a>.</p>
       </>}
       <details className="nd-node-details nd-raw"><summary>Live node identity and status <ChevronRight size={15}/></summary><div className="nd-raw-body">{status ? <><p>Chain {status.chainId} · header #{status.head.height}. A status reading is separate from the fixed snapshot of a query result.</p><pre tabIndex={0}>{JSON.stringify(status, null, 2)}</pre></> : <p>Waiting for the node status.</p>}</div></details>
     </main>
@@ -87,7 +87,7 @@ function BoundaryWalkthrough() {
     <div className="nd-boundary-output" aria-live="polite" aria-atomic="true">
       {evaluated.error ? <p className="nd-alert" role="alert">{evaluated.error}</p> : <><p className="nd-demo-equation"><code>{expression}</code></p><div className="nd-price-line">{evaluated.values.map(item => <div className={`nd-price-point ${item.matches ? "is-included" : ""}`} key={item.value}><strong>{item.value}</strong><span>{item.reason}</span></div>)}</div><p className="nd-demo-answer"><strong>Example answer: {matches.length ? matches.map(item => item.value).join(", ") : "no matches"}.</strong> {matches.length ? "A complete answer must include every highlighted value." : "An empty answer still needs evidence that the interval has no matches."}</p></>}
     </div>
-    <p className="nd-illustration-note">This local teaching model is not a decoded range witness and does not verify a proof. The live API currently exposes the verified result and header certificate, but no decoded range-witness inspection.</p>
+    <p className="nd-illustration-note">This local teaching model is not a decoded range witness and does not verify a proof. Open the proof inspector to explore the actual decoded range witness checked by the light node.</p>
     <a className="nd-button" href="/queries?range=price#range-query">Open the live price example <ArrowRight size={15}/></a>
   </div>;
 }
@@ -117,7 +117,7 @@ function RangeExplained({ status, fullUrl }: { status: NativeSourceStatus | null
         <li><span>4</span><div><h3>Each matching value → its complete posting set</h3><p>A posting set is the list of entity IDs indexed under a value. For every matching term, the verifier reconstructs the complete set and compares its commitment. If three entities have price 15, all three IDs must be supplied.</p></div></li>
         <li><span>5</span><div><h3>Entity IDs → authenticated rows & key bindings</h3><p>Row proofs bind the entity contents to those IDs; key-map proofs bind the public entity keys to the same records. The verifier checks the matched typed attributes and that each entity is live at the selected block, then returns the full set.</p></div></li>
       </ol>
-      <p className="nd-illustration-note">This chain is a conceptual explanation of <code>range-complete-v1</code>, not a visualization decoded from your live range proof. The separate proof inspector visualizes actual <em>equality</em> witnesses.</p>
+      <p className="nd-illustration-note">This chain is a conceptual explanation of <code>range-complete-v1</code>, not a visualization decoded from your live range proof. The proof inspector visualizes actual range and equality witnesses.</p>
       <details className="nd-raw nd-guide-technical"><summary>More detail: how can a small proof cover a large tree? <ChevronRight size={15}/></summary><div className="nd-raw-body"><p>The term index is an authenticated Patricia trie. Its compressed key paths describe the possible keys under a subtree. A subtree that cannot intersect the requested typed interval can remain an opaque hash. Any subtree that could contain a matching key must be opened far enough to account for it.</p><p>A boundary proof may reveal an out-of-range leaf or path to establish where the interval ends. It does not need to return unrelated subtrees in full. Node hashes and child commitments bind all the opened pieces to the same root; changing a piece changes that commitment.</p></div></details>
     </GuideSection>
     <GuideSection id="completeness" number="04 / CHECK WHAT COULD BE MISSING" title="A valid row alone does not prove a complete answer.">
