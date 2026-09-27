@@ -241,6 +241,7 @@ function proxyLocalVerifier(req, res, nodePanel = false) {
   const allowed = (req.method === "GET" && path === "/sim/v1/status")
     || (!nodePanel && req.method === "POST" && path === "/sim/v1/query/verified")
     || (nodePanel && NODE_MODE === "lightnode" && req.method === "POST" && path === "/sim/v1/query/inspect")
+    || (nodePanel && NODE_MODE === "lightnode" && DEBUG_NODE_PROTOCOL === "signed" && req.method === "POST" && path === "/sim/v1/query/range/verified")
     || (nodePanel && NODE_MODE === "fullnode" && req.method === "GET" && /^\/sim\/v1\/feed\/blocks\/(0|[1-9][0-9]{0,19})$/.test(path));
   const fail = (status, error) => {
     if (res.writableEnded) return;

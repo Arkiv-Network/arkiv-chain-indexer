@@ -155,6 +155,22 @@ for (const protocol of ["sim", "signed"]) for (const mode of ["fullnode", "light
       if (mode === "fullnode") expect((await fetch(origin + "/node-sim/v1/query/inspect", { method: "POST", body: "{}" })).status).toBe(404);
       expect((await fetch(origin + "/node-sim/v1/status", { headers: { origin: "https://other.example" } })).status).toBe(403);
       expect(received).toHaveLength(1);
+      const rangePath = "/node-sim/v1/query/range/verified";
+      const range = await fetch(origin + rangePath, { method: "POST", body: "{}",
+        headers: { origin, cookie: "secret=session", authorization: "Bearer secret", "x-csrf-token": "secret" },
+      });
+      const supportsRange = protocol === "signed" && mode === "lightnode";
+      expect(range.status).toBe(supportsRange ? 200 : 404);
+      expect(received).toHaveLength(supportsRange ? 2 : 1);
+      if (supportsRange) {
+        expect(received[1]!.path).toBe("/signed/v1/query/range/verified");
+        for (const name of ["authorization", "cookie", "x-csrf-token", "origin"])
+          expect(received[1]!.headers.has(name)).toBe(false);
+        expect((await fetch(origin + rangePath, { method: "POST", body: "{}", headers: { origin: "https://other.example" } })).status).toBe(403);
+        expect((await fetch(origin + rangePath)).status).toBe(404);
+        expect((await fetch(origin + "/node-sim/v1/query/range", { method: "POST", body: "{}" })).status).toBe(404);
+        expect(received).toHaveLength(2);
+      }
     } finally {
       child.kill("SIGTERM"); await child.exited; await node.stop(true);
     }

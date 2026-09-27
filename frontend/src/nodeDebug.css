@@ -64,3 +64,12 @@
 
 /* Light nodes show only telemetry provided by their status endpoint. */
 .nd-light .nd-stats{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+
+/* Range bounds keep their inclusion control beside each numeric input. */
+.nd-range-bound { display: grid; gap: 12px; min-width: 0; }
+#range-query { scroll-margin-top: 24px; }
+#range-query .nd-record-main strong { overflow-wrap: anywhere; white-space: normal; }
+#range-query .nd-record-id { width: auto; min-width: 26px; padding: 0 6px; }
+
+#range-query .nd-examples { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 740px) { #range-query .nd-examples { grid-template-columns: 1fr; } }

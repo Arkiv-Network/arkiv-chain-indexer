@@ -22,6 +22,7 @@ export interface NativeWorkload {
 }
 /** A node's own public status as the backend observed or probed it. */
 export interface NativeSourceStatus extends NativeIdentity {
+  proofProfiles?: string[];
   capabilities?: { profile: string; layoutVersion: number; codecVersion: number; scalarTypes: string[]; systemEquality: string[]; sdkRpcCompatible: boolean; signatures: boolean };
   role: "producer" | "full" | "light";
   head: NativeSnapshot;

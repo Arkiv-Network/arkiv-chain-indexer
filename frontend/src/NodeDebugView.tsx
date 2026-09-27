@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowRight, ArrowUpRight, Check, ChevronRight, Copy, Database, Download, FileCode2, GitBranch, Layers3, LoaderCircle, Radio, Search, ShieldCheck, Terminal, Workflow } from "lucide-react";
+import { RangeQueryLab } from "./RangeQueryLab";
 import { PatriciaProofVisualizer } from "./PatriciaProofVisualizer";
 import { fetchNodeBlock, fetchNodeStatus, formatNodeBytes, inspectNodeQuery, pinSelection, queryExamples, isArkivProfile, ARKIV_TYPES, readableKey, type ArkivEntity, type FeedBlock, type InspectedPage, type NodeUiMode } from "./nodeDebugApi";
 import { displayNative, type EqSelection, type NativeRow, type NativeSourceStatus } from "./simulatorApi";
@@ -82,6 +83,7 @@ export function NodeDebugView({ mode }: { mode: NodeUiMode }) {
   const { status, error, updated } = useNodeStatus(mode);
   const light = mode === "lightnode";
   const signed = status?.authentication === "signed-proposer-v1";
+  const ranges = signed && status?.proofProfiles?.includes("range-complete-v1");
   useEffect(() => { document.title = `Arkiv ${light ? "Light" : "Full"} Node · Experimental`; }, [light]);
   const peerGap = status?.observedPeerHeight && /^\d+$/.test(status.observedPeerHeight) ? (BigInt(status.observedPeerHeight) - BigInt(status.head.height)).toString() : "—";
   const frozen = !!status && ["chain-conflict", "storage-fenced"].includes(status.health);
@@ -97,9 +99,11 @@ export function NodeDebugView({ mode }: { mode: NodeUiMode }) {
         {(!light || status?.storage?.fileBytes !== undefined) && <Stat label="Retained file" value={formatNodeBytes(status?.storage?.fileBytes)} detail={light ? "Durable headers and node metadata" : "Durable replay history and state"} icon={<Database size={17}/>}/>}
         {!light && <Stat label="Engine cache" value={formatNodeBytes(status?.memory?.engineCacheBytes)} detail={`${displayNative(status?.memory?.engineCacheEntries)} entries · excludes process RSS`} icon={<Layers3 size={17}/>}/>}
       </div>
-      <Topology mode={mode} status={status}/>{isArkivProfile(status) && <div className="nd-profile-note"><strong>Arkiv entity profile v2</strong><p>32-byte names · exact scalar types · committed ownership and lifecycle fields. {signed ? "Single typed equality proofs against authenticated headers. The SDK RPC is a compatibility subset; Ethereum consensus and production state-root format are not implemented." : "Single typed equality proofs; unsigned producer. This simulator does not implement the full SDK RPC or production state-root format."}</p></div>}
+      <Topology mode={mode} status={status}/>{isArkivProfile(status) && <div className="nd-profile-note"><strong>Arkiv entity profile v2</strong><p>32-byte names · exact scalar types · committed ownership and lifecycle fields. {signed ? "Typed equality proofs against authenticated headers. The SDK RPC is a compatibility subset; Ethereum consensus and production state-root format are not implemented." : "Single typed equality proofs; unsigned producer. This simulator does not implement the full SDK RPC or production state-root format."}</p></div>}
       <div className="nd-trust-note"><ShieldCheck size={18}/><p><strong>{light ? "Proof verification happens in the hosted Rust light process." : signed ? "A native chain with a pinned signing proposer." : "A native simulator with an unsigned source."}</strong> {light ? signed ? "This browser displays the hosted verifier’s result and witness. Its header history is authenticated against the pinned proposer; this is not multi-party consensus." : "This browser displays its result and witness. Roots come from that process’s trusted header history; the simulator’s producer is unsigned." : "The full node independently replays the producer’s blocks. Open the light node to check query proofs against its own retained headers."}</p><span>{signed ? "SIGNED PROPOSER" : "UNSIGNED SIMULATOR"}</span></div>
+      {light && ranges && <p><a className="nd-button" href="#range-query">Try complete range proofs <ArrowDown size={15}/></a></p>}
       {light ? <QueryLab key={status ? `${status.sourceId}/${status.runId}/${frozen}` : "connecting"} status={status} unavailable={!!error || frozen}/> : <BlockLab key={status ? `${status.sourceId}/${status.runId}/${frozen}` : "connecting"} status={status} unavailable={!!error || frozen}/>}
+      {light && ranges && status && <RangeQueryLab key={`${status.sourceId}/${status.runId}/${status.genesisHash}/${status.chainId}/${frozen}`} status={status} unavailable={!!error || frozen}/>}
       {status && <section className="nd-card nd-identity"><div className="nd-section-heading"><div><span className="nd-eyebrow">SOURCE IDENTITY</span><h2>The chain behind this node</h2></div><span className="nd-chip">Chain {status.chainId}</span></div><HashLine label="Head state root" value={status.head.stateRoot}/><HashLine label="Head block hash" value={status.head.hash}/><div className="nd-identity-small"><span>Source <code>{status.sourceId}</code></span><span>Run <code>{status.runId}</code></span></div><RawData title="Complete node status" value={status} name={`${mode}-status.json`}/></section>}
     </main><footer className="nd-footer"><span><strong>arkiv</strong> / experimental node lab</span><span>{signed ? "Native data. Real proofs. Signed proposer." : "Native data. Real proofs. Unsigned simulator."}</span><a href={light ? FULL_URL : LIGHT_URL}>Open {light ? "full" : "light"} node <ArrowUpRight size={14}/></a></footer>
   </div>;
