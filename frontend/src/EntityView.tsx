@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fetchEntityByKey, type EntityByKeyResponse, type StoredEntityOperation } from "./api";
+import { isPermanentEntity, isPermanentLifetime } from "./entityLifetime";
 import { fmtBytes, fmtDurationSeconds, fmtInteger } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { writeEntityPermalink } from "./permalinks";
@@ -247,7 +248,9 @@ function EntityDetail({
                 <AddressCell address={genesis.creator} />
               </Row>
               <Row label="Expires" title={`Absolute expiry block ${genesis.expiresAt}`}>
-                {genesis.expiresAt === NEVER_EXPIRES ? "never" : `block ${fmtInteger(Number(genesis.expiresAt))}`}
+                {isPermanentEntity(0, Number(genesis.expiresAt), blockTimeMs / 1000)
+                  ? "Permanent"
+                  : `block ${fmtInteger(genesis.expiresAt)}`}
               </Row>
               {genesis.creationFlags ? (
                 <Row label="Flags">{describeCreationFlags(genesis.creationFlags)}</Row>
@@ -289,9 +292,9 @@ function EntityDetail({
                 label="Expires"
                 title={`Set by the ${latestExpiry.operation} in block ${latestExpiry.blockNumberDecimal}`}
               >
-                {fmtInteger(latestExpiry.expiresAtBlocks)} blocks (~
-                {fmtDurationSeconds((latestExpiry.expiresAtBlocks * blockTimeMs) / 1000)}) from block{" "}
-                {latestExpiry.blockNumberDecimal}
+                {isPermanentLifetime(latestExpiry.expiresAtBlocks, blockTimeMs / 1000)
+                  ? "Permanent"
+                  : `${fmtInteger(latestExpiry.expiresAtBlocks)} blocks (~${fmtDurationSeconds((latestExpiry.expiresAtBlocks * blockTimeMs) / 1000)}) from block ${latestExpiry.blockNumberDecimal}`}
               </Row>
             ) : null}
           </dl>
@@ -384,7 +387,9 @@ function EntityDetail({
                   {operation.payloadSizeBytes > 0 ? fmtBytes(operation.payloadSizeBytes) : "—"}
                 </TableCell>
                 <TableCell>
-                  {operation.expiresAtBlocks > 0 ? `${fmtInteger(operation.expiresAtBlocks)} blocks` : "—"}
+                  {isPermanentLifetime(operation.expiresAtBlocks, blockTimeMs / 1000)
+                    ? "Permanent"
+                    : operation.expiresAtBlocks > 0 ? `${fmtInteger(operation.expiresAtBlocks)} blocks` : "—"}
                 </TableCell>
                 <TableCell>{operation.newOwner ? <AddressCell address={operation.newOwner} /> : "—"}</TableCell>
               </TableRow>
@@ -396,13 +401,6 @@ function EntityDetail({
   );
 }
 
-/**
- * Lifecycle badge derived from the newest stored operation: a trailing delete
- * means the entity is gone; a trailing expire means the chain reaped it;
- * anything else leaves it active as far as the stored history knows.
- */
-const NEVER_EXPIRES = "18446744073709551615";
-
 function describeCreationFlags(flags: number): string {
   const names: string[] = [];
   if (flags & 1) names.push("readonly");
@@ -412,6 +410,11 @@ function describeCreationFlags(flags: number): string {
   return names.join(", ");
 }
 
+/**
+ * Lifecycle badge derived from the newest stored operation: a trailing delete
+ * means the entity is gone; a trailing expire means the chain reaped it;
+ * anything else leaves it active as far as the stored history knows.
+ */
 function lifecycleInfo(latest: StoredEntityOperation): { label: string; tone: StatusTone } {
   if (latest.operation === "delete") return { label: "Deleted", tone: "fail" };
   if (latest.operation === "expire") return { label: "Expired", tone: "fail" };

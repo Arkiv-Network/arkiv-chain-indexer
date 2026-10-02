@@ -22,6 +22,7 @@ import {
   type EntityRecord,
 } from "./dataQuery";
 import type { BlockTiming } from "./dataRpc";
+import { isPermanentEntity } from "./entityLifetime";
 import { fmtDate, fmtInteger } from "./format";
 import { entityDetailHref, shouldHandleClientNavigation, writeEntityPermalink } from "./permalinks";
 import { AddressCell, copyText } from "./TransactionsView";
@@ -182,6 +183,7 @@ function EntityCard({
       )
     : [];
   const creatorDiffers = entity.creator !== null && entity.owner !== null && entity.creator.toLowerCase() !== entity.owner.toLowerCase();
+  const permanent = isPermanentEntity(entity.createdAt, entity.expiresAt, timing?.blockDurationSeconds ?? null);
 
   return (
     <Card className="gap-0 overflow-hidden py-0">
@@ -261,11 +263,13 @@ function EntityCard({
             </MetaRow>
           ) : null}
           <MetaRow label="Expires">
-            <BlockStamp block={entity.expiresAt} timing={timing} nowMs={nowMs} timeZone={timeZone} onLocationChange={onLocationChange} />
+            {permanent ? "Permanent" : (
+              <BlockStamp block={entity.expiresAt} timing={timing} nowMs={nowMs} timeZone={timeZone} onLocationChange={onLocationChange} />
+            )}
           </MetaRow>
         </div>
 
-        {entity.createdAt !== null && entity.expiresAt !== null && timing ? (
+        {!permanent && entity.createdAt !== null && entity.expiresAt !== null && timing ? (
           <LifetimeBar createdAt={entity.createdAt} expiresAt={entity.expiresAt} timing={timing} nowMs={nowMs} />
         ) : null}
       </div>
