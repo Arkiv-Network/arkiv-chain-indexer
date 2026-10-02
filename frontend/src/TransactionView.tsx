@@ -19,6 +19,7 @@ export { CopyButton } from "@/components/copy-cell";
 import { OpBadge, StatusBadge, type StatusTone } from "@/components/op-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { isPermanentLifetime } from "./entityLifetime";
 import {
   fmtBytes,
   fmtDate,
@@ -500,7 +501,9 @@ function OperationCard({
         ) : null}
         {operation.expiresAtBlocks > 0 ? (
           <Row label="Expires">
-            {fmtInteger(operation.expiresAtBlocks)} blocks (~{fmtDurationSeconds(expirySeconds)})
+            {isPermanentLifetime(operation.expiresAtBlocks, blockTimeMs / 1000)
+              ? "Permanent"
+              : `${fmtInteger(operation.expiresAtBlocks)} blocks (~${fmtDurationSeconds(expirySeconds)})`}
           </Row>
         ) : null}
         {operation.newOwner ? (
