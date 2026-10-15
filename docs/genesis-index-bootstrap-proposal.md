@@ -105,41 +105,49 @@ as an additional regular container inside `indexer-0`, connecting to the same lo
 Its component-owned wrapper waits after success and checks durable state after restarts. It is
 not an init container waiting for the backend: that would prevent the backend from starting.
 
-The backend starts normally and creates/migrates its schema. For a declared artifact, it keeps
-genesis entity projection/query readiness pending until bootstrap and repair finish. Scanner
-block ingestion can continue. An HTTP health check alone does not certify a complete entity index.
+The backend starts and creates/migrates its schema, but scanner ingestion and entity projection
+wait for bootstrap success. Entity queries remain unavailable until then. An HTTP health check
+alone does not certify a complete entity index.
+
+Bootstrap has two durable outcomes: complete, or reset required. There is no partial-import resume
+protocol, shard checkpoint or recovery of an interrupted index build.
 
 The restore command:
 
-1. Waits for schema readiness and validates artifact identity against the network declaration,
-   stored scanner identity and the node's block-zero hash/root/count. An unavailable node means
-   waiting; a mismatch means refusal, with no reset of existing data.
-2. Acquires the existing fold lock, coordinates through `genesis_import`, and loads into private
-   staging tables. The new snapshot source must be integrated with the projector's state machine;
-   it cannot be implemented merely by setting an environment variable in today's backend.
-3. Downloads one bounded shard at a time, verifies digest/length before use, and commits its rows
-   and checkpoint in one transaction. An interrupted shard rolls back; completed shards are not
-   appended again. Checkpoints bind the manifest digest and shard identity. Never resume arbitrary
-   compressed streams or binary COPY at an assumed row offset.
-4. Validates counts and ids, builds required indexes, and atomically installs the genesis base
-   under the fold lock. In the first release this is allowed only when entity tables are empty;
-   a compatible already-complete import is a no-op, and a nonempty incompatible index is refused.
-5. Hands control to the backend's existing repair mechanism for already-scanned operations.
-   Only completed repair marks the entity index ready; importer exit zero alone is insufficient.
+1. Waits for schema readiness and validates artifact identity against the network declaration
+   and the node's block-zero hash/root/count. An unavailable node means waiting; a mismatch means
+   refusal before loading. A matching completed database is reused without importing again.
+2. Requires a fresh explorer database, records that bootstrap has started, and holds the fold
+   lock while loading genesis rows. The backend and scanner must honor the bootstrap gate.
+3. Downloads one bounded shard at a time, verifies digest/length before use, and loads its rows.
+   Batches may commit to bound transaction size, but partial contents are never query-ready and
+   are not a resumable import. Shards bound scratch usage, not recovery checkpoints.
+4. Validates counts and ids and builds the required indexes. It commits the block-zero projection
+   state and a durable completion marker bound to the chain and artifact identity in one
+   transaction. Only then may scanner ingestion, normal projection and entity queries start.
 
-Restarts must also recover during index construction, atomic installation and repair. Store the
-phase and artifact identity in Postgres, not just a pod-local completion marker. Existing restored
-databases with matching chain identity and a completed genesis import are accepted even if they
-were produced by the dump importer or a database backup, rather than this new bootstrap command.
+If the process fails or restarts after bootstrap started but before that completion transaction,
+mark the explorer as requiring reset. Reset the explorer database to a fresh schema and rerun the
+whole bootstrap from the immutable artifact. Stop all explorer database writers during reset.
+This reset is confined to the explorer database; the chain's state, genesis and retained artifacts
+are untouched. The supported reset operation and its status belong in the implementation/runbook;
+ordinary pod startup must not silently clear a populated database.
+
+A crash after the completion transaction simply reuses the successful database, even if the
+container did not yet report success. Existing restored databases with matching chain identity
+and a completed genesis import are also accepted, including those produced by the dump importer
+or a database backup. Missing or incompatible completion evidence requires operator resolution,
+not an assumption that partial data is complete. Normal post-bootstrap scanner restart behavior
+remains unchanged.
 
 ## Lifecycle and sizing
 
 | Event | Expected behavior |
 | --- | --- |
 | New seeded explorer | Restore immutable genesis artifact, then project scanned blocks. |
-| Pod restart | Keep completed DB; resume an interrupted shard or repair. |
+| Pod restart | Reuse a completed DB; interrupted bootstrap requires reset and a full retry. |
 | Lost explorer PVC | Recreate DB, restore genesis artifact, rescan available chain history. |
-| Restore existing explorer DB | Validate identity; retain compatible data and progress. |
+| Restore existing explorer DB | Validate identity and completed bootstrap; retain compatible data. |
 | Disable / re-enable indexer | Preserve declaration, artifact reference and existing PVC semantics. |
 | Chain restore / wipe | Use the resulting execution genesis identity; refuse artifacts for a different identity. |
 | External explorer | Same image/commands with local artifact files or authorized download and its own DB. |
@@ -155,13 +163,13 @@ validated API, chart and declaration. The current resource overrides cover chain
 shared environment settings cannot set container limits. Keep scratch separate from database
 storage and bounded by the largest shard, not the full raw seed dump.
 
-Measure entity and attribute counts, table/index sizes, peak WAL, staging/index-build space and
+Measure entity and attribute counts, table/index sizes, peak WAL, index-build space and
 peak memory on a representative subset before sizing the full import. Do not reuse synthetic two-attribute-per-entity estimates for Sourcify. No restore
 throughput or completion-time guarantee is made by this proposal.
 
 ## Delivery and acceptance
 
-1. Indexer PR: protocol/schema, exporter, restore state machine, progress/health integration and
+1. Indexer PR: protocol/schema, exporter, bootstrap completion gate, progress/health integration and
    opt-in Postgres tests. Verify a small artifact produces the same rows and query answers as
    `importGenesisState.ts`, including entity order, permanent expiry and payload sizes.
 2. Prefill PR: shared-dump lifecycle, publication protocol, immutable descriptor and retries. Test
@@ -169,7 +177,8 @@ throughput or completion-time guarantee is made by this proposal.
 3. Manager PR: pinned container wiring, catalog/reference persistence, secrets, resources and
    separate explorer conditions. Update `how-it-works.md`, feature parity, security and the ops
    runbook together; document minimum compatible versions instead of accepting ignored settings.
-4. Lab acceptance: creation, restart at every import phase, lost PVC, compatible restored DB,
+4. Lab acceptance: creation, failure at every bootstrap phase followed by reset/full retry,
+   restart after the completion commit, lost PVC, compatible restored DB,
    indexer off/on, chain restore/wipe, private artifacts and an external explorer. Inject truncated
    shards, digest/identity mismatches and unsupported schema versions. Partial data must never be
    reported as a complete index. Compare sampled block-zero queries and subsequent mutations with
