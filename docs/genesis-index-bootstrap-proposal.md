@@ -4,8 +4,8 @@ Status: proposed, 2026-10-15. This document adds no runtime behavior or supporte
 
 A seeded chain contains entities at block zero without creation transactions. Restoring its
 execution database makes those entities available to the node, but the explorer's block scanner
-cannot reconstruct them. Sorbet's seed contains 15,276,198 entities; the default one-million-entity
-RPC import cap deliberately leaves a dataset of this size waiting for an offline import.
+cannot reconstruct them. The default one-million-entity RPC import cap deliberately leaves larger
+datasets waiting for an offline import.
 
 The proposal is to prepare the explorer's genesis data once, publish it alongside the retained
 initial chain snapshot, and bootstrap an empty explorer from that immutable artifact. The indexer
@@ -155,9 +155,8 @@ validated API, chart and declaration. The current resource overrides cover chain
 shared environment settings cannot set container limits. Keep scratch separate from database
 storage and bounded by the largest shard, not the full raw seed dump.
 
-Sorbet currently declares 300Gi for the database. Measure entity and attribute counts, table/index
-sizes, peak WAL, staging/index-build space and peak memory on a representative subset before sizing
-the full import. Do not reuse synthetic two-attribute-per-entity estimates for Sourcify. No restore
+Measure entity and attribute counts, table/index sizes, peak WAL, staging/index-build space and
+peak memory on a representative subset before sizing the full import. Do not reuse synthetic two-attribute-per-entity estimates for Sourcify. No restore
 throughput or completion-time guarantee is made by this proposal.
 
 ## Delivery and acceptance
@@ -174,14 +173,7 @@ throughput or completion-time guarantee is made by this proposal.
    indexer off/on, chain restore/wipe, private artifacts and an external explorer. Inject truncated
    shards, digest/identity mismatches and unsupported schema versions. Partial data must never be
    reported as a complete index. Compare sampled block-zero queries and subsequent mutations with
-   the node, then run the full Sorbet-scale import with measured resource usage.
-
-For the existing Sorbet run, use a one-shot export job against the already-published state dump.
-Recover the seeder manifest if retained; otherwise construct the required metadata from verified
-publication identity plus block-zero node count, and validate the complete dump with the exporter.
-Publish a new immutable explorer descriptor associated with Sorbet's existing genesis. This should
-not rebuild its chain snapshot or rerun seeding. Attach through the supported declaration/API once
-implemented; do not patch a live pod as the permanent deployment method.
+   the node, then run a production-scale import with measured resource usage.
 
 Review decisions requested: the portable shard contract, the optional genesis catalog/reference
 extension, and independent chain/explorer completion with retained export scratch. Command and
