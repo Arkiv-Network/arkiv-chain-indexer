@@ -167,22 +167,12 @@ suite("Google login UI and proxy", () => {
     await context.close();
   });
 
-  test("regular users opening comparison links query only the public index", async () => {
-    session = signedIn("user"); calls.length = 0;
-    const context = await browser.newContext(); const page = await openPage(context);
-    const queried = page.waitForResponse((response) => response.url().endsWith("/api/shadow-rpc/experimental"));
-    await page.goto(`${base}/data?rpc=both&q=*`); await queried;
-    await page.getByText("Logged In", { exact: true }).waitFor();
-    expect(calls.some(({ path }) => path === "/shadow-rpc")).toBe(false);
-    await context.close();
-  });
-
-  test("administrator comparison queries use the current session's CSRF token", async () => {
+  test("the entity explorer queries the network, never the backend relay or index, even for administrators", async () => {
     session = signedIn("admin"); calls.length = 0;
     const context = await browser.newContext(); const page = await openPage(context);
-    const queried = page.waitForResponse((response) => response.url().endsWith("/api/shadow-rpc") && response.request().postDataJSON()?.method === "arkiv_query");
-    await page.goto(`${base}/data?rpc=both&q=*`); await queried;
-    expect(calls.filter(({ path }) => path === "/shadow-rpc").every(({ csrf }) => csrf === "browser-test-csrf")).toBe(true);
+    await page.goto(`${base}/entity-explorer?q=${encodeURIComponent("arkiv.schema = str('arkiv-demo.posts')")}`);
+    await page.getByText(/^\d+ entit/).waitFor();
+    expect(calls.some(({ path }) => path.startsWith("/shadow-rpc"))).toBe(false);
     await context.close();
   });
 
@@ -198,19 +188,12 @@ suite("Google login UI and proxy", () => {
     await context.close();
   });
 
-  test("redesigned Data controls preserve historical counts and query history", async () => {
+  test("entity explorer query history fits a phone and loads an entry into the editor", async () => {
     session = anonymous();
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await openPage(context);
-    await page.goto(`${base}/data?q=*&block=7`);
-    const countButton = page.getByRole("button", { name: "Count query", exact: true });
-    await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some(button => button.textContent?.trim() === "Count query" && !button.disabled));
-    expect(await page.getByLabel("At block", { exact: true }).inputValue()).toBe("7");
-    expect(await page.getByRole("tab", { name: "Default node", exact: true }).count()).toBe(0);
-    const request = page.waitForRequest(request => request.postDataJSON()?.method === "arkiv_getEntityCount");
-    await countButton.click();
-    expect((await request).postDataJSON().params).toEqual([{ query: "*", block: 7 }]);
-    await page.getByText("0 matching entities at block 7", { exact: true }).waitFor();
+    await page.goto(`${base}/entity-explorer?q=${encodeURIComponent("TYPEOF(score) = i32")}`);
+    await page.getByText(/^\d+ entit/).waitFor();
     await page.getByRole("button", { name: /^History/ }).click();
     const dialog = page.getByRole("dialog", { name: "Query history" });
     await dialog.waitFor();
@@ -266,10 +249,10 @@ suite("Google login UI and proxy", () => {
       await page.waitForFunction(() => document.documentElement.classList.contains("dark"));
       await popup.getByLabel("Time zone", { exact: true }).selectOption("UTC");
       await page.waitForFunction(() => localStorage.getItem("gas-price-tracker:timeZone") === "UTC");
-      await popup.getByRole("link", { name: "Data", exact: true }).click();
+      await popup.getByRole("link", { name: "Entity explorer", exact: true }).click();
       await popup.waitFor({ state: "detached" });
-      await page.getByRole("heading", { name: "Data", exact: true }).waitFor();
-      expect(await page.getByRole("button", { name: "Open navigation menu", exact: true }).textContent()).toBe("Data");
+      await page.getByRole("heading", { name: "Entity explorer", exact: true }).waitFor();
+      expect(await page.getByRole("button", { name: "Open navigation menu", exact: true }).textContent()).toBe("Entity explorer");
       await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
       await popup.waitFor();
       await page.mouse.click(1, 843);

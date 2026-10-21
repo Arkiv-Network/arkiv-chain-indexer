@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import { NavigationMenu } from "./NavigationMenu";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   deleteBaseloadConfig,
   fetchBaseloadState,
@@ -25,7 +25,6 @@ import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
-import { DataView } from "./DataView";
 import { EntityView } from "./EntityView";
 import { ChartsView } from "./ChartsView";
 import { CedricView } from "./CedricView";
@@ -57,10 +56,16 @@ import { SendersView } from "./SendersView";
 import { detectBrowserTimeZone, TIME_ZONE_OPTIONS } from "./timezones";
 import { TransactionsView } from "./TransactionsView";
 import { TransactionView } from "./TransactionView";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { Badge } from "./components/ui/badge";
+import { cn } from "./lib/utils";
 import { OmniSearch } from "./OmniSearch";
 import { SearchView } from "./SearchView";
+
+// The Data page carries the Arkiv SDK, viem and the mock network's dataset, so
+// it loads on first visit rather than with every other page.
+const EntityExplorerView = lazy(() =>
+  import("./entityExplorer/EntityExplorerView").then((module) => ({ default: module.EntityExplorerView })),
+);
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
@@ -136,7 +141,7 @@ export function App() {
 
   useEffect(() => {
     const network = pageSettings.networkName ? ` · ${pageSettings.networkName}` : "";
-    const screen = activeView === "data" ? "Data (experimental, use with caution) · " : "";
+    const screen = activeView === "entity-explorer" ? "Entity explorer · " : "";
     document.title = `${screen}${pageSettings.chainName} BlockExplorer${network}`;
   }, [activeView, pageSettings.chainName, pageSettings.networkName]);
 
@@ -580,15 +585,10 @@ export function App() {
             tokenSymbol={pageSettings.tokenSymbol}
             lockedAddress={addressParam}
           />
-        ) : activeView === "data" ? (
-          <DataView
-            key={`${auth.session.user?.id ?? "anonymous"}:${adminModeIsActive}`}
-            locationSearch={locationSearch}
-            onLocationChange={refreshFromLocation}
-            timeZone={timeZone}
-            adminModeActive={adminModeIsActive}
-            csrfToken={csrfToken}
-          />
+        ) : activeView === "entity-explorer" ? (
+          <Suspense fallback={<p className="mx-auto w-full max-w-415 px-3 py-8 text-xs text-muted-foreground md:px-6">Loading…</p>}>
+            <EntityExplorerView onLocationChange={refreshFromLocation} timeZone={timeZone} />
+          </Suspense>
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView
             onLocationChange={refreshFromLocation}

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { editQueryHistory, QUERY_HISTORY_LIMIT, readQueryHistory, rememberQuery, writeQueryHistory, type QueryHistoryEntry } from "./src/queryHistory";
+import { editQueryHistory, QUERY_HISTORY_LIMIT, readQueryHistory, rememberQuery, writeQueryHistory, type QueryHistoryEntry } from "./src/entityExplorer/lib/queryHistory";
 import { writeStoredString, type StorageLike } from "./src/localStorage";
 
 function memoryStorage(): StorageLike {

@@ -935,9 +935,8 @@ Worth knowing before pointing a wallet at it:
   and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
   no business relying on. List it explicitly if a deployment's node really does.
 - **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`)
-  are forwarded by default too.** On this path they read the node's entity state. The Data page defaults
-  to the experimental index on `/shadow-rpc/experimental`; administrators can select the backend relay
-  or compare both sources.
+  are forwarded by default too.** On this path they read the node's entity state. The entity explorer does not
+  use this relay; it queries the network's RPC directly.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -1120,8 +1119,8 @@ creates a suite of entities covering every attribute type, every mutation, expir
 transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
 a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
 
-The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
-`rpc=index` in shared links) when `/health` reports it enabled.
+The frontend's entity explorer (`/entity-explorer`) no longer reads the index: it queries the network's RPC in the user-defined column
+format, which the index's projection does not fold yet.
 
 ### `GET /metrics` and `GET /admin/metrics`
 
@@ -1208,27 +1207,23 @@ are hidden:
 - **Transactions** — stored transaction query table for exact block, block range, and date range inspection.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
 - **Charts** — interactive historical chart view with links from selected block points into Transactions.
-- **Data** (`/data`) — live entity state read from an Arkiv node rather than from the index. A CodeMirror
-  editor (loaded as its own chunk only on this page) takes an Arkiv 0.8 query with highlighting and
-  completions; a pasted bare entity key or address is rewritten to `$key = key(..)` / `$owner = addr(..)`.
-  Ctrl+Enter or **Run query** sends `arkiv_query` with every projection except the payload (payloads on this
-  network run to ~100 KB each), and the run is recorded in the URL as `/data?q=...&pageSize=...&expiration=...`
-  so it can be shared and reached by back/forward. Results are cards: key linked to its indexed history,
-  owner/creator, content type, creation flags, created/updated/expires blocks with dates estimated from
-  `arkiv_getBlockTiming`, a lifetime bar, and one chip per attribute; chips and the funnel buttons open a
-  menu to query by that value only, add it to the current query, or copy it. "Load next page" resumes the
-  node's cursor at the block the first page was read at; "Expiring within 24h" filters the loaded cards
-  client-side. Syntax errors show the node's message with a caret at the reported position. Below the results
-  is a collapsed RPC endpoint switch: the **experimental entity index** (`/api/shadow-rpc/experimental`, the
-  default) or a **custom RPC URL** called straight from the browser; in admin mode the **indexer backend**
-  (`/api/shadow-rpc`, which forwards `arkiv_query`, `arkiv_getEntityCount` and `arkiv_getBlockTiming` to the
-  node it is configured with, using the deployment's key and an administrator session) and **Both (compare)** join the
-  list. The choice is kept in browser local storage; a remembered or linked `backend`/`both` is used as the
-  index outside admin mode.
-  "Check connection" runs `eth_chainId`, `web3_clientVersion` and the three Arkiv reads against the selected
-  endpoint and reports each call's verdict, latency and result, plus the node's head block, block time, live
-  entity count and a sample entity key linked to its indexed history. The page also reads `/api/health` to warn
-  when the backend's `SHADOW_RPC_UPSTREAM_METHODS` does not cover the entity reads.
+- **Entity explorer** (`/entity-explorer`; `/data` still works) — entity state with user-defined columns, read from the network's RPC through the Arkiv
+  SDK rather than from the index. Entities carry typed attributes (bool, i32, u64, u256, dec, str, addr, key,
+  bytes32, bytes), each indexed or stored only, zero or more `bytes` blobs, and an `arkiv.schema` tag when
+  written through a named schema. No live node serves this format yet, so the network is a mock node
+  simulated in the browser over a generated dataset, answering queries with the documented semantics and error
+  codes (`frontend/src/entityExplorer/lib/client.ts` is where a real node's transport would go). A CodeMirror
+  editor (loaded as its own chunk) highlights the query language and completes the filterable entity fields,
+  `arkiv.schema` and the column names of the results on screen; a pasted bare entity key or address is
+  rewritten to `$key = key(..)` / `$owner = addr(..)`. The run is recorded in the URL as
+  `/entity-explorer?q=...&pageSize=...&expiration=...` so it can be shared and reached by back/forward. Results are
+  one row per entity — key, schema, owner, a preview of its attributes, expiry — and expand in place to the full
+  entity: owner, creator, creation transaction, flags, a lifetime bar with dates estimated from block timing,
+  every column with its type and whether it is indexed, and a viewer per blob (text/JSON, image, hex, gzip
+  decompression guided by a sibling `<name>Encoding` column). Schema chips narrow a mixed page to one schema.
+  Values open a menu to query by them, add them to the query, or copy them; unindexed ones say why they cannot
+  be filtered on. "Load next page" resumes the cursor at the block the first page was read at, "Expiring within
+  24h" filters loaded rows client-side, and a TypeScript panel shows the query as SDK code.
 
 Every page carries a **scanner sync banner** above the content whenever the indexer trails the chain head. It
 polls `GET /sync` every 10 seconds and states how far behind the scanner is (in blocks and in chain time),

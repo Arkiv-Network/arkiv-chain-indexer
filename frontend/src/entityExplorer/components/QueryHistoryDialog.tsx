@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { fmtDate } from "./format";
-import { copyText } from "./TransactionsView";
-import { QUERY_HISTORY_LIMIT, type QueryHistoryEntry } from "./queryHistory";
+import { fmtDate } from "@/format";
+import { copyText } from "@/components/copy-cell";
+import { QUERY_HISTORY_LIMIT, type QueryHistoryEntry } from "../lib/queryHistory";
 
 export function QueryHistoryDialog({ entries, timeZone, onLoad, onEdit, onDelete, onClose }: {
   entries: QueryHistoryEntry[];

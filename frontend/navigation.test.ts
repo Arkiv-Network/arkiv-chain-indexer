@@ -8,13 +8,13 @@ function visibleViews(adminVerified: boolean, transactionDataEnabled: boolean | 
 describe("frontend navigation visibility", () => {
   test("direct admin views require the same access as their navigation items", () => {
     for (const view of ["admin", "baseload", "health"] as const) expect(requiresAdminView(view)).toBe(true);
-    for (const view of ["statistics", "home", "data", "search", "entity", "transaction"] as const) expect(requiresAdminView(view)).toBe(false);
+    for (const view of ["statistics", "home", "entity-explorer", "search", "entity", "transaction"] as const) expect(requiresAdminView(view)).toBe(false);
   });
 
   test("hides admin-only pages when admin mode is not verified", () => {
     const views = visibleViews(false, true);
     for (const view of ["admin", "baseload", "health"]) expect(views).not.toContain(view);
-    expect(views).toContain("data");
+    expect(views).toContain("entity-explorer");
   });
 
   test("shows admin-only pages when admin mode is verified", () => {

@@ -15,7 +15,7 @@ import { TIME_ZONE_OPTIONS } from "./timezones";
 const NAV_ICONS: Partial<Record<View, LucideIcon>> = {
   statistics: LineChart,
   home: Home, search: Search, blocks: Boxes, block: Box, transactions: Wallet,
-  entity: Layers, address: Wallet, data: Database, "transaction-records": Receipt,
+  entity: Layers, address: Wallet, "entity-explorer": Database, "transaction-records": Receipt,
   senders: Users, ranges: ListOrdered, charts: LineChart, guzzlers: Activity,
   health: HeartPulse, admin: Shield, baseload: Gauge,
 };

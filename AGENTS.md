@@ -119,8 +119,8 @@ docker compose up --build
   data, with an allowlisted node passthrough below. The path demands administrator authentication: a session
   with configured Origin and X-CSRF-Token, or a temporary access token (it spends the upstream's quota).
   `/shadow-rpc/experimental` is open
-  and explicitly receives no passthrough forwarder; the Data tab offers only the
-  index and a custom node outside admin mode. `latest` means the indexed head (`scanner_state.last_successful_block`);
+  and explicitly receives no passthrough forwarder. The entity explorer uses neither: it queries the network's
+  own RPC through the Arkiv SDK (see the entity explorer note below). `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
   calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns
@@ -193,6 +193,18 @@ docker compose up --build
   the newest reading at or before a block; when there is none, `eth_getBalance` and `GET /balances` say so
   rather than answering `0x0` — an unindexed account and an empty one are different facts, and conflating them
   is the `eth_getLogs`-below-the-floor mistake again.
+- The frontend entity explorer (`/entity-explorer`, code in `frontend/src/entityExplorer/`) speaks the user-defined column format: entities carry
+  typed attributes (indexed or stored only, zero or more `bytes` blobs, an `arkiv.schema` tag) instead of a
+  payload and content type. It queries the network's RPC through `@arkiv-network/sdk`, installed from
+  `frontend/vendor/` until that SDK is published (the frontend Dockerfile copies the tarball before `npm ci`).
+  No live node serves the format yet, so the network is a mock node in the browser
+  (`entityExplorer/mock/`, a viem transport over a generated dataset with a query-language interpreter);
+  `entityExplorer/lib/client.ts` builds the one client, so a real node is a transport swap there. It does not use `/shadow-rpc` or the entity index, whose
+  projection still folds the payload format. It fetches with TanStack Query and keeps `q`, `pageSize` and
+  `expiration` in the URL with nuqs; both providers wrap the page inside its lazy chunk, since no
+  other page uses them. Layout: `EntityExplorerView.tsx` composes the page, `hooks/` holds the run
+  (`useEntitySearch`) and saved queries, `components/` the UI, `lib/` the framework-free logic the frontend
+  tests cover, and `mock/` the mock node. `/data`, the page's old path, still resolves to it.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

@@ -14,7 +14,7 @@ import { CedricOnTimer } from "./Cedric";
 import { CopyButton } from "@/components/copy-cell";
 
 // Re-exported so existing `import { CopyButton } from "./TransactionView"`
-// call sites (DataView, EntityView) keep working against the shared component.
+// call sites (EntityView) keep working against the shared component.
 export { CopyButton } from "@/components/copy-cell";
 import { OpBadge, StatusBadge, type StatusTone } from "@/components/op-badge";
 import { Button } from "@/components/ui/button";

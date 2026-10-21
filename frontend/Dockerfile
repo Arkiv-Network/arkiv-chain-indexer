@@ -41,6 +41,9 @@ ENV VITE_HISTOGRAM_CLOCK_TICK_MS=$VITE_HISTOGRAM_CLOCK_TICK_MS
 ENV VITE_NO_BATCHER=$VITE_NO_BATCHER
 
 COPY package.json package-lock.json ./
+# The Arkiv SDK with user-defined columns is not on npm yet; package.json
+# installs it from this tarball.
+COPY vendor ./vendor
 RUN npm ci --no-audit --no-fund
 
 COPY tsconfig.json vite.config.ts index.html ./

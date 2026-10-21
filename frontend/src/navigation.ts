@@ -12,7 +12,7 @@ export const ALL_NAV_ITEMS: readonly NavItem[] = [
   { view: "statistics", label: "Statistics" },
   { view: "search", label: "Search" },
   { view: "blocks", label: "Blocks" },
-  { view: "data", label: "Data" },
+  { view: "entity-explorer", label: "Entity explorer" },
   { view: "block", label: "Block", requiresTransactionData: true },
   { view: "entity", label: "Entity", requiresTransactionData: true },
   { view: "transactions", label: "Address", requiresTransactionData: true },
