@@ -59,7 +59,8 @@ of this gate. The scanner continues independently while the backend completes re
 
 Only make the reference file available after the chain is running. An absent
 reference, unavailable database/node, or transient download error is retried.
-Downloads stream to temporary files, enforce declared lengths and hashes, and
+Downloads retry after 120 seconds without response data. They stream to temporary
+files, enforce declared lengths and hashes, and
 rename verified files atomically. Scratch must hold the full dump plus its small
 manifest; it is separate from PostgreSQL data, indexes and WAL. The worker removes
 its verified local files after the matching database is durably done. Downloaded payload

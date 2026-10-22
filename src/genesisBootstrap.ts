@@ -140,19 +140,28 @@ async function verifiedFile(path: string, object: BootstrapObject): Promise<bool
 }
 
 /** One bounded stream, no body buffering; consumers never see a partial or unverified file. */
-export async function downloadBootstrapObject(object: BootstrapObject, path: string, fetcher: BootstrapFetch, signal?: AbortSignal): Promise<void> {
+export async function downloadBootstrapObject(object: BootstrapObject, path: string, fetcher: BootstrapFetch, signal?: AbortSignal, idleTimeoutMs = 120_000): Promise<void> {
   if (await verifiedFile(path, object)) return;
   await rm(path, { force: true });
   const partial = `${path}.partial-${randomUUID()}`;
   let response: Response | undefined;
+  const idle = new AbortController();
+  const downloadSignal = signal ? AbortSignal.any([signal, idle.signal]) : idle.signal;
+  let idleTimer: ReturnType<typeof setTimeout>;
+  const armIdleTimer = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => idle.abort(new Error("bootstrap object download stalled")), idleTimeoutMs);
+  };
+  armIdleTimer();
   try {
-    response = await fetcher(object.uri, object.versionId, signal);
+    response = await fetcher(object.uri, object.versionId, downloadSignal);
     if (!response.ok || !response.body) throw new Error("bootstrap object download is unavailable");
     const file = await open(partial, "wx", 0o600);
     const hasher = createHash("sha256");
     let bytes = 0;
     try {
       for await (const chunk of response.body) {
+        armIdleTimer();
         bytes += chunk.byteLength;
         if (bytes > object.bytes) throw new BootstrapIntegrityError("bootstrap object exceeds its declared byte size");
         hasher.update(chunk);
@@ -171,7 +180,12 @@ export async function downloadBootstrapObject(object: BootstrapObject, path: str
       await file.close();
     }
     await rename(partial, path);
+  } catch (error) {
+    // Stalls are availability failures, never durable artifact-integrity failures.
+    if (idle.signal.aborted) throw new Error("bootstrap object download stalled");
+    throw error;
   } finally {
+    clearTimeout(idleTimer!);
     if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {});
     await rm(partial, { force: true });
   }

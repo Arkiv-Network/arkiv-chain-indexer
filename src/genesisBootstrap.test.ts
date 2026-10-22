@@ -66,6 +66,30 @@ describe("managed genesis bootstrap artifacts", () => {
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 
+  test("a stalled response aborts and removes scratch without becoming an integrity failure", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "genesis-bootstrap-"));
+    let observedSignal: AbortSignal | undefined;
+    try {
+      const object = { uri: "s3://bucket/state", sha256: digest("data"), bytes: 4 };
+      const stalled = downloadBootstrapObject(object, join(dir, "state"), async (_uri, _version, signal) => {
+        observedSignal = signal;
+        return new Response(new ReadableStream({ start(controller) {
+          controller.enqueue(new TextEncoder().encode("d"));
+          signal!.addEventListener("abort", () => controller.error(signal!.reason), { once: true });
+        } }));
+      }, undefined, 10);
+      let failure: unknown;
+      try { await stalled; } catch (error) { failure = error; }
+      expect(observedSignal?.aborted).toBe(true);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(BootstrapIntegrityError);
+      expect((failure as Error).message).toContain("stalled");
+      expect(await readdir(dir)).toEqual([]);
+      await downloadBootstrapObject(object, join(dir, "state"), async () => new Response("data"));
+      expect(await readFile(join(dir, "state"), "utf8")).toBe("data");
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
   test("restart reclaims only worker partials and preserves verified files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "genesis-bootstrap-"));
     const name = `state-${"a".repeat(64)}.jsonl`;
