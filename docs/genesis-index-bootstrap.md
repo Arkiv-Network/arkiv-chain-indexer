@@ -72,6 +72,12 @@ and genesis evidence. A running repair is observed without starting another load
 A failed import requires explicit reset. A mismatched or unverifiable existing
 identity is refused without replacing data.
 
+Entity reads **fail closed** while genesis import is pending, running, unavailable or failed:
+HTTP endpoints return 503 and entity RPC requests report that the index is incomplete,
+rather than serving a partial set of entities. The frontend shows import progress from
+`/api/health` → `features.entityQueryIndex.readiness` and `genesis.imported` / `genesis.total`.
+The banner clears when the index is ready; block scanning and rollout readiness remain independent.
+
 ## Completion and recovery
 
 `/health` advertises `features.entityQueryIndex.genesisBootstrapVersion: 1` and exposes

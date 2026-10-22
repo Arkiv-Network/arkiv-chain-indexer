@@ -1,4 +1,5 @@
 /** Long-lived pod worker; completed imports stay healthy and are reused across restarts. */
+import { GenesisCountMismatchConfirmation, bootstrapPollInterval } from "../src/genesisBootstrapObservation";
 import { readFile, stat } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { EntityIndexStorage } from "../src/entityIndexStorage";
@@ -26,6 +27,7 @@ const stop = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => stop.abort());
 let storage: EntityIndexStorage | undefined;
 let lastStatus = "";
+const countConfirmation = new GenesisCountMismatchConfirmation();
 function report(status: string) {
   if (status !== lastStatus) { console.log(`genesis bootstrap: ${status}`); lastStatus = status; }
 }
@@ -36,6 +38,7 @@ const node = createRpcGenesisSource({ url: rpc,
 try {
   await prepareBootstrapScratch(scratch);
   while (!stop.signal.aborted) {
+    let countMismatch: string | null = null;
     try {
       // Kubernetes projects the private reference only after the chain is running.
       // Bound config reads, and never include its contents or URIs in log output.
@@ -61,8 +64,13 @@ try {
         } else {
           const count = await node.count();
           if (count !== reference.entityCount) {
-            await recordGenesisVerificationFailure(storage, identity, "block-zero entity count differs from the retained reference");
-            report("failed: block-zero entity count mismatch");
+            countMismatch = JSON.stringify([reference.chainId, chain.genesisHash, reference.sha256, reference.entityCount]);
+            if (countConfirmation.observe(countMismatch)) {
+              await recordGenesisVerificationFailure(storage, identity, "block-zero entity count differs from the retained reference");
+              report("failed: block-zero entity count mismatch");
+            } else {
+              report("waiting to confirm block-zero entity count mismatch");
+            }
           } else {
             try {
               report("downloading and verifying retained artifacts");
@@ -94,7 +102,10 @@ try {
         ? "refused: import requires explicit operator resolution"
         : "waiting for reference, database, node or object storage; retrying");
     }
-    try { await delay(5_000, undefined, { signal: stop.signal }); } catch { break; }
+    // An intervening success, transport error, repair, or reference change breaks the sequence.
+    if (countMismatch === null) countConfirmation.observe(null);
+    const interval = bootstrapPollInterval(lastStatus);
+    try { await delay(interval, undefined, { signal: stop.signal }); } catch { break; }
   }
 } finally {
   await storage?.close();
