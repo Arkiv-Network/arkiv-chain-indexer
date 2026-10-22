@@ -61,7 +61,8 @@ Only make the reference file available after the chain is running. An absent
 reference, unavailable database/node, or transient download error is retried.
 Downloads stream to temporary files, enforce declared lengths and hashes, and
 rename verified files atomically. Scratch must hold the full dump plus its small
-manifest; it is separate from PostgreSQL data, indexes and WAL. Downloaded payload
+manifest; it is separate from PostgreSQL data, indexes and WAL. The worker removes
+its verified local files after the matching database is durably done. Downloaded payload
 bytes never enter PostgreSQL.
 
 The worker checks durable state before downloading. A matching completed import is
@@ -72,7 +73,7 @@ identity is refused without replacing data.
 
 ## Completion and recovery
 
-`/health` advertises `entityQueryIndex.genesisBootstrapVersion: 1` and exposes
+`/health` advertises `features.entityQueryIndex.genesisBootstrapVersion: 1` and exposes
 `entityQueryIndex.ready`, `readiness`, and `genesis` progress and
 identity. The import command's successful return means either completed-state
 reuse or handoff to the backend's repair phase. The manager must observe

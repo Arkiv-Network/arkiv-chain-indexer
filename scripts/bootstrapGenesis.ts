@@ -5,7 +5,7 @@ import { EntityIndexStorage } from "../src/entityIndexStorage";
 import { createRpcGenesisSource } from "../src/entityGenesis";
 import { fileDumpSource } from "../src/entityGenesisDump";
 import { GenesisImportRefused, importGenesisDump, parseDumpManifest, recordGenesisVerificationFailure } from "../src/entityGenesisDumpImport";
-import { BootstrapIntegrityError, bootstrapDisposition, createBootstrapFetcher, downloadGenesisBootstrap, parseBootstrapReference, prepareBootstrapScratch } from "../src/genesisBootstrap";
+import { BootstrapIntegrityError, bootstrapDisposition, createBootstrapFetcher, downloadGenesisBootstrap, parseBootstrapReference, prepareBootstrapScratch, releaseBootstrapScratch } from "../src/genesisBootstrap";
 
 if (process.argv.includes("--help")) {
   console.log("bootstrapGenesis: managed pod worker. Requires DATABASE_URL, GENESIS_BOOTSTRAP_RPC, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY. Optional GENESIS_BOOTSTRAP_REFERENCE (default /bootstrap/reference.json), GENESIS_BOOTSTRAP_SCRATCH (default /bootstrap-scratch), AWS_REGION (default auto). Waits for the private reference; exits only on SIGTERM/SIGINT. Completion is genesis_import=done, not process exit.");
@@ -54,6 +54,7 @@ try {
         } else if (disposition === "reset-required") {
           report("failed: explicit entity reset is required");
         } else if (disposition === "done") {
+          await releaseBootstrapScratch(reference, scratch);
           report("done");
         } else if (disposition === "repair") {
           report("waiting for backend repair");

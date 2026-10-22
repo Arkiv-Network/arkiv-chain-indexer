@@ -119,6 +119,13 @@ export async function prepareBootstrapScratch(scratch: string): Promise<void> {
   }
 }
 
+/** Release this artifact's scratch only after its matching database is durably done. */
+export async function releaseBootstrapScratch(reference: GenesisBootstrapReference, scratch: string): Promise<void> {
+  const dump = join(scratch, `state-${reference.sha256}.jsonl`);
+  await rm(dump, { force: true });
+  await rm(`${dump}.manifest.json`, { force: true });
+}
+
 async function verifiedFile(path: string, object: BootstrapObject): Promise<boolean> {
   try {
     const info = await stat(path);

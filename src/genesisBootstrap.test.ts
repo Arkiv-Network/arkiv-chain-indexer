@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { BootstrapIntegrityError, bootstrapDisposition, createBootstrapFetcher, downloadBootstrapObject, downloadGenesisBootstrap, parseBootstrapReference, prepareBootstrapScratch } from "./genesisBootstrap";
+import { BootstrapIntegrityError, bootstrapDisposition, createBootstrapFetcher, downloadBootstrapObject, downloadGenesisBootstrap, parseBootstrapReference, prepareBootstrapScratch, releaseBootstrapScratch } from "./genesisBootstrap";
 
 import type { GenesisImportState } from "./entityIndexStorage";
 
@@ -75,6 +75,18 @@ describe("managed genesis bootstrap artifacts", () => {
       await writeFile(join(dir, "unrelated.partial-1234"), "other");
       await prepareBootstrapScratch(dir);
       expect((await readdir(dir)).sort()).toEqual([name, "unrelated.partial-1234"].sort());
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  test("completion releases only the matching artifact scratch and is repeatable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "genesis-bootstrap-"));
+    const reference = parseBootstrapReference(fixture());
+    const name = `state-${reference.sha256}.jsonl`;
+    try {
+      for (const file of [name, name + ".manifest.json", "other-import.jsonl"]) await writeFile(join(dir, file), "fixture");
+      await releaseBootstrapScratch(reference, dir);
+      await releaseBootstrapScratch(reference, dir);
+      expect(await readdir(dir)).toEqual(["other-import.jsonl"]);
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 
