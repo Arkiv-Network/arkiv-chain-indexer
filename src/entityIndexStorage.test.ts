@@ -833,6 +833,7 @@ describeWithPostgres("entity index (Postgres)", () => {
       expect(head.result).toBe("0x6a");
       const health = (await (await fetch(`http://${server.hostname}:${server.port}/health`)).json()) as HealthResponseBody;
       expect(health.features.entityQueryIndex).toEqual({
+        ready: true, readiness: "ready", genesisBootstrapVersion: 1,
         path: "/shadow-rpc/experimental",
         methods: [...ARKIV_INDEX_METHODS],
         floorBlock: "100",
@@ -1045,7 +1046,7 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(await index.getEntityVersions(keyOf(6))).toHaveLength(1);
     expect(await index.getEntityVersions(keyOf(3))).toHaveLength(0);
     // Nothing is served while the import owns the index.
-    expect((await call("arkiv_getEntityCount")).error?.message).toMatch(/not projected any block yet/);
+    expect((await call("arkiv_getEntityCount")).error?.message).toMatch(/entity index is incomplete/);
 
     const tick = await projector.runOnce();
     expect(tick.genesisStatus).toBe("done");
@@ -1365,6 +1366,7 @@ describeWithPostgres("offline genesis import (Postgres)", () => {
       source: fileDumpSource(path),
       dumpPath: path,
       manifest: MANIFEST,
+      expected: { chainId: MANIFEST.chainId, genesisHash: `0x${"ab".repeat(32)}` },
       batchEntities: 2,
       onProgress: (event, doc) => events.push([event, doc]),
       progressIntervalMs: 0,
@@ -1466,7 +1468,9 @@ describeWithPostgres("offline genesis import (Postgres)", () => {
     expect(written.finished_at).not.toBeNull();
 
     // Nothing to do twice.
-    await expect(runImport(path)).rejects.toThrow("already imported");
+    const doneBefore = await index.getGenesisImport();
+    expect((await runImport(path)).result.state.status).toBe("done");
+    expect(await index.getGenesisImport()).toEqual(doneBefore);
   });
 
   test("an interrupted run resumes from its last batch without duplicating rows", async () => {
@@ -1497,12 +1501,15 @@ describeWithPostgres("offline genesis import (Postgres)", () => {
 
   test("refuses to run over another import, a different chain, or a node that disagrees", async () => {
     const path = await writeDump("refuse.jsonl", buildDump(ENTITIES));
-    await expect(runImport(path)).rejects.toThrow(GenesisImportRefused); // still done from the previous test
+    await expect(runImport(path, { expected: { chainId: MANIFEST.chainId, genesisHash: `0x${"cd".repeat(32)}` } })).rejects.toThrow(GenesisImportRefused);
     await index.reset();
     await expect(runImport(path, { manifest: { ...MANIFEST, chainId: 1337n } })).rejects.toThrow("follows chain 7733102");
+    await index.reset();
     await expect(runImport(path, { expected: { chainId: 7733102n, count: 6 } })).rejects.toThrow("holds 6 entities at block 0");
+    await index.reset();
     await expect(runImport(path, { expected: { chainId: 7733102n, stateRoot: "0x" + "11".repeat(32) } })).rejects.toThrow("state root");
-    expect(await index.getGenesisImport()).toBeUndefined();
+    expect((await index.getGenesisImport())?.status).toBe("failed");
+    await index.reset();
     await index.setGenesisImport({
       status: "running",
       phase: "walk",

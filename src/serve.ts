@@ -166,7 +166,7 @@ async function main(): Promise<void> {
     // small pool, so a long initial fold never starves the API's connections.
     let genesisImportDescription = "off";
     if (config.entityQueryIndex) {
-      entityIndex = await EntityIndexStorage.open(config.databaseUrl, { max: 4 });
+      entityIndex = await EntityIndexStorage.open(config.databaseUrl, { max: 4, managedGenesis: config.entityIndexGenesis === "managed" });
       // The entities a seeded chain was born with come from the node, since
       // no operation ever created them; without a node only an offline
       // import (scripts/importGenesisState.ts) can bring them in.
@@ -179,7 +179,9 @@ async function main(): Promise<void> {
             })
           : undefined;
       genesisImportDescription =
-        config.entityIndexGenesis === "off"
+        config.entityIndexGenesis === "managed"
+          ? "managed (waiting for the external genesis importer)"
+          : config.entityIndexGenesis === "off"
           ? "off (ENTITY_INDEX_GENESIS=off; an offline import is still finished)"
           : genesisSource
             ? `auto, from the node at ${config.entityIndexGenesisRpc?.url.replace(/\/\/[^/]*@/, "//")} ` +
