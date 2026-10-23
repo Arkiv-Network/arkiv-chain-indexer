@@ -16,7 +16,7 @@
  * that have later operations and marks it `done` (see `/health` →
  * `entityQueryIndex.genesis`). An interrupted run resumes from its last batch.
  *
- * This is the only script in the repository that writes to Postgres. It runs
+ * This script writes to Postgres. It runs
  * against the backend's database, typically from inside the compose network:
  *
  *   docker compose --env-file .env.sourcify.local -f docker-compose.yml -f docker-compose.prefill.yml \
@@ -31,6 +31,12 @@
  *
  * Options:
  *   --dump <file>                the state.jsonl dump (required)
+ *   --sha256 <hex>               trusted SHA-256 of the exact dump bytes
+ *   --manifest-sha256 <hex>      trusted SHA-256 of the manifest bytes
+ *   --chain-id <id>              expected chain id (also checked against --rpc)
+ *   --genesis-hash <hash>        expected execution block-zero hash, not genesis file SHA
+ *   --state-root <root>          expected block-zero state root
+ *   --entity-count <count>       expected genesis entity count
  *   --manifest <file>            its manifest (default: <dump>.manifest.json)
  *   --database-url <url>         the indexer's Postgres (default: $DATABASE_URL)
  *   --rpc <url>                  a node on the same chain; its chain id, genesis hash,
@@ -44,7 +50,7 @@
  *   --progress-interval <s>      seconds between progress updates (default 2)
  *   --log <json|text>            output format (default json)
  *
- * Exit status: 0 handed off to the backend, 1 failed, 2 usage, 130 stopped by a signal.
+ * Exit status: 0 handed off to the backend or matching completed import reused, 1 failed, 2 usage, 130 stopped by a signal.
  */
 
 import { parseArgs } from "node:util";
@@ -53,6 +59,8 @@ import { fileDumpSource } from "../src/entityGenesisDump";
 import {
   GenesisImportRefused,
   GenesisImportStopped,
+  GenesisVerificationError,
+  dumpSha256,
   importGenesisDump,
   parseDumpManifest,
   type GenesisDumpExpectation,
@@ -69,6 +77,12 @@ import {
 const { values: args } = parseArgs({
   options: {
     dump: { type: "string" },
+    sha256: { type: "string" },
+    "manifest-sha256": { type: "string" },
+    "chain-id": { type: "string" },
+    "genesis-hash": { type: "string" },
+    "state-root": { type: "string" },
+    "entity-count": { type: "string" },
     manifest: { type: "string" },
     "database-url": { type: "string" },
     rpc: { type: "string" },
@@ -86,6 +100,8 @@ const usage = (): never => {
   console.error(
     "usage: bun run scripts/importGenesisState.ts --dump <state.jsonl> [--manifest <file>] [--database-url <url>]\n" +
       "         [--rpc <url>] [--batch <n>] [--rebuild-indexes auto|always|never]\n" +
+      "         [--sha256 <hex>] [--manifest-sha256 <hex>] [--chain-id <id>]\n" +
+      "         [--genesis-hash <hash>] [--state-root <root>] [--entity-count <count>]\n" +
       "         [--progress-file <file>] [--progress-interval <seconds>] [--log json|text]",
   );
   process.exit(args.help ? 0 : 2);
@@ -107,6 +123,10 @@ const batchEntities = Number(args.batch ?? "5000");
 if (!Number.isInteger(batchEntities) || batchEntities <= 0) usage();
 const progressIntervalMs = Number(args["progress-interval"] ?? "2") * 1000;
 if (!Number.isFinite(progressIntervalMs) || progressIntervalMs < 0) usage();
+for (const name of ["sha256", "manifest-sha256"] as const) if (args[name] && !/^[0-9a-fA-F]{64}$/.test(args[name]!)) usage();
+for (const name of ["genesis-hash", "state-root"] as const) if (args[name] && !/^0x[0-9a-fA-F]{64}$/.test(args[name]!)) usage();
+if (args["chain-id"] && !/^[1-9][0-9]*$/.test(args["chain-id"])) usage();
+if (args["entity-count"] && (!/^[0-9]+$/.test(args["entity-count"]) || !Number.isSafeInteger(Number(args["entity-count"])))) usage();
 const progressFile = args["progress-file"] ?? process.env.ENTITY_INDEX_GENESIS_PROGRESS_FILE;
 
 const tracker = new GenesisProgressTracker({ writer: "import-script", source: "dump" });
@@ -133,18 +153,33 @@ let exitCode = 0;
 try {
   emit("start");
   const source = fileDumpSource(dumpPath);
-  if (source.size === 0) throw new GenesisImportRefused(`${dumpPath} is empty or missing`);
-  const manifest = parseDumpManifest(await Bun.file(manifestPath).json());
-  note(`dump ${dumpPath}: ${manifest.count.toLocaleString("en-US")} entities for chain ${manifest.chainId}, ${source.size.toLocaleString("en-US")} bytes`);
+  const manifest = async () => {
+    try {
+      if (args["manifest-sha256"] && await dumpSha256(fileDumpSource(manifestPath), controller.signal) !== args["manifest-sha256"].toLowerCase()) throw new GenesisVerificationError("the manifest SHA-256 does not match the trusted reference");
+      return parseDumpManifest(await Bun.file(manifestPath).json());
+    } catch (error) {
+      if (error instanceof GenesisImportStopped) throw error;
+      throw new GenesisVerificationError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
-  let expected: GenesisDumpExpectation | undefined;
+  let expected: GenesisDumpExpectation = {
+    ...(args["chain-id"] ? { chainId: BigInt(args["chain-id"]) } : {}),
+    ...(args["genesis-hash"] ? { genesisHash: args["genesis-hash"].toLowerCase() } : {}),
+    ...(args["state-root"] ? { stateRoot: args["state-root"].toLowerCase() } : {}),
+    ...(args["entity-count"] ? { count: Number(args["entity-count"]) } : {}),
+  };
   if (args.rpc) {
     const apiKey = process.env.SHADOW_RPC_UPSTREAM_API_KEY;
     const node = createRpcGenesisSource({ url: args.rpc, ...(apiKey ? { apiKey } : {}), log: note });
     const chain = await node.describe();
     const count = await node.count();
+    for (const [key, value] of Object.entries({ ...chain, count })) {
+      const wanted = expected[key as keyof GenesisDumpExpectation];
+      if (wanted !== undefined && wanted !== value) throw new GenesisImportRefused(`the live node's ${key} differs from the trusted reference`);
+    }
     expected = { ...chain, count };
-    note(`node ${args.rpc}: chain ${chain.chainId}, genesis ${chain.genesisHash ?? "?"}, state root ${chain.stateRoot ?? "?"}, ${count.toLocaleString("en-US")} entities at block 0`);
+    note(`node: chain ${chain.chainId}, genesis ${chain.genesisHash ?? "?"}, state root ${chain.stateRoot ?? "?"}, ${count.toLocaleString("en-US")} entities at block 0`);
   }
 
   const storage = await EntityIndexStorage.open(databaseUrl!, { max: 2 });
@@ -154,6 +189,7 @@ try {
       source,
       dumpPath,
       manifest,
+      ...(args.sha256 ? { sha256: args.sha256.toLowerCase() } : {}),
       ...(expected ? { expected } : {}),
       batchEntities,
       rebuildIndexes,

@@ -40,7 +40,7 @@ export function hexPrefixBounds(input: string, digits: number): [string, string]
   return [`0x${low}`, `0x${high}`];
 }
 
-export interface SearchReader { search(input: SearchInput, transactionDataEnabled: boolean): Promise<SearchResponse> }
+export interface SearchReader { search(input: SearchInput, transactionDataEnabled: boolean, entityGeneration?: string): Promise<SearchResponse> }
 
 function blockHref(number: string, transactions: boolean): string {
   if (transactions) return `/block?block=${number}`;
@@ -70,14 +70,14 @@ export class OmniSearch implements SearchReader {
 
   async close(): Promise<void> { await this.db.close(); }
 
-  async search(input: SearchInput, transactionDataEnabled: boolean): Promise<SearchResponse> {
-    const key = JSON.stringify([input, transactionDataEnabled]);
+  async search(input: SearchInput, transactionDataEnabled: boolean, entityGeneration?: string): Promise<SearchResponse> {
+    const key = JSON.stringify([input, transactionDataEnabled, entityGeneration]);
     const hit = this.cache.get(key);
     if (hit) return JSON.parse(typeof hit.body === "string" ? hit.body : new TextDecoder().decode(hit.body)) as SearchResponse;
     const pending = this.inflight.get(key);
     if (pending) return pending;
     if (this.inflight.size >= 2) throw new SearchBusyError("Search is busy. Please try again shortly.");
-    const work = this.execute(input, transactionDataEnabled).then(async (body) => {
+    const work = this.execute(input, transactionDataEnabled, entityGeneration !== "incomplete").then(async (body) => {
       // Byte bodies make the cache's byte limit exact for Unicode metadata too.
       if (!body.partial) await this.cache.load(key, async () => ({ status: 200, body: new TextEncoder().encode(JSON.stringify(body)) }));
       return body;
@@ -101,7 +101,7 @@ export class OmniSearch implements SearchReader {
     });
   }
 
-  private async execute(input: SearchInput, transactionDataEnabled: boolean): Promise<SearchResponse> {
+  private async execute(input: SearchInput, transactionDataEnabled: boolean, entitiesAvailable: boolean): Promise<SearchResponse> {
     const body: SearchResponse = {
       query: input.query, results: [], suggestions: [], truncated: false, partial: false, notes: [],
       coverage: { attributeIndex: false, attributeHead: null,
@@ -133,10 +133,11 @@ export class OmniSearch implements SearchReader {
     }
     const isHex = /^(?:0x)?[0-9a-f]{6,64}$/i.test(q);
     if (isHex) {
-      body.truncated = await this.identifiers(input, transactionDataEnabled, run, add);
+      body.truncated = await this.identifiers(input, transactionDataEnabled, entitiesAvailable, run, add);
       body.notes.push("Identifier prefixes search stored block/transaction hashes, entity keys, senders and balance addresses, plus projected owners/creators when enabled. Other address roles are not indexed by search. A full address can still be opened directly.");
     }
     if (body.partial) body.notes.push("Some lookups reached the search time budget. Results may be incomplete; refine the query or retry.");
+    if (!entitiesAvailable) { body.partial = true; body.notes.push("The genesis entity index is incomplete; projected entities are excluded."); }
     body.truncated ||= body.results.length > input.limit;
     body.results = body.results.slice(0, input.limit);
     body.suggestions = body.results.map((r) => ({
@@ -146,7 +147,7 @@ export class OmniSearch implements SearchReader {
   }
 
   private async identifiers(
-    input: SearchInput, transactions: boolean,
+    input: SearchInput, transactions: boolean, entitiesAvailable: boolean,
     run: (fn: (tx: DbQueryable) => Promise<void>) => Promise<void>, add: (r: SearchResult) => void,
   ): Promise<boolean> {
     let truncated = false;
@@ -158,7 +159,7 @@ export class OmniSearch implements SearchReader {
         { table: "transactions", column: "lower(from_address)", digits: 40, kind: "address" as const, detail: "Sender address" },
         { table: "account_balances", column: "address", digits: 40, kind: "address" as const, detail: "Balance address" },
       ] : []),
-      ...(transactions && this.entityIndex ? [
+      ...(transactions && this.entityIndex && entitiesAvailable ? [
         { table: "entity_versions", column: "entity_key", digits: 64, kind: "entity" as const, detail: "Projected entity key" },
         { table: "entity_versions", column: "owner", digits: 40, kind: "address" as const, detail: "Entity owner address (including history)" },
         { table: "entity_versions", column: "creator", digits: 40, kind: "address" as const, detail: "Entity creator address" },

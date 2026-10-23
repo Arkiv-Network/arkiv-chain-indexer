@@ -53,7 +53,7 @@ export interface EntityProjectorGenesisOptions {
   /** The node to import from; without one, only an import the offline importer started is finished here. */
   source?: GenesisSource;
   /** `auto` asks the source once whether block 0 holds entities; `off` never asks. */
-  mode?: "auto" | "off";
+  mode?: "auto" | "off" | "managed";
   /** The largest genesis the RPC walk takes on; beyond it the import waits for the offline importer. */
   rpcLimit?: number;
   /** Entities per write transaction. */
@@ -270,8 +270,6 @@ export class EntityProjector {
     };
     const head = await this.storage.getIndexedHead();
     result.head = head;
-    if (head === undefined) return result;
-
     const genesis = await this.runGenesisStage();
     result.genesisStatus = genesis.status;
     result.genesisEntitiesImported = genesis.imported;
@@ -281,7 +279,7 @@ export class EntityProjector {
       result.lockHeldElsewhere = true;
       return result;
     }
-    if (genesis.blocked) return result;
+    if (genesis.blocked || head === undefined) return result;
 
     let progress = await this.storage.getProgress();
     if (progress.floorBlock === undefined) {
@@ -351,6 +349,8 @@ export class EntityProjector {
   ): Promise<{ entities: number; versions: number } | undefined> {
     try {
       return await this.storage.withFoldLock(async (client) => {
+        const genesis = await this.storage.getGenesisImport(client);
+        if (genesis && genesis.status !== "done" && genesis.status !== "none") return undefined;
         const refold = await this.storage.refoldEntities(keys, chunkEnd, client);
         await this.storage.setProgress(
           { projectedThroughBlock: chunkEnd, lastFoldAt: new Date().toISOString() },
@@ -389,7 +389,11 @@ export class EntityProjector {
     const since = new Date(Date.parse(watermark) - this.lateScanOverlapMs).toISOString();
     const keys = await this.storage.keysScannedSince(since, through);
     if (keys.length > 0) {
-      const folded = await this.storage.withFoldLock((client) => this.storage.refoldEntities(keys, through, client));
+      const folded = await this.storage.withFoldLock(async (client) => {
+        const genesis = await this.storage.getGenesisImport(client);
+        if (genesis && genesis.status !== "done" && genesis.status !== "none") return undefined;
+        return this.storage.refoldEntities(keys, through, client);
+      });
       if (folded === undefined) return undefined;
       this.log(`entity index: refolded ${folded.entities} entities whose operations arrived below block ${through}`);
       if (this.floorOverride === undefined && floor !== undefined) {
@@ -434,9 +438,9 @@ export class EntityProjector {
 
   private async runGenesisStage(): Promise<GenesisStageOutcome> {
     const state = await this.storage.getGenesisImport();
-    if (state === undefined) return this.probeGenesis();
+    if (state === undefined) return this.genesis.mode === "managed" ? { ...GENESIS_IDLE, blocked: true } : this.probeGenesis();
     if (this.progressWriter && this.progressTrackedImport !== state.startedAt) this.publishGenesis(state);
-    if (state.status !== "running") return { ...GENESIS_IDLE, status: state.status };
+    if (state.status !== "running") return { ...GENESIS_IDLE, status: state.status, blocked: state.status !== "done" && (this.genesis.mode === "managed" || state.status === "waiting" || state.status === "failed" || state.status === "unavailable") };
     return state.phase === "repair" ? this.repairGenesis(state) : this.walkGenesis(state);
   }
 
@@ -487,7 +491,7 @@ export class EntityProjector {
    */
   private async probeGenesis(): Promise<GenesisStageOutcome> {
     const source = this.genesis.source;
-    if (!source || this.genesis.mode === "off") return GENESIS_IDLE;
+    if (!source || this.genesis.mode !== "auto") return GENESIS_IDLE;
     if (this.floorOverride !== undefined && this.floorOverride > 0n) {
       this.warnOnce("pinned-floor", `entity index: genesis import skipped; the floor is pinned at block ${this.floorOverride}`);
       return GENESIS_IDLE;
@@ -708,7 +712,7 @@ export class EntityProjector {
     const startedAt = Date.now();
     const floored = await this.storage.withFoldLock(async (client) => {
       const current = await this.storage.getGenesisImport(client);
-      if (!current || current.status !== "running" || current.phase !== "repair") return "moved" as const;
+      if (!current || current.status !== "running" || current.phase !== "repair" || current.startedAt !== state.startedAt || current.importId !== state.importId) return "moved" as const;
       const progress = await this.storage.getProgress();
       if (progress.floorBlock !== undefined && progress.floorBlock === 0n) return "ok" as const;
       if (progress.floorBlock !== undefined) {
@@ -743,7 +747,7 @@ export class EntityProjector {
       const expectedAfter = after;
       const outcome = await this.storage.withFoldLock(async (client) => {
         const current = await this.storage.getGenesisImport(client);
-        if (!current || current.status !== "running" || current.phase !== "repair" || current.repairAfterKey !== expectedAfter) {
+        if (!current || current.status !== "running" || current.phase !== "repair" || current.repairAfterKey !== expectedAfter || current.startedAt !== state.startedAt || current.importId !== state.importId) {
           return "moved" as const;
         }
         if (keys.length > 0) await this.storage.refoldEntities(keys, through, client);

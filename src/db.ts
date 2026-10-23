@@ -30,6 +30,8 @@ export interface DbListenSubscription {
 }
 
 export interface Db extends DbQueryable {
+  /** Reserve one connection without holding a long-running transaction. */
+  withConnection<T>(fn: (connection: DbQueryable) => Promise<T>): Promise<T>;
   transaction<T>(fn: (tx: DbQueryable) => Promise<T>): Promise<T>;
   /**
    * Subscribe to a Postgres NOTIFY channel. The handler receives each
@@ -76,6 +78,10 @@ export function openDb(connectionString: string, options: OpenDbOptions = {}): D
   const base = queryableFrom(sql);
   return {
     query: base.query,
+    async withConnection<T>(fn: (connection: DbQueryable) => Promise<T>): Promise<T> {
+      const connection = await sql.reserve();
+      try { return await fn(queryableFrom(connection)); } finally { connection.release(); }
+    },
     transaction<T>(fn: (tx: DbQueryable) => Promise<T>): Promise<T> {
       return sql.begin((tx) => fn(queryableFrom(tx))) as Promise<T>;
     },

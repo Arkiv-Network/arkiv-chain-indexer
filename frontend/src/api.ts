@@ -817,6 +817,8 @@ export interface HealthResponse {
 }
 
 export interface EntityQueryIndexHealth {
+  ready?: boolean;
+  readiness?: string;
   path: string;
   methods: string[];
   /** First block the index can attribute entities from; null until the projector has started. */

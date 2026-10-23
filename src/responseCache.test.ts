@@ -192,6 +192,24 @@ describe("ResponseCache", () => {
     expect(calls).toBe(2);
   });
 
+  test("a post-import request never joins a pre-import load invalidated by clear", async () => {
+    const cache = new ResponseCache();
+    let releaseOld!: () => void;
+    let releaseNew!: () => void;
+    const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+    const newGate = new Promise<void>((resolve) => { releaseNew = resolve; });
+    const old = cache.load(KEY_A, async () => { await oldGate; return response("not found"); });
+    cache.clear();
+    const current = cache.load(KEY_A, async () => { await newGate; return response("imported entity"); });
+    releaseOld();
+    expect(await old).toEqual(response("not found"));
+    const joined = cache.load(KEY_A, async () => { throw new Error("new loader should remain in flight"); });
+    releaseNew();
+    expect(await current).toEqual(response("imported entity"));
+    expect(await joined).toEqual(response("imported entity"));
+    expect(cache.get(KEY_A)).toEqual(response("imported entity"));
+  });
+
   test("clear drops every entry and poisons loads in flight", async () => {
     const cache = new ResponseCache();
     await cache.load(KEY_A, async () => response("a"));

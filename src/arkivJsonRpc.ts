@@ -427,6 +427,7 @@ function blockUnavailable(requested: bigint, latest: bigint, reason: string): Js
 
 /** The block a read evaluates at: the projection head for `latest`, else a block the index covers. */
 function resolveBlock(progress: EntityIndexProgress, requested: bigint | "latest"): ResolvedBlock {
+  if (progress.readiness?.ready === false) throw new JsonRpcError(JSON_RPC_SERVER_ERROR, `the entity index is incomplete: ${progress.readiness.reason}`);
   const head = progress.projectedThroughBlock;
   if (head === undefined) {
     throw new JsonRpcError(
@@ -549,7 +550,8 @@ export function createArkivIndexMethods(
       // The projection head, as `latest` is: a caller that pins a read to
       // `current_block` must land on a block the index can answer for, and
       // the chain head the scanner has reached may be a few blocks ahead.
-      const head = (await index.getProgress()).projectedThroughBlock;
+      const progress = await index.getProgress();
+      const head = resolveBlock(progress, "latest").block;
       const block = head === undefined ? undefined : await chain.getBlockByNumber(head);
       if (head === undefined || !block) {
         throw new JsonRpcError(JSON_RPC_SERVER_ERROR, "the entity index has not projected any block yet");

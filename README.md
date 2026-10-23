@@ -1003,6 +1003,15 @@ fill, a rescan, the backfill scanner — and refolds those keys too. A first bui
 history in chunks and takes minutes for a few hundred thousand blocks. All writes run under an advisory lock,
 so two backends on one database never fold on top of each other.
 
+For managed post-genesis provisioning, private artifact references, and recovery, see
+[managed explorer genesis import](docs/genesis-index-bootstrap.md).
+
+Entity reads **fail closed** while genesis import is pending, running, unavailable or failed:
+HTTP endpoints return 503 and entity RPC requests report that the index is incomplete,
+rather than serving a partial set of entities. The frontend shows import progress from
+`/api/health` → `features.entityQueryIndex.readiness` and `genesis.imported` / `genesis.total`.
+The banner clears when the index is ready; block scanning and rollout readiness remain independent.
+
 **Genesis entities (seeded chains).** A devnet built with
 [arkiv-prefill](https://github.com/Arkiv-Network/arkiv-prefill) carries its dataset in the block-0 state:
 `arkiv-cli seed-genesis` writes a reth `init-state` dump, the node starts on it, and no transaction, receipt or

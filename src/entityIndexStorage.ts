@@ -38,6 +38,8 @@ import { compileEntityQuery } from "./entityQuerySql";
 
 export interface EntityIndexStorageOptions {
   schema?: string;
+  /** A manager-provided genesis artifact is required before entity reads. */
+  managedGenesis?: boolean;
   /** Pool size; the index shares the database with the scanner and the API. */
   max?: number;
   /** Entity keys refolded per pass; see {@link DEFAULT_FOLD_KEY_BATCH}. */
@@ -53,6 +55,8 @@ export interface EntityIndexProgress {
   /** Operations scanned after this instant and sitting below the fold point still await a refold. */
   lateScanWatermark: string | undefined;
   lastFoldAt: string | undefined;
+  /** Incomplete genesis state never vouches for entity query results. */
+  readiness?: EntityIndexReadiness;
 }
 
 /**
@@ -112,7 +116,21 @@ export type GenesisImportStatus = "none" | "waiting" | "running" | "done" | "una
  * - `running`/`repair`: every row is in; keys that also have operations are being refolded on top;
  * - `done`, `unavailable` (the node holds no block-0 state), `failed` (with `error`).
  */
+export interface EntityIndexReadiness {
+  ready: boolean;
+  reason: "ready" | "genesis-pending" | "genesis-running" | "genesis-failed" | "genesis-unavailable";
+  /** Changes on reset/import, preventing reuse of cached entity responses. */
+  generation: string;
+}
+
 export interface GenesisImportState {
+  importId?: string;
+  /** Per-invocation fence, renewed on resume after acquiring the session lease. */
+  attemptId?: string;
+  artifactSha256?: string;
+  artifactBytes?: number;
+  stateRoot?: string;
+  indexes?: "kept" | "dropped";
   status: GenesisImportStatus;
   phase: "walk" | "repair" | null;
   source: "rpc" | "dump" | null;
@@ -382,6 +400,7 @@ export class EntityIndexStorage implements EntityIndexReader {
   private readonly qLogs: string;
   private readonly qScannerState: string;
   private readonly foldKeyBatch: number;
+  private readonly managedGenesis: boolean;
 
   private constructor(
     private readonly db: Db,
@@ -389,6 +408,7 @@ export class EntityIndexStorage implements EntityIndexReader {
     options: EntityIndexStorageOptions,
   ) {
     this.schema = options.schema ?? "public";
+    this.managedGenesis = options.managedGenesis ?? false;
     this.foldKeyBatch = options.foldKeyBatch ?? DEFAULT_FOLD_KEY_BATCH;
     const prefix = quoteIdent(this.schema);
     this.qState = `${prefix}.entity_index_state`;
@@ -403,8 +423,7 @@ export class EntityIndexStorage implements EntityIndexReader {
   static async open(connectionString: string, options: EntityIndexStorageOptions = {}): Promise<EntityIndexStorage> {
     const db = openDb(connectionString, options.max !== undefined ? { max: options.max } : {});
     const storage = new EntityIndexStorage(db, true, options);
-    await storage.initSchema();
-    return storage;
+    try { await storage.initSchema(); return storage; } catch (error) { await db.close(); throw error; }
   }
 
   static async fromDb(db: Db, options: EntityIndexStorageOptions = {}): Promise<EntityIndexStorage> {
@@ -461,7 +480,7 @@ export class EntityIndexStorage implements EntityIndexReader {
     // in-transaction tie-break, and the address indexes gained the expiry
     // bound; the indexes built for the old shapes go.
     for (const name of LEGACY_INDEXES) {
-      await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent(name)}`);
+      await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent(this.schema)}.${quoteIdent(name)}`);
     }
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qAttributes} (
@@ -475,7 +494,19 @@ export class EntityIndexStorage implements EntityIndexReader {
         PRIMARY KEY (entity_key, version, name)
       )
     `);
-    await this.ensureIndexes();
+    if (this.managedGenesis) {
+      await this.withFoldLock(async (client) => {
+        if (await this.getGenesisImport(client)) return;
+        await this.setGenesisImport({ status: "waiting", phase: null, source: "dump", chainId: null, genesisHash: null,
+          total: 0, imported: 0, cursor: null, repairAfterKey: null, startedAt: new Date().toISOString(), finishedAt: null, error: null }, client);
+      });
+    }
+    const genesis = await this.getGenesisImport();
+    // A bulk loader owns missing indexes until its tracked rebuild. Startup
+    // must not rebuild a large partial index before the backend can serve health.
+    if (!(genesis?.source === "dump" && (genesis.status === "running" || genesis.status === "failed"))) {
+      await this.ensureIndexes();
+    }
     // Late arrivals (gap fills, rescans) are found by when they were written.
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_scanned_at_idx")}
@@ -498,7 +529,7 @@ export class EntityIndexStorage implements EntityIndexReader {
    */
   async dropSecondaryIndexes(): Promise<void> {
     for (const index of SECONDARY_INDEXES) {
-      await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent(index.name)}`);
+      await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent(this.schema)}.${quoteIdent(index.name)}`);
     }
   }
 
@@ -525,6 +556,7 @@ export class EntityIndexStorage implements EntityIndexReader {
       projectedThroughBlock: asBigint(STATE_PROJECTED_THROUGH),
       lateScanWatermark: state.get(STATE_LATE_SCAN_WATERMARK),
       lastFoldAt: state.get(STATE_LAST_FOLD_AT),
+      readiness: genesisReadiness(state.has(STATE_GENESIS_IMPORT) ? JSON.parse(state.get(STATE_GENESIS_IMPORT)!) : undefined, this.managedGenesis),
     };
   }
 
@@ -600,12 +632,27 @@ export class EntityIndexStorage implements EntityIndexReader {
     return reading;
   }
 
-  /** Drop the projection and its bookkeeping so the next fold starts over. */
+  /** Hold an exclusive importer/reset lease, without a transaction spanning the dump. */
+  async withImportLock<T>(fn: () => Promise<T>): Promise<T> {
+    return this.db.withConnection(async (connection) => {
+      const key = `entity-genesis-import:${this.schema}`;
+      const lock = await connection.query<{ locked: boolean }>("SELECT pg_try_advisory_lock(hashtext($1)) AS locked", [key]);
+      if (!lock.rows[0]?.locked) throw new Error("another genesis importer or reset is running");
+      try { return await fn(); } finally {
+        await connection.query("SELECT pg_advisory_unlock(hashtext($1))", [key]);
+      }
+    });
+  }
+
+  /** Call only after stopping writers. The import lease and fold lock fence in-flight work. */
   async reset(): Promise<void> {
-    await this.db.transaction(async (client) => {
-      await client.query(`TRUNCATE ${this.qAttributes}`);
-      await client.query(`TRUNCATE ${this.qVersions}`);
-      await client.query(`DELETE FROM ${this.qState}`);
+    await this.withImportLock(async () => {
+      const reset = await this.withFoldLock(async (client) => {
+        await client.query(`TRUNCATE ${this.qAttributes}, ${this.qVersions}`);
+        await client.query(`DELETE FROM ${this.qState}`);
+        return true;
+      });
+      if (!reset) throw new Error("entity projector is running; stop writers before reset");
     });
   }
 
@@ -1029,4 +1076,12 @@ export class EntityIndexStorage implements EntityIndexReader {
       genesis,
     };
   }
+}
+
+/** Shared readiness policy for HTTP, RPC and projection. Non-seeded/manual deployments remain usable. */
+export function genesisReadiness(state: GenesisImportState | undefined, managed: boolean): EntityIndexReadiness {
+  const generation = `${state?.importId ?? state?.startedAt ?? "none"}:${state?.status ?? "pending"}`;
+  if (state?.status === "done" || (!managed && (!state || state.status === "none"))) return { ready: true, reason: "ready", generation };
+  const reason = state?.status === "running" ? "genesis-running" : state?.status === "failed" ? "genesis-failed" : state?.status === "unavailable" ? "genesis-unavailable" : "genesis-pending";
+  return { ready: false, reason, generation };
 }

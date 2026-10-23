@@ -236,3 +236,8 @@ test("legacy machine credentials are ignored", () => {
   expect(config).not.toHaveProperty("metricsBearerToken");
   expect(config).not.toHaveProperty("baseloadAutomationToken");
 });
+
+test("managed genesis is an explicit configuration mode", () => {
+  expect(parseServerConfig([], { ...BASE_ENV, ENTITY_INDEX_GENESIS: "managed" }).entityIndexGenesis).toBe("managed");
+  expect(parseServerConfig(["--entity-index-genesis", "managed"], BASE_ENV).entityIndexGenesis).toBe("managed");
+});
