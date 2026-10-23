@@ -41,7 +41,7 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 
 The `decoder` compose service runs the released
 [arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) image, pinned to
-`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.1`; set `ARKIV_DECODER_IMAGE` to run a different build. The
+`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.2`; set `ARKIV_DECODER_IMAGE` to run a different build. The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
