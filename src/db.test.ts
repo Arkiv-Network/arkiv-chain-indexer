@@ -31,6 +31,24 @@ if (!hasPostgresForTests()) {
       expect(row.c).toBe("2");
     });
 
+    test("statementTimeoutMs bounds every statement of the pool, and 57014 reports it", async () => {
+      const timed = openDb(TEST_DATABASE_URL!, { max: 1, statementTimeoutMs: 100 });
+      try {
+        const shown = await timed.query<{ statement_timeout: string }>("SHOW statement_timeout");
+        expect(shown.rows[0]!.statement_timeout).toBe("100ms");
+        const failure = await timed.query("SELECT pg_sleep(1)").then(
+          () => undefined,
+          (error: unknown) => error as { errno?: unknown },
+        );
+        expect(String(failure?.errno)).toBe("57014");
+      } finally {
+        await timed.close();
+      }
+      // Without the option the server default stays.
+      const shown = await db.query<{ statement_timeout: string }>("SHOW statement_timeout");
+      expect(shown.rows[0]!.statement_timeout).toBe("0");
+    });
+
     test("INTEGER columns decode as numbers", async () => {
       const result = await db.query<{ i: unknown }>(`SELECT 42::integer AS i`);
       expect(result.rows[0]!.i).toBe(42);

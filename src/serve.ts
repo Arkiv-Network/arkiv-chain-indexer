@@ -28,6 +28,7 @@ async function main(): Promise<void> {
   let stopStoredBlockListener: (() => Promise<void>) | undefined;
   let syncPrecomputer: PrecomputedResponse | undefined;
   let entityIndex: EntityIndexStorage | undefined;
+  let entityIndexReader: EntityIndexStorage | undefined;
   let entityProjector: EntityProjector | undefined;
   let search: OmniSearch | undefined;
 
@@ -158,6 +159,14 @@ async function main(): Promise<void> {
     let genesisImportDescription = "off";
     if (config.entityQueryIndex) {
       entityIndex = await EntityIndexStorage.open(config.databaseUrl, { max: 4, managedGenesis: config.entityIndexGenesis === "managed" });
+      // The API reads through a pool of its own with a statement timeout, so
+      // one expensive query cannot hold a connection for long — while the
+      // projector's folds and counts, on the pool above, are never cut short.
+      entityIndexReader = await EntityIndexStorage.open(config.databaseUrl, {
+        max: 4,
+        managedGenesis: config.entityIndexGenesis === "managed",
+        ...(config.entityIndexReadTimeoutMs > 0 ? { statementTimeoutMs: config.entityIndexReadTimeoutMs } : {}),
+      });
       // The entities a seeded chain was born with come from the node, since
       // no operation ever created them; without a node only an offline
       // import (scripts/importGenesisState.ts) can bring them in.
@@ -218,7 +227,7 @@ async function main(): Promise<void> {
       transactionCountCache,
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
-      ...(entityIndex ? { entityIndex } : {}),
+      ...(entityIndexReader ? { entityIndex: entityIndexReader } : {}),
       metricsEnabled: config.metricsEnabled,
     });
     console.log(`Block server listening on http://${server.hostname}:${server.port}`);
@@ -275,6 +284,7 @@ async function main(): Promise<void> {
       await server.stop();
       await search?.close();
       await entityIndex?.close();
+      await entityIndexReader?.close();
       await stopEntityInvalidationListener?.();
       await stopStoredBlockListener?.();
       await guzzlerStore?.close();
@@ -298,6 +308,7 @@ async function main(): Promise<void> {
     syncPrecomputer?.stop();
     await entityProjector?.stop();
     await entityIndex?.close();
+    await entityIndexReader?.close();
     await stopEntityInvalidationListener?.();
     await stopStoredBlockListener?.();
     await guzzlerStore?.close();

@@ -389,6 +389,8 @@ services:
       ENTITY_INDEX_GENESIS_RPC: ${ENTITY_INDEX_GENESIS_RPC:-}
       ENTITY_INDEX_GENESIS_RPC_LIMIT: ${ENTITY_INDEX_GENESIS_RPC_LIMIT:-}
       ENTITY_INDEX_GENESIS_PROGRESS_FILE: ${ENTITY_INDEX_GENESIS_PROGRESS_FILE:-}
+      # Statement timeout (ms) of the pool serving entity-index reads; 0 disables.
+      ENTITY_INDEX_READ_TIMEOUT_MS: ${ENTITY_INDEX_READ_TIMEOUT_MS:-}
       # Prometheus text metrics on GET /metrics (see docs/prometheus.md). The
       # nginx site configs return 404 for /api/metrics, so the scrape target is
       # the loopback backend port. /metrics is open; deployment controls external access.

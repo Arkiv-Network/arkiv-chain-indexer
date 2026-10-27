@@ -1236,6 +1236,7 @@ A scrape config and starter queries are in [`docs/prometheus.md`](docs/prometheu
 | `--entity-index-genesis` | `ENTITY_INDEX_GENESIS` | `auto` | `auto` asks the node once whether block 0 holds entities and imports them; `off` never asks (an offline import is still finished). |
 | `--entity-index-genesis-rpc` | `ENTITY_INDEX_GENESIS_RPC` | `SHADOW_RPC_UPSTREAM` | The node the genesis import reads (with `SHADOW_RPC_UPSTREAM_API_KEY`). |
 | `--entity-index-genesis-rpc-limit` | `ENTITY_INDEX_GENESIS_RPC_LIMIT` | `1000000` | Most genesis entities imported over RPC; a bigger genesis waits for `scripts/importGenesisState.ts`. |
+| `--entity-index-read-timeout-ms` | `ENTITY_INDEX_READ_TIMEOUT_MS` | `15000` | Postgres statement timeout for the entity-index reads behind `/shadow-rpc/experimental` and `/entity/:key`, which use a pool of their own (the projector's folds are never cut short); a cancelled query answers `-32000`. `0` disables. |
 | `--entity-index-genesis-progress-file` | `ENTITY_INDEX_GENESIS_PROGRESS_FILE` | unset | Write the genesis import's progress document here on every change. |
 
 ```sh

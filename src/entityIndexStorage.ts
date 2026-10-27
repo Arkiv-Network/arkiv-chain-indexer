@@ -49,6 +49,12 @@ export interface EntityIndexStorageOptions {
   max?: number;
   /** Entity keys refolded per pass; see {@link DEFAULT_FOLD_KEY_BATCH}. */
   foldKeyBatch?: number;
+  /**
+   * `statement_timeout` for this store's own pool, in milliseconds. For a
+   * store that only serves reads (the API's): the projector's folds and
+   * counts must not be cut short, so its store leaves this unset.
+   */
+  statementTimeoutMs?: number;
 }
 
 /** Where the fold stands. */
@@ -429,7 +435,10 @@ export class EntityIndexStorage implements EntityIndexReader {
   }
 
   static async open(connectionString: string, options: EntityIndexStorageOptions = {}): Promise<EntityIndexStorage> {
-    const db = openDb(connectionString, options.max !== undefined ? { max: options.max } : {});
+    const db = openDb(connectionString, {
+      ...(options.max !== undefined ? { max: options.max } : {}),
+      ...(options.statementTimeoutMs ? { statementTimeoutMs: options.statementTimeoutMs } : {}),
+    });
     const storage = new EntityIndexStorage(db, true, options);
     try { await storage.initSchema(); return storage; } catch (error) { await db.close(); throw error; }
   }
@@ -1033,8 +1042,10 @@ export class EntityIndexStorage implements EntityIndexReader {
     // $1 is always the block. At the head only latest versions can be live,
     // which is what the partial indexes cover; in the past the version valid
     // at that block is the one whose validity range contains it.
+    // `from_block <= $1` at the head too: a fold that commits between the head
+    // read and this query must not leak a newer version into the answer.
     return atHead
-      ? "v.to_block IS NULL AND NOT v.deleted AND v.expires_at > $1::numeric"
+      ? "v.to_block IS NULL AND v.from_block <= $1::bigint AND NOT v.deleted AND v.expires_at > $1::numeric"
       : "v.from_block <= $1::bigint AND (v.to_block IS NULL OR v.to_block > $1::bigint) AND NOT v.deleted AND v.expires_at > $1::numeric";
   }
 

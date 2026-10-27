@@ -25,6 +25,9 @@ import {
  * Settings for the one hole in the otherwise node-free `/shadow-rpc` surface.
  * Present only when an upstream URL is configured; absent, nothing is forwarded.
  */
+/** Long enough for any query the node itself answers promptly; short enough that one cannot hold a pool connection. */
+export const DEFAULT_ENTITY_INDEX_READ_TIMEOUT_MS = 15_000;
+
 export interface JsonRpcPassthroughConfig {
   /** Unset means "the node the scanner recorded" (`scanner_state.scanner_rpc_url`). */
   url?: string;
@@ -75,6 +78,8 @@ export interface ServerConfig {
   entityIndexGenesisRpc?: { url: string; apiKey?: string };
   /** The largest genesis the RPC walk takes on; beyond it the import waits for the offline importer. */
   entityIndexGenesisRpcLimit: number;
+  /** statement_timeout of the pool serving entity-index reads, in ms; 0 for none. */
+  entityIndexReadTimeoutMs: number;
   /** Where the genesis import writes its progress document; unset writes none. */
   entityIndexGenesisProgressFile?: string;
 }
@@ -245,6 +250,13 @@ const SPEC: CliSpec = {
         "Most genesis entities the import walks over RPC; a bigger genesis waits for scripts/importGenesisState.ts, since the node's paging costs O(N) per page. Defaults to 1000000 (or ENTITY_INDEX_GENESIS_RPC_LIMIT).",
       env: ["ENTITY_INDEX_GENESIS_RPC_LIMIT"],
       default: DEFAULT_GENESIS_RPC_LIMIT.toString(),
+    },
+    {
+      flags: "--entity-index-read-timeout-ms <ms>",
+      description:
+        "Postgres statement timeout for the entity-index reads behind /shadow-rpc/experimental and /entity/:key (their own pool; the projector's folds are not limited). A cancelled query answers -32000. 0 disables. Defaults to 15000 (or ENTITY_INDEX_READ_TIMEOUT_MS).",
+      env: ["ENTITY_INDEX_READ_TIMEOUT_MS"],
+      default: DEFAULT_ENTITY_INDEX_READ_TIMEOUT_MS.toString(),
     },
     {
       flags: "--entity-index-genesis-progress-file <path>",
@@ -466,6 +478,11 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     DEFAULT_GENESIS_RPC_LIMIT,
   );
   const entityIndexGenesisProgressFile = cli.value("entity-index-genesis-progress-file")?.trim() || undefined;
+  const entityIndexReadTimeoutMs = intOrDefault(
+    "--entity-index-read-timeout-ms",
+    cli.value("entity-index-read-timeout-ms"),
+    DEFAULT_ENTITY_INDEX_READ_TIMEOUT_MS,
+  );
 
   return {
     databaseUrl,
@@ -493,6 +510,7 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     entityIndexGenesis,
     ...(entityIndexGenesisRpc ? { entityIndexGenesisRpc } : {}),
     entityIndexGenesisRpcLimit,
+    entityIndexReadTimeoutMs,
     ...(entityIndexGenesisProgressFile ? { entityIndexGenesisProgressFile } : {}),
   };
 }

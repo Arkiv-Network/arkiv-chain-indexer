@@ -362,7 +362,45 @@ function cursorPosition(entity: EntityVersion): EntityCursorPosition {
 }
 
 /** Build the handlers for {@link ARKIV_INDEX_METHODS}. */
+/** Postgres `query_canceled`: the read pool's statement timeout cut the query short. */
+const STATEMENT_TIMEOUT_SQLSTATE = "57014";
+
+function isStatementTimeout(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { errno, code } = error as { errno?: unknown; code?: unknown };
+  return String(errno) === STATEMENT_TIMEOUT_SQLSTATE || String(code) === STATEMENT_TIMEOUT_SQLSTATE;
+}
+
+/** A read the statement timeout cancelled answers as a server error saying so, not as an internal one. */
+function withReadTimeout(handler: JsonRpcMethodHandler): JsonRpcMethodHandler {
+  return async (params) => {
+    try {
+      return await handler(params);
+    } catch (error) {
+      if (isStatementTimeout(error)) {
+        throw new JsonRpcError(
+          JSON_RPC_SERVER_ERROR,
+          "the entity index cancelled this query at its statement timeout; narrow the query or ask for a smaller limit",
+        );
+      }
+      throw error;
+    }
+  };
+}
+
 export function createArkivIndexMethods(
+  index: EntityIndexReader,
+  chain: ArkivChainReader,
+): Record<(typeof ARKIV_INDEX_METHODS)[number], JsonRpcMethodHandler> {
+  const methods = createIndexMethodHandlers(index, chain);
+  return {
+    arkiv_query: withReadTimeout(methods.arkiv_query),
+    arkiv_getEntityCount: withReadTimeout(methods.arkiv_getEntityCount),
+    arkiv_getBlockTiming: withReadTimeout(methods.arkiv_getBlockTiming),
+  };
+}
+
+function createIndexMethodHandlers(
   index: EntityIndexReader,
   chain: ArkivChainReader,
 ): Record<(typeof ARKIV_INDEX_METHODS)[number], JsonRpcMethodHandler> {

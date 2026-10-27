@@ -1456,6 +1456,53 @@ describeWithPostgres("genesis import (Postgres)", () => {
     }
   });
 
+  test("a read at the head never shows a version newer than the head, and a cancelled read says so", async () => {
+    const isolated = await createIsolatedStorage("entity_head_filter");
+    const pool = openDb(TEST_DATABASE_URL!, { max: 2 });
+    try {
+      const own = isolated.storage;
+      const ownIndex = await EntityIndexStorage.fromDb(pool, { schema: isolated.schema });
+      await own.saveChainId(7733102n);
+      await storeBlock(own, {
+        blockNumber: 3,
+        transactions: [registryTx(3, 0, ALICE, { logs: [createdLog(0, KEY_A, ALICE, 900)] })],
+        operations: [
+          { position: 0, hash: registryTx(3, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, entityKey: KEY_A, ...deadline(900), attributes: [str("v", "one")] })] },
+        ],
+      });
+      await storeBlock(own, {
+        blockNumber: 4,
+        transactions: [registryTx(4, 0, ALICE, { logs: [patchedLog(0, KEY_A, ALICE)] })],
+        operations: [{ position: 0, hash: registryTx(4, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 2, entityKey: KEY_A, attributes: [str("v", "two")] })] }],
+      });
+      await new EntityProjector(ownIndex, { genesis: { mode: "off" }, log: () => {} }).runOnce();
+      expect((await ownIndex.getProgress()).projectedThroughBlock).toBe(4n);
+      // A read that saw head 3 before a fold through 4 committed: block 4's version must not leak into it.
+      const atThree = await ownIndex.queryEntities({ kind: "all" }, { block: 3n, atHead: true, limit: 10 });
+      expect(atThree.entities.map((entity) => entity.attributes.map((attribute) => attribute.valueText))).not.toContainEqual(["two"]);
+      expect((await ownIndex.queryEntities({ kind: "all" }, { block: 4n, atHead: true, limit: 10 })).entities.map((e) => e.attributes[0]!.valueText)).toEqual(["two"]);
+
+      const cancelled = createArkivIndexMethods(
+        {
+          ...ownIndex,
+          getProgress: () => ownIndex.getProgress(),
+          queryEntities: async () => {
+            throw Object.assign(new Error("canceling statement due to statement timeout"), { errno: "57014" });
+          },
+        } as unknown as EntityIndexStorage,
+        own,
+      );
+      const response = (await handleJsonRpcBody({ jsonrpc: "2.0", id: 1, method: "arkiv_query", params: ["*"] }, own, { localOverrides: cancelled })) as JsonRpcResponse;
+      expect(response.error).toEqual({
+        code: -32000,
+        message: "the entity index cancelled this query at its statement timeout; narrow the query or ask for a smaller limit",
+      });
+    } finally {
+      await pool.close();
+      await isolated.cleanup();
+    }
+  });
+
   test("a node that cannot answer, a genesis too big for RPC, a different chain, or a pinned floor", async () => {
     await index.reset();
     let source = createFakeGenesisSource(FOUR, {
