@@ -168,35 +168,44 @@ docker compose up --build
   declares the `JsonRpcForwarder` interface so the dependency points one way; `/health` lists the forwarded
   methods under `features.jsonRpcPassthrough`.
 - The entity index (on by default; `ENTITY_QUERY_INDEX=false` turns it off; `POST /shadow-rpc/experimental`,
-  `JSON_RPC_EXPERIMENTAL_PATH` in `server.ts`) answers the `arkiv_*` reads from PostgreSQL on a path of its
-  own, so `/shadow-rpc` keeps relaying them to the node and the two stay comparable
-  (`scripts/compareEntityQuery.ts`; `scripts/seedEntityQueryFixtures.ts` seeds the fixture suite). The pieces:
-  `entityQueryLanguage.ts` is a byte-offset port of the node's `arkiv-query` crate (`~/arkiv-network/arkiv`),
-  and its tests pin the node's exact messages and positions — change a message only after checking the node;
+  `JSON_RPC_EXPERIMENTAL_PATH` in `server.ts`) answers the UDC node's `arkiv_*` reads (`arkiv_query`,
+  `arkiv_getEntityCount`, `arkiv_getBlockTiming`; there is no `arkiv_getEntity`) from PostgreSQL on a path of
+  its own, so `/shadow-rpc` keeps relaying them to the node and the two stay comparable
+  (`scripts/compareEntityQuery.ts`). The wire contract is arkiv-state-db-experiment's `signed/rpc_reads.rs`:
+  `select` takes exactly the SDK's `RpcSelect` keys (`payload`/`contentType` are `-32602`), `key` defaults on,
+  quantities are JSON integers or canonical `0x` hex, every parameter fault is `-32602` `InvalidParams`, query
+  and cursor/block errors use the node's `query rejected (<kind>): …` envelope — check the live node before
+  changing any of it. The pieces: `entityQueryLanguage.ts` is a byte-offset port of the `arkiv-query` crate
+  (`~/arkiv-network/arkiv`) with the UDC node's system-attribute rules (`$payload`/`$contentType` are the node's
+  exact `-32002`); its other messages still follow the older crate (language parity is deferred);
   `entityValues.ts` holds the type ids, bounds and wire encodings (`dec` is stored as 18-place units, `u256`
-  as `numeric`, strings compared bytewise via `value_text`); `entityIndex.ts` folds one key's operations into
-  versions (`foldEntityVersions`, pure — tombstones unset, `$payload`/`$contentType` cells route to fields,
-  reverted transactions apply nothing, expiry comes from the `EntityCreated`/`ExpiryExtended` event when a log
-  is stored and from calldata otherwise); `entityQuerySql.ts` compiles the AST to correlated `EXISTS` over
-  `entity_version_attributes`; `entityIndexStorage.ts` owns the tables and the paging query
-  (`ORDER BY created_at DESC, created_position DESC, entity_key DESC` — the node's entity-id order: ids are
-  allocated when a transaction commits, walking its staged deltas in **ascending key order**
-  (`BTreeMap<EntityAddress, …>` in `arkiv-reth-statemanager`), so inside one transaction the operation index
-  plays no part; across transactions it is creation order because a key can never be re-created); `entityProjector.ts` folds forward in chunks and
+  as `numeric`, strings compared bytewise via `value_text`, `bytes` as keccak256 + size); `entityIndex.ts`
+  folds one key's operations into versions (`foldEntityVersions`, pure — patch mutations apply in order, a
+  typed one sets value, type *and* indexed flag, a tombstone unsets, reverted transactions apply nothing,
+  expiry comes from the `EntityCreated`/`ExpiryExtended` event when a log is stored and exactly
+  `max(expiresAt, block + minLifetime)` otherwise); `entityQuerySql.ts` compiles the AST to correlated `EXISTS`
+  over `entity_version_attributes` **with `AND a.indexed`** — a predicate never matches an unindexed attribute,
+  as on the node; `entityIndexStorage.ts` owns the tables and the paging query (`ORDER BY created_at ASC,
+  created_position ASC, created_op_index ASC` — the UDC node's entity-id order, creation order with operations
+  in calldata order); `entityProjector.ts` folds forward in chunks and
   refolds keys whose operations landed below the fold point (`transaction_operations.scanned_at`), lowering
-  the floor when a backfill brings keyed creates in below it, and runs the genesis import for seeded chains
-  (arkiv-prefill): `entityGenesis.ts` walks the node at block 0, `entityGenesisDump.ts` +
-  `entityGenesisDumpImport.ts` load a seed's `state.jsonl` offline through `scripts/importGenesisState.ts` — the
-  only script that writes to Postgres — and `genesisProgress.ts` is the progress document both write; genesis
+  the floor when a backfill brings keyed creates in below it, and runs the genesis import for seeded chains:
+  `entityGenesis.ts` walks the node at block 0 oldest-first with every `RpcSelect` key (the indexed flag is only
+  in `attributeSchema`), restarting the walk when the node forgot its cursor (`-32005`: UDC cursors are
+  process-local) — rows are deterministic and written idempotently; `entityGenesisDump.ts` +
+  `entityGenesisDumpImport.ts` load a payload-era seed's `state.jsonl` offline through
+  `scripts/importGenesisState.ts` — the only script that writes to Postgres; no UDC codec reader exists yet —
+  and `genesisProgress.ts` is the progress document both write; genesis
   rows are version 0 with `created_at = 0` and `created_position` = entity id, `foldEntityVersions` takes such a
   row as the base, one state row (`genesis_import`) tracks both importers, and the projector never folds while
   an import is `running`; `arkivJsonRpc.ts` is the method layer
   (projection, cursors, options, errors) and plugs into `jsonRpc.ts` through `localOverrides`. Invariants:
-  never store payload bytes (`select.payload` is refused); `latest` is the projection head, never the
-  scanner or chain head; blocks outside `[floor, head]` are `-32006`, never a silently partial answer;
-  `creationFlags` is `null` rather than guessed for pre-logs creates. The node evaluates `$createdAt` ranges
-  by scanning (~10s per page on cheesecake at a past block), so the comparison cuts node walks at the floor
-  instead of windowing every query. Index every address column paired with `expires_at`, never alone: an address keeps a row for every entity it ever owned and most of them have expired, so `(owner, expires_at)` turned a 95ms scan of 167k rows at a past block into 1ms.
+  never store `bytes` contents (their wire value from the index is `null`); every attribute is stored with its
+  flag, indexed or not; `latest` is the projection head, never the scanner or chain head; blocks outside
+  `[floor, head]` are `-32006`, never a silently partial answer. `GET /entity/:key` adds the index's newest
+  state uncached (the projector folds after the scanner's NOTIFY). The node evaluates `$createdAt` ranges
+  by scanning, so the comparison drops pre-floor entities from node walks instead of windowing every query.
+  Index every address column paired with `expires_at`, never alone: an address keeps a row for every entity it ever owned and most of them have expired, so `(owner, expires_at)` turned a 95ms scan of 167k rows at a past block into 1ms.
 - Account balances (`account_balances`, `SCANNER_TRACK_BALANCES`, default off) are **readings, never sums**.
   For each block the scanner takes the addresses that appeared as `from` or `to` and asks the node what they
   hold at that block (`EthereumRpcClient.getBalances`, batched `eth_getBalance` requests per block of at most

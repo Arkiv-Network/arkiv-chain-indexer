@@ -92,7 +92,7 @@ No matching stored rows means **zero stored activity**, not unavailable data or
 proof that the period was completely scanned. Existing coverage limits still
 apply separately to blocks, transaction details and decoded operations.
 
-**Current entity state, active payload state, attributes and content types do
+**Current entity state, active bytes state, attributes and schemas do
 not change with the activity period.** They retain their explicitly reported
 projection block. There is no historical gauge filtering, subtraction or
 attempt to infer entity-state deltas from operations. Unavailable projected
@@ -109,8 +109,8 @@ Counts and byte totals are decimal strings in JSON, preserving integer precision
 Only the percentage, durations, type IDs and timestamps use other representations.
 The page's **Byte units** selector offers exact bytes, automatic decimal units
 (kB/MB/GB/TB, base 1000; the default), and automatic binary units
-(KiB/MiB/GiB/TiB, base 1024). It also applies to mean input sizes and content-type
-payload totals, and remembers the selection in the browser.
+(KiB/MiB/GiB/TiB, base 1024). It also applies to mean input sizes and the bytes
+totals per schema, and remembers the selection in the browser.
 
 Every section, metric label and table header has an info icon explaining its
 meaning, database source, calculation, inclusion conditions and limitations.
@@ -133,8 +133,10 @@ queries or the scanner's measurements change.
 | Input byte totals | Stored uncompressed and compressed calldata sizes, separately from block metrics and transaction rows. Transaction input count, mean and maximum are also shown. |
 | Bytes writes | Successful creates/patches with a bytes attribute, and the sum of their `bytes_size` (the decoder's size of the bytes values; contents are never stored). Repeated writes count again. |
 | Attribute writes | Attribute triples set by successful creates/patches, split by the indexed flag (indexed = queryable, stored = returned but never matched), plus patch tombstones (unsets) and writes tagged with an `arkiv.schema`. |
-| Active payload metadata | Total and maximum recorded payload size, number of active entities with a nonzero size, and the top 20 content types by active entity count. |
-| Active attributes | Total, mean/max per active entity, number of active entities with attributes, and counts by attribute type. Old versions and expired/deleted entities are excluded. |
+| Permanent entities | Active entities whose expiry is 2^64 − 1 (`expires_at = 18446744073709551615`). |
+| Active bytes | Total and maximum `bytes_size` (the summed size of an entity's `bytes` attributes; contents are never stored) and the number of active entities with a nonzero size. |
+| Active attributes | Total, split into indexed (queryable) and stored-only, mean/max per active entity, number of active entities with attributes, and counts by attribute type with the indexed share of each. Old versions and expired/deleted entities are excluded. |
+| Top schemas | The 20 `arkiv.schema` tags (`entity_versions.schema_name`) with the most active entities, each with their bytes total, plus the number of active entities with no tag. |
 
 ## What the current database cannot establish
 
@@ -150,14 +152,13 @@ queries or the scanner's measurements change.
 - **Chain-wide totals for history that was never stored/decoded.** Coverage is
   reported rather than extrapolated. Older size columns defaulted to zero; those
   historical zeros cannot be distinguished from measured zero without rescanning.
-- **Payload contents or verified unique provider storage.** The index deliberately
-  stores no payload bytes. Declared reference sizes are not a measurement of
-  provider availability or deduplicated storage. The projection's recorded size
-  is not guaranteed to resolve the current referenced payload's size.
+- **`bytes` attribute contents.** The index deliberately stores only each bytes
+  value's size and keccak256, so deduplicated storage cannot be measured beyond
+  identical hashes, and no content can be inspected.
 - **Exact protocol-encoded attribute storage bytes.** Attribute counts, types and
   values are stored, but their original wire/storage representation is not. JSON
   text length or PostgreSQL row size would measure a different thing.
 
-For a first overview, attribute counts/types and payload sizes/content types are
-useful because they describe entity shape and data volume without reading or
-storing payload contents.
+For a first overview, attribute counts/types, bytes sizes and schemas are useful
+because they describe entity shape and data volume without reading or storing
+bytes contents.

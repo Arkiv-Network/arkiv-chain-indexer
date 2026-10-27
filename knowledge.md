@@ -432,7 +432,7 @@ ID avoids a node dependency for `eth_chainId`.
 
 `SHADOW_RPC_UPSTREAM` enables an explicit allowlist that outranks local handlers
 and transaction-data gating. Defaults are `eth_sendRawTransaction`, `arkiv_query`,
-`arkiv_getEntity`, `arkiv_getEntityCount`, and `arkiv_getBlockTiming`. Use an
+`arkiv_getEntityCount`, and `arkiv_getBlockTiming`. Use an
 explicit deployment allowlist to relay live nonce, calls, or gas estimation when
 needed; `eth_sendTransaction` assumes a node-managed unlocked account and is not
 a default. Forwarding uses a ten-second timeout and 600 calls/minute endpoint cap
@@ -457,6 +457,29 @@ shadow RPC), not `0x0`. Coverage begins when enabled; no historical readings wer
 backfilled. Twelve sampled readings matched the node in the August 28 check.
 
 ## Entity query engine
+
+**Current (v0.6.0-udc.1, UDC chain).** The reference node is now
+`/home/ubuntu/arkiv-network/arkiv-state-db-experiment` (`signed/rpc_reads.rs`,
+`simulator/query_language/`). Differences from the notes below, which describe
+the reth-era port:
+- Methods: `arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`; no
+  `arkiv_getEntity` (`-32601`). `select` keys are exactly the SDK's `RpcSelect`
+  (`payload`/`contentType` are `-32602`); `key` defaults on; every parameter
+  fault is `-32602 InvalidParams`; `atBlock`/`limit` are JSON integers or
+  canonical `0x` hex (no `latest`); a cursor needs `atBlock`; node cursors are
+  66-char process-local tokens (stale after a node restart: `-32005`).
+- Errors use `query rejected (<kind>): <message>` with `data {position, got[, expected]}`.
+  `$payload` / `$contentType` are unknown system attributes (`-32002`) with the
+  node's exact messages. Other language messages still follow the older crate
+  (parity deferred, WP2c).
+- Results are **oldest-first** by entity id: block, transaction, then the
+  create's operation index (`created_at, created_position, created_op_index ASC`).
+- `attributeSchema` is `{name, type, indexed}`; `attributes` holds every
+  attribute, indexed or not; predicates match indexed attributes only
+  (`AND a.indexed` in the SQL). `bytes` are stored as keccak256 + size and
+  answered as `value: null` by the index.
+- The fold takes each patch triple's indexed flag (patches can retype, index or
+  unindex); expiry without an event is exactly `max(expiresAt, block + minLifetime)`.
 
 ### Grammar and node compatibility
 

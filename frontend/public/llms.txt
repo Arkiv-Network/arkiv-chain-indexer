@@ -99,7 +99,7 @@ Related scanner and worker settings:
 | JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
 | Account balances | `SCANNER_TRACK_BALANCES` on the scanner; `account_balances` rows | `GET /balances` and `eth_getBalance` on `/shadow-rpc`. Both answer empty/`-32000` without stored readings. |
 | JSON-RPC passthrough | Explicit `SHADOW_RPC_UPSTREAM` or the scanner-recorded node; methods listed in `/health` | Relays `eth_sendRawTransaction` and the four Arkiv reads by default. Until a node is available, forwarded calls return `-32000`. |
-| Entity query index (experimental) | on by default (`ENTITY_QUERY_INDEX=false` turns it off); status in `features.entityQueryIndex` in `/health` | `POST /shadow-rpc/experimental` answers `arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming` from the indexer's own entity tables. `404` when off. |
+| Entity query index (experimental) | on by default (`ENTITY_QUERY_INDEX=false` turns it off); status in `features.entityQueryIndex` in `/health` | `POST /shadow-rpc/experimental` answers `arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming` from the indexer's own entity tables. `404` when off. |
 
 ## Endpoint Index
 
@@ -168,10 +168,12 @@ without an observed head or when the chain has 10 or fewer blocks. Block-metric
 transaction totals and stored transaction-row counts are reported separately.
 Operation counts separate successful, reverted and unknown receipt outcomes.
 Entity counts refer to `entities.asOfBlock`, the projection head, and are null
-when the projection is unavailable or importing genesis. Attribute counts and
-content-type summaries cover active entities at that block. Byte totals describe
-recorded calldata/payload sizes, not full signed transaction sizes or verified
-unique provider storage. A lagging projection cannot establish exact live-chain
+when the projection is unavailable or importing genesis. Attribute counts (split
+into indexed and stored-only), `attributeTypes` and `topSchemas` (`arkiv.schema`
+tags) cover active entities at that block. `blocks` reports gas fees (`gasFeeWei`),
+rent (`rentFeeWei`) and their sum (`burnedWei`) separately. Byte totals describe
+recorded calldata and `bytes` attribute sizes (contents are never stored), not full
+signed transaction sizes. A lagging projection cannot establish exact live-chain
 entity counts. Check `limitations`, snapshot age and observed/projection heads.
 
 Snapshots retain version 1 and unchanged top-level all-time/current-state fields.
@@ -281,7 +283,7 @@ under `features.jsonRpcPassthrough`.
 | --- | --- | --- |
 | `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset follows the node the scanner recorded (`SCANNER_RPC_FULL_NODE`, without its key). In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
 | `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
-| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntity,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
+| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
 | `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
 | `SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE` | `600` | Forwarded calls per minute across all callers; `0` removes the cap. |
 
@@ -290,8 +292,8 @@ Worth knowing before pointing a wallet at it:
 - **`eth_sendRawTransaction` is the only write method forwarded by default.** Wallets and SDKs sign locally
   and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
   no business relying on. List it explicitly if a deployment's node really does.
-- **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`)
-  are forwarded by default too.** On this path they read the node's entity state. The Data page defaults
+- **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`; the UDC node has no
+  `arkiv_getEntity`) are forwarded by default too.** On this path they read the node's entity state. The Data page defaults
   to the experimental index on `/shadow-rpc/experimental`; administrators can select the backend relay
   or compare both sources.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
@@ -317,8 +319,8 @@ curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: applicat
 On by default (`ENTITY_QUERY_INDEX=false` switches it off). The backend folds the decoded Arkiv operations
 (`transaction_operations`, so `SAVE_TRANSACTION_DATA=true` and a `DECODER_URL` are required) and the receipt
 event logs (`transaction_logs`) into two tables of its own — `entity_versions`, one row per state an entity
-went through with the block range it held for, and `entity_version_attributes`, that state's typed
-attributes — and answers `arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount` and `arkiv_getBlockTiming`
+went through with the block range it held for, and `entity_version_attributes`, that state's attributes, each
+with its type and `indexed` flag — and answers `arkiv_query`, `arkiv_getEntityCount` and `arkiv_getBlockTiming`
 from them on a **separate path**, `POST /shadow-rpc/experimental` (`/api/shadow-rpc/experimental` publicly).
 `/shadow-rpc` is untouched and keeps relaying those methods to the node, so the two paths are two independent
 sources for the same questions, and either can be checked against the other. The path answers `404` when the
@@ -327,32 +329,52 @@ feature is off; `GET /health` reports it under `features.entityQueryIndex` as `f
 genesis }`, where `genesis` is `null` or the genesis import's `{ status, phase, source, total, imported,
 startedAtUtc, finishedAtUtc, updatedAtUtc, error }`.
 
-The wire contract is the node's (`arkiv-reth-rpc` / `arkiv-rpc-types` in the 0.8 engine): the same parameter
-shapes and defaults (`atBlock` hex or `latest`, `limit` 1–200 default 100, `select` with `attributes` as a
-boolean or a per-name map), the same query grammar and limits (`*`, `= < <= > >= STARTSWITH`, `AND`/`OR`/`NOT`,
-typed literals, `$owner $creator $key $expiresAt $createdAt $contentType`; 8 KiB, 64 predicates, depth 32),
-the same error codes with the same messages and byte positions (`-32001` malformed, `-32002` type, `-32003`
-literal, `-32004` limit, `-32005` cursor, `-32006` block unavailable), the same newest-first order, the same
-encodings (`u64`/`createdAt`/`updatedAt`/`expiresAt` as hex, `i32` as a number, `dec` as a trimmed decimal
-string, `u256` minimal hex, addresses/keys lowercase), attributes sorted by name, and the same fold semantics:
-a patch merges (a tombstone unsets), every mutation bumps `updatedAt`, expiry is the receipt event's value
-when logs are stored and the calldata's otherwise, a reverted transaction applies nothing, and an entity is
-live at block `B` while `expiresAt > B` and it was not deleted — so a query evaluated `atBlock` a past block
-sees exactly what was live then.
+The wire contract is the UDC node's (arkiv-state-db-experiment, `signed/rpc_reads.rs`) and the SDK's
+(`RpcSelect`, `RpcQueryOptions`):
+
+- **Parameters.** `arkiv_query(query, { atBlock?, select?, limit?, cursor? })`: any other option key, a quantity
+  that is not a JSON integer or `0x` hex without leading zeros (`latest` included), a `limit` outside 1–200
+  (default 100), or a `select` key outside `key owner creator createdAt updatedAt expiresAt creationFlags
+  attributeSchema attributes` — the removed `payload` and `contentType` included — is `-32602` with the node's
+  message `InvalidParams`. `attributes` takes a boolean or a map of attribute names to booleans. `key` is
+  selected unless the selection sets it false. `arkiv_getEntityCount({ query?, block? })` takes the block as a
+  JSON integer only (a hex string is `-32602`). There is no `arkiv_getEntity` (`-32601`), as on the node.
+- **Entities.** The node's `RpcEntity`: `attributeSchema` entries are `{name, type, indexed}`, `attributes`
+  holds every attribute — indexed or not — as `{name, type, value}` sorted by name, `creationFlags` is
+  `{raw, readonly, permissionlessExtension}`, quantities are hex (`expiresAt` `0xffffffffffffffff` for a
+  permanent entity), `i32` a number, `dec` a trimmed decimal, `u256` minimal hex, addresses/keys lowercase.
+- **Order.** Oldest first by entity id — creation block, transaction, then the create's operation index.
+- **Queries.** The grammar and limits (`*`, `= < <= > >= STARTSWITH`, `AND`/`OR`/`NOT`, typed literals,
+  `$owner $creator $key $expiresAt $createdAt`; 8 KiB, 64 predicates, depth 32) and the error codes (`-32001`
+  parse, `-32002` type, `-32003` literal, `-32004` limits, `-32005` cursor, `-32006` block), with the node's
+  envelope: `query rejected (<kind>): <message>` and `data: {position, got[, expected]}`. Predicates match
+  **indexed attributes only**, exactly as the node's: an unindexed attribute (and every `bytes` one) is stored
+  and returned but never matched. `$payload` and `$contentType` answer the node's own `-32002` messages.
+  Full language parity (`EXISTS`, `TYPEOF`, `!=` and every message) is not implemented yet.
+- **Fold.** A patch applies its mutations in order — a typed one sets the attribute with its new type and
+  indexed flag (a patch can retype, index or unindex), a tombstone unsets it, unnamed attributes stay; every
+  mutation bumps `updatedAt`; expiry is the receipt event's value when logs are stored and otherwise exactly
+  `max(expiresAt, block + minLifetime)` from the calldata (capped at 2^64 − 1, which a huge lifetime reaches
+  too); a reverted transaction applies nothing; and an entity is live at block `B` while `expiresAt > B` and it
+  was not deleted — so a query evaluated `atBlock` a past block sees exactly what was live then.
 
 Where the index cannot honour something the node does, it says so rather than approximating:
 
 | | Node | Index |
 | --- | --- | --- |
-| `latest` | The chain head. | The **projection head** (`projectedThroughBlock` in `/health`): the newest block folded, a few blocks behind the scanner head, itself behind the chain. `blockNumber` in every reply says which block answered. |
-| History | Any block the node keeps state for. | Blocks between the **floor** and the projection head; anything else is `-32006` with `{ requested, latest }`. The floor is the first block whose stored creates carry entity keys (`floorBlock` in `/health`); entities created before it are unknown, so counts count what the index holds. A backfill that writes older blocks lowers the floor as it goes; `ENTITY_INDEX_FLOOR_BLOCK` pins it instead. |
-| `select.payload` | The bytes. | Refused with `-32000`: payload bytes are never stored (the calldata invariant). `arkiv_getEntity` leaves `payload` out. |
-| `creationFlags` | Always known. | `null` for entities created before receipt logs were stored (the flags travel in the `EntityCreated` event, not the calldata). |
-| Cursors | Resume below an internal entity id. | Resume below a creation position. Both are opaque, bound to the query, block and `select`, and reject a cursor from another request with the node's own messages — but a cursor from one source cannot be handed to the other: the index answers a node's cursor with `-32005` and a message saying so. |
-| `arkiv_getBlockTiming` | The node's clock. | The scanner head's block and its timestamp. |
+| No `atBlock` | The chain head. | The **projection head** (`projectedThroughBlock` in `/health`): the newest block folded, a few blocks behind the scanner head, itself behind the chain. `blockNumber` in every reply says which block answered. |
+| History | Any block the node keeps state for. | Blocks between the **floor** and the projection head; anything else is `-32006` (`query rejected (block): …`). The floor is the first block whose stored creates carry entity keys (`floorBlock` in `/health`); entities created before it are unknown, so counts count what the index holds. A backfill that writes older blocks lowers the floor as it goes; `ENTITY_INDEX_FLOOR_BLOCK` pins it instead. |
+| Genesis entities | Part of the block-0 state on a seeded chain. | Imported once, from the node; until that import is `done` the floor stays above 0 and they are unknown. |
+| `bytes` values | The content, as hex. | `null`: the index stores a `bytes` attribute's keccak256 and size, never its content (`attributeSchema` lists it, `GET /entity/:key` gives size and hash). Read the content from a node. |
+| `creationFlags` | Always known. | From the `EntityCreated` event, else the calldata's flag byte; `null` only where neither was stored. |
+| Cursors | 66-character tokens into a process-local cache (gone after a restart: `-32005`). | The same shape, carrying a creation position bound to the query, block and `select`. A cursor from one source cannot be handed to the other: both answer the node's `-32005`. A cursor needs an explicit `atBlock`, as on the node. |
+| `arkiv_getBlockTiming` | The node's clock. | The projection head's block and its timestamp. |
 
 Genesis entities (a chain seeded at block 0 with arkiv-prefill; no transaction created them) are imported
-once as version-0 rows with `createdAt = 0` in the node's entity-id order, and later operations fold on top.
+once as version-0 rows with `createdAt = 0` in the node's entity-id order (oldest first, every attribute with
+its `indexed` flag, `bytes` as hash and size), and later operations fold on top. A walk interrupted by a node
+restart (UDC node cursors are process-local, so the stale cursor answers `-32005`) starts over from the first
+page and rewrites the rows already imported idempotently.
 `ENTITY_INDEX_GENESIS=auto` (default) asks the node once and walks `arkiv_query` at block 0 when it holds at
 most `ENTITY_INDEX_GENESIS_RPC_LIMIT` (1,000,000) entities, else reports `waiting`; `off` never asks. Bigger
 seeds load offline with `scripts/importGenesisState.ts --dump state.jsonl [--rpc <node>]`, which verifies the
@@ -360,7 +382,8 @@ records' id order against the system account's slots, resumes from its last batc
 per line, and hands the repair to the backend. `ENTITY_INDEX_GENESIS_PROGRESS_FILE` / `--progress-file` receive
 a snake_case progress document (`phase`, `percent`, `elapsed_s`, `entities`, `dump`, `rpc`, `database`,
 `repair`, `error`, `pid`, `updated_at`) on every change. `docker-compose.prefill.yml` joins a local prefill
-node's network and mounts its artifacts at `/prefill`. Entities imported over RPC have `payloadSize` 0.
+node's network and mounts its artifacts at `/prefill`. The offline importer reads the payload-era arkiv-reth seed format only (no reader for the UDC prefill codec
+yet), so on a UDC chain use the RPC import.
 
 The projection is kept up to date by an in-process projector: every few seconds it folds the operations of the
 blocks the scanner has stored since its last pass (per entity key, replaying the key's whole history, so a
@@ -371,10 +394,11 @@ so two backends on one database never fold on top of each other.
 
 Two scripts turn the pair into a test rig. `scripts/compareEntityQuery.ts --node <url> --index <url>` walks
 the same queries on both sides at the same block — discovering them from the data, plus any fixture manifest —
-and reports every difference in order, fields, page boundaries, counts, `arkiv_getEntity` and the error
-code/message/position of invalid requests, with `--bench` timing both. `scripts/seedEntityQueryFixtures.ts`
-creates a suite of entities covering every attribute type, every mutation, expiry, flags and reverting
-transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
+and reports every difference in order, fields, page boundaries, counts, `$key` reads and the error
+code/message/position of invalid requests, with `--bench` timing both (language messages are compared by
+code only unless `--strict-language`; `bytes` values, which the index withholds, by presence only). `scripts/seedEntityQueryFixtures.ts`
+(still written for the payload-era SDK) creates a suite of entities covering every attribute type, every
+mutation, expiry, flags and reverting transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
 a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
 
 The frontend's `/data` page defaults to the experimental index (`rpc=index` in shared links) and also
@@ -594,7 +618,14 @@ ascending — capped at the configured history limit (`ENTITY_HISTORY_LIMIT`, de
 were cut off, and `firstOperation` (present only then) carries the earliest stored operation so the
 create stays reachable. Returns `404` when no operations are stored for the key — unless the entity index
 knows the key from the chain's genesis state, in which case `genesis` (`{ owner, creator, expiresAt,
-contentType, creationFlags, payloadSize, attributes }`) is added and an empty `operations` is `200`.
+creationFlags, bytesSize, schemaName, attributes }`) is added and an empty `operations` is `200`.
+When the entity index is on, the response also carries `state`: the index's current view of the
+entity, read fresh on every request (not cached) — `{ asOfBlock, status, version, owner, creator,
+createdAt, updatedAt, expiresAt, permanent, creationFlags, bytesSize, schemaName, attributes }`,
+where `status` is `live`, `expired` or `deleted` at `asOfBlock` (the projection head), block numbers
+are decimal strings and each attribute is `{ name, type, indexed, value, size?, keccak256? }`
+(`bytes` with `value: null` and its size and hash). `state` is absent when the index has not folded
+the key yet. The `genesis` attributes use the same shape.
 Creates are linked to their entity key from the EntityCreated receipt log, so rows scanned before
 that link existed may be missing from a key's history until their blocks are re-scanned.
 
@@ -872,6 +903,6 @@ in database rows or API responses. They are intentionally dropped and must not b
   in-memory CSRF token; credentials are never stored in browser local storage. Custom-node requests
   omit application cookies and CSRF headers.
 - The `/data` page defaults to `/api/shadow-rpc/experimental`. It queries projected entity state at
-  the index's head, excludes payload bytes, and keeps queries and paging options in shareable URLs.
+  the index's head, withholds `bytes` attribute contents, and keeps queries and paging options in shareable URLs.
   A custom RPC URL can be called directly from the browser if it permits cross-origin requests.
   Admin mode also offers the backend relay and comparison with the index.
