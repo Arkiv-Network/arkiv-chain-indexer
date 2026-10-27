@@ -10,7 +10,12 @@ export interface StoredBlock {
   averagePriorityFeeWei: string;
   averagePriorityFeeWeightedWei: string;
   averageFeePriceWei: string;
+  /** Gas fees only (Σ gasUsed × effectiveGasPrice). */
   totalTransactionFeeWei?: string;
+  /** Storage rent the block's transactions burned, outside gas. */
+  totalRentFeeWei?: string;
+  /** burntFeesWei + totalRentFeeWei. */
+  totalBurnedWei?: string;
   feePriceSumWei?: string;
   priorityFeeSumWei?: string;
   priorityFeeWeightedNumeratorWei?: string;
@@ -44,6 +49,8 @@ export const BLOCK_RESPONSE_NAMES = [
   "blockRewardWei",
   "burntFeesWei",
   "totalTransactionFeeWei",
+  "totalRentFeeWei",
+  "totalBurnedWei",
   "feePriceSumWei",
   "priorityFeeSumWei",
   "priorityFeeWeightedNumeratorWei",
@@ -97,8 +104,12 @@ export const RANGE_RESPONSE_NAMES = [
   "transactionCount",
   "totalBlockRewardWei",
   "totalBurntFeesWei",
+  "totalRentFeeWei",
+  "totalBurnedWei",
   "averageBlockRewardWei",
   "averageBurntFeesWei",
+  "averageRentFeeWei",
+  "averageBurnedWei",
   "averageFeePriceWei",
   "averageTransactionGasUsed",
   "averageTransactionInputDataSizeBytes",
@@ -139,8 +150,12 @@ export interface StoredBlockRange {
   averageTransactionInputDataCompressedSizeBytes: string;
   totalBlockRewardWei: string;
   totalBurntFeesWei: string;
+  totalRentFeeWei: string;
+  totalBurnedWei: string;
   averageBlockRewardWei: string;
   averageBurntFeesWei: string;
+  averageRentFeeWei: string;
+  averageBurnedWei: string;
   transactionCount: number;
   totalGasUsed: string;
   averageTotalGasUsed: string;
@@ -221,72 +236,65 @@ interface CompactRangesResponse {
   ranges: RangeResponseRow[];
 }
 
+/**
+ * One attribute triple of an operation, as arkiv-transaction-decoder v0.3
+ * reported it. `value` is in the node's arkiv_query encoding (u64/u256 as 0x
+ * quantities, i32 a JSON number, bool a JSON boolean, dec a decimal string,
+ * str text, bytes32/key/addr lowercase hex); null for bytes (whose content is
+ * never stored: see size and keccak256), a tombstone (typeId 0, a patch
+ * unsetting the attribute) and a malformed triple (see error).
+ */
 export interface ArkivOperationAttribute {
-  key: string;
-  valueType: number;
-  valueTypeName: string; // "uint" | "string" | "entityKey" | "unknown"
-  value: string;
-}
-
-export interface ArkivReferenceVerification {
-  valid: boolean;
-  signerTrusted: boolean;
-  chainId: number;
-  claimedSigner: string | null;
-  recoveredSigner: string | null;
-  messageHash: string | null;
-  errors: string[];
-}
-
-export interface ArkivPayloadReference {
-  kind: string;
-  version: number;
-  provider: string;
-  id: string;
-  namespace: string;
-  contentType?: string;
-  checksum: string;
-  sizeBytes: number;
-  submittedAt: string;
-  nonce: string;
-  /** Signed provider payment gas units. Converted to wei with the block base fee. */
-  payment: number;
-  signature: {
-    scheme: string;
-    signer: string;
-    receipt: Record<string, unknown>;
-    messageHash: string;
-    signature: string;
-    r: string;
-    s: string;
-    v: number;
-  };
+  name: string;
+  /** Raw byte: type in the low seven bits, 0x80 = indexed. */
+  typeId: number;
+  /** "str", "bytes", …; "tombstone" for 0; "invalid(0x..)" for an id the node refuses. */
+  type: string;
+  /** Queryable; unindexed attributes are stored and returned but never matched. */
+  indexed: boolean;
+  value: string | number | boolean | null;
+  size: number;
+  /** bytes only. */
+  keccak256?: string;
+  error?: string;
 }
 
 export interface ArkivOperation {
   opIndex: number; // 0-based index of the operation within the tx's execute() call
-  operationType: number; // 1=create 2=update 3=extend 4=transfer 5=delete 6=expire
-  operation: string; // "create" | "update" | "extend" | "transfer" | "delete" | "expire" | "unknown(N)"
-  entityKey: string | null; // bytes32 hex as returned by decoder
-  contentType: string | null; // decoded MIME-ish string or null
-  payloadSizeBytes: number; // SIZE ONLY — the payload bytes/hex/text are NEVER stored anywhere
+  operationType: number; // 1=create 2=patch 3=extend 4=transfer 5=delete
+  operation: string; // "create" | "patch" | "extend" | "transfer" | "delete" | "unknown(N)"
+  entityKey: string | null; // lowercase bytes32; a create's comes from its EntityCreated log
+  salt: string | null; // create: uint128, decimal
+  creationFlags: number | null; // create: bit 0 readonly, bit 1 permissionless extension
+  expiresAt: string | null; // create/extend: requested deadline (block), exact decimal; "0" unset
+  minLifetime: string | null; // create/extend: requested lifetime floor in blocks, decimal; "0" unset
+  newOwner: string | null; // transfer: lowercase address
+  bytesSize: number; // bytes held by the op's bytes attributes (contents never stored)
+  schemaName: string | null; // the op's indexed str `arkiv.schema`, when it sets one
+  /** create: the attributes; patch: the mutations in calldata order (tombstones unset). */
   attributes: ArkivOperationAttribute[];
-  expiresAtBlocks: number; // uint32 from decoder (0 when not applicable)
-  newOwner: string | null; // address for transfer ops, null otherwise
-  // Reference mode (optional: absent on pre-reference rows / older fixtures).
-  isReference?: boolean; // true when the payload is a v1 payload reference
-  payloadReference?: ArkivPayloadReference | null; // provider receipt metadata, never entity bytes
-  referenceVerification?: ArkivReferenceVerification | null; // offline EIP-191 verdict
-  referenceError?: string | null; // set when a reference payload failed to parse
+}
+
+/** A stored operation as the API serves it: calldata plus the expiry the engine resolved. */
+export interface StoredArkivOperation extends ArkivOperation {
+  /** create/extend: max(expiresAt, block + minLifetime) capped at 2^64 − 1, decimal; null otherwise. */
+  resolvedExpiresAt: string | null;
+  /** create/extend: resolvedExpiresAt === "18446744073709551615"; null otherwise. */
+  permanent: boolean | null;
 }
 
 /** One stored operation joined with its transaction context, for entity history. */
-export interface StoredEntityOperation extends ArkivOperation {
+export interface StoredEntityOperation extends StoredArkivOperation {
   blockNumber: number;
   blockNumberDecimal: string;
   blockDate: string;
   position: number;
   hash: string;
+  /** "1" applied, "0" reverted; null when the row has no transaction. */
+  transactionStatus: string | null;
+  /** Rent the whole transaction burned, shared by its transactionOperationCount operations. */
+  transactionRentFeeWei: string | null;
+  transactionOperationCount: number;
 }
 
 /**
@@ -333,25 +341,22 @@ export const ENTITY_OPERATION_RESPONSE_NAMES = [
   "operationType",
   "operation",
   "entityKey",
-  "contentType",
-  "payloadSizeBytes",
-  "attributes",
-  "expiresAtBlocks",
+  "salt",
+  "creationFlags",
+  "expiresAt",
+  "minLifetime",
+  "resolvedExpiresAt",
+  "permanent",
   "newOwner",
-  "isReference",
-  "payloadReference",
-  "referenceVerification",
-  "referenceError",
+  "bytesSize",
+  "schemaName",
+  "attributes",
+  "transactionStatus",
+  "transactionRentFeeWei",
+  "transactionOperationCount",
 ] as const satisfies readonly (keyof StoredEntityOperation)[];
 
-export type EntityOperationResponseValue =
-  | number
-  | string
-  | boolean
-  | null
-  | ArkivOperationAttribute[]
-  | ArkivPayloadReference
-  | ArkivReferenceVerification;
+export type EntityOperationResponseValue = number | string | boolean | null | ArkivOperationAttribute[];
 export type EntityOperationResponseRow = EntityOperationResponseValue[];
 
 interface CompactEntityByKeyResponse {
@@ -369,41 +374,6 @@ export interface ArkivOperationSummaryEntry {
   operation: string;
   operationType: number;
   count: number;
-}
-
-export interface PayloadProviderPaymentEntry {
-  opIndex: number;
-  provider: string;
-  signer: string | null;
-  payloadId: string;
-  paymentGasUnits?: string;
-  paymentWei: string;
-  providerEarnedWei: string;
-  burnedWei: string;
-}
-
-export interface PayloadProviderPaymentProviderTotal {
-  provider: string;
-  signer: string | null;
-  paymentCount: number;
-  paymentGasUnits?: string;
-  paymentWei: string;
-  providerEarnedWei: string;
-  burnedWei: string;
-}
-
-export interface PayloadProviderPaymentBreakdown {
-  enabled: boolean;
-  providerShareBps: number | null;
-  minimumPaymentGasUnits?: string | null;
-  minimumPaymentWei: string | null;
-  totalPaymentGasUnits?: string;
-  totalPaymentWei: string;
-  totalProviderEarnedWei: string;
-  totalBurnedWei: string;
-  entries: PayloadProviderPaymentEntry[];
-  providers: PayloadProviderPaymentProviderTotal[];
-  source: "protocolSchedule" | "configuredShareBps" | "unconfigured";
 }
 
 export interface InspectedTransaction {
@@ -428,15 +398,18 @@ export interface InspectedTransaction {
   maxPriorityFeePerGasWei: string | null;
   effectiveGasPriceWei: string;
   priorityFeeWei: string;
+  /** Gas fee only: gasUsed × effectiveGasPrice. */
   transactionFeeWei: string;
+  /** Storage rent burned outside gas ("0" for a failed transaction). */
+  rentFeeWei: string;
+  /** transactionFeeWei + rentFeeWei; present on stored rows. */
+  totalCostWei?: string;
   status: string | null;
   contractAddress: string | null;
   /** Decoded Arkiv operations; present on /transaction/<hash> detail responses. */
-  operations?: ArkivOperation[];
+  operations?: StoredArkivOperation[];
   /** Per-operation-type counts; present on /transactions list rows that have stored operations. */
   operationsSummary?: ArkivOperationSummaryEntry[];
-  /** Payload-reference payment split for transaction detail rows. */
-  payloadProviderPayments?: PayloadProviderPaymentBreakdown;
 }
 
 export interface InspectedBlock {
@@ -504,6 +477,8 @@ const TRANSACTION_RESPONSE_BASE_NAMES = [
   "effectiveGasPriceWei",
   "priorityFeeWei",
   "transactionFeeWei",
+  "rentFeeWei",
+  "totalCostWei",
   "status",
   "contractAddress",
 ] as const satisfies readonly (keyof StoredTransaction)[];
@@ -581,7 +556,12 @@ export interface StoredSenderStats {
   latestNonce: string | null;
   transactionCount: string;
   totalGasUsed: string;
+  /** Gas fees only. */
   totalTransactionFeeWei: string;
+  /** Storage rent, outside gas. */
+  totalRentFeeWei: string;
+  /** Gas fees plus rent. */
+  totalCostWei: string;
   totalValueWei: string;
   averageGasUsed: string;
   averageTransactionFeeWei: string;
@@ -610,6 +590,8 @@ export const SENDER_STATS_RESPONSE_NAMES = [
   "transactionCount",
   "totalGasUsed",
   "totalTransactionFeeWei",
+  "totalRentFeeWei",
+  "totalCostWei",
   "totalValueWei",
   "averageGasUsed",
   "averageTransactionFeeWei",
@@ -634,7 +616,10 @@ export interface GuzzlerStat {
   address: string;
   transactionCount: number;
   totalGasUsed: string;
+  /** Gas fees only. */
   totalFeeWei: string;
+  /** Storage rent, outside gas. */
+  totalRentFeeWei: string;
   firstSeen: string;
   lastSeen: string;
 }
@@ -658,6 +643,7 @@ export const GUZZLER_STAT_RESPONSE_NAMES = [
   "transactionCount",
   "totalGasUsed",
   "totalFeeWei",
+  "totalRentFeeWei",
   "firstSeen",
   "lastSeen",
 ] as const satisfies readonly (keyof GuzzlerStat)[];
@@ -686,7 +672,10 @@ export interface GuzzlerHistoryPoint {
   startTime: string;
   transactionCount: number;
   totalGasUsed: string;
+  /** Gas fees only. */
   totalFeeWei: string;
+  /** Storage rent, outside gas. */
+  totalRentFeeWei: string;
   firstSeen: string;
   lastSeen: string;
 }
@@ -697,6 +686,7 @@ export const GUZZLER_HISTORY_POINT_RESPONSE_NAMES = [
   "transactionCount",
   "totalGasUsed",
   "totalFeeWei",
+  "totalRentFeeWei",
   "firstSeen",
   "lastSeen",
 ] as const satisfies readonly (keyof GuzzlerHistoryPoint)[];
@@ -1213,6 +1203,8 @@ function decodeBlockResponseRow(row: BlockResponseRow, names: readonly string[] 
   assignOptionalString(block, "blockRewardWei", values.get("blockRewardWei") ?? null);
   assignOptionalString(block, "burntFeesWei", values.get("burntFeesWei") ?? null);
   assignOptionalString(block, "totalTransactionFeeWei", values.get("totalTransactionFeeWei") ?? null);
+  assignOptionalString(block, "totalRentFeeWei", values.get("totalRentFeeWei") ?? null);
+  assignOptionalString(block, "totalBurnedWei", values.get("totalBurnedWei") ?? null);
   assignOptionalString(block, "feePriceSumWei", values.get("feePriceSumWei") ?? null);
   assignOptionalString(block, "priorityFeeSumWei", values.get("priorityFeeSumWei") ?? null);
   assignOptionalString(
@@ -1263,6 +1255,10 @@ function decodeRangeResponseRow(
     totalBurntFeesWei: stringValue(values.get("totalBurntFeesWei") ?? null),
     averageBlockRewardWei: stringValue(values.get("averageBlockRewardWei") ?? null),
     averageBurntFeesWei: stringValue(values.get("averageBurntFeesWei") ?? null),
+    totalRentFeeWei: stringValue(values.get("totalRentFeeWei") ?? "0"),
+    totalBurnedWei: stringValue(values.get("totalBurnedWei") ?? "0"),
+    averageRentFeeWei: stringValue(values.get("averageRentFeeWei") ?? "0"),
+    averageBurnedWei: stringValue(values.get("averageBurnedWei") ?? "0"),
     transactionCount: numberValue(values.get("transactionCount") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
     averageTotalGasUsed: stringValue(values.get("averageTotalGasUsed") ?? null),
@@ -1315,6 +1311,7 @@ function decodeGuzzlerHistoryPointResponseRow(
     transactionCount: numberValue(values.get("transactionCount") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
     totalFeeWei: stringValue(values.get("totalFeeWei") ?? null),
+    totalRentFeeWei: stringValue(values.get("totalRentFeeWei") ?? "0"),
     firstSeen: stringValue(values.get("firstSeen") ?? null),
     lastSeen: stringValue(values.get("lastSeen") ?? null),
   };
@@ -1349,6 +1346,8 @@ function decodeTransactionResponseRow(
     effectiveGasPriceWei: stringValue(values.get("effectiveGasPriceWei") ?? null),
     priorityFeeWei: stringValue(values.get("priorityFeeWei") ?? null),
     transactionFeeWei: stringValue(values.get("transactionFeeWei") ?? null),
+    rentFeeWei: stringValue(values.get("rentFeeWei") ?? "0"),
+    totalCostWei: stringValue(values.get("totalCostWei") ?? values.get("transactionFeeWei") ?? null),
     status: nullableString(values.get("status") ?? null),
     contractAddress: nullableString(values.get("contractAddress") ?? null),
   };
@@ -1386,6 +1385,8 @@ function decodeSenderStatsResponseRow(
     transactionCount: stringValue(values.get("transactionCount") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
     totalTransactionFeeWei: stringValue(values.get("totalTransactionFeeWei") ?? null),
+    totalRentFeeWei: stringValue(values.get("totalRentFeeWei") ?? "0"),
+    totalCostWei: stringValue(values.get("totalCostWei") ?? values.get("totalTransactionFeeWei") ?? null),
     totalValueWei: stringValue(values.get("totalValueWei") ?? null),
     averageGasUsed: stringValue(values.get("averageGasUsed") ?? null),
     averageTransactionFeeWei: stringValue(values.get("averageTransactionFeeWei") ?? null),
@@ -1405,8 +1406,8 @@ function decodeEntityOperationResponseRow(
 ): StoredEntityOperation {
   const values = valuesByName(names, row);
   const attributes = values.get("attributes");
-  const payloadReference = values.get("payloadReference");
-  const referenceVerification = values.get("referenceVerification");
+  const creationFlags = values.get("creationFlags");
+  const permanent = values.get("permanent");
   return {
     blockNumber: numberValue(values.get("blockNumber") ?? null),
     blockNumberDecimal: stringValue(values.get("blockNumberDecimal") ?? null),
@@ -1417,23 +1418,19 @@ function decodeEntityOperationResponseRow(
     operationType: numberValue(values.get("operationType") ?? null),
     operation: stringValue(values.get("operation") ?? null),
     entityKey: nullableString(values.get("entityKey") ?? null),
-    contentType: nullableString(values.get("contentType") ?? null),
-    payloadSizeBytes: numberValue(values.get("payloadSizeBytes") ?? null),
-    attributes: Array.isArray(attributes) ? (attributes as ArkivOperationAttribute[]) : [],
-    expiresAtBlocks: numberValue(values.get("expiresAtBlocks") ?? null),
+    salt: nullableString(values.get("salt") ?? null),
+    creationFlags: typeof creationFlags === "number" ? creationFlags : null,
+    expiresAt: nullableString(values.get("expiresAt") ?? null),
+    minLifetime: nullableString(values.get("minLifetime") ?? null),
+    resolvedExpiresAt: nullableString(values.get("resolvedExpiresAt") ?? null),
+    permanent: typeof permanent === "boolean" ? permanent : null,
     newOwner: nullableString(values.get("newOwner") ?? null),
-    isReference: values.get("isReference") === true,
-    payloadReference:
-      payloadReference && typeof payloadReference === "object" && !Array.isArray(payloadReference)
-        ? (payloadReference as ArkivPayloadReference)
-        : null,
-    referenceVerification:
-      referenceVerification &&
-      typeof referenceVerification === "object" &&
-      !Array.isArray(referenceVerification)
-        ? (referenceVerification as ArkivReferenceVerification)
-        : null,
-    referenceError: nullableString(values.get("referenceError") ?? null),
+    bytesSize: numberValue(values.get("bytesSize") ?? 0),
+    schemaName: nullableString(values.get("schemaName") ?? null),
+    attributes: Array.isArray(attributes) ? (attributes as ArkivOperationAttribute[]) : [],
+    transactionStatus: nullableString(values.get("transactionStatus") ?? null),
+    transactionRentFeeWei: nullableString(values.get("transactionRentFeeWei") ?? null),
+    transactionOperationCount: numberValue(values.get("transactionOperationCount") ?? 1),
   };
 }
 
@@ -1447,6 +1444,7 @@ function decodeGuzzlerStatResponseRow(
     transactionCount: numberValue(values.get("transactionCount") ?? null),
     totalGasUsed: stringValue(values.get("totalGasUsed") ?? null),
     totalFeeWei: stringValue(values.get("totalFeeWei") ?? null),
+    totalRentFeeWei: stringValue(values.get("totalRentFeeWei") ?? "0"),
     firstSeen: stringValue(values.get("firstSeen") ?? null),
     lastSeen: stringValue(values.get("lastSeen") ?? null),
   };
@@ -1465,6 +1463,8 @@ function assignOptionalString(
     | "blockRewardWei"
     | "burntFeesWei"
     | "totalTransactionFeeWei"
+    | "totalRentFeeWei"
+    | "totalBurnedWei"
     | "feePriceSumWei"
     | "priorityFeeSumWei"
     | "priorityFeeWeightedNumeratorWei"

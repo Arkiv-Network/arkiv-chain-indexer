@@ -166,11 +166,12 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
           <ExplainedStat label="Transaction rows with input">{integer(activity.transactions.withInput)}</ExplainedStat>
           <ExplainedStat label="Mean input per transaction">{formatStatisticsBytes(activity.transactions.inputBytes, byteUnit, activity.transactions.indexed)}</ExplainedStat>
           <ExplainedStat label="Largest transaction input">{bytes(activity.transactions.maxInputBytes)}</ExplainedStat>
-          <ExplainedStat label="Successful writes with payload">{integer(activity.operations.successfulPayloadWrites)}</ExplainedStat>
-          <ExplainedStat label="Recorded payload bytes in successful ops">{bytes(activity.operations.successfulPayloadBytes)}</ExplainedStat>
-          <ExplainedStat label="Successful reference writes">{integer(activity.operations.successfulReferenceWrites)}</ExplainedStat>
-          <ExplainedStat label="Declared referenced payload bytes">{bytes(activity.operations.referencedPayloadBytes)}</ExplainedStat>
-          <ExplainedStat label="References without a usable size">{integer(activity.operations.referencesWithoutSize)}</ExplainedStat>
+          <ExplainedStat label="Successful writes with bytes">{integer(activity.operations.successfulBytesWrites)}</ExplainedStat>
+          <ExplainedStat label="Bytes written in successful ops">{bytes(activity.operations.successfulBytesWritten)}</ExplainedStat>
+          <ExplainedStat label="Indexed attribute writes">{integer(activity.operations.successfulIndexedAttributeWrites)}</ExplainedStat>
+          <ExplainedStat label="Stored attribute writes">{integer(activity.operations.successfulStoredAttributeWrites)}</ExplainedStat>
+          <ExplainedStat label="Attribute unsets">{integer(activity.operations.successfulAttributeUnsets)}</ExplainedStat>
+          <ExplainedStat label="Schema-tagged writes">{integer(activity.operations.successfulSchemaTaggedWrites)}</ExplainedStat>
         </StatGrid>
       </Section>
       <Section title="Current active payload state" note="Current projection at the block shown above, independent of the activity period. Recorded metadata is not verified storage usage.">

@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fetchEntityByKey, type EntityByKeyResponse, type StoredEntityOperation } from "./api";
-import { isPermanentEntity, isPermanentLifetime } from "./entityLifetime";
+import { isPermanentEntity } from "./entityLifetime";
 import { fmtBytes, fmtDurationSeconds, fmtInteger } from "./format";
 import { PageBreadcrumbs } from "./PageBreadcrumbs";
 import { writeEntityPermalink } from "./permalinks";
@@ -168,10 +168,8 @@ function EntityDetail({
   const latest = operations.length > 0 ? operations[operations.length - 1]! : null;
   const lifecycle = latest ? lifecycleInfo(latest) : { label: "Active", tone: "ok" as const };
   const newestFirst = [...operations].reverse();
-  const latestContent = newestFirst.find((operation) => operation.contentType !== null) ?? null;
-  const latestExpiry = newestFirst.find((operation) => operation.expiresAtBlocks > 0) ?? null;
+  const latestExpiry = newestFirst.find((operation) => operation.resolvedExpiresAt !== null) ?? null;
   const lastTransfer = newestFirst.find((operation) => operation.newOwner !== null) ?? null;
-  const contentType = latestContent?.contentType ?? genesis?.contentType ?? null;
 
   return (
     <Card className="gap-4 p-4">
@@ -198,19 +196,6 @@ function EntityDetail({
             >
               {fmtInteger(totalOperations)}
             </Row>
-            {contentType ? <Row label="Content type">{contentType}</Row> : null}
-            {latestContent && latestContent.payloadSizeBytes > 0 ? (
-              <Row
-                label="Payload"
-                title={`${fmtInteger(latestContent.payloadSizeBytes)} bytes, from the ${latestContent.operation} in block ${latestContent.blockNumberDecimal}`}
-              >
-                {fmtBytes(latestContent.payloadSizeBytes)}
-              </Row>
-            ) : genesis && genesis.payloadSize > 0 ? (
-              <Row label="Payload" title={`${fmtInteger(genesis.payloadSize)} bytes in the genesis state`}>
-                {fmtBytes(genesis.payloadSize)}
-              </Row>
-            ) : null}
             {lastTransfer?.newOwner ? (
               <Row label="Owner (last transfer)">
                 <AddressCell address={lastTransfer.newOwner} />
@@ -273,7 +258,6 @@ function EntityDetail({
             <Row label="Operation">
               <span className="inline-flex flex-wrap items-center gap-1">
                 <OpBadge operation={latest.operation} />
-                {latest.isReference ? <OpBadge operation="reference" /> : null}
               </span>
             </Row>
             <Row label="Block">
@@ -292,9 +276,11 @@ function EntityDetail({
                 label="Expires"
                 title={`Set by the ${latestExpiry.operation} in block ${latestExpiry.blockNumberDecimal}`}
               >
-                {isPermanentLifetime(latestExpiry.expiresAtBlocks, blockTimeMs / 1000)
+                {latestExpiry.permanent
                   ? "Permanent"
-                  : `${fmtInteger(latestExpiry.expiresAtBlocks)} blocks (~${fmtDurationSeconds((latestExpiry.expiresAtBlocks * blockTimeMs) / 1000)}) from block ${latestExpiry.blockNumberDecimal}`}
+                  : `block ${fmtInteger(latestExpiry.resolvedExpiresAt!)} (~${fmtDurationSeconds(
+                      (Number(BigInt(latestExpiry.resolvedExpiresAt!) - BigInt(latestExpiry.blockNumberDecimal)) * blockTimeMs) / 1000,
+                    )} after block ${latestExpiry.blockNumberDecimal})`}
               </Row>
             ) : null}
           </dl>
@@ -355,8 +341,8 @@ function EntityDetail({
               <TableHead>Transaction</TableHead>
               <TableHead>Op</TableHead>
               <TableHead>Operation</TableHead>
-              <TableHead>Content type</TableHead>
-              <TableHead>Payload</TableHead>
+              <TableHead>Schema</TableHead>
+              <TableHead>Bytes</TableHead>
               <TableHead>Expires</TableHead>
               <TableHead>New owner</TableHead>
             </TableRow>
@@ -379,17 +365,16 @@ function EntityDetail({
                 <TableCell>
                   <span className="inline-flex flex-wrap items-center gap-1">
                     <OpBadge operation={operation.operation} />
-                    {operation.isReference ? <OpBadge operation="reference" /> : null}
                   </span>
                 </TableCell>
-                <TableCell>{operation.contentType ?? "—"}</TableCell>
-                <TableCell title={`${fmtInteger(operation.payloadSizeBytes)} bytes`}>
-                  {operation.payloadSizeBytes > 0 ? fmtBytes(operation.payloadSizeBytes) : "—"}
+                <TableCell>{operation.schemaName ?? "—"}</TableCell>
+                <TableCell title={`${fmtInteger(operation.bytesSize)} bytes`}>
+                  {operation.bytesSize > 0 ? fmtBytes(operation.bytesSize) : "—"}
                 </TableCell>
                 <TableCell>
-                  {isPermanentLifetime(operation.expiresAtBlocks, blockTimeMs / 1000)
+                  {operation.permanent
                     ? "Permanent"
-                    : operation.expiresAtBlocks > 0 ? `${fmtInteger(operation.expiresAtBlocks)} blocks` : "—"}
+                    : operation.resolvedExpiresAt !== null ? `block ${fmtInteger(operation.resolvedExpiresAt)}` : "—"}
                 </TableCell>
                 <TableCell>{operation.newOwner ? <AddressCell address={operation.newOwner} /> : "—"}</TableCell>
               </TableRow>

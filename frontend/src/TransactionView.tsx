@@ -2,13 +2,10 @@ import { ExternalLink } from "lucide-react";
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import {
   fetchTransactionByHash,
-  type ArkivOperation,
-  type ArkivReferenceVerification,
-  type PayloadProviderPaymentBreakdown,
+  type StoredArkivOperation,
   type StoredTransaction,
 } from "./api";
 import { AddressCell } from "./TransactionsView";
-import { AddressFace } from "./AddressFace";
 import { BlockNumberLink } from "./blockLinks";
 import { CedricOnTimer } from "./Cedric";
 import { CopyButton } from "@/components/copy-cell";
@@ -19,12 +16,9 @@ export { CopyButton } from "@/components/copy-cell";
 import { OpBadge, StatusBadge, type StatusTone } from "@/components/op-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { isPermanentLifetime } from "./entityLifetime";
 import {
   fmtBytes,
   fmtDate,
-  fmtDurationSeconds,
-  fmtEth,
   fmtGasPrice,
   fmtInteger,
   fmtRatio,
@@ -37,7 +31,7 @@ import {
   writeEntityPermalink,
   writeTransactionPermalink,
 } from "./permalinks";
-import { payloadInfoHref, transactionDecoderHref } from "./transactionLinks";
+import { transactionDecoderHref } from "./transactionLinks";
 
 interface TransactionViewProps {
   hash: string | null;
@@ -170,12 +164,12 @@ function TransactionDetail({
   transaction,
   timeZone,
   tokenSymbol,
-  blockTimeMs,
   onLocationChange,
 }: {
   transaction: StoredTransaction;
   timeZone: string;
   tokenSymbol: string;
+  /** Unused since operations carry their resolved expiry block; kept for callers. */
   blockTimeMs: number;
   onLocationChange: () => void;
 }) {
@@ -183,7 +177,6 @@ function TransactionDetail({
   const decoderHref = transactionDecoderHref(transaction.hash);
   const isContractCreation = !transaction.to && Boolean(transaction.contractAddress);
   const operations = transaction.operations ?? [];
-  const payloadProviderPayments = transaction.payloadProviderPayments ?? null;
 
   return (
     <div className="relative sm:mt-6">
@@ -269,14 +262,10 @@ function TransactionDetail({
             <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
               Arkiv operations ({operations.length})
             </h3>
-            {payloadProviderPayments ? (
-              <PayloadProviderPaymentsPanel payments={payloadProviderPayments} tokenSymbol={tokenSymbol} />
-            ) : null}
             {operations.map((operation) => (
               <OperationCard
                 key={operation.opIndex}
                 operation={operation}
-                blockTimeMs={blockTimeMs}
                 onLocationChange={onLocationChange}
               />
             ))}
@@ -287,111 +276,20 @@ function TransactionDetail({
   );
 }
 
-function PayloadProviderPaymentsPanel({
-  payments,
-  tokenSymbol,
-}: {
-  payments: PayloadProviderPaymentBreakdown;
-  tokenSymbol: string;
-}) {
-  const sourceLabel =
-    payments.source === "protocolSchedule"
-      ? "protocol schedule"
-      : payments.source === "configuredShareBps"
-        ? "configured split"
-        : "split unavailable";
-  const splitLabel =
-    payments.providerShareBps === null ? "—" : `${(payments.providerShareBps / 100).toFixed(2)}%`;
-
-  return (
-    <div className="border border-border bg-muted/40 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h4 className="text-xs font-medium text-foreground">Payload provider payments</h4>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {payments.entries.length} reference payment
-            {payments.entries.length === 1 ? "" : "s"} - {sourceLabel}
-          </p>
-        </div>
-        <StatusBadge tone={payments.enabled ? "ok" : "unknown"}>
-          {payments.enabled ? "enabled" : "not active"}
-        </StatusBadge>
-      </div>
-      <dl className="mt-2 flex flex-col">
-        <Row label="Signed payment">
-          {paymentValue(payments.totalPaymentWei, tokenSymbol)}
-          {payments.totalPaymentGasUnits ? ` (${fmtInteger(payments.totalPaymentGasUnits)} gas units)` : ""}
-        </Row>
-        <Row label="Provider share">{splitLabel}</Row>
-        <Row label="Provider earned">{paymentValue(payments.totalProviderEarnedWei, tokenSymbol)}</Row>
-        <Row label="Burned">{paymentValue(payments.totalBurnedWei, tokenSymbol)}</Row>
-        <Row label="Minimum payment">
-          {payments.minimumPaymentWei === null
-            ? "—"
-            : `${paymentValue(payments.minimumPaymentWei, tokenSymbol)}${
-                payments.minimumPaymentGasUnits ? ` (${fmtInteger(payments.minimumPaymentGasUnits)} gas units)` : ""
-              }`}
-        </Row>
-      </dl>
-
-      <div className="mt-3 flex flex-col gap-2">
-        {payments.providers.map((provider) => (
-          <div
-            className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border pt-2 text-xs first:border-0 first:pt-0"
-            key={`${provider.provider}:${provider.signer ?? ""}`}
-          >
-            <div className="flex items-baseline gap-2">
-              <strong className="font-medium text-foreground">{provider.provider}</strong>
-              <span className="text-muted-foreground">
-                {provider.paymentCount} payment{provider.paymentCount === 1 ? "" : "s"}
-              </span>
-            </div>
-            {provider.signer ? <AddressCell address={provider.signer} /> : <span>—</span>}
-            <div className="font-mono">{paymentValue(provider.providerEarnedWei, tokenSymbol)}</div>
-            <div className="font-mono text-muted-foreground">burn {paymentValue(provider.burnedWei, tokenSymbol)}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-3 flex flex-col gap-1">
-        {payments.entries.map((entry) => (
-          <div
-            className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs"
-            key={`${entry.opIndex}:${entry.payloadId}`}
-          >
-            <span className="text-muted-foreground">op #{entry.opIndex}</span>
-            <span className="truncate font-mono">{entry.payloadId}</span>
-            <span className="font-mono">{paymentValue(entry.providerEarnedWei, tokenSymbol)}</span>
-            <span className="font-mono text-muted-foreground">burn {paymentValue(entry.burnedWei, tokenSymbol)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function OperationCard({
   operation,
-  blockTimeMs,
   onLocationChange,
 }: {
-  operation: ArkivOperation;
-  blockTimeMs: number;
+  operation: StoredArkivOperation;
   onLocationChange?: () => void;
 }) {
   const entityKey =
     operation.entityKey && !isAllZeroBytes32(operation.entityKey) ? operation.entityKey : null;
-  const expirySeconds = (operation.expiresAtBlocks * blockTimeMs) / 1000;
-  const reference = operation.payloadReference ?? null;
-  const verification = operation.referenceVerification ?? null;
-  const verdict = verification ? referenceVerdict(verification) : null;
-  const payloadHref = reference ? payloadInfoHref(reference.id) : null;
 
   return (
     <div className="border border-border p-3">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <OpBadge operation={operation.operation} />
-        {operation.isReference ? <OpBadge operation="reference" /> : null}
         <span className="text-xs text-muted-foreground">#{operation.opIndex}</span>
       </div>
       <dl className="flex flex-col">
@@ -416,94 +314,33 @@ function OperationCard({
             "—"
           )}
         </Row>
-        <Row label="Content type">{operation.contentType ?? "—"}</Row>
-        <Row label="Payload size" title={`${fmtInteger(operation.payloadSizeBytes)} bytes`}>
-          {fmtBytes(operation.payloadSizeBytes)}
-        </Row>
-        {verdict ? (
-          <Row label="Verification">
-            <div className="flex flex-col items-start gap-1">
-              <StatusBadge tone={verdict.tone}>{verdict.label}</StatusBadge>
-              {verification && verification.errors.length > 0 ? (
-                <div className="flex flex-col gap-0.5 text-xs text-destructive">
-                  {verification.errors.map((error, index) => (
-                    <div key={index}>{error}</div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+        {operation.schemaName ? <Row label="Schema">{operation.schemaName}</Row> : null}
+        {operation.bytesSize > 0 ? (
+          <Row label="Bytes" title={`${fmtInteger(operation.bytesSize)} bytes in bytes attributes (contents are not stored)`}>
+            {fmtBytes(operation.bytesSize)}
           </Row>
-        ) : null}
-        {operation.referenceError ? (
-          <Row label="Reference">
-            <StatusBadge tone="fail">{operation.referenceError}</StatusBadge>
-          </Row>
-        ) : null}
-        {reference ? (
-          <>
-            <Row label="Provider">
-              <span className="inline-flex flex-wrap items-baseline gap-2">
-                {verification?.recoveredSigner ? (
-                  <AddressFace
-                    address={verification.recoveredSigner}
-                    width={18}
-                    height={18}
-                    className="rounded-full"
-                    alt=""
-                    title={`Signer identicon for ${verification.recoveredSigner}`}
-                  />
-                ) : null}
-                <span>{reference.provider}</span>
-              </span>
-            </Row>
-            <Row label="Payload id">
-              <span className="inline-flex flex-wrap items-baseline gap-1.5">
-                {payloadHref ? (
-                  <a
-                    className="truncate font-mono text-foreground transition-colors hover:text-accent hover:underline"
-                    href={payloadHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    title="View payload info on the payload provider"
-                  >
-                    {reference.id}
-                  </a>
-                ) : (
-                  <span className="truncate font-mono">{reference.id}</span>
-                )}
-                <CopyButton value={reference.id} label="payload id" />
-              </span>
-            </Row>
-            <Row label="Namespace">{reference.namespace}</Row>
-            <Row label="Checksum">
-              <span className="truncate font-mono">{reference.checksum}</span>
-            </Row>
-            <Row label="Reference size" title={`${fmtInteger(reference.sizeBytes)} bytes`}>
-              {fmtBytes(reference.sizeBytes)}
-            </Row>
-            {verification?.recoveredSigner ? (
-              <Row label="Signer">
-                <AddressCell address={verification.recoveredSigner} />
-              </Row>
-            ) : null}
-          </>
         ) : null}
         {operation.attributes.length > 0 ? (
           <Row label="Attributes">
             <div className="flex flex-col gap-0.5">
               {operation.attributes.map((attribute, index) => (
-                <div key={`${attribute.key}:${index}`} title={attribute.valueTypeName}>
-                  {attribute.key} = <span className="font-mono">{attribute.value}</span>
+                <div key={`${attribute.name}:${index}`} title={`${attribute.type}${attribute.indexed ? ", indexed" : ", stored"}`}>
+                  {attribute.name} ={" "}
+                  <span className="font-mono">
+                    {attribute.type === "tombstone"
+                      ? "(unset)"
+                      : attribute.value === null
+                        ? attribute.keccak256 ?? "—"
+                        : String(attribute.value)}
+                  </span>
                 </div>
               ))}
             </div>
           </Row>
         ) : null}
-        {operation.expiresAtBlocks > 0 ? (
+        {operation.resolvedExpiresAt !== null ? (
           <Row label="Expires">
-            {isPermanentLifetime(operation.expiresAtBlocks, blockTimeMs / 1000)
-              ? "Permanent"
-              : `${fmtInteger(operation.expiresAtBlocks)} blocks (~${fmtDurationSeconds(expirySeconds)})`}
+            {operation.permanent ? "Permanent" : `block ${fmtInteger(operation.resolvedExpiresAt)}`}
           </Row>
         ) : null}
         {operation.newOwner ? (
@@ -514,10 +351,6 @@ function OperationCard({
       </dl>
     </div>
   );
-}
-
-function paymentValue(wei: string, tokenSymbol: string): string {
-  return `${fmtInteger(wei)} wei (${fmtEth(wei)} ${tokenSymbol})`;
 }
 
 function isAllZeroBytes32(value: string): boolean {
@@ -539,17 +372,6 @@ function statusInfo(status: string | null): { label: string; tone: StatusTone } 
   if (status === "1") return { label: "Success", tone: "ok" };
   if (status === "0") return { label: "Failed", tone: "fail" };
   return { label: status ?? "Unknown", tone: "unknown" };
-}
-
-/**
- * Map a reference verification verdict to a badge label/tone. `valid` already
- * implies the signer is trusted (the decoder records an untrusted signer as an
- * error that fails the verdict), so an untrusted signer surfaces under `fail`.
- */
-function referenceVerdict(verification: ArkivReferenceVerification): { label: string; tone: StatusTone } {
-  if (verification.valid) return { label: "Verified", tone: "ok" };
-  if (!verification.signerTrusted) return { label: "Untrusted signer", tone: "fail" };
-  return { label: "Invalid", tone: "fail" };
 }
 
 function txTypeLabel(type: string | null): string {

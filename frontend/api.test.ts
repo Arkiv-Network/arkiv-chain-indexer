@@ -318,6 +318,7 @@ describe("frontend API helpers", () => {
         transactionCount: 3,
         totalGasUsed: "63000",
         totalFeeWei: "420000",
+        totalRentFeeWei: "7000",
         firstSeen: "2024-01-01T00:00:05.000Z",
         lastSeen: "2024-01-01T00:00:55.000Z",
       },
@@ -354,6 +355,7 @@ describe("frontend API helpers", () => {
         transactionCount: 3,
         totalGasUsed: "63000",
         totalFeeWei: "420000",
+        totalRentFeeWei: "7000",
         firstSeen: "2024-01-01T00:00:05.000Z",
         lastSeen: "2024-01-01T00:00:55.000Z",
       },
@@ -581,6 +583,8 @@ function compactGuzzlerHistoryPointRow(): Array<number | string | null> {
         return "63000";
       case "totalFeeWei":
         return "420000";
+      case "totalRentFeeWei":
+        return "7000";
       case "firstSeen":
         return "2024-01-01T00:00:05.000Z";
       case "lastSeen":
@@ -601,6 +605,8 @@ function compactGuzzlerStatRow(): Array<number | string | null> {
         return "63000";
       case "totalFeeWei":
         return "420000";
+      case "totalRentFeeWei":
+        return "7000";
       case "firstSeen":
         return "2024-01-01T00:00:05.000Z";
       case "lastSeen":

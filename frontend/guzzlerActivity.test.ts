@@ -24,6 +24,7 @@ function point(minute: number, overrides: Partial<GuzzlerHistoryPoint> = {}): Gu
     transactionCount: 1,
     totalGasUsed: "1000",
     totalFeeWei: "0",
+    totalRentFeeWei: "0",
     firstSeen: new Date(startMs + 1_000).toISOString(),
     lastSeen: new Date(startMs + 30_000).toISOString(),
     ...overrides,
