@@ -108,7 +108,7 @@ Related scanner and worker settings:
 | `OPTIONS` | any | CORS preflight. |
 | `GET` | `/health` | Backend, scanner, database, feature, and guzzler cache health. |
 | `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
-| `GET` | `/statistics` | Worker snapshot of chain coverage, transaction/operation totals, entity state, payload sizes and attributes. |
+| `GET` | `/statistics` | Worker snapshot of chain coverage, transaction/operation totals, gas fees and rent, entity state, bytes sizes, schemas and attributes. |
 | `POST` | `/shadow-rpc` | Ethereum JSON-RPC 2.0 served from stored data, plus any methods the optional passthrough relays to a real node. |
 | `GET` | `/blocks` | Compact rows for stored per-block metrics. |
 | `GET` | `/blocks/:blockNumber` | One compact stored block row. |
@@ -177,14 +177,15 @@ entity counts. Check `limitations`, snapshot age and observed/projection heads.
 Snapshots retain version 1 and unchanged top-level all-time/current-state fields.
 New snapshots add `windows` keyed by `1h`, `2h`, `6h`, `12h`, `24h`, `48h`, `72h`,
 `7d` and `all`. Each contains `fromInclusiveUtc`, `toExclusiveUtc`, `blocks`
-(`indexed`, `transactions`, `inputBytes`, `compressedInputBytes`), `transactions`
+(`indexed`, `transactions`, `inputBytes`, `compressedInputBytes`, `gasFeeWei`, `rentFeeWei`,
+`burnedWei`), `transactions`
 and `operations` (same shapes as their top-level counterparts). Finite windows
 use each table's stored `block_date`, with `start <= timestamp < gatheredAtUtc`;
 all share the transaction-start cutoff truncated to milliseconds. `7d` is exactly
 168 hours. `all` has null bounds and includes every stored row, including any
 future-dated rows. Orphan operations use their own block timestamp and count as
 unknown receipt outcomes. Empty periods are zero stored activity, not proof of
-complete coverage. Windows contain no entity gauges: current entity/payload and
+complete coverage. Windows contain no entity gauges: current entity, bytes and
 attribute state remains at `entities.asOfBlock`. Old worker files can lack
 `windows`; use top-level all-time fields and treat finite periods as unavailable.
 Period selection never triggers a database query or worker sweep.
@@ -421,8 +422,8 @@ Response shape:
 
 ```txt
 blockNumber, blockDate, blockTimeSeconds, baseBlockFeeWei, totalGasUsed, totalInputDataSizeBytes,
-totalInputDataCompressedSizeBytes, maxGasInBlock, transactionCount, blockRewardWei,
-burntFeesWei, totalTransactionFeeWei, feePriceSumWei, priorityFeeSumWei,
+totalInputDataCompressedSizeBytes, maxGasInBlock, transactionCount, blockRewardWei, burntFeesWei,
+totalTransactionFeeWei, totalRentFeeWei, totalBurnedWei, feePriceSumWei, priorityFeeSumWei,
 priorityFeeWeightedNumeratorWei, priorityFeeGasWeightedNumeratorWei, averageFeePriceWei,
 averageTransactionFeeWei, averageTransactionGasUsed, averageTransactionInputDataSizeBytes,
 averageTransactionInputDataCompressedSizeBytes, averagePriorityFeeWeightedWei,
@@ -445,10 +446,10 @@ The block includes the metrics from `/blocks` plus `blockNumberDecimal` and `tra
 Each transaction includes:
 
 ```txt
-position, hash, from, to, type, nonce, valueWei, gasLimit, gasUsed,
-inputDataSizeBytes, inputDataCompressedSizeBytes, cumulativeGasUsed, gasPriceWei,
-maxFeePerGasWei, maxPriorityFeePerGasWei, effectiveGasPriceWei, priorityFeeWei,
-transactionFeeWei, status, contractAddress
+position, hash, from, to, type, nonce, valueWei, gasLimit, gasUsed, inputDataSizeBytes,
+inputDataCompressedSizeBytes, cumulativeGasUsed, gasPriceWei, maxFeePerGasWei,
+maxPriorityFeePerGasWei, effectiveGasPriceWei, priorityFeeWei, transactionFeeWei, rentFeeWei,
+status, contractAddress
 ```
 
 ## `GET /ranges`
@@ -475,16 +476,19 @@ Response shape includes `count`, `limit`, `truncated`, `filters`, `names`, and `
 `names` field order:
 
 ```txt
-rangeSize, rangeStart, rangeEnd, minBlockDate, maxBlockDate, minBaseFeeWei,
-maxBaseFeeWei, averageBaseFeeWei, totalGasUsed, totalInputDataSizeBytes,
-totalInputDataCompressedSizeBytes, totalMaxGas, minMaxGasInBlock, maxMaxGasInBlock,
-transactionCount, totalBlockRewardWei, totalBurntFeesWei, averageBlockRewardWei,
-averageBurntFeesWei, averageFeePriceWei, averageTransactionGasUsed,
+rangeSize, rangeStart, rangeEnd, minBlockDate, maxBlockDate, averageBlockTimeSeconds,
+minBlockTimeSeconds, maxBlockTimeSeconds, minBaseFeeWei, maxBaseFeeWei, averageBaseFeeWei,
+totalGasUsed, averageTotalGasUsed, minTotalGasUsed, maxTotalGasUsed, totalInputDataSizeBytes,
+averageTotalInputDataSizeBytes, minTotalInputDataSizeBytes, maxTotalInputDataSizeBytes,
+totalInputDataCompressedSizeBytes, averageTotalInputDataCompressedSizeBytes,
+minTotalInputDataCompressedSizeBytes, maxTotalInputDataCompressedSizeBytes, totalMaxGas,
+minMaxGasInBlock, maxMaxGasInBlock, transactionCount, totalBlockRewardWei, totalBurntFeesWei,
+totalRentFeeWei, totalBurnedWei, averageBlockRewardWei, averageBurntFeesWei, averageRentFeeWei,
+averageBurnedWei, averageFeePriceWei, averageTransactionGasUsed,
 averageTransactionInputDataSizeBytes, averageTransactionInputDataCompressedSizeBytes,
-averagePriorityFeeWeightedWei, averagePriorityFeeWei, minBatcherQueueSize,
-maxBatcherQueueSize, averageBatcherQueueSize, averageBatcherIntensity,
-averageBatcherLowerThreshold, averageBatcherUpperThreshold, averageBatcherMaxBlockSize,
-averageBatcherMaxTxSize
+averagePriorityFeeWeightedWei, averagePriorityFeeWei, minBatcherQueueSize, maxBatcherQueueSize,
+averageBatcherQueueSize, averageBatcherIntensity, averageBatcherLowerThreshold,
+averageBatcherUpperThreshold, averageBatcherMaxBlockSize, averageBatcherMaxTxSize
 ```
 
 ## `GET /transactions`
@@ -541,10 +545,10 @@ Each transaction row is a compact JSON array of values in `names` order.
 `names` field order:
 
 ```txt
-blockNumber, blockNumberDecimal, blockDate, baseBlockFeeWei, position, hash, from, to, type,
-nonce, valueWei, gasLimit, gasUsed, inputDataSizeBytes, inputDataCompressedSizeBytes,
-cumulativeGasUsed, gasPriceWei, maxFeePerGasWei, maxPriorityFeePerGasWei, effectiveGasPriceWei,
-priorityFeeWei, transactionFeeWei, status, contractAddress, operationsSummary
+blockNumber, blockNumberDecimal, blockDate, baseBlockFeeWei, position, hash, from, to, type, nonce,
+valueWei, gasLimit, gasUsed, inputDataSizeBytes, inputDataCompressedSizeBytes, cumulativeGasUsed,
+gasPriceWei, maxFeePerGasWei, maxPriorityFeePerGasWei, effectiveGasPriceWei, priorityFeeWei,
+transactionFeeWei, rentFeeWei, totalCostWei, status, contractAddress, operationsSummary
 ```
 
 The final `operationsSummary` value is an array of `{ operation, operationType, count }` entries
@@ -561,19 +565,30 @@ array is empty if no operations are stored.
 Each operation includes:
 
 ```txt
-opIndex, operationType, operation, entityKey, contentType, payloadSizeBytes,
-attributes, expiresAtBlocks, newOwner
+opIndex, operationType, operation, entityKey, salt, creationFlags, expiresAt, minLifetime,
+resolvedExpiresAt, permanent, newOwner, bytesSize, schemaName, attributes
 ```
 
-Each operation attribute includes `key`, `valueType`, `valueTypeName`, and `value`.
+`operationType` is 1 create, 2 patch, 3 extend, 4 transfer, 5 delete. `salt`, `expiresAt`,
+`minLifetime` and `resolvedExpiresAt` are decimal strings; `resolvedExpiresAt` is the calldata's
+`max(expiresAt, block + minLifetime)` for creates and extends (capped at 2^64-1; the entity index
+prefers the receipt's expiry event) and `permanent` is true when it is 2^64-1. `schemaName` is the
+`arkiv.schema` attribute's value when the operation sets one. `bytesSize` is the summed size of the
+operation's `bytes` attributes.
+
+Each operation attribute is `{ name, typeId, type, indexed, value, size, keccak256? }`: `typeId` is
+the raw on-chain id (low 7 bits the type, bit `0x80` indexed; 0 a tombstone that unsets the name),
+`value` uses the node's `arkiv_query` encoding (`u64`/`u256` as `0x` hex, `i32` a number, `bool` a
+boolean, `dec` a decimal string, other types lowercase hex or text), and a `bytes` attribute has
+`value: null` with its `size` and `keccak256` — its contents are never stored.
 
 ## `GET /entity/:entityKey`
 
 Requires transaction data to be enabled. The entity key must match `0x` plus 64 hex characters; it
 is normalized to lowercase.
 
-Returns the most recent stored operations on that entity key (create, update, extend, transfer,
-delete, expire) in chain order — ordered by block number, transaction position, and operation index
+Returns the most recent stored operations on that entity key (create, patch, extend, transfer,
+delete) in chain order — ordered by block number, transaction position, and operation index
 ascending — capped at the configured history limit (`ENTITY_HISTORY_LIMIT`, default 100).
 `totalOperations` always carries the full stored count; `truncated` is true when older operations
 were cut off, and `firstOperation` (present only then) carries the earliest stored operation so the
@@ -603,15 +618,18 @@ Response shape:
 ```
 
 `count` is the number of returned operations. Each operation (and `firstOperation`, when present)
-is a compact JSON array of values in `names` order; the `attributes`, `payloadReference`, and
-`referenceVerification` values stay nested JSON inside the row.
+is a compact JSON array of values in `names` order; `attributes` stays nested JSON inside the row
+(the same attribute objects as on `/transaction/:hash`). `transactionStatus` is the receipt status
+(a reverted transaction's operations are listed but applied nothing), `transactionRentFeeWei` the
+transaction's rent and `transactionOperationCount` how many operations it carried.
 
 `names` field order:
 
 ```txt
 blockNumber, blockNumberDecimal, blockDate, position, hash, opIndex, operationType, operation,
-entityKey, contentType, payloadSizeBytes, attributes, expiresAtBlocks, newOwner, isReference,
-payloadReference, referenceVerification, referenceError
+entityKey, salt, creationFlags, expiresAt, minLifetime, resolvedExpiresAt, permanent, newOwner,
+bytesSize, schemaName, attributes, transactionStatus, transactionRentFeeWei,
+transactionOperationCount
 ```
 
 ## `GET /transaction-records`
@@ -658,10 +676,10 @@ The response includes `count`, `limit`, `truncated`, `filters`, `names`, and `se
 sender row is a compact JSON array of values in `names` order:
 
 ```txt
-address, latestNonce, transactionCount, totalGasUsed, totalTransactionFeeWei,
-totalValueWei, averageGasUsed, averageTransactionFeeWei, firstBlockNumber,
-firstBlockNumberDecimal, lastBlockNumber, lastBlockNumberDecimal, firstBlockDate,
-lastBlockDate, aggregatedAt
+address, latestNonce, transactionCount, totalGasUsed, totalTransactionFeeWei, totalRentFeeWei,
+totalCostWei, totalValueWei, averageGasUsed, averageTransactionFeeWei, firstBlockNumber,
+firstBlockNumberDecimal, lastBlockNumber, lastBlockNumberDecimal, firstBlockDate, lastBlockDate,
+aggregatedAt
 ```
 
 ## `GET /balances`
@@ -713,7 +731,7 @@ Response fields:
 `names` field order for each guzzler stat:
 
 ```txt
-address, transactionCount, totalGasUsed, totalFeeWei, firstSeen, lastSeen
+address, transactionCount, totalGasUsed, totalFeeWei, totalRentFeeWei, firstSeen, lastSeen
 ```
 
 Each window row includes `label`, `windowMs`, `count`, and compact `guzzlers` rows.
@@ -733,7 +751,7 @@ address, generatedAt, retentionMs, bucketMs, count, names, points
 `names` field order for each point:
 
 ```txt
-minute, startTime, transactionCount, totalGasUsed, totalFeeWei, firstSeen, lastSeen
+minute, startTime, transactionCount, totalGasUsed, totalFeeWei, totalRentFeeWei, firstSeen, lastSeen
 ```
 
 ## Baseload APIs
@@ -819,16 +837,18 @@ spaces, dots, underscores, or hyphens, and are limited to 80 characters.
 
 ## Arkiv Operation Metadata
 
-The scanner can send Arkiv registry transaction calldata to the external decoder service. A decoder
-HTTP 400 means the calldata is not an Arkiv `execute()` call and is skipped. Other decoder failures
-make the whole block retry.
+The scanner sends Arkiv registry transaction calldata to the external decoder service
+(arkiv-transaction-decoder v0.3, `format: "udc"`). A decoder HTTP 400 means the calldata is not an
+Arkiv `execute()` call (or breaks a hard limit) and is skipped. Any other failure — including an
+answer outside the UDC contract — makes the whole block retry.
 
 Stored operation metadata is keyed by transaction block number, position, and operation index.
-Stored fields include operation type/name, entity key, content type, attributes, expiry, new owner,
-and `payloadSizeBytes`.
+Stored fields are the operation type/name, entity key, salt, creation flags, requested expiry and
+minimum lifetime, new owner, bytes size, schema name and the attribute triples (bytes as size and
+keccak256 only).
 
-Never expect `payload.hex`, `payload.text`, or raw transaction `input` in database rows or API
-responses. They are intentionally dropped and must not be persisted.
+Never expect `bytes` attribute contents, `payload.hex`, `payload.text`, or raw transaction `input`
+in database rows or API responses. They are intentionally dropped and must not be persisted.
 
 ## Scanner and Aggregator Behavior Relevant to API Data
 
