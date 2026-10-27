@@ -3,7 +3,7 @@ import { ArkivDecoderClient } from "./arkivOperations";
 import { HttpBatcherCollector } from "./batcher";
 import { GuzzlerService } from "./guzzlerService";
 import { RedisGuzzlerStore } from "./guzzlerStore";
-import { EthereumRpcClient } from "./rpc";
+import { EthereumRpcClient, readGenesisHashWithRetry } from "./rpc";
 import { attachRpcKeyRing } from "./rpcKeyRing";
 import { runScanner } from "./scanner";
 import { ScannerStorage } from "./storage";
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     // Bind the database to this chain's block 0 before writing anything: a
     // restarted chain keeps its chain id, so the id alone cannot tell an old
     // chain's database from this one's.
-    await storage.bindGenesisHash(await readGenesisHashWithRetry(rpc, config.retryMs));
+    await storage.bindGenesisHash((await readGenesisHashWithRetry(rpc, config.retryMs))!);
     if (chainId !== undefined) {
       await storage.saveChainId(BigInt(chainId));
     }
@@ -61,21 +61,6 @@ async function main(): Promise<void> {
   } finally {
     await guzzlerService?.stop();
     await storage?.close();
-  }
-}
-
-/** Block 0's hash, retried until the node answers: the scanner never writes without it. */
-async function readGenesisHashWithRetry(rpc: EthereumRpcClient, retryMs: number): Promise<string> {
-  for (;;) {
-    try {
-      return await rpc.getBlockHash(0n);
-    } catch (error) {
-      console.error(
-        `Failed to read block 0's hash via RPC endpoint ${rpc.rpcUrl}; retrying after ${retryMs}ms`,
-        error,
-      );
-      await Bun.sleep(retryMs);
-    }
   }
 }
 

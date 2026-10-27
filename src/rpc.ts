@@ -241,3 +241,26 @@ export class EthereumRpcClient {
     return responseText;
   }
 }
+
+/**
+ * Block 0's hash, retried until the node answers: the writers bind their
+ * database to it and never write without it. `shouldStop` ends the wait (it
+ * then returns undefined) so a shutdown is not held up by a node that is down.
+ */
+export async function readGenesisHashWithRetry(
+  rpc: Pick<EthereumRpcClient, "getBlockHash" | "rpcUrl">,
+  retryMs: number,
+  options: { shouldStop?: () => boolean; sleep?: (ms: number) => Promise<void>; log?: (message: string, error: unknown) => void } = {},
+): Promise<string | undefined> {
+  const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const log = options.log ?? ((message: string, error: unknown) => console.error(message, error));
+  for (;;) {
+    if (options.shouldStop?.()) return undefined;
+    try {
+      return await rpc.getBlockHash(0n);
+    } catch (error) {
+      log(`Failed to read block 0's hash via RPC endpoint ${rpc.rpcUrl}; retrying after ${retryMs}ms`, error);
+      await sleep(retryMs);
+    }
+  }
+}
