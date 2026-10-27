@@ -38,6 +38,7 @@ import {
   type StoredEntityAttribute,
 } from "./entityIndex";
 import type { QueryAst } from "./entityQueryLanguage";
+import { assertDataModel } from "./storage";
 import { compileEntityQuery } from "./entityQuerySql";
 
 export interface EntityIndexStorageOptions {
@@ -449,6 +450,9 @@ export class EntityIndexStorage implements EntityIndexReader {
     if (this.schema !== "public") {
       await this.db.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(this.schema)}`);
     }
+    // The scanner's guard, before any DDL: the genesis scripts open only the
+    // index, and must not build its tables in another data model's database.
+    await assertDataModel(this.db, this.schema);
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qState} (
         key TEXT PRIMARY KEY,
