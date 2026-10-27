@@ -246,6 +246,14 @@ docker compose up --build
   `frontend/` plus a second context named `shared` for the repository's `src/` (declared in
   `docker-compose.yml` and `.github/workflows/publish-images.yml`), because `frontend/src` imports shared
   modules such as `src/omniSearchTypes.ts` from `../src`.
+- Frontend UDC conventions: attributes from every source (decoded operation, index state, `arkiv_query`) go
+  through `frontend/src/attributes.ts` (`AttributeView`, canonical text, EIP-55, query conditions only for
+  indexed attributes, the `arkiv.schema` badge, patch diffs) and render in `components/attribute-table.tsx`.
+  Permanence is `isPermanentExpiry` (exactly 2^64 − 1), never a lifetime estimate. Entity versions and a
+  patch's old values come from folding `/entity/<key>` in `entityHistory.ts`. bytes contents are loaded in the
+  browser from the node (`nodeBytes.ts`, `VITE_NODE_RPC_URL`), never via the backend; `frontend/server.js`
+  can forward `/node-rpc` to `NODE_RPC_UPSTREAM` for a node without CORS. The decoder link is off unless
+  `VITE_TRANSACTION_DECODER_BASE_URL` is set.
 - The `decoder` image this repo publishes is built by `.github/workflows/publish-images.yml` from
   arkiv-transaction-decoder's source at a pinned commit, with `--build-arg PORT=28884`. Deployments probe that
   port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. Compose runs the

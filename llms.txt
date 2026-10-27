@@ -294,8 +294,8 @@ Worth knowing before pointing a wallet at it:
   no business relying on. List it explicitly if a deployment's node really does.
 - **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`; the UDC node has no
   `arkiv_getEntity`) are forwarded by default too.** On this path they read the node's entity state. The Data page defaults
-  to the experimental index on `/shadow-rpc/experimental`; administrators can select the backend relay
-  or compare both sources.
+  to the deployment's node, called from the browser (`VITE_NODE_RPC_URL`), and to the experimental index on
+  `/shadow-rpc/experimental` when none is configured; administrators can also select this backend relay.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -401,12 +401,13 @@ code only unless `--strict-language`; `bytes` values, which the index withholds,
 mutation, expiry, flags and reverting transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
 a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
 
-The frontend's `/data` page defaults to the experimental index (`rpc=index` in shared links) and also
-offers a custom node. In admin mode, the backend relay (`/shadow-rpc`) and **both** (`rpc=both`) are
-available. The comparison sends each query to the two endpoints at once — pinned to the lower of their two heads so the index's lag
-is not read as a difference — and prints the timings side by side with every field the answers disagree on,
-the browser-side twin of `scripts/compareEntityQuery.ts`. Only the first page is compared: a cursor belongs
-to the endpoint that issued it.
+The frontend's `/data` page defaults to the deployment's node (`rpc=node` in shared links; `VITE_NODE_RPC_URL`,
+called from the browser), else to the experimental index (`rpc=index`), and also offers a custom node.
+**Both** (`rpc=both`) compares the node with the index — public when the deployment has a node, else the
+admin-only backend relay (`/shadow-rpc`) stands in for it. The comparison sends each query to the two endpoints at once — pinned to the lower of their two heads so the index's lag
+is not read as a difference — and prints the timings side by side with every field the answers disagree on
+(the index withholds `bytes` contents, which are not compared), the browser-side twin of
+`scripts/compareEntityQuery.ts`. Only the first page is compared: a cursor belongs to the endpoint that issued it.
 
 ## `GET /blocks`
 
@@ -902,7 +903,11 @@ in database rows or API responses. They are intentionally dropped and must not b
 - Public explorer reads need no login. Browser administrator requests use session cookies and an
   in-memory CSRF token; credentials are never stored in browser local storage. Custom-node requests
   omit application cookies and CSRF headers.
-- The `/data` page defaults to `/api/shadow-rpc/experimental`. It queries projected entity state at
-  the index's head, withholds `bytes` attribute contents, and keeps queries and paging options in shareable URLs.
-  A custom RPC URL can be called directly from the browser if it permits cross-origin requests.
-  Admin mode also offers the backend relay and comparison with the index.
+- The `/data` page defaults to the deployment's node (`VITE_NODE_RPC_URL`, called from the browser), else to
+  `/api/shadow-rpc/experimental`, which queries projected entity state at the index's head and withholds `bytes`
+  attribute contents; queries and paging options are kept in shareable URLs. A custom RPC URL can be called
+  directly from the browser if it permits cross-origin requests. Admin mode also offers the backend relay.
+- The UI never asks the backend for `bytes` contents: "Load from node" reads one attribute from the node in the
+  browser and checks it against the keccak256 the index recorded. `frontend/server.js` can forward
+  `POST /node-rpc` and `GET /node-rpc/signed/v1/status` to `NODE_RPC_UPSTREAM` (no cookies) for a node without CORS.
+- Permanence is exact: `expiresAt === "18446744073709551615"` (2^64 − 1), never a lifetime heuristic.

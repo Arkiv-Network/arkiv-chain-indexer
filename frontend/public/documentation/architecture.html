@@ -198,7 +198,7 @@
         <div class="node"><span class="label">Client</span><h3>React UI</h3><p>Charts, transactions,<br>entity queries</p></div>
       </div>
       <div class="grid three">
-        <div class="rail"><h3>Decoder service</h3><p>Scanner sends Arkiv calls over HTTP; stores decoded metadata and receipt logs. Payload bytes stay out of PostgreSQL.</p></div>
+        <div class="rail"><h3>Decoder service</h3><p>Scanner sends Arkiv calls over HTTP; stores decoded operations, attributes and receipt logs. bytes contents stay out of PostgreSQL: only their size and keccak256.</p></div>
         <div class="rail"><h3>Background work</h3><p>Separate range / sender aggregators read and write PostgreSQL. The backend runs the entity projector with its own pool.</p></div>
         <div class="rail"><h3>Freshness signal</h3><p>Block commits emit PostgreSQL <code>NOTIFY</code>. API processes invalidate caches and refresh sync status.</p></div>
       </div>
@@ -293,7 +293,7 @@
           </ul>
         </div>
       </div>
-      <div class="callout"><span class="label">Data contract</span><span>Wei / gas calculations use <code>bigint</code>; large values cross JSON as decimal strings. Persist operation metadata, sizes, and receipt logs; never transaction calldata or entity payload bytes.</span></div>
+      <div class="callout"><span class="label">Data contract</span><span>Wei / gas calculations use <code>bigint</code>; large values cross JSON as decimal strings. Persist operations, attributes, sizes, rent and receipt logs; never transaction calldata or bytes attribute contents (the browser loads those from the node).</span></div>
       <p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/storage.ts" target="_blank" rel="noopener noreferrer">storage.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/aggregateAll.ts" target="_blank" rel="noopener noreferrer">aggregateAll.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/aggregateSenders.ts" target="_blank" rel="noopener noreferrer">aggregateSenders.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/entityIndexStorage.ts" target="_blank" rel="noopener noreferrer">entityIndexStorage.ts</a></p>
       <aside class="notes"><strong>Presenter · 1 min.</strong> These are ordinary application-maintained tables, not PostgreSQL materialized views. Windows align to multiples of their range size: [kM, kM + M − 1]. Supported sizes are 2, 5, 10, 20, 50, 100, 150, 200, 300, 500, and 1,000. Most large metric fields use decimal TEXT; typed entity range values use exact NUMERIC. Optional account_balances rows are sparse snapshots keyed by block and address.</aside>
     </section>
@@ -398,7 +398,7 @@
           <p style="margin-top:19px;font-size:15px">Pairing an address with expiry excludes expired candidates early. Typed attribute indexes avoid scanning arbitrary JSON for each predicate.</p>
         </div>
       </div>
-      <div class="callout"><span class="label">Coverage contract</span><span><code>latest</code> means the projection head. Queries outside <code>[floor, head]</code> fail explicitly. Payload selection is refused; seeded chains need a genesis import.</span></div>
+      <div class="callout"><span class="label">Coverage contract</span><span><code>latest</code> means the projection head. Queries outside <code>[floor, head]</code> fail explicitly. Selects other than the SDK’s RpcSelect keys are refused, bytes values answer null and unindexed attributes never match; seeded chains need a genesis import.</span></div>
       <p class="sources">Source: <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/entityIndexStorage.ts" target="_blank" rel="noopener noreferrer">entityIndexStorage.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/entityProjector.ts" target="_blank" rel="noopener noreferrer">entityProjector.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/entityQuerySql.ts" target="_blank" rel="noopener noreferrer">entityQuerySql.ts</a> · <a href="https://github.com/Arkiv-Network/arkiv-chain-indexer/blob/main/src/arkivJsonRpc.ts" target="_blank" rel="noopener noreferrer">arkivJsonRpc.ts</a></p>
       <aside class="notes"><strong>Presenter · 1 min.</strong> A current version can still be expired: “current” means latest and undeleted, while expiry is evaluated for the requested block. Keeping expiry in the address index matters when an owner has a large history of expired entities. Historical indexes include every version. Numeric comparisons use exact NUMERIC, with decimals scaled to 18 places. The projector polls, detects late scans using scanned_at, and serializes fold writes with a PostgreSQL advisory lock.</aside>
     </section>

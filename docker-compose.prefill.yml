@@ -15,6 +15,11 @@
 # The RPC URLs themselves come from the env file: SCANNER_RPC_FULL_NODE and
 # SHADOW_RPC_UPSTREAM pointing at http://<node container>:8545, for example
 # http://arkiv-sourcify-node-1:8545.
+#
+# The frontend joins the network too and forwards /node-rpc to the node
+# (NODE_RPC_UPSTREAM, default SHADOW_RPC_UPSTREAM), so the Data tab and the
+# bytes "load from node" action reach a node that answers no CORS, same-origin
+# (VITE_NODE_RPC_URL, default /node-rpc).
 
 x-prefill-network: &prefill-network
   networks:
@@ -28,6 +33,11 @@ services:
     <<: *prefill-network
   gap-filler:
     <<: *prefill-network
+  frontend:
+    <<: *prefill-network
+    environment:
+      NODE_RPC_UPSTREAM: ${NODE_RPC_UPSTREAM:-${SHADOW_RPC_UPSTREAM:-}}
+      VITE_NODE_RPC_URL: ${VITE_NODE_RPC_URL:-/node-rpc}
   backend:
     <<: *prefill-network
     volumes:

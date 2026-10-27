@@ -422,7 +422,8 @@ services:
         VITE_CHAIN_NAME: ${VITE_CHAIN_NAME:-Arkiv}
         VITE_NETWORK_NAME: ${VITE_NETWORK_NAME:-}
         VITE_TOKEN_SYMBOL: ${VITE_TOKEN_SYMBOL:-ETH}
-        VITE_TRANSACTION_DECODER_BASE_URL: ${VITE_TRANSACTION_DECODER_BASE_URL:-https://decoder.atlas.arkiv-global.net/}
+        # Off unless set: the payload-era Atlas decoder cannot read UDC calldata.
+        VITE_TRANSACTION_DECODER_BASE_URL: ${VITE_TRANSACTION_DECODER_BASE_URL:-}
         VITE_BLOCK_TIME_MS: ${VITE_BLOCK_TIME_MS:-2000}
         VITE_STUB_TICK_MS: ${VITE_STUB_TICK_MS:-500}
         VITE_MAX_STUB_BLOCKS: ${VITE_MAX_STUB_BLOCKS:-3}
@@ -443,6 +444,19 @@ services:
       PORT: 23560
       BACKEND_HOST: backend
       BACKEND_PORT: 3000
+      # Runtime config (/config.js), no rebuild needed. The decoder link is off
+      # unless set (`off` also turns it off).
+      VITE_TRANSACTION_DECODER_BASE_URL: ${VITE_TRANSACTION_DECODER_BASE_URL:-}
+      # The browser's own node: the Data tab's default endpoint and where bytes
+      # contents load from (never through the backend). An absolute URL must
+      # answer CORS; `/node-rpc` uses NODE_RPC_UPSTREAM below, same-origin.
+      VITE_NODE_RPC_URL: ${VITE_NODE_RPC_URL:-}
+      # The node's /signed/v1/status, for the rent cap; defaults to the RPC URL
+      # + /signed/v1/status. Unreachable is fine: the UI says so.
+      VITE_NODE_STATUS_URL: ${VITE_NODE_STATUS_URL:-}
+      # Where /node-rpc forwards (JSON-RPC and /signed/v1/status only, without
+      # cookies). Empty: /node-rpc answers 503.
+      NODE_RPC_UPSTREAM: ${NODE_RPC_UPSTREAM:-}
     ports:
       - "${FRONTEND_HOST:-127.0.0.1}:${FRONTEND_PORT:-23560}:23560"
 
