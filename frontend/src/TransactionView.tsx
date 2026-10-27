@@ -30,7 +30,7 @@ import {
   fmtRatio,
   fmtTokenAmount,
 } from "./format";
-import { PageBreadcrumbs } from "./PageBreadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import {
   entityDetailHref,
   transactionDetailHref,
@@ -116,15 +116,7 @@ export function TransactionView({
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <PageBreadcrumbs
-        items={[
-          { view: "home", label: "Home" },
-          { view: "blocks", label: "Block list" },
-          { view: "transaction", label: "Transaction details" },
-        ]}
-        onLocationChange={onLocationChange}
-      />
-      <h2 className="font-heading text-lg font-black tracking-tight">Transaction</h2>
+      <PageHeader title="Transaction" />
 
       <form onSubmit={onSubmit} className="flex max-w-2xl gap-2">
         <input

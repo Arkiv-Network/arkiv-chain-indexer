@@ -3,6 +3,7 @@ import { AddressFace } from "./AddressFace";
 import { Cedric } from "./Cedric";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
+import { PageHeader } from "@/components/page-header";
 import { CopyButton } from "@/components/copy-cell";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -181,23 +182,26 @@ function GuzzlerLeaderboard({
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-heading text-lg font-black tracking-tight">Most Active Wallets (1h)</h2>
-        <div className="flex flex-wrap items-center gap-3">
-          <Tabs className="min-w-0 max-w-full" value={windowKey} onValueChange={(value) => setWindowKey(value as WindowKey)}>
-            <TabsList aria-label="Active window" className="max-w-full flex-wrap group-data-horizontal/tabs:h-auto">
-              {WINDOWS.map((w) => (
-                <TabsTrigger key={w.key} value={w.key}>
-                  {w.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-          <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
-            {loading ? "Refreshing" : "Refresh"}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Activity"
+        description="The most active wallets in the selected window, ranked by gas used."
+        actions={
+          <>
+            <Tabs className="min-w-0 max-w-full" value={windowKey} onValueChange={(value) => setWindowKey(value as WindowKey)}>
+              <TabsList aria-label="Active window" className="max-w-full flex-wrap group-data-horizontal/tabs:h-auto">
+                {WINDOWS.map((w) => (
+                  <TabsTrigger key={w.key} value={w.key}>
+                    {w.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
+              {loading ? "Refreshing" : "Refresh"}
+            </Button>
+          </>
+        }
+      />
 
       <p className="text-xs text-muted-foreground">
         These are the network's most active wallets — the senders submitting the

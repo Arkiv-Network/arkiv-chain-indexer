@@ -6,6 +6,7 @@ import {
   type TransactionRecordsResponse,
 } from "./api";
 import { AddressCell } from "./TransactionsView";
+import { PageHeader } from "@/components/page-header";
 import { BlockCell } from "@/components/block-cell";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -142,7 +143,7 @@ export function RecordTransactionsView({ onLocationChange, timeZone, tokenSymbol
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <h2 className="font-heading text-lg font-black tracking-tight">Record transactions</h2>
+      <PageHeader title="Records" description="Record-setting transactions in the stored history." />
       <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
         {loading
           ? "Loading..."

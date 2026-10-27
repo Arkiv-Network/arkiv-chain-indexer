@@ -21,7 +21,7 @@ import {
   writePermalink,
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
-import { PageBreadcrumbs } from "./PageBreadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import { CedricOnTimer } from "./Cedric";
 import { renderTableHeader } from "./tableHeader";
 
@@ -344,14 +344,7 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <PageBreadcrumbs
-        items={[
-          { view: "home", label: "Home" },
-          { view: "blocks", label: "Block list" },
-        ]}
-        onLocationChange={onLocationChange}
-      />
-      <h2 className="font-heading text-lg font-black tracking-tight">Block list</h2>
+      <PageHeader title="Blocks" />
 
       <FiltersPanel
         open={filtersOpen}

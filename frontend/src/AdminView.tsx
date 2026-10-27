@@ -7,6 +7,7 @@ import {
   normalizeSettingsDraft,
   settingsToDraft,
 } from "./pageSettings";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,16 +62,19 @@ export function AdminView({
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <h2 className="font-heading text-lg font-black tracking-tight">Page settings</h2>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Build defaults from Vite</span>
-          <Badge variant="outline" className="font-mono">
-            {BUILD_PAGE_SETTINGS.chainName}
-          </Badge>
-        </div>
-      </div>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+      <PageHeader
+        title="Admin"
+        description="Page settings"
+        actions={
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Build defaults from Vite</span>
+            <Badge variant="outline" className="font-mono">
+              {BUILD_PAGE_SETTINGS.chainName}
+            </Badge>
+          </div>
+        }
+      />
 
       <Card className="py-0">
         <form onSubmit={saveSettings}>

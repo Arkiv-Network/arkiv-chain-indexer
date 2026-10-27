@@ -4,6 +4,7 @@ import { fmtBytes, fmtDate, fmtDurationSeconds, fmtInteger, fmtUtcDate } from ".
 import { ServerMetricsPanel } from "./ServerMetricsPanel";
 import { SyncDetails } from "./SyncStatusBanner";
 import { describeSync, type SyncTone } from "./syncStatus";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,13 +65,15 @@ export function HealthView({ timeZone }: HealthViewProps) {
   const guzzlersEnabled = guzzlers?.enabled ?? data?.features.guzzlers ?? false;
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-heading text-lg font-black tracking-tight">Health</h2>
-        <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
-          {loading ? "Refreshing" : "Refresh"}
-        </Button>
-      </div>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+      <PageHeader
+        title="Health"
+        actions={
+          <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
+            {loading ? "Refreshing" : "Refresh"}
+          </Button>
+        }
+      />
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
       {sync ? (
         <Card className={cn("border-l-4", syncTone.border)}>

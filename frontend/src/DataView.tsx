@@ -65,7 +65,7 @@ import { EntityResults, QueryError } from "./EntityResults";
 import { QueryHistoryDialog } from "./QueryHistoryDialog";
 import { editQueryHistory, readQueryHistory, rememberQuery, writeQueryHistory, type QueryHistoryEntry } from "./queryHistory";
 import { fmtDate, fmtInteger } from "./format";
-import { PageBreadcrumbs } from "./PageBreadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import {
   buildPermalinkHref,
   entityDetailHref,
@@ -573,20 +573,15 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
-      <div className="flex flex-col gap-1.5">
-        <PageBreadcrumbs
-          items={[
-            { view: "home", label: "Home" },
-            { view: "data", label: "Data" },
-          ]}
-          onLocationChange={onLocationChange}
-        />
-        <h2 className="font-heading text-lg font-black tracking-tight">Data</h2>
-        <p className="page-caution" role="note">
-          Experimental — use with caution
-        </p>
-      </div>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+      <PageHeader
+        title="Entities"
+        description={
+          <p className="page-caution" role="note">
+            Experimental — use with caution
+          </p>
+        }
+      />
 
       <p className="max-w-3xl text-xs text-muted-foreground">
         Query entity state from the indexer&apos;s experimental entity index, or from any node you name; in admin mode

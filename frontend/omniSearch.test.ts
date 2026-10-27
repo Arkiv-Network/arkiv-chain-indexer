@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { canSuggest, fetchSearch, normalizeSearchQuery, searchHref } from "./src/searchApi";
+import { canSuggest, fetchSearch, normalizeSearchQuery, scopedExactHref, searchHref, suggestionsInScope } from "./src/searchApi";
 import { readViewFromLocation } from "./src/permalinks";
 
 const originalFetch = globalThis.fetch;
@@ -53,4 +53,22 @@ test("search requests carry an abort signal and encode input as a parameter", as
   }) as unknown as typeof fetch;
   await fetchSearch("name=a&b", true, abort.signal);
   expect(called).toBe(true);
+});
+
+test("scoped searches open a complete address or transaction hash directly", () => {
+  const address = `0x${"Ab".repeat(20)}`;
+  const hash = `0x${"cd".repeat(32)}`;
+  expect(scopedExactHref(` ${address} `, ["address"])).toBe(`/address/0x${"ab".repeat(20)}`);
+  expect(scopedExactHref("ab".repeat(20), ["address", "transaction"])).toBe(`/address/0x${"ab".repeat(20)}`);
+  expect(scopedExactHref(hash, ["address", "transaction"])).toBe(`/tx/${hash}`);
+  expect(scopedExactHref(hash, ["address"])).toBeNull();
+  expect(scopedExactHref("0xabcdef", ["address", "transaction"])).toBeNull();
+  expect(scopedExactHref("12345", ["address", "transaction"])).toBeNull();
+});
+
+test("scoped suggestions keep only the pages in scope", () => {
+  const suggestion = (href: string) => ({ label: href, query: href, detail: "", href });
+  const all = [suggestion("/address/0x1"), suggestion("/tx/0x2"), suggestion("/block/3"), suggestion("/entity/0x4")];
+  expect(suggestionsInScope(all, ["address"]).map((item) => item.href)).toEqual(["/address/0x1"]);
+  expect(suggestionsInScope(all, ["address", "transaction"]).map((item) => item.href)).toEqual(["/address/0x1", "/tx/0x2"]);
 });

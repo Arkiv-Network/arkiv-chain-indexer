@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { requiresAdminView, visibleNavItems } from "./src/navigation";
+import { primaryNavViewFor, requiresAdminView, visibleNavItems } from "./src/navigation";
 
 function visibleViews(adminVerified: boolean, transactionDataEnabled: boolean | null): string[] {
   return visibleNavItems(adminVerified, transactionDataEnabled).map((item) => item.view);
@@ -28,5 +28,18 @@ describe("frontend navigation visibility", () => {
     const views = visibleViews(true, false);
     for (const view of ["block", "entity", "transactions", "senders"]) expect(views).not.toContain(view);
     expect(views).toContain("transaction-records");
+  });
+
+  test("puts the explorer sections in the header and everything else in the footer", () => {
+    const primary = visibleNavItems(false, true).filter((item) => item.primary).map((item) => item.label);
+    expect(primary).toEqual(["Home", "Blocks", "Wallets", "Transactions", "Entities"]);
+  });
+
+  test("detail pages highlight the header section they belong to", () => {
+    expect(primaryNavViewFor("block")).toBe("blocks");
+    expect(primaryNavViewFor("transaction")).toBe("transactions");
+    expect(primaryNavViewFor("address")).toBe("senders");
+    expect(primaryNavViewFor("entity")).toBe("data");
+    expect(primaryNavViewFor("statistics")).toBe("statistics");
   });
 });
