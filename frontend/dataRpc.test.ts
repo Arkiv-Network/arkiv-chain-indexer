@@ -7,6 +7,8 @@ import {
   RpcCallError,
   callRpc,
   checkRpcSource,
+  compareSources,
+  defaultRpcSource,
   describeRpcEndpoint,
   isValidRpcUrl,
   missingBackendMethods,
@@ -379,5 +381,56 @@ describe("checkRpcSource", () => {
     expect(step.code).toBeUndefined();
     expect(step.summary).toContain("unexpected block timing shape");
     expect(report.entityCount).toBe(7155);
+  });
+});
+
+describe("the deployment's node as a source", () => {
+  const NODE_URL = "/node-rpc";
+
+  test("is the default when configured, and the index otherwise", () => {
+    expect(defaultRpcSource(NODE_URL)).toEqual({ kind: "node", customUrl: "" });
+    expect(defaultRpcSource(null)).toEqual({ kind: "index", customUrl: "" });
+    expect(readStoredRpcSource(memoryStorage(), NODE_URL).kind).toBe("node");
+    expect(readStoredRpcMode(memoryStorage(), NODE_URL)).toBe("node");
+  });
+
+  test("calls the configured URL and links as `node`", () => {
+    const node: RpcSource = { kind: "node", customUrl: "" };
+    expect(rpcEndpointUrl(node, NODE_URL)).toBe(NODE_URL);
+    expect(describeRpcEndpoint(node, "https://u:p@node.example.test/rpc")).toBe("https://node.example.test/rpc");
+    expect(rpcLinkValue(node)).toBe("node");
+    expect(rpcSourceFromLinkValue("node", NODE_URL)).toEqual(node);
+    // A link naming a node this deployment lacks names nothing.
+    expect(rpcSourceFromLinkValue("node", null)).toBeNull();
+    expect(rpcModeFromLinkValue("both", NODE_URL)).toEqual({ mode: "both", source: node });
+  });
+
+  test("the comparison is node vs index and public when the deployment has a node", () => {
+    expect(compareSources(NODE_URL)).toEqual([{ kind: "node", customUrl: "" }, { kind: "index", customUrl: "" }]);
+    expect(compareSources(null)[0]).toEqual({ kind: "backend", customUrl: "" });
+    expect(rpcModeNeedsAdmin("both", NODE_URL)).toBe(false);
+    expect(rpcModeNeedsAdmin("node", NODE_URL)).toBe(false);
+    expect(permittedRpcMode("both", false, NODE_URL)).toBe("both");
+    expect(permittedRpcMode("backend", false, NODE_URL)).toBe("node");
+    expect(permittedRpcMode("node", true, null)).toBe("index");
+  });
+
+  test("a remembered node choice without a configured node falls back", () => {
+    const storage = memoryStorage();
+    writeStoredRpcMode("node", storage);
+    writeStoredRpcSource({ kind: "node", customUrl: "" }, storage);
+    expect(readStoredRpcMode(storage, null)).toBe("index");
+    expect(readStoredRpcSource(storage, null).kind).toBe("index");
+  });
+
+  test("the node never receives session credentials or the CSRF token", async () => {
+    const seen: Array<{ credentials: RequestCredentials | undefined; csrf: string | null; url: string }> = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), credentials: init?.credentials, csrf: new Headers(init?.headers).get("X-CSRF-Token") });
+      return jsonResponse({ jsonrpc: "2.0", id: 1, result: "0x1" });
+    }) as unknown as typeof fetch;
+    await callRpc({ kind: "node", customUrl: "" }, "eth_chainId", [], { fetchImpl, csrfToken: "csrf-secret" });
+    expect(seen[0]!.credentials).toBe("omit");
+    expect(seen[0]!.csrf).toBeNull();
   });
 });

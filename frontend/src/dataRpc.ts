@@ -1,18 +1,21 @@
 import { notifyAuthFailure } from "./authClient";
-// The Data page talks JSON-RPC to an Arkiv node for entity state the index does
-// not hold. This module is the framework-free half: which endpoint to use, how
-// a call is made, and the connection check that proves the chosen endpoint
+// The Data page talks JSON-RPC to an Arkiv node, or to the backend's own
+// entity index. This module is the framework-free half: which endpoint to use,
+// how a call is made, and the connection check that proves the chosen endpoint
 // really answers the Arkiv read methods. Keep React out of here so `bun test`
 // can exercise it with a fake fetch.
 
 import { readStoredString, writeStoredString, type StorageLike } from "./localStorage";
+import { describeNodeUrl, NODE_RPC_URL } from "./nodeRpc";
 
 /**
- * Where the page sends its JSON-RPC calls: the backend forwarding to its node
- * (`backend`), the backend's own experimental entity index (`index`), or any
- * node the user names (`custom`).
+ * Where the page sends its JSON-RPC calls: the deployment's node, called
+ * straight from the browser (`node`, see nodeRpc.ts; the default when one is
+ * configured), the backend's own experimental entity index (`index`), the
+ * backend forwarding to its node (`backend`, admin only), or any node the user
+ * names (`custom`).
  */
-export type RpcSourceKind = "backend" | "index" | "custom";
+export type RpcSourceKind = "node" | "backend" | "index" | "custom";
 
 export interface RpcSource {
   kind: RpcSourceKind;
@@ -30,6 +33,8 @@ export const BACKEND_RPC_PATH = "/api/shadow-rpc";
 export const BACKEND_INDEX_RPC_PATH = "/api/shadow-rpc/experimental";
 /** The `rpc=` link value that selects the experimental index. */
 export const INDEX_RPC_LINK_VALUE = "index";
+/** The `rpc=` link value that selects the deployment's node. */
+export const NODE_RPC_LINK_VALUE = "node";
 
 /** The entity read methods the page depends on. `/health` lists which ones the backend forwards. */
 export const ARKIV_READ_METHODS = ["arkiv_query", "arkiv_getEntityCount", "arkiv_getBlockTiming"] as const;
@@ -39,10 +44,15 @@ export const DEFAULT_RPC_TIMEOUT_MS = 15_000;
 const SOURCE_KIND_STORAGE_KEY = "data.rpcSourceKind";
 const CUSTOM_URL_STORAGE_KEY = "data.rpcCustomUrl";
 
-export const DEFAULT_RPC_SOURCE: RpcSource = { kind: "index", customUrl: "" };
+/** The node when the deployment names one, else the experimental index. */
+export function defaultRpcSource(nodeUrl: string | null = NODE_RPC_URL): RpcSource {
+  return { kind: nodeUrl ? "node" : "index", customUrl: "" };
+}
+
+export const DEFAULT_RPC_SOURCE: RpcSource = defaultRpcSource();
 
 export function isRpcSourceKind(value: string): value is RpcSourceKind {
-  return value === "backend" || value === "index" || value === "custom";
+  return value === "node" || value === "backend" || value === "index" || value === "custom";
 }
 
 /** Accepts absolute http(s) URLs only; a key baked into the path is allowed but the page never logs it. */
@@ -57,7 +67,8 @@ export function isValidRpcUrl(value: string): boolean {
   }
 }
 
-export function rpcEndpointUrl(source: RpcSource): string {
+export function rpcEndpointUrl(source: RpcSource, nodeUrl: string | null = NODE_RPC_URL): string {
+  if (source.kind === "node") return nodeUrl ?? "";
   if (source.kind === "backend") return BACKEND_RPC_PATH;
   if (source.kind === "index") return BACKEND_INDEX_RPC_PATH;
   return source.customUrl.trim();
@@ -65,25 +76,27 @@ export function rpcEndpointUrl(source: RpcSource): string {
 
 /**
  * What a shared link carries for the endpoint: the custom URL, the word
- * `index` for the experimental index, nothing for the default backend.
+ * `node` or `index`, nothing for the backend relay.
  */
 export function rpcLinkValue(source: RpcSource): string {
   if (source.kind === "custom") return source.customUrl.trim();
   if (source.kind === "index") return INDEX_RPC_LINK_VALUE;
+  if (source.kind === "node") return NODE_RPC_LINK_VALUE;
   return "";
 }
 
-/** The endpoint a link's `rpc=` value names, or null when it names none (or junk). */
-export function rpcSourceFromLinkValue(value: string): RpcSource | null {
+/** The endpoint a link's `rpc=` value names, or null when it names none (or junk, or a node this deployment lacks). */
+export function rpcSourceFromLinkValue(value: string, nodeUrl: string | null = NODE_RPC_URL): RpcSource | null {
   const trimmed = value.trim();
   if (trimmed === INDEX_RPC_LINK_VALUE) return { kind: "index", customUrl: "" };
+  if (trimmed === NODE_RPC_LINK_VALUE) return nodeUrl ? { kind: "node", customUrl: "" } : null;
   return trimmed && isValidRpcUrl(trimmed) ? { kind: "custom", customUrl: trimmed } : null;
 }
 
 /**
- * What a run sends to: one of the sources, or — as `both` — the backend's own
- * two endpoints at once, so the node's answer and the experimental index's can
- * be compared. `both` is not an {@link RpcSource} because it names two of them.
+ * What a run sends to: one of the sources, or — as `both` — a node and the
+ * experimental index at once, so the two answers can be compared. `both` is
+ * not an {@link RpcSource} because it names two of them.
  */
 export type RpcMode = RpcSourceKind | "both";
 
@@ -91,24 +104,30 @@ export type RpcMode = RpcSourceKind | "both";
 export const COMPARE_RPC_LINK_VALUE = "both";
 
 /**
- * Whether a mode talks to the backend's node relay, which the backend serves
- * only with the administrator session: `backend` outright, `both` for one of its
- * two sides. The experimental index and a custom node are open to everyone.
+ * The two endpoints `both` compares, the node first: the deployment's node
+ * when it names one (public), else the backend's node relay (admin only).
  */
-export function rpcModeNeedsAdmin(mode: RpcMode): boolean {
-  return mode === "backend" || mode === "both";
+export function compareSources(nodeUrl: string | null = NODE_RPC_URL): readonly [RpcSource, RpcSource] {
+  return [{ kind: nodeUrl ? "node" : "backend", customUrl: "" }, { kind: "index", customUrl: "" }];
 }
 
-/** The mode this browser may actually use: an admin's choice as made, anyone else's lowered to the index. */
-export function permittedRpcMode(mode: RpcMode, adminModeActive: boolean): RpcMode {
-  return !adminModeActive && rpcModeNeedsAdmin(mode) ? "index" : mode;
+export const COMPARE_SOURCES: readonly [RpcSource, RpcSource] = compareSources();
+
+/**
+ * Whether a mode talks to the backend's node relay, which the backend serves
+ * only with the administrator session: `backend` outright, `both` when the
+ * deployment has no node of its own to compare against. The node, the index
+ * and a custom node are open to everyone.
+ */
+export function rpcModeNeedsAdmin(mode: RpcMode, nodeUrl: string | null = NODE_RPC_URL): boolean {
+  return mode === "backend" || (mode === "both" && !nodeUrl);
 }
 
-/** The two endpoints `both` compares, the node's relay first. */
-export const COMPARE_SOURCES: readonly [RpcSource, RpcSource] = [
-  { kind: "backend", customUrl: "" },
-  { kind: "index", customUrl: "" },
-];
+/** The mode this browser may actually use: an admin's choice as made, anyone else's lowered to the default. */
+export function permittedRpcMode(mode: RpcMode, adminModeActive: boolean, nodeUrl: string | null = NODE_RPC_URL): RpcMode {
+  if (mode === "node" && !nodeUrl) return "index";
+  return !adminModeActive && rpcModeNeedsAdmin(mode, nodeUrl) ? defaultRpcSource(nodeUrl).kind : mode;
+}
 
 const MODE_STORAGE_KEY = "data.rpcMode";
 
@@ -123,14 +142,15 @@ export function rpcModeLinkValue(mode: RpcMode, source: RpcSource): string {
 }
 
 /** The mode and endpoint a link's `rpc=` value names, or null when it names none (or junk). */
-export function rpcModeFromLinkValue(value: string): { mode: RpcMode; source: RpcSource } | null {
-  if (value.trim() === COMPARE_RPC_LINK_VALUE) return { mode: "both", source: COMPARE_SOURCES[0] };
-  const source = rpcSourceFromLinkValue(value);
+export function rpcModeFromLinkValue(value: string, nodeUrl: string | null = NODE_RPC_URL): { mode: RpcMode; source: RpcSource } | null {
+  if (value.trim() === COMPARE_RPC_LINK_VALUE) return { mode: "both", source: compareSources(nodeUrl)[0] };
+  const source = rpcSourceFromLinkValue(value, nodeUrl);
   return source ? { mode: source.kind, source } : null;
 }
 
 /** A displayable form of the endpoint with any credential in the URL blanked out. */
-export function describeRpcEndpoint(source: RpcSource): string {
+export function describeRpcEndpoint(source: RpcSource, nodeUrl: string | null = NODE_RPC_URL): string {
+  if (source.kind === "node") return describeNodeUrl(nodeUrl);
   if (source.kind === "backend") return BACKEND_RPC_PATH;
   if (source.kind === "index") return BACKEND_INDEX_RPC_PATH;
   const raw = source.customUrl.trim();
@@ -146,10 +166,12 @@ export function describeRpcEndpoint(source: RpcSource): string {
   }
 }
 
-export function readStoredRpcSource(storage?: StorageLike | null): RpcSource {
-  const kind = readStoredString(SOURCE_KIND_STORAGE_KEY, DEFAULT_RPC_SOURCE.kind, isRpcSourceKind, storage);
+export function readStoredRpcSource(storage?: StorageLike | null, nodeUrl: string | null = NODE_RPC_URL): RpcSource {
+  const fallback = defaultRpcSource(nodeUrl).kind;
+  const kind = readStoredString(SOURCE_KIND_STORAGE_KEY, fallback, isRpcSourceKind, storage);
   const customUrl = readStoredString(CUSTOM_URL_STORAGE_KEY, "", () => true, storage);
-  return { kind: kind as RpcSourceKind, customUrl };
+  // A remembered node choice on a deployment that no longer names one falls back.
+  return { kind: kind === "node" && !nodeUrl ? fallback : (kind as RpcSourceKind), customUrl };
 }
 
 export function writeStoredRpcSource(source: RpcSource, storage?: StorageLike | null): void {
@@ -157,10 +179,11 @@ export function writeStoredRpcSource(source: RpcSource, storage?: StorageLike | 
   writeStoredString(CUSTOM_URL_STORAGE_KEY, source.customUrl, storage);
 }
 
-export function readStoredRpcMode(storage?: StorageLike | null): RpcMode {
+export function readStoredRpcMode(storage?: StorageLike | null, nodeUrl: string | null = NODE_RPC_URL): RpcMode {
   const stored = readStoredString(MODE_STORAGE_KEY, "", isRpcMode, storage);
+  if (stored === "node" && !nodeUrl) return defaultRpcSource(nodeUrl).kind;
   // Before the mode was remembered on its own, the stored source kind was it.
-  return stored ? (stored as RpcMode) : readStoredRpcSource(storage).kind;
+  return stored ? (stored as RpcMode) : readStoredRpcSource(storage, nodeUrl).kind;
 }
 
 export function writeStoredRpcMode(mode: RpcMode, storage?: StorageLike | null): void {
@@ -251,7 +274,8 @@ export async function callRpc<T = unknown>(
   try {
     response = await fetchImpl(endpoint, {
       method: "POST",
-      credentials: source.kind === "custom" ? "omit" : "same-origin",
+      // A node (the deployment's or a custom one) never receives session credentials.
+      credentials: source.kind === "custom" || source.kind === "node" ? "omit" : "same-origin",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       signal: combineSignals(AbortSignal.timeout(timeoutMs), deps.signal),
