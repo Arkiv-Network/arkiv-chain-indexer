@@ -871,7 +871,8 @@ spaces, dots, underscores, or hyphens, and are limited to 80 characters.
 The scanner sends Arkiv registry transaction calldata to the external decoder service
 (arkiv-transaction-decoder v0.3, `format: "udc"`). A decoder HTTP 400 means the calldata is not an
 Arkiv `execute()` call (or breaks a hard limit) and is skipped. Any other failure — including an
-answer outside the UDC contract — makes the whole block retry.
+answer outside the UDC contract, and a decoder `error` on an operation or attribute of a successful
+transaction (the node never mines one) — makes the whole block retry.
 
 Stored operation metadata is keyed by transaction block number, position, and operation index.
 Stored fields are the operation type/name, entity key, salt, creation flags, requested expiry and

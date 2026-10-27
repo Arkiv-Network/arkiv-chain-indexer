@@ -191,20 +191,44 @@ export function storedAttributeOf(cell: ArkivOperationAttribute): StoredEntityAt
 }
 
 /**
+ * A stored operation the fold cannot apply as the chain did. Only applied
+ * operations reach the fold, and the scanner refuses to store a successful
+ * transaction the decoder flags or misreads, so this means the rows were not
+ * written by this indexer's scanner; the fold stops on it rather than
+ * quietly dropping what the chain applied.
+ */
+export class EntityFoldError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EntityFoldError";
+  }
+}
+
+function opLocation(op: EntityOpRecord): string {
+  return `operation ${op.opIndex} of transaction ${op.position} in block ${op.blockNumber} (entity ${op.entityKey})`;
+}
+
+/**
  * Apply a create's or patch's triples, in order, to the working set: a
  * tombstone unsets; a typed triple sets, replacing value, type and indexed
- * flag; a triple that cannot be stored is skipped rather than stored as
- * something it is not.
+ * flag. A triple that cannot be stored stops the fold (see {@link EntityFoldError}).
  */
-function applyAttributes(byName: Map<string, StoredEntityAttribute>, cells: ArkivOperationAttribute[]): void {
-  for (const cell of cells) {
-    if (cell.error !== undefined) continue;
+function applyAttributes(byName: Map<string, StoredEntityAttribute>, op: EntityOpRecord): void {
+  for (const cell of op.attributes) {
+    if (cell.error !== undefined) {
+      throw new EntityFoldError(`${opLocation(op)}: attribute ${JSON.stringify(cell.name)} carries the decoder error "${cell.error}"`);
+    }
     if (cell.typeId === TOMBSTONE_TYPE_ID) {
       byName.delete(cell.name);
       continue;
     }
     const stored = storedAttributeOf(cell);
-    if (stored) byName.set(cell.name, stored);
+    if (!stored) {
+      throw new EntityFoldError(
+        `${opLocation(op)}: attribute ${JSON.stringify(cell.name)} (typeId ${cell.typeId}) does not read as its type`,
+      );
+    }
+    byName.set(cell.name, stored);
   }
 }
 
@@ -248,7 +272,7 @@ export function foldEntityVersions(
     if (!current) {
       if (op.operationType !== OPERATION_CREATE) continue;
       attributes.clear();
-      applyAttributes(attributes, op.attributes);
+      applyAttributes(attributes, op);
       push(
         withAttributes(
           {
@@ -286,7 +310,7 @@ export function foldEntityVersions(
     };
     switch (op.operationType) {
       case OPERATION_PATCH: {
-        applyAttributes(attributes, op.attributes);
+        applyAttributes(attributes, op);
         push(withAttributes(base, sortedAttributes(attributes)));
         break;
       }
@@ -351,16 +375,29 @@ function wordAt(data: string, index: number): bigint | undefined {
   return BigInt(`0x${word}`);
 }
 
+/**
+ * The engine's expiry is a uint64 and its flags a uint8; a wider word is not
+ * an event this engine emits, and would otherwise surface as a NUMERIC
+ * overflow at the write.
+ */
+function boundedWord(log: EntityEventLog, index: number, max: bigint, what: string): bigint | undefined {
+  const value = wordAt(log.data, index);
+  if (value !== undefined && value > max) {
+    throw new EntityFoldError(`log ${log.logIndex}: its ${what} word ${value} exceeds ${max}`);
+  }
+  return value;
+}
+
 function decodeEvent(topic0: string, log: EntityEventLog): EntityOpEvent | undefined {
   switch (topic0) {
     case ENTITY_EVENT_TOPICS.created: {
-      const expiresAt = wordAt(log.data, 0);
-      const flags = wordAt(log.data, 1);
+      const expiresAt = boundedWord(log, 0, U64_MAX, "EntityCreated expiresAt");
+      const flags = boundedWord(log, 1, 0xffn, "EntityCreated creationFlags");
       if (expiresAt === undefined) return undefined;
-      return { expiresAt, ...(flags !== undefined ? { creationFlags: Number(flags & 0xffn) } : {}) };
+      return { expiresAt, ...(flags !== undefined ? { creationFlags: Number(flags) } : {}) };
     }
     case ENTITY_EVENT_TOPICS.expiryExtended: {
-      const expiresAt = wordAt(log.data, 0);
+      const expiresAt = boundedWord(log, 0, U64_MAX, "ExpiryExtended expiresAt");
       return expiresAt === undefined ? undefined : { expiresAt };
     }
     case ENTITY_EVENT_TOPICS.ownershipTransferred: {

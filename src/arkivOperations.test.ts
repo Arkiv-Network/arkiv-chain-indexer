@@ -5,6 +5,7 @@ import {
   DecoderContractError,
   ENTITY_CREATED_TOPIC0,
   decodeBlockArkivOperations,
+  minedOperationFault,
   parseDecoderResponse,
   resolveOperationExpiry,
   schemaNameOf,
@@ -127,7 +128,7 @@ describe("parseDecoderResponse", () => {
     const { creationFlags: _dropped, ...missing } = decoderOperationFixture();
     expect(() => parseDecoderResponse(decoderResponseJson([missing]))).toThrow("operation 0 has no creationFlags");
     expect(() => parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ expiresAt: 100 })]))).toThrow(
-      "operation 0.expiresAt is number 100, expected a decimal string or null",
+      "operation 0.expiresAt is number 100, expected a uint64 decimal string or null",
     );
     expect(() =>
       parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ attributes: [{ name: "x", typeId: 8 }] })])),
@@ -155,6 +156,58 @@ describe("parseDecoderResponse", () => {
         decoderResponseJson([decoderOperationFixture({ attributes: [udcAttribute("blob", "bytes", "0x010203")] })]),
       ),
     ).toThrow("bytes content is never stored");
+    // Keyed on the typeId the chain carries, whatever tag the decoder gives it.
+    const renamed = { ...udcAttribute("blob", "bytes", null, { size: 3, keccak256: `0x${"ab".repeat(32)}` }), type: "str", value: "0x010203" };
+    expect(() => parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ attributes: [renamed] })]))).toThrow(
+      "bytes content is never stored",
+    );
+  });
+
+  test("bounds the ABI words to their widths instead of handing Postgres an overflow", () => {
+    const parse = (overrides: Record<string, unknown>) => () => parseDecoderResponse(decoderResponseJson([decoderOperationFixture(overrides)]));
+    expect(parse({ salt: ((1n << 128n) - 1n).toString() })).not.toThrow();
+    expect(parse({ salt: (1n << 128n).toString() })).toThrow(DecoderContractError);
+    expect(parse({ salt: (1n << 128n).toString() })).toThrow("operation 0.salt is");
+    expect(parse({ expiresAt: "18446744073709551615" })).not.toThrow();
+    expect(parse({ expiresAt: "18446744073709551616" })).toThrow("expected a uint64 decimal string or null");
+    expect(parse({ minLifetime: "18446744073709551616" })).toThrow("operation 0.minLifetime");
+    expect(parse({ minLifetime: "9".repeat(100) })).toThrow("operation 0.minLifetime");
+    expect(parse({ bytesSize: 2 ** 31 })).toThrow("operation 0.bytesSize");
+  });
+
+  test("an unflagged triple must read as its typeId's type", () => {
+    const parse = (attribute: unknown) => () =>
+      parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ attributes: [attribute] })]));
+    expect(parse({ ...udcAttribute("n", "u64", "0x10"), type: "str" })).toThrow('has typeId 131 (u64) but type "str"');
+    expect(parse(udcAttribute("n", "u64", 16))).toThrow("does not read as u64");
+    expect(parse(udcAttribute("n", "u64", "0x010"))).toThrow("is not the node's encoding of a u64");
+    expect(parse(udcAttribute("d", "dec", "3.50"))).toThrow("is not the node's encoding of a dec");
+    expect(parse(udcAttribute("a", "addr", `0x${"AB".repeat(20)}`))).toThrow("is not the node's encoding of a addr");
+    expect(parse(udcAttribute("b", "bool", "true"))).toThrow("does not read as bool");
+    expect(parse({ ...udcAttribute("n", "u64", "0x10"), indexed: false })).toThrow("indexed is false, but typeId 131 says otherwise");
+    expect(parse({ name: "x", typeId: 0x0b, type: "invalid(0x0b)", indexed: false, value: null, size: 32 })).toThrow(
+      "has typeId 11, which the node refuses, and no error",
+    );
+    expect(parse({ name: "b", typeId: 7, type: "bytes", indexed: false, value: null, size: 3 })).toThrow("without its keccak256");
+    expect(parse({ name: "t", typeId: 0, type: "tombstone", indexed: false, value: "x", size: 0 })).toThrow("is a tombstone");
+    // A flagged triple is kept as the decoder read it: the scanner decides by the receipt.
+    const flagged = { ...udcAttribute("n", "u64", null), error: "a u64 with high bits set" };
+    const [operation] = parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ attributes: [flagged] })]));
+    expect(operation!.attributes[0]).toEqual(flagged);
+  });
+
+  test("keeps an operation's error, which only the receipt makes fatal", () => {
+    const [operation] = parseDecoderResponse(
+      decoderResponseJson([decoderOperationFixture({ creationFlags: 4, error: "creationFlags sets bits other than readonly (1) and permissionless extension (2)" })]),
+    );
+    expect(operation!.error).toBe("creationFlags sets bits other than readonly (1) and permissionless extension (2)");
+    expect(minedOperationFault([operation!])).toBe(
+      "operation 0 (create) is flagged: creationFlags sets bits other than readonly (1) and permissionless extension (2)",
+    );
+    expect(() => parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ error: 7 })]))).toThrow("operation 0.error is number 7");
+    const [clean] = parseDecoderResponse(decoderResponseJson([decoderOperationFixture()]));
+    expect(clean).not.toHaveProperty("error");
+    expect(minedOperationFault([clean!])).toBeUndefined();
   });
 });
 
@@ -459,6 +512,21 @@ describe("create entity keys from receipts", () => {
     const results = await decodeBlockArkivOperations(block, client, [receipt]);
 
     expect(results[0]?.operations[0]?.entityKey).toBeNull();
+  });
+
+  test("a decoder flag on a successful transaction stalls the block; on a reverted one it is kept", async () => {
+    const flagged = { ...udcAttribute("n", "u64", null), error: "a u64 with high bits set" };
+    stubFetch(() => decoderResponse([decoderOperationFixture({ attributes: [flagged] })]));
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const block = blockFixture([transactionFixture(0, { to: ARKIV_REGISTRY_ADDRESS as Hex, input: "0x01" })]);
+    const hash = block.transactions[0]!.hash;
+    const mined = decodeBlockArkivOperations(block, client, [receiptFixture(hash, [entityCreatedLog(KEY_A)])]);
+    await expect(mined).rejects.toThrow(DecoderContractError);
+    await expect(decodeBlockArkivOperations(block, client, [receiptFixture(hash, [entityCreatedLog(KEY_A)])])).rejects.toThrow(
+      `(version v0.3.0) answered outside the UDC contract: successful transaction ${hash}: operation 0 (create) attribute "n" is flagged: a u64 with high bits set`,
+    );
+    const reverted = await decodeBlockArkivOperations(block, client, [receiptFixture(hash, [], { status: "0x0" })]);
+    expect(reverted[0]?.operations[0]?.attributes[0]).toEqual(flagged);
   });
 
   test("leaves operations untouched without receipts", async () => {
