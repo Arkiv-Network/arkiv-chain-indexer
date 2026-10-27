@@ -1,5 +1,6 @@
 import { formatBytes, formatDurationMs, formatGwei, formatKGas } from "./format";
 import { decodeBlockArkivOperations, type ArkivDecoderClient } from "./arkivOperations";
+import { describeRpcTarget } from "./baseloadRpcKeys";
 import { inspectBlockFromRpc, type InspectedTransaction } from "./blockInspector";
 import { readBuildInfo } from "./buildInfo";
 import { computeBlockMetrics } from "./metrics";
@@ -170,7 +171,7 @@ async function readSafeHeadWithRetry(
       return safeHead;
     } catch (error) {
       console.error(
-        `Failed to read latest block (block target: latest) via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
+        `Failed to read latest block (block target: latest) via RPC endpoint ${describeRpcTarget(rpc.rpcUrl)}; retrying after ${config.retryMs}ms`,
         error,
       );
       await runtime.sleep(config.retryMs);
@@ -294,7 +295,7 @@ async function scanBlockWithRetry(
       return;
     } catch (error) {
       console.error(
-        `Failed to ${direction} scan block ${blockNumber.toString()} via RPC endpoint ${rpc.rpcUrl}; retrying after ${config.retryMs}ms`,
+        `Failed to ${direction} scan block ${blockNumber.toString()} via RPC endpoint ${describeRpcTarget(rpc.rpcUrl)}; retrying after ${config.retryMs}ms`,
         error,
       );
       await runtime.sleep(config.retryMs);
