@@ -7,7 +7,7 @@ calculates the totals. HTTP requests never run the aggregation queries.
 The worker uses the existing tables, opens a single read-only, repeatable-read
 PostgreSQL transaction per sweep, and atomically replaces a JSON file. It creates
 no tables, columns, indexes, materialized views or state rows. It does not call
-the node, decode transactions, or persist payload bytes. Each result carries its
+the node, decode transactions, or persist bytes contents. Each result carries its
 collection time, duration, observed chain head and entity projection block.
 
 ## Running
@@ -56,7 +56,7 @@ when their volume survives. There is no historical statistics time series.
 The **Activity period** selector offers exactly **1 hour, 2 hours, 6 hours,
 12 hours, 24 hours, 48 hours, 72 hours, 7 days, and All time**. All time is the
 default; the browser remembers your choice. Selection changes indexed activity,
-entity operation attempts and transaction input/payload write totals using the
+entity operation attempts, fees, rent and bytes/attribute write totals using the
 already loaded snapshot. It does not trigger a sweep or database query.
 
 `GET /api/statistics` still takes no query parameters. Snapshot `version: 1`
@@ -70,10 +70,11 @@ New snapshots add `windows` with keys `1h`, `2h`, `6h`, `12h`, `24h`, `48h`,
 
 - `fromInclusiveUtc` and `toExclusiveUtc`: ISO UTC timestamps for finite windows;
   both are `null` for `all`, which includes every stored row in the snapshot.
-- `blocks`: `indexed`, `transactions`, `inputBytes` and `compressedInputBytes`.
+- `blocks`: `indexed`, `transactions`, `inputBytes`, `compressedInputBytes`, `gasFeeWei` (Σ gas fees),
+  `rentFeeWei` (Σ receipt rent, outside gas) and `burnedWei` (base-fee burn plus rent).
 - `transactions`: the same fields as the top-level transaction totals.
 - `operations`: the same fields as the top-level operation totals, including
-  success/revert/unknown counts by type and successful payload/reference sizes.
+  success/revert/unknown counts by type and the successful bytes and attribute writes.
 
 All finite periods share the exact `gatheredAtUtc` cutoff, taken from the
 PostgreSQL transaction start and truncated to milliseconds to match JSON time
@@ -125,12 +126,13 @@ queries or the scanner's measurements change.
 | Indexed blocks | All rows in `blocks`, with first/last height and missing blocks inside that span. |
 | Transactions in block metrics | Sum of `blocks.transaction_count`; available even when transaction-row storage is disabled. Excludes transactions the scanner intentionally ignores. |
 | Indexed transactions | Rows in `transactions`. Can differ from the block-metric total if storage was disabled for some history. |
-| Created/updated/extended/deleted/owner changes | Decoded operations grouped by operation type and transaction receipt outcome. Status `1` is successful, `0` reverted; null/other/missing transaction status is reported separately. Multiple changes to one entity count separately. The page omits the expiry-operation row; API totals retain it. |
+| Created/patched/extended/deleted/owner changes | Decoded operations grouped by operation type and transaction receipt outcome. Status `1` is successful, `0` reverted; null/other/missing transaction status is reported separately. Multiple changes to one entity count separately. |
+| Gas fees, rent, burned | Sums of `blocks.total_transaction_fee_wei` (gas only), `total_rent_fee_wei` (receipt `rentFee`, outside gas) and `total_burned_wei` (base-fee burn plus rent). |
 | Known entities | Distinct projected entity states at the projection head, including active, expired and deleted entities, and imported genesis entities. Excludes unknown entities whose creates were never indexed. |
 | Active entities | Projected state with `deleted = false` and `expires_at > projection head`. Expiry is recalculated on every sweep, even without new operations. |
 | Input byte totals | Stored uncompressed and compressed calldata sizes, separately from block metrics and transaction rows. Transaction input count, mean and maximum are also shown. |
-| Operation payload bytes | Sum of decoder-recorded sizes across successful operations, including repeated writes. Reference receipts are not necessarily the referenced entity bytes. |
-| Referenced payload bytes | Sum of reference metadata `sizeBytes` across successful reference operations. Repeated references count repeatedly. References without a usable size have a separate count. |
+| Bytes writes | Successful creates/patches with a bytes attribute, and the sum of their `bytes_size` (the decoder's size of the bytes values; contents are never stored). Repeated writes count again. |
+| Attribute writes | Attribute triples set by successful creates/patches, split by the indexed flag (indexed = queryable, stored = returned but never matched), plus patch tombstones (unsets) and writes tagged with an `arkiv.schema`. |
 | Active payload metadata | Total and maximum recorded payload size, number of active entities with a nonzero size, and the top 20 content types by active entity count. |
 | Active attributes | Total, mean/max per active entity, number of active entities with attributes, and counts by attribute type. Old versions and expired/deleted entities are excluded. |
 

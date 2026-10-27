@@ -29,11 +29,19 @@ docker compose up --build
   `COMMIT` / `ROLLBACK`).
 - Preserve wei and gas precision. Store large integer values as decimal strings and use `bigint` for calculations.
 - Fetch transaction receipts sequentially for the current block so the scanner handles transactions one by one.
-- Transaction payloads/calldata are never persisted — only Arkiv operation metadata, the payload size, the
-  transaction hash, and receipt event logs (address, topics, ABI data — `transaction_logs`). The decoder's `payload.hex` / `payload.text` and the raw `input` field must never reach the
-  database. This holds under reference mode too: we persist the payload reference's receipt metadata
-  (`payload_reference`) and the verification verdict (`reference_verification`), but never the referenced entity
-  bytes (the bytes live in the payload provider, not on-chain).
+- Calldata is never persisted, and neither is the content of any `bytes` attribute — only Arkiv operation
+  metadata (attribute names, type ids, indexed flags, values of the non-bytes types, sizes, and a bytes value's
+  keccak256), the transaction hash, and receipt event logs (address, topics, ABI data — `transaction_logs`). The raw
+  `input` field must never reach the database; a decoder response carrying a bytes value is refused.
+- One database per chain and data model. Tables are created in their final shape and never migrated: do not add
+  `ADD COLUMN IF NOT EXISTS` / legacy index drops. `scanner_state.data_model` (`DATA_MODEL` in `src/storage.ts`)
+  marks the model and `scanner_state.genesis_hash` the chain; `ScannerStorage.open` refuses a schema with data but
+  no (or another) marker before any DDL, the scanner and gap filler refuse a node whose block 0 is not the recorded
+  one (`bindGenesisHash`), and the backend checks the recorded hash against the stored block 0. Bump `DATA_MODEL`
+  whenever the stored shape changes.
+- Rent is not gas. `transaction_fee_wei` (and every "fee" field) stays `gasUsed × effectiveGasPrice` —
+  `eth_feeHistory` and the priority-fee oracle depend on it; the receipt's `rentFee` goes to `rent_fee_wei` /
+  `total_rent_fee_wei`, `total_burned_wei = burnt_fees_wei + total_rent_fee_wei`, and API rows add `totalCostWei`.
 - Keep network-dependent tests opt-in. Normal `bun test` should not require an RPC endpoint **or** a database;
   storage / aggregator / server tests skip themselves unless `TEST_DATABASE_URL` is set.
 
@@ -52,15 +60,20 @@ docker compose up --build
 
 - Runtime code lives in `src/`.
 - `src/rpc.ts` intentionally uses raw JSON-RPC over `fetch` to avoid runtime dependencies.
-- `src/arkivOperations.ts` POSTs to the external arkiv-transaction-decoder (Bun) microservice at
-  `<DECODER_URL>/decode` (compose service `decoder`, defaulted by compose to `http://decoder:28884`). It sends the
-  chain id obtained once from `eth_chainId` so a decoder that verifies v1 payload references uses the right
-  trusted-signer allowlist; arkiv-transaction-decoder does not parse references and ignores it. Decoded operation
-  metadata — including `is_reference`, the parsed `payload_reference`, the offline `reference_verification` verdict,
-  and `reference_error` — is stored in `transaction_operations` (no payloads) in the same transaction as the block's
-  transaction rows. A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes
-  the whole block retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
-  `GET /transactions` rows that have stored operations.
+- `src/arkivOperations.ts` POSTs `{"data": calldata}` to the external arkiv-transaction-decoder (Bun, v0.3)
+  microservice at `<DECODER_URL>/decode` (compose service `decoder`, defaulted by compose to
+  `http://decoder:28884`). It reads only the UDC contract — `{"format": "udc", "operations": [...]}`, every
+  operation carrying every field (`null` where it does not apply), attributes as
+  `{name, typeId, type, indexed, value, size, keccak256?, error?}` with values in the node's `arkiv_query`
+  encoding — and anything else throws a `DecoderContractError` naming the decoder version (`GET /version`), so the
+  block retries instead of storing a guess. Decoded operation metadata (exact `expires_at` / `min_lifetime` /
+  `salt` as NUMERIC, `creation_flags`, `new_owner`, `bytes_size`, `schema_name` = the indexed str `arkiv.schema`,
+  attributes JSONB) is stored in `transaction_operations` in the same transaction as the block's transaction rows.
+  A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes the whole block
+  retry. The decoder's `permanent` flag is not stored: permanence is a property of the *resolved* expiry,
+  `max(expiresAt, block + minLifetime)` capped at 2^64 − 1 (`resolveOperationExpiry`), which the API serves as
+  `resolvedExpiresAt` / `permanent`. The HTTP API attaches `operations` to `GET /transaction/<hash>` and
+  `operationsSummary` to `GET /transactions` rows that have stored operations.
 - `src/storage.ts` uses the pooled Bun SQL client through `src/db.ts`. The whole storage API is async;
   `db.transaction()` wraps `sql.begin()` so every write uses the same transaction connection. Storage optionally
   takes a `schema` so tests can run in isolated schemas against a shared database.
@@ -183,7 +196,8 @@ docker compose up --build
   instead of windowing every query. Index every address column paired with `expires_at`, never alone: an address keeps a row for every entity it ever owned and most of them have expired, so `(owner, expires_at)` turned a 95ms scan of 167k rows at a past block into 1ms.
 - Account balances (`account_balances`, `SCANNER_TRACK_BALANCES`, default off) are **readings, never sums**.
   For each block the scanner takes the addresses that appeared as `from` or `to` and asks the node what they
-  hold at that block (`EthereumRpcClient.getBalances`, one batched `eth_getBalance` request per block — never
+  hold at that block (`EthereumRpcClient.getBalances`, batched `eth_getBalance` requests per block of at most
+  `MAX_RPC_BATCH_SIZE` = 64 calls, the Arkiv node's batch cap — never
   one request per address: the scanner's request count is what its share of the RPC key quota buys). Do not
   replace this with arithmetic over `value_wei`: balances also move through contract-internal transfers, fee
   payments and withdrawals that a block's transaction list does not show, and the index has no genesis anchor

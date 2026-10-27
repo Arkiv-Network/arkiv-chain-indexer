@@ -60,8 +60,11 @@ Related scanner and worker settings:
 - Most route validation errors return `400`.
 - Protected routes return `401` for missing/invalid credentials and `403` for denied administrator
   access or invalid Origin/CSRF. Browser requests use session cookies; automation uses generated access tokens.
-- The backend never returns raw transaction calldata and never stores decoded Arkiv payload bytes.
-  It stores and returns payload size only.
+- The backend never returns raw transaction calldata and never stores the content of a `bytes`
+  attribute: it stores and returns its size and keccak256 only.
+- Fee fields (`transactionFeeWei`, `totalTransactionFeeWei`, ...) are gas fees only. Arkiv UDC rent,
+  burned outside gas, is `rentFeeWei` / `totalRentFeeWei`; `totalCostWei` is gas fee plus rent and
+  `totalBurnedWei` the base-fee burn plus rent.
 - Wei, gas, nonce, block number, and other values that may exceed JavaScript precision are returned
   as decimal strings unless a response type is explicitly a small number.
 - Dates are ISO-8601 UTC strings.

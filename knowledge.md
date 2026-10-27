@@ -31,8 +31,14 @@ Navigation: [discrepancies](#documentation-and-memory-discrepancies) ·
   explorer, Redis activity leaderboards, and configurable Baseload workers.
 - A block and its scanner progress must commit together. Failed forward reads
   must retry rather than create a hole. Amounts use `bigint` and decimal strings.
-- Never persist transaction input or entity payload bytes. Operation metadata,
-  payload sizes, reference receipt metadata, and receipt event logs are allowed.
+- Never persist transaction input or the content of any `bytes` attribute.
+  Operation metadata (names, type ids, indexed flags, non-bytes values, sizes, a
+  bytes value's keccak256) and receipt event logs are allowed.
+- Since v0.6.0-udc.1 (October 27, 2026) the indexer speaks only the UDC entity
+  model (SDK 0.9, arkiv-state-db-experiment): no payload, content type or payload
+  references, schema-typed attributes with an indexed flag, rent beside gas. No
+  pre-UDC compatibility; each chain gets a fresh database, guarded by
+  `scanner_state.data_model` / `genesis_hash`.
 - Account balances are node readings for touched addresses, not reconstructed
   sums. Missing coverage must not become an invented zero balance.
 - The public JSON-RPC path is `/api/shadow-rpc`; the backend sees `/shadow-rpc`. Since v0.5.4 it requires the admin bearer token (`503` without one configured); `/api/shadow-rpc/experimental` is the open path, and the Data tab defaults to it.
@@ -88,7 +94,7 @@ still govern future edits.
 | Storage / DB | [src/storage.ts](src/storage.ts), [src/db.ts](src/db.ts) | Schema, atomic writes, queries, notifications, Bun SQL adapter. |
 | Metrics / aggregation | [src/metrics.ts](src/metrics.ts), [src/ranges.ts](src/ranges.ts), [src/aggregator.ts](src/aggregator.ts), [src/aggregateAll.ts](src/aggregateAll.ts) | Exact block math and separately scheduled range aggregates. |
 | HTTP backend | [src/serve.ts](src/serve.ts), [src/server.ts](src/server.ts), [src/serverConfig.ts](src/serverConfig.ts) | Startup, feature gates, API routes, caches, projector, Baseload. |
-| Arkiv operations | [src/arkivOperations.ts](src/arkivOperations.ts), [src/payloadProviderPayments.ts](src/payloadProviderPayments.ts) | Decoder client, metadata-only normalization, generated keys, reference payment accounting. |
+| Arkiv operations | [src/arkivOperations.ts](src/arkivOperations.ts) | UDC decoder contract (strict), generated create keys, resolved expiry, schema tag. |
 | Shadow RPC | [src/jsonRpc.ts](src/jsonRpc.ts), [src/jsonRpcPassthrough.ts](src/jsonRpcPassthrough.ts), [src/arkivJsonRpc.ts](src/arkivJsonRpc.ts) | Ethereum indexed answers, allowlisted upstream relay, experimental entity methods. |
 | Entity index | [src/entityIndex.ts](src/entityIndex.ts), [src/entityIndexStorage.ts](src/entityIndexStorage.ts), [src/entityProjector.ts](src/entityProjector.ts) | Fold operations into historical entity versions, query and maintain projection. |
 | Entity language | [src/entityQueryLanguage.ts](src/entityQueryLanguage.ts), [src/entityQuerySql.ts](src/entityQuerySql.ts), [src/entityValues.ts](src/entityValues.ts) | Node-compatible grammar, SQL compilation, typed values. |
@@ -235,7 +241,8 @@ usable push timestamps when correlating the August 24 incident.
   scripts/importGenesisState.ts …` works; images before it, including any `latest`
   pulled before September 9, 19:07 UTC, fail with `Module not found`.
 - Kubernetes uses the indexer-published **decoder** package. Compose defaults to
-  the upstream `arkiv-transaction-decoder:v0.2.1` package. Indexer decoder release
+  the upstream `arkiv-transaction-decoder:v0.3.0` package (since v0.6.0-udc.1;
+  v0.2.x before). Indexer decoder release
   tags are indexer versions, not upstream decoder versions.
 - The db-chain chart (through 0.24.0) renders the backend with a fixed environment:
   no entity index and no shadow RPC upstream. db-chain-mgr #387 (draft, September 9)
@@ -266,6 +273,17 @@ usable push timestamps when correlating the August 24 incident.
   without starting it (used September 9, evening).
 
 ## Decoder and Arkiv metadata
+
+**Current (v0.6.0-udc.1, UDC chain).** The decoder is arkiv-transaction-decoder
+v0.3 (`format: "udc"`): attributes are `(name, typeId, value)` triples whose
+`typeId` low seven bits are the type and bit 7 the indexed flag; values come in
+the node's `arkiv_query` encoding; bytes are size + keccak256 only; expiry is
+the exact decimal pair `expiresAt` / `minLifetime`. The indexer refuses any other
+response shape loudly (naming the decoder version) and retries the block. The
+legacy selector `0xba8ccf92` now answers 400. Receipts carry `rentFee` (rent is
+burned outside gas); the scanner no longer sends a chain id to the decoder, and
+payload-provider payment accounting was removed with reference mode. The
+history below describes the payload era.
 
 The old execute selector `0xba8ccf92` used a single operation struct containing
 payload/content type. SDK 0.8's `0x49650044` uses

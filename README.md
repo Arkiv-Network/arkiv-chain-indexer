@@ -41,19 +41,33 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 
 The `decoder` compose service runs the released
 [arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) image, pinned to
-`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.2`; set `ARKIV_DECODER_IMAGE` to run a different build. The
+`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.0`; set `ARKIV_DECODER_IMAGE` to run a different build. The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
-table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
-payload size. It reads both the tagged-union `execute()` format the chain carries today (selector `0x49650044`,
-where the payload and content type arrive as the `$payload` and `$contentType` system attributes) and the older
-struct format still sitting in historical blocks. Calldata alone cannot yield a create's `entity_key` (the engine
-derives the key from the owner, its entity nonce and the salt, and calldata carries none of the first two), so the
-scanner fills it from the `EntityCreated` log in the transaction receipt it already fetches; it stays null only
-when the transaction reverted or the receipt's log count does not match the calldata's creates. This decoder does not
-parse v1 payload references, so `is_reference`, `payload_reference` and `reference_verification` stay unset — it
-was swapped in for the decoder that came before it, which did parse them but refused every registry call the
-chain now makes. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to disable it.
+table. v0.3 reads the UDC entity model of `@arkiv-network/sdk` 0.9 — schema-typed attributes, each with an indexed
+flag, and no payload or content type — and answers `{"format": "udc", "operations": [...]}`; any other shape (an
+older decoder) fails the block with an error naming the decoder's version, and the block is retried until the
+decoder is upgraded, so a mismatch stalls the scan instead of leaving gaps. Calldata is never persisted, and neither
+is the content of any `bytes` attribute: the decoder reports only its size and keccak256. Calldata alone cannot
+yield a create's `entity_key` (the engine derives the key from the owner, its entity nonce and the salt, and
+calldata carries none of the first two), so the scanner fills it from the `EntityCreated` log in the transaction
+receipt it already fetches; it stays null only when the transaction reverted or the receipt's log count does not
+match the calldata's creates. Decoding requires `SAVE_TRANSACTION_DATA=true`; set `DECODER_URL=` (empty) to
+disable it.
+
+**One database per chain.** Tables are created in their final shape and never migrated. The schema records its
+data model (`scanner_state.data_model = arkiv-udc-1`) and the chain's block-0 hash (`scanner_state.genesis_hash`):
+every process refuses to start on a schema that holds data without that marker or with another one, and the scanner
+(and gap filler) refuse a database whose recorded genesis hash is not the node's block 0 — a restarted chain keeps
+its chain id, so the id alone cannot tell two databases apart. The backend checks the recorded hash against the
+stored block 0. Point `DATABASE_URL` at an empty database for every new chain.
+
+**Rent.** Arkiv UDC nodes charge storage rent outside gas and report it as the receipt's `rentFee`. The scanner
+stores it per transaction (`transactions.rent_fee_wei`) and per block (`blocks.total_rent_fee_wei`), beside — never
+inside — the gas fee: `transaction_fee_wei` stays `gasUsed × effectiveGasPrice` (`eth_feeHistory` and the priority
+fee oracle depend on that), `blocks.total_burned_wei` is the base-fee burn plus rent, and block ranges and sender
+stats carry rent totals of their own. API rows add `rentFeeWei` and `totalCostWei` (gas fee plus rent), and
+shadow-RPC receipts carry `rentFee` as the node's do. A receipt without `rentFee` (a node without rent) reads as 0.
 
 Releases publish that same decoder as `ghcr.io/arkiv-network/arkiv-chain-indexer/decoder`, built from
 arkiv-transaction-decoder's source at the pinned commit with `--build-arg PORT=28884`. Kubernetes deployments
@@ -77,8 +91,8 @@ after its newest completed range, and sleeps for 30 seconds after each sweep (co
 `AGGREGATE_INTERVAL_MS`).
 
 The separate statistics worker (`bun run collect-statistics`, Compose service `statistics`)
-publishes chain coverage, transaction/operation counts, active entities, payload-size
-metadata and attribute statistics to the **Statistics** page and `GET /statistics`.
+publishes chain coverage, transaction/operation counts, gas fees and rent, bytes and attribute
+writes (indexed vs stored), active entities and attribute statistics to the **Statistics** page and `GET /statistics`.
 Activity periods cover 1h, 2h, 6h, 12h, 24h, 48h, 72h, 7 days and all time; current
 entity state stays tied to its projection block. Existing top-level API fields
 remain compatible, with period totals added under `windows`.
@@ -189,16 +203,13 @@ Configuration can be passed through CLI flags or environment variables.
 | `--tx-receipt-concurrency` | `SCANNER_TX_RECEIPT_CONCURRENCY` | `20` | Maximum concurrent receipt RPC requests per block; set to `1` for sequential reads. |
 | `--save-transaction-data` | `SCANNER_SAVE_TRANSACTION_DATA` or `SAVE_TRANSACTION_DATA` | `true` | Store inspected transaction rows after metrics are computed. |
 | `--track-balances` | `SCANNER_TRACK_BALANCES` | `false` | Record each block's sender/recipient balances by reading them from the node (one batched `eth_getBalance` per block). Feeds `GET /balances` and `eth_getBalance`. |
-| `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder base URL (the scanner POSTs to `<url>/decode`). When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (no payloads), including v1 payload-reference metadata and the offline verification verdict from a decoder that parses references. The scanner sends the chain id from `eth_chainId` so references are verified for the right chain. The gap filler accepts the same option. |
+| `--decoder-url` | `DECODER_URL` or `SCANNER_DECODER_URL` | unset | Optional arkiv-transaction-decoder (v0.3, UDC format) base URL; the scanner POSTs `{"data": calldata}` to `<url>/decode`. When set (and transaction rows are stored), Arkiv registry transactions are decoded into stored operation metadata (never calldata or bytes contents). A response in any other format fails the block, naming the decoder version from `<url>/version`, and the block is retried. The gap filler accepts the same option. |
 | n/a | `SCANNER_RPC_FULL_NODE` | **required** | Ethereum JSON-RPC endpoint. With the compose `rpc-proxy` profile this is `http://rpc-proxy:8788` (see below). |
 
 Backend transaction-detail payment display:
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
-| `--protocol-schedule-url` | `ARKIV_PROTOCOL_SCHEDULE_URL` or `SERVER_PROTOCOL_SCHEDULE_URL` | unset | Optional Arkiv protocol schedule URL. `/transaction/<hash>` uses its active `payloadProviderPayment.providerShareBps` entry to split signed payload-reference payment gas units, converted with the transaction block's base fee, into provider-earned and burned native token. |
-| `--protocol-schedule-path` | `ARKIV_PROTOCOL_SCHEDULE_PATH` or `SERVER_PROTOCOL_SCHEDULE_PATH` | unset | Optional local protocol schedule JSON path. Takes precedence over URL when both are set. |
-| `--payload-provider-payment-share-bps` | `PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS` or `SERVER_PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS` | unset | Optional provider-share basis-point override used only when no schedule URL/path is configured. |
 
 Show help:
 
@@ -455,7 +466,10 @@ lose precision.
 | `total_gas_used` | Block `gasUsed`. |
 | `max_gas_in_block` | Block `gasLimit`; this is the maximum possible gas for that block and can vary by network. |
 | `transaction_count` | Number of transactions in the block. |
-| `total_transaction_fee_wei` | Sum of actual transaction fees: `sum(receipt.gasUsed * effectiveGasPrice)`. |
+| `total_transaction_fee_wei` | Sum of actual transaction gas fees: `sum(receipt.gasUsed * effectiveGasPrice)`. Never includes rent. |
+| `burnt_fees_wei` | Base-fee burn: `baseFeePerGas * gasUsed`. |
+| `total_rent_fee_wei` | Sum of the receipts' `rentFee`: storage rent burned outside gas (Arkiv UDC chains; 0 elsewhere). |
+| `total_burned_wei` | `burnt_fees_wei + total_rent_fee_wei`. |
 | `fee_price_sum_wei` | Exact sum of transaction fee prices: `sum(effectiveGasPrice)`. |
 | `priority_fee_sum_wei` | Exact sum of transaction priority fee prices: `sum(priorityFee)`. |
 | `priority_fee_weighted_numerator_wei` | Legacy exact numerator for transaction-fee-weighted priority fee: `sum(priorityFee * transactionFee)`. |
@@ -490,13 +504,17 @@ For empty blocks all averages are stored as `0`.
 
 When a decoder URL is configured and transaction rows are stored, decoded Arkiv operations land in the
 `transaction_operations` table, keyed by `(block_number, position, op_index)` and indexed by transaction hash and
-entity key. Each row stores metadata only: operation type and name, entity key (for creates, read from the
-receipt's `EntityCreated` log rather than calldata), content type, attribute key/value
-pairs (JSONB), expiry in blocks, new owner, and the payload size in bytes. For v1 reference-mode operations it also
-stores `is_reference`, the parsed payload reference (`payload_reference`, JSONB — provider receipt metadata such as
-id, checksum, size, and signature, never the entity bytes), the offline verification verdict
-(`reference_verification`, JSONB — `valid`, `signerTrusted`, recovered signer, and any errors), and
-`reference_error` when a reference payload failed to parse. Transaction payloads and calldata are never persisted.
+entity key. Each row stores what the operation asked for, as the decoder reported it: operation type and name
+(`create`, `patch`, `extend`, `transfer`, `delete`), entity key (for creates, read from the receipt's
+`EntityCreated` log rather than calldata), the uint128 `salt` (`NUMERIC(39)`), the raw `creation_flags` byte, the
+exact expiry pair `expires_at` / `min_lifetime` (`NUMERIC(20)`, so the permanent expiry 2^64 − 1 fits), `new_owner`,
+`bytes_size` (bytes held by the operation's `bytes` attributes), `schema_name` (the value of the indexed str
+`arkiv.schema` the SDK tags named-schema writes with) and `attributes` (JSONB, one
+`{name, typeId, type, indexed, value, size, keccak256?, error?}` per triple, in calldata order; for a patch these are
+the mutations, tombstones — `typeId` 0 — included). Values use the node's `arkiv_query` encoding; `bytes` values are
+`null` with their size and keccak256 beside them — bytes contents and calldata are never persisted. The API adds
+`resolvedExpiresAt` (`max(expiresAt, block + minLifetime)` capped at 2^64 − 1, the expiry the engine applies) and
+`permanent` (that resolved expiry is 2^64 − 1), so permanence never rests on the request's deadline alone.
 Re-scanning a block replaces its operation rows in the same database transaction as its transaction rows.
 
 ### Range Aggregates
@@ -711,20 +729,22 @@ the field.
 
 ### `GET /transaction/:hash`
 
-Returns one stored transaction as `{ "transaction": ... }`. The transaction always includes an `operations`
-array with the decoded Arkiv operation metadata recorded for it (empty when none): operation type/name, entity
-key, content type, attributes, expiry, new owner, and `payloadSizeBytes`, plus the reference-mode fields
-`isReference`, `payloadReference`, `referenceVerification`, and `referenceError` for v1 reference operations.
-Payload bytes are never stored or returned. Returns `404` when the hash is unknown or transaction data is disabled.
+Returns one stored transaction as `{ "transaction": ... }`, with `rentFeeWei` (the receipt's rent, outside gas) and
+`totalCostWei` (gas fee plus rent) beside the gas-only `transactionFeeWei`. The transaction always includes an
+`operations` array with the decoded Arkiv operation metadata recorded for it (empty when none): `opIndex`,
+`operationType`, `operation`, `entityKey`, `salt`, `creationFlags`, `expiresAt`, `minLifetime`, `resolvedExpiresAt`,
+`permanent`, `newOwner`, `bytesSize`, `schemaName` and `attributes` (see "Arkiv operation metadata"). Bytes contents
+and calldata are never stored or returned. Returns `404` when the hash is unknown or transaction data is disabled.
 
 ### `GET /entity/:entityKey`
 
-Returns the chronological history of every stored operation on one Arkiv entity key (create, update, extend,
-transfer, delete, expire) as `{ "entityKey", "count", "operations" }`. The key must be `0x` plus 64 hex
+Returns the chronological history of every stored operation on one Arkiv entity key (create, patch, extend,
+transfer, delete) as `{ "entityKey", "count", "operations" }`. The key must be `0x` plus 64 hex
 characters and is normalized to lowercase. Operations are ordered by block number, transaction position, and
 operation index ascending, capped at **1,000 rows**, and each carries its transaction context (`blockNumber`,
-`blockNumberDecimal`, `blockDate`, `position`, `hash`) alongside the same operation fields as
-`/transaction/:hash`. Returns `404` when no operations are stored for the key or transaction data is disabled.
+`blockNumberDecimal`, `blockDate`, `position`, `hash`, `transactionStatus`, and `transactionRentFeeWei` — the rent
+of the whole transaction, shared by its `transactionOperationCount` operations) alongside the same operation fields
+as `/transaction/:hash`. Returns `404` when no operations are stored for the key or transaction data is disabled.
 When the entity index is enabled and the key was part of the chain's genesis state, the response also carries
 `genesis` — `{ owner, creator, expiresAt, contentType, creationFlags, payloadSize, attributes: [{ name, type,
 value }] }`, `expiresAt` the absolute block as a decimal string — and a genesis entity without operations answers
@@ -877,6 +897,8 @@ Two differences in particular are deliberate:
 - **`latest` means the indexed head.** `eth_blockNumber` and the `latest` / `pending` / `safe` / `finalized`
   tags all resolve to `scanner_state.last_successful_block`, not the chain head. `eth_syncing` reports the gap
   (`false` once the scanner is within a few blocks of the observed head). `earliest` is the oldest stored block.
+- **Receipts carry the node's `rentFee`** (storage rent, beside `gasUsed × effectiveGasPrice`; `0x0` for a
+  failed transaction).
 - **Fields the scanner does not persist are `null`.** Block, transaction and receipt objects keep the standard
   shape, but roots, miner, `logsBloom` and signatures (`v`/`r`/`s`) come back as `null` until those are
   indexed. `input` is always `null`: calldata is never stored. Block `hash` / `parentHash` (and the `blockHash`
