@@ -231,8 +231,8 @@ metric columns.
 
 Kalarepa uses a key registered directly with Tiramisu's bouncer. A single key in
 `RPC_KEY_POOL_FILE` is shared by the scanner, gap filler, backfill scanner and Baseload
-workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately, and
-`ENTITY_EXPLORER_RPC_API_KEY` the entity explorer's relay to its public node.
+workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately (including the
+entity explorer's relay and live balances, which use the same node).
 See [direct key provisioning and rotation](docs/tiramisu-rpc-keys.md). This setup needs
 neither the Hub browser generator nor the optional proxy below.
 
@@ -1240,9 +1240,9 @@ are hidden:
   SDK rather than from the index. Entities carry typed attributes (bool, i32, u64, u256, dec, str, addr, key,
   bytes32, bytes), each indexed or stored only, zero or more `bytes` blobs, and an `arkiv.schema` tag when
   written through a named schema. The page reads a public node through `@arkiv-network/sdk@next`, by way of
-  the backend's `POST /entity-explorer/rpc` relay, which forwards only the explorer's methods and adds
-  `ENTITY_EXPLORER_RPC_API_KEY` server-side (node: `ENTITY_EXPLORER_RPC`, default the Jalebi testnet
-  `https://rpc.jalebi.db-chain.testnet.arkiv.network`). A CodeMirror
+  the backend's `POST /entity-explorer/rpc` relay, which forwards only the explorer's methods to the
+  indexed chain's own node (the one `/shadow-rpc` relays to), so the explorer always shows the chain the
+  indexer scans. A CodeMirror
   editor (loaded as its own chunk) highlights the query language and completes the filterable entity fields,
   `arkiv.schema` and the column names of the results on screen; a pasted bare entity key or address is
   rewritten to `$key = key(..)` / `$owner = addr(..)`. The run is recorded in the URL as

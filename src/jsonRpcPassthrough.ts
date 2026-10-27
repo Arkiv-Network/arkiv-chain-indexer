@@ -42,19 +42,12 @@ export const ARKIV_READ_METHODS: readonly string[] = [
 ];
 
 /**
- * What `POST /entity-explorer/rpc` relays: exactly the calls the frontend's
- * entity explorer makes — the query, and the block timing that dates its
- * results. Fixed rather than configurable, because the frontend's code is what
+ * What `POST /entity-explorer/rpc` relays to the indexed chain's node: exactly
+ * the calls the frontend's entity explorer makes — the query, and the block
+ * timing that dates its results. Fixed rather than configurable, because the frontend's code is what
  * decides which methods it calls; a method it stops calling comes off here.
  */
 export const ENTITY_EXPLORER_RPC_METHODS: readonly string[] = ["arkiv_query", "arkiv_getBlockTiming"];
-
-/**
- * The public node the entity explorer reads: Jalebi, the testnet that serves
- * the user-defined column format. Unrelated to the network this deployment
- * indexes.
- */
-export const DEFAULT_ENTITY_EXPLORER_RPC_URL = "https://rpc.jalebi.db-chain.testnet.arkiv.network";
 
 /**
  * Forwarded unless the deployment says otherwise. `eth_sendRawTransaction` is

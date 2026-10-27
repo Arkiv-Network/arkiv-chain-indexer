@@ -17,7 +17,6 @@ import { DEFAULT_ENTITY_HISTORY_LIMIT } from "./storage";
 import { DEFAULT_GENESIS_RPC_LIMIT } from "./entityProjector";
 import {
   DEFAULT_PASSTHROUGH_METHODS,
-  DEFAULT_ENTITY_EXPLORER_RPC_URL,
   DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE,
   DEFAULT_PASSTHROUGH_TIMEOUT_MS,
 } from "./jsonRpcPassthrough";
@@ -32,17 +31,6 @@ export interface JsonRpcPassthroughConfig {
   apiKey?: string;
   methods: string[];
   timeoutMs: number;
-  rateLimitPerMinute: number;
-}
-
-/**
- * The relay behind `POST /entity-explorer/rpc`: a public node and the key it
- * meters by, so the frontend's explorer reads the node without the key ever
- * reaching a browser.
- */
-export interface EntityExplorerRpcConfig {
-  url: string;
-  apiKey?: string;
   rateLimitPerMinute: number;
 }
 
@@ -69,7 +57,6 @@ export interface ServerConfig {
   transactionCountCacheMaxEntries: number;
   transactionCountCacheTtlMs: number;
   jsonRpcPassthrough: JsonRpcPassthroughConfig;
-  entityExplorerRpc: EntityExplorerRpcConfig;
   /**
    * Serve the Arkiv entity reads from the indexer's own experimental entity
    * index at `POST /shadow-rpc/experimental`, and run the projector that
@@ -319,26 +306,6 @@ const SPEC: CliSpec = {
       env: ["SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE"],
       default: DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE.toString(),
     },
-    {
-      flags: "--entity-explorer-rpc <url>",
-      description:
-        "Public JSON-RPC node that POST /entity-explorer/rpc relays the entity explorer's reads to. Defaults to the Jalebi testnet (or ENTITY_EXPLORER_RPC); unrelated to the indexed network.",
-      env: ["ENTITY_EXPLORER_RPC"],
-      default: DEFAULT_ENTITY_EXPLORER_RPC_URL,
-    },
-    {
-      flags: "--entity-explorer-rpc-api-key <key>",
-      description:
-        "Key sent as x-api-key with every relayed explorer request; it stays on the server. Defaults to ENTITY_EXPLORER_RPC_API_KEY; unset sends none and gets the node's anonymous quota.",
-      env: ["ENTITY_EXPLORER_RPC_API_KEY"],
-    },
-    {
-      flags: "--entity-explorer-rpc-rate-limit <per-minute>",
-      description:
-        "Relayed explorer requests allowed per minute across all callers, capping how fast the open endpoint can spend the key's quota; 0 removes the cap. Defaults to 600 (or ENTITY_EXPLORER_RPC_RATE_LIMIT_PER_MINUTE).",
-      env: ["ENTITY_EXPLORER_RPC_RATE_LIMIT_PER_MINUTE"],
-      default: DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE.toString(),
-    },
   ],
 };
 
@@ -506,29 +473,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     };
   }
 
-  const entityExplorerRpcUrl = cli.value("entity-explorer-rpc")?.trim() || DEFAULT_ENTITY_EXPLORER_RPC_URL;
-  {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(entityExplorerRpcUrl);
-    } catch {
-      throw new Error(`--entity-explorer-rpc must be a URL: ${entityExplorerRpcUrl}`);
-    }
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      throw new Error("--entity-explorer-rpc must be an http(s) URL");
-    }
-  }
-  const entityExplorerRpcApiKey = cli.value("entity-explorer-rpc-api-key")?.trim();
-  const entityExplorerRpc: EntityExplorerRpcConfig = {
-    url: entityExplorerRpcUrl,
-    ...(entityExplorerRpcApiKey ? { apiKey: entityExplorerRpcApiKey } : {}),
-    rateLimitPerMinute: intOrDefault(
-      "--entity-explorer-rpc-rate-limit",
-      cli.value("entity-explorer-rpc-rate-limit"),
-      DEFAULT_PASSTHROUGH_RATE_LIMIT_PER_MINUTE,
-    ),
-  };
-
   const genesisModeValue = cli.value("entity-index-genesis")?.trim().toLowerCase() || "auto";
   if (genesisModeValue !== "auto" && genesisModeValue !== "off" && genesisModeValue !== "managed") {
     throw new Error(`--entity-index-genesis must be auto, off or managed, got ${genesisModeValue}`);
@@ -579,7 +523,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     transactionCountCacheMaxEntries,
     transactionCountCacheTtlMs,
     jsonRpcPassthrough,
-    entityExplorerRpc,
     entityQueryIndex,
     metricsEnabled,
     ...(entityIndexFloorBlock !== undefined ? { entityIndexFloorBlock } : {}),

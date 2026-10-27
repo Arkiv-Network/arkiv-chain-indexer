@@ -123,8 +123,8 @@ export interface BlockServerOptions {
    */
   jsonRpcPassthrough?: JsonRpcForwarder;
   /**
-   * Relays the frontend entity explorer's reads to a public node with the
-   * deployment's API key. Omitted, `POST /entity-explorer/rpc` is a 404.
+   * Relays the frontend entity explorer's reads to the indexed chain's node.
+   * Omitted, `POST /entity-explorer/rpc` is a 404.
    */
   entityExplorerRpc?: JsonRpcForwarder;
   /**
@@ -329,7 +329,7 @@ export interface HealthResponseBody {
      * is the only way a caller can tell which writes the endpoint accepts.
      */
     jsonRpcPassthrough: string[] | false;
-    /** Methods `POST /entity-explorer/rpc` relays to its public node, sorted; `false` when it is off. */
+    /** Methods `POST /entity-explorer/rpc` relays to the chain's node, sorted; `false` when it is off. */
     entityExplorerRpc: string[] | false;
     /** Whether `GET /balances/live` can ask the node for a current balance. */
     liveBalance: boolean;
@@ -667,9 +667,9 @@ const JSON_RPC_PATH = "/shadow-rpc";
  */
 const JSON_RPC_EXPERIMENTAL_PATH = "/shadow-rpc/experimental";
 /**
- * The entity explorer's way to a public node: a pure relay of a fixed method
- * list, with the API key added here so it never reaches a browser. Nothing on
- * it is answered from the index, and it is not `/shadow-rpc`'s upstream.
+ * The entity explorer's way to the indexed chain's node (the one `/shadow-rpc`
+ * relays to): a pure relay of a fixed method list, open where `/shadow-rpc`
+ * needs a login. Nothing on it is answered from the index.
  */
 const ENTITY_EXPLORER_RPC_PATH = "/entity-explorer/rpc";
 /** Largest JSON-RPC request body accepted, in bytes; batches are capped separately. */
@@ -853,7 +853,7 @@ async function routeRequest(
       return jsonError(404, "The entity explorer relay is not configured on this deployment");
     }
     // Open like the explorer page itself; the relay's rate limit, not a login,
-    // is what keeps callers from draining the key's quota.
+    // is what keeps callers from draining the node's quota.
     return handleJsonRpcRequest(
       request,
       storage,

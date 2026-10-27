@@ -172,12 +172,13 @@ async function main(): Promise<void> {
       rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
       logLabel: "live balance",
     });
-    // The frontend entity explorer's node: a public RPC, keyed here.
+    // The frontend entity explorer reads the same node, asked only its two methods.
     const entityExplorerRpc = new JsonRpcPassthrough({
-      url: config.entityExplorerRpc.url,
-      ...(config.entityExplorerRpc.apiKey ? { apiKey: config.entityExplorerRpc.apiKey } : {}),
+      url: config.jsonRpcPassthrough.url ?? (() => passthroughStorage.getScannerRpcUrl()),
+      ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
       methods: ENTITY_EXPLORER_RPC_METHODS,
-      rateLimitPerMinute: config.entityExplorerRpc.rateLimitPerMinute,
+      timeoutMs: config.jsonRpcPassthrough.timeoutMs,
+      rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
       logLabel: "entity-explorer rpc",
     });
     // Experimental: the entity index behind /shadow-rpc/experimental. Its own
@@ -285,8 +286,9 @@ async function main(): Promise<void> {
       }`,
     );
     console.log(
-      `Entity explorer relay: forwarding ${entityExplorerRpc.describe()} to ${new URL(config.entityExplorerRpc.url).host} ` +
-        (config.entityExplorerRpc.apiKey ? "with ENTITY_EXPLORER_RPC_API_KEY" : "without an API key"),
+      `Entity explorer relay and live balances: forwarding ${entityExplorerRpc.describe()} and eth_getBalance to ${
+        config.jsonRpcPassthrough.url ? "SHADOW_RPC_UPSTREAM" : "the node the scanner recorded"
+      }`,
     );
     console.log(
       entityIndex

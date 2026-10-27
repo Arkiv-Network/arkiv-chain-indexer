@@ -1,8 +1,7 @@
 // The client the entity explorer queries the network with, through the Arkiv SDK.
 // It talks to the backend's relay rather than to a node: the relay forwards the
-// explorer's reads to a public RPC (Jalebi by default) and adds the API key, so
-// the key never reaches the browser. Which node that is is backend config
-// (ENTITY_EXPLORER_RPC), so no chain is pinned here.
+// explorer's reads to the node the indexer scans, so the explorer always shows
+// the indexed chain. Which chain that is is backend config, so none is pinned here.
 
 import { createPublicClient } from "@arkiv-network/sdk";
 import { http } from "viem";

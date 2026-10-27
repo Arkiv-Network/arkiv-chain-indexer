@@ -117,30 +117,6 @@ describe("parseServerConfig", () => {
     ).toThrow("--payload-provider-payment-share-bps must be between 0 and 10000");
   });
 
-  test("the entity explorer relay defaults to Jalebi without a key", () => {
-    expect(parseServerConfig([], BASE_ENV).entityExplorerRpc).toEqual({
-      url: "https://rpc.jalebi.db-chain.testnet.arkiv.network",
-      rateLimitPerMinute: 600,
-    });
-  });
-
-  test("reads the entity explorer relay settings from the environment", () => {
-    const config = parseServerConfig([], {
-      ...BASE_ENV,
-      ENTITY_EXPLORER_RPC: "https://rpc.example.test",
-      ENTITY_EXPLORER_RPC_API_KEY: "sdk_test",
-      ENTITY_EXPLORER_RPC_RATE_LIMIT_PER_MINUTE: "120",
-    });
-    expect(config.entityExplorerRpc).toEqual({ url: "https://rpc.example.test", apiKey: "sdk_test", rateLimitPerMinute: 120 });
-    // Compose passes unset variables through as empty strings.
-    expect(
-      parseServerConfig([], { ...BASE_ENV, ENTITY_EXPLORER_RPC: "", ENTITY_EXPLORER_RPC_API_KEY: "" }).entityExplorerRpc,
-    ).toEqual({ url: "https://rpc.jalebi.db-chain.testnet.arkiv.network", rateLimitPerMinute: 600 });
-    expect(() => parseServerConfig([], { ...BASE_ENV, ENTITY_EXPLORER_RPC: "ws://rpc.example.test" })).toThrow(
-      "--entity-explorer-rpc must be an http(s) URL",
-    );
-  });
-
   test("no upstream means the passthrough follows the node the scanner recorded", () => {
     expect(parseServerConfig([], BASE_ENV).jsonRpcPassthrough).toEqual({
       methods: ["eth_sendRawTransaction", "arkiv_query", "arkiv_getEntity", "arkiv_getEntityCount", "arkiv_getBlockTiming"],

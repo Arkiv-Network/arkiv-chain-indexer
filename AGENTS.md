@@ -202,11 +202,11 @@ docker compose up --build
   payload and content type. It queries a public node through `@arkiv-network/sdk@next`, by way of the backend's
   `POST /entity-explorer/rpc` (`/api/entity-explorer/rpc` publicly): a pure relay — `builtInMethods: false`, so
   nothing is answered from the index — of `ENTITY_EXPLORER_RPC_METHODS` (exactly what the explorer calls: `arkiv_query`, `arkiv_getBlockTiming`),
-  built on `JsonRpcPassthrough` with its own rate limit. It adds `ENTITY_EXPLORER_RPC_API_KEY` as `x-api-key`, so
-  the key never reaches a browser. The node is `ENTITY_EXPLORER_RPC` (default Jalebi,
-  `https://rpc.jalebi.db-chain.testnet.arkiv.network`) and is unrelated to the indexed network and to
-  `SHADOW_RPC_UPSTREAM`; the frontend pins no chain. Jalebi's gateway meters by key (an unknown key is a 401;
-  `sdk_test` is the public SDK test key). The node caps a page at 100 entities, and `select: "*"`
+  built on `JsonRpcPassthrough`. It reads the indexed chain's own node — the one `/shadow-rpc` relays to
+  (`SHADOW_RPC_UPSTREAM`, else the node the scanner recorded), with that relay's key, timeout and rate limit — so
+  the explorer and the indexer always look at the same chain and there is nothing extra to configure; the
+  frontend pins no chain. A key embedded in the node's URL (Jalebi accepts one as the last path segment, e.g.
+  `…/sdk_test`) stays on the server. The node caps a page at 100 entities, and `select: "*"`
   leaves out `$attributeSchema`, so the explorer names every field it needs (`EXPLORER_SELECT`). It does not use `/shadow-rpc` or the entity index, whose
   projection still folds the payload format. It fetches with TanStack Query and keeps `q`, `pageSize` and
   `expiration` in the URL with nuqs; the nuqs adapter wraps the page inside its lazy chunk, since no
