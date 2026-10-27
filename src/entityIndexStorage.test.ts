@@ -1379,7 +1379,7 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(0), keyOf(1), keyOf(2), keyOf(3)]);
   });
 
-  test("a probe that finds no genesis entities leaves the floor to the first keyed create", async () => {
+  test("a probe that finds no genesis entities leaves the floor to the first keyed create while blocks below it are missing", async () => {
     await index.reset();
     const source = createFakeGenesisSource([]);
     const logs: string[] = [];
@@ -1389,6 +1389,71 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect((await index.getProgress()).floorBlock).toBe(5n);
     expect(logs.some((line) => line.includes("holds no genesis entities"))).toBe(true);
     expect(source.pages).toBe(0);
+  });
+
+  test("a chain born empty and stored from block 0 is answered from block 0, as the node does", async () => {
+    const isolated = await createIsolatedStorage("entity_floor_zero");
+    const pool = openDb(TEST_DATABASE_URL!, { max: 2 });
+    try {
+      const own = isolated.storage;
+      const ownIndex = await EntityIndexStorage.fromDb(pool, { schema: isolated.schema });
+      const ownMethods = createArkivIndexMethods(ownIndex, own);
+      const ownResult = async <T = unknown>(method: string, params: unknown[] = []): Promise<T> => {
+        const response = (await handleJsonRpcBody({ jsonrpc: "2.0", id: 1, method, params }, own, { localOverrides: ownMethods })) as JsonRpcResponse;
+        if (response.error) throw new Error(`${method} failed: ${JSON.stringify(response.error)}`);
+        return response.result as T;
+      };
+      await own.saveChainId(7733102n);
+      // Blocks 1 and 2 first (the backfill has not reached block 0), the first keyed create at 3.
+      // Block 1 also holds a reverted create, which has no key and created nothing.
+      await storeBlock(own, {
+        blockNumber: 1,
+        transactions: [registryTx(1, 0, ALICE, { status: "0" })],
+        operations: [{ position: 0, hash: registryTx(1, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, ...deadline(900) })] }],
+      });
+      await storeBlock(own, { blockNumber: 2, transactions: [], operations: [] });
+      await storeBlock(own, {
+        blockNumber: 3,
+        transactions: [registryTx(3, 0, ALICE, { logs: [createdLog(0, KEY_A, ALICE, 900)] })],
+        operations: [
+          { position: 0, hash: registryTx(3, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, entityKey: KEY_A, ...deadline(900), attributes: [str("project", "onchain")] })] },
+        ],
+      });
+      const logs: string[] = [];
+      const projector = new EntityProjector(ownIndex, { genesis: { source: createFakeGenesisSource([]) }, lateScanIntervalMs: 0, log: (line) => logs.push(line) });
+      expect((await projector.runOnce()).genesisStatus).toBe("none");
+      expect((await ownIndex.getProgress()).floorBlock).toBe(3n); // block 0 is not stored yet
+      await expect(ownResult("arkiv_getEntityCount", [{ block: 0 }])).rejects.toThrow("-32006");
+
+      // The backfill stores block 0: the history below the first create is complete.
+      await storeBlock(own, { blockNumber: 0, transactions: [], operations: [] });
+      await projector.runOnce();
+      expect((await ownIndex.getProgress()).floorBlock).toBe(0n);
+      expect(logs.some((line) => line.includes("floor lowered to block 0 from 3"))).toBe(true);
+      expect(await ownResult<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(0);
+      expect((await ownResult<{ data: unknown[] }>("arkiv_query", ["*", { atBlock: 2 }])).data).toEqual([]);
+      expect((await ownResult<{ data: Array<{ key: string }> }>("arkiv_query", ["*", { atBlock: 3 }])).data.map((e) => e.key)).toEqual([KEY_A]);
+
+      // A fresh index over the same complete history starts at block 0 straight away.
+      await ownIndex.reset();
+      const fresh = new EntityProjector(ownIndex, { genesis: { source: createFakeGenesisSource([]) }, log: () => {} });
+      await fresh.runOnce();
+      expect((await ownIndex.getProgress()).floorBlock).toBe(0n);
+
+      // A successful create without a key below the first keyed one leaves an entity the index cannot know.
+      await ownIndex.reset();
+      await storeBlock(own, {
+        blockNumber: 2,
+        transactions: [registryTx(2, 0, ALICE)],
+        operations: [{ position: 0, hash: registryTx(2, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, ...deadline(900) })] }],
+      });
+      expect(await ownIndex.countKeylessCreatesBelow(3n)).toBe(1);
+      await new EntityProjector(ownIndex, { genesis: { source: createFakeGenesisSource([]) }, log: () => {} }).runOnce();
+      expect((await ownIndex.getProgress()).floorBlock).toBe(3n);
+    } finally {
+      await pool.close();
+      await isolated.cleanup();
+    }
   });
 
   test("a node that cannot answer, a genesis too big for RPC, a different chain, or a pinned floor", async () => {

@@ -296,20 +296,32 @@ export class EntityProjector {
 
     let progress = await this.storage.getProgress();
     if (progress.floorBlock === undefined) {
-      const floor = this.floorOverride ?? (await this.storage.detectFloorBlock());
+      const detected = this.floorOverride ?? (await this.storage.detectFloorBlock());
+      // A chain born empty and stored from block 0 is known from block 0, creates or not.
+      const floor = (await this.knownFromBlockZero(detected ?? head + 1n)) ? 0n : detected;
       if (floor === undefined) return result; // no keyed create stored yet
       await this.storage.setProgress({
         floorBlock: floor,
         projectedThroughBlock: floor - 1n,
         lateScanWatermark: await this.storage.now(),
       });
-      this.log(`entity index: starting at block ${floor} (first create with an entity key)`);
+      this.log(
+        floor === detected
+          ? `entity index: starting at block ${floor} (first create with an entity key)`
+          : "entity index: starting at block 0 (no genesis entities, every block stored from block 0)",
+      );
       progress = await this.storage.getProgress();
     }
     let through = progress.projectedThroughBlock ?? progress.floorBlock! - 1n;
     result.projectedThroughBlock = through;
 
     if (Date.now() - this.lastLateScanAt >= this.lateScanIntervalMs) {
+      if (progress.floorBlock !== undefined && progress.floorBlock > 0n && (await this.knownFromBlockZero(progress.floorBlock))) {
+        // The backfill (or the gap filler) completed the history below the floor.
+        await this.storage.setProgress({ floorBlock: 0n });
+        this.log(`entity index: floor lowered to block 0 from ${progress.floorBlock} (no genesis entities, every block stored from block 0)`);
+        progress = await this.storage.getProgress();
+      }
       const outcome = await this.refoldLateArrivals(progress.lateScanWatermark, through, progress.floorBlock);
       if (outcome === undefined) {
         result.lockHeldElsewhere = true;
@@ -419,6 +431,21 @@ export class EntityProjector {
     }
     await this.storage.setProgress({ lateScanWatermark: now });
     return keys.length;
+  }
+
+  /**
+   * Whether the index knows every entity from block 0 although its first
+   * keyed create is at `floor`: the node found no genesis entities (status
+   * `none`), the floor is not pinned, every block below `floor` is stored,
+   * and none of them holds a successful create without a key. The node then
+   * answers `[]` and `0` below the first create, and so can the index.
+   */
+  private async knownFromBlockZero(floor: bigint): Promise<boolean> {
+    if (this.floorOverride !== undefined || floor <= 0n) return false;
+    const genesis = await this.storage.getGenesisImport();
+    if (genesis?.status !== "none") return false;
+    if (!(await this.storage.storedEveryBlockBelow(floor))) return false;
+    return (await this.storage.countKeylessCreatesBelow(floor)) === 0;
   }
 
   /**
