@@ -1,7 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import {
-  canSuggest, fetchSearch, normalizeSearchQuery, scopedExactHref, searchHref, suggestionsInScope,
-  type SearchKind, type SearchSuggestion,
+  canSuggest, fetchSearch, fullHashHref, fullHashQuery, normalizeSearchQuery, scopedExactHref, searchHref,
+  suggestionsInScope, type SearchKind, type SearchSuggestion,
 } from "./searchApi";
 
 const DEFAULT_PLACEHOLDER = "Block number, address, hash or entity key…";
@@ -24,6 +25,21 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false, s
   const input = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const listId = useId();
+  const queryClient = useQueryClient();
+
+  /** A complete 32-byte value may be an entity key: ask the index whether it is a block or transaction first. */
+  const resolveFullHash = async (hash: string): Promise<string> => {
+    try {
+      const indexed = await queryClient.fetchQuery({
+        queryKey: ["search", hash],
+        queryFn: ({ signal }) => fetchSearch(hash, false, signal),
+        staleTime: 30_000,
+      });
+      return fullHashHref(hash, indexed);
+    } catch {
+      return fullHashHref(hash, null);
+    }
+  };
 
   useEffect(() => { setQuery(normalizeSearchQuery(initialQuery)); }, [initialQuery]);
   useEffect(() => {
@@ -66,7 +82,11 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false, s
       if (query.trim()) {
         setDismissed(true);
         input.current?.blur();
-        onNavigate((scope && scopedExactHref(query, scope)) || searchHref(query.trim()));
+        const scoped = scope && scopedExactHref(query, scope);
+        const hash = fullHashQuery(query);
+        if (scoped) onNavigate(scoped);
+        else if (hash && (!scope || scope.includes("entity"))) void resolveFullHash(hash).then(onNavigate);
+        else onNavigate(searchHref(query.trim()));
       }
     }} onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
