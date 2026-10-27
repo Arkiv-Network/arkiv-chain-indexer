@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/page-header";
-import { buildPermalinkHref } from "@/permalinks";
+import { buildPermalinkHref, entityDetailHref } from "@/permalinks";
 import { EntityResults } from "./components/EntityResults";
 import { QueryHistoryDialog } from "./components/QueryHistoryDialog";
 import { QueryPanel } from "./components/QueryPanel";
@@ -19,6 +19,8 @@ import { appendQueryExpression, explorerLinkFilters, normalizeQueryInput } from 
 
 interface EntityExplorerViewProps {
   timeZone: string;
+  /** The deployment stores transaction data, so entities have an indexed history page to link to. */
+  transactionDataEnabled?: boolean;
 }
 
 export function EntityExplorerView(props: EntityExplorerViewProps) {
@@ -29,7 +31,7 @@ export function EntityExplorerView(props: EntityExplorerViewProps) {
   );
 }
 
-function EntityExplorerPage({ timeZone }: EntityExplorerViewProps) {
+function EntityExplorerPage({ timeZone, transactionDataEnabled = false }: EntityExplorerViewProps) {
   const search = useEntitySearch();
   const { executedQuery, pageSize, expiration } = search;
 
@@ -141,6 +143,7 @@ function EntityExplorerPage({ timeZone }: EntityExplorerViewProps) {
         expirationFilter={expiration}
         timeZone={timeZone}
         entityHref={entityHref}
+        {...(transactionDataEnabled ? { historyHref: entityDetailHref } : {})}
         previousQuery={previousQueries.at(-1) ?? null}
         onBack={back}
         onLoadMore={search.loadMore}

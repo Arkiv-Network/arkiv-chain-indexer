@@ -55,7 +55,7 @@ for arg in "$@"; do
     --skip-smoke) SMOKE=0 ;;
     --skip-health) HEALTH=0 ;;
     --no-build) BUILD=0 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -152,6 +152,7 @@ SCANNER_POLL_MS=500
 SCANNER_RETRY_MS=2000
 SCANNER_TRACK_BALANCES=false
 GAP_FILL_INTERVAL_MS=10000
+STATISTICS_INTERVAL_MS=15000
 BACKEND_HOST=127.0.0.1
 BACKEND_PORT=13101
 FRONTEND_HOST=127.0.0.1
@@ -172,7 +173,7 @@ EOF
   if [ "$BUILD" = 1 ] && [ -n "$DECODER_IMAGE" ]; then
     # A given decoder image runs as is: `up --build` would rebuild its name
     # from the compose pin, so build every other image and start without building.
-    services=$(dc config --services | grep -vx decoder | tr '\n' ' ')
+    services=$(dc config --services | grep -vx decoder | tr '\n' ' ') || { note_failure "compose config"; exit 1; }
     # shellcheck disable=SC2086
     if ! dc build $services >"$LOGS/compose-build.log" 2>&1; then
       tail -20 "$LOGS/compose-build.log"; note_failure "compose build"; exit 1

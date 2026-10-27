@@ -578,7 +578,7 @@ export function App() {
           />
         ) : activeView === "entity-explorer" ? (
           <Suspense fallback={<p className="mx-auto w-full max-w-415 px-3 py-8 text-xs text-muted-foreground md:px-6">Loading…</p>}>
-            <EntityExplorerView timeZone={timeZone} />
+            <EntityExplorerView timeZone={timeZone} transactionDataEnabled={transactionDataEnabled === true} />
           </Suspense>
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView

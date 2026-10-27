@@ -111,6 +111,7 @@ Related scanner and worker settings:
 | `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
 | `GET` | `/statistics` | Worker snapshot of chain coverage, transaction/operation totals, gas fees and rent, entity state, bytes sizes, schemas and attributes. |
 | `POST` | `/shadow-rpc` | Ethereum JSON-RPC 2.0 served from stored data, plus any methods the optional passthrough relays to a real node. |
+| `POST` | `/entity-explorer/rpc` | Open relay of `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node (the entity explorer and "Load from node"); nothing is answered from the index. |
 | `GET` | `/blocks` | Compact rows for stored per-block metrics. |
 | `GET` | `/blocks/:blockNumber` | One compact stored block row. |
 | `GET` | `/block/:blockNumber` | Stored block plus stored transaction rows for inspection. |

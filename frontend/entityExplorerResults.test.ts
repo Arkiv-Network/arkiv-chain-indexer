@@ -82,6 +82,14 @@ describe("EntityResults", () => {
     expect(html).toContain("Copy link");
   });
 
+  test("links an entity to its indexed history only where the deployment has one", () => {
+    const withHistory = render([POST], { historyHref: (key) => `/entity/${key}` });
+    expect(withHistory).toContain(`href="/entity/${POST.$key}"`);
+    expect(withHistory).toContain(">History</a>");
+    // Without transaction data there is no entity page to send the reader to.
+    expect(render([POST])).not.toContain(">History</a>");
+  });
+
   test("says a cancelled query was cancelled rather than empty", () => {
     const html = render([], { cancelled: true });
     expect(html).toContain("Query cancelled");

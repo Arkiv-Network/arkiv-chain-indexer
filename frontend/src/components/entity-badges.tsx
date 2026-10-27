@@ -62,7 +62,8 @@ export function PermanentBadge({ className }: { className?: string }) {
 
 /**
  * The entity's schema (its indexed str `arkiv.schema`), shown as a header
- * badge instead of an attribute row. Clicking queries every entity of it.
+ * badge instead of an attribute row. Clicking queries every entity of it in
+ * the entity explorer.
  */
 export function SchemaBadge({ name, actions, className }: { name: string; actions?: ConditionActions; className?: string }) {
   const expression = schemaCondition(name);
@@ -72,13 +73,6 @@ export function SchemaBadge({ name, actions, className }: { name: string; action
     className,
   );
   const title = `Query ${expression}`;
-  if (actions?.onQueryOnly) {
-    return (
-      <button type="button" className={classes} title={title} onClick={() => actions.onQueryOnly?.(expression)}>
-        schema: {name}
-      </button>
-    );
-  }
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();

@@ -74,7 +74,7 @@ still govern future edits.
 | Receipt fetching | `AGENTS.md` requires sequential fetching; `.env.example` calls concurrency a legacy no-op | [src/scanner.ts](src/scanner.ts) uses a bounded worker pool, added in `5b2043f`; [src/config.ts](src/config.ts) defaults concurrency to 20. This is an unresolved instructions/code discrepancy. |
 | Aggregator interval | `AGENTS.md` says 60 seconds | [src/aggregateAll.ts](src/aggregateAll.ts) defaults to 30 seconds, matching `.env.example`. |
 | Database-free tests | Docs say only `TEST_DATABASE_URL` enables integration tests | [src/testPostgres.ts](src/testPostgres.ts) falls back to `DATABASE_URL`. Bun also auto-loads `.env`; an ordinary test invocation may therefore use a database. |
-| Passthrough defaults | First-pass memory includes `eth_sendTransaction`; `AGENTS.md` describes only raw submission | [src/jsonRpcPassthrough.ts](src/jsonRpcPassthrough.ts) defaults to `eth_sendRawTransaction` plus all four Arkiv read methods. `eth_sendTransaction` needs explicit configuration. No upstream means no forwarding. |
+| Passthrough defaults | First-pass memory includes `eth_sendTransaction`; `AGENTS.md` describes only raw submission | [src/jsonRpcPassthrough.ts](src/jsonRpcPassthrough.ts) defaults to `eth_sendRawTransaction` plus all three Arkiv read methods (the UDC node has no `arkiv_getEntity`). `eth_sendTransaction` needs explicit configuration. No upstream means no forwarding. |
 | Live Baseload configuration | A restart loses the running fleet | Fixed September 5 in `3419a76`: `baseload_live_config` persists it and wins over the startup file. |
 | Receipt-wait wedge | Workers silently poll forever as `running` | September 4 code adds a 20-second stall check, `waiting`/`outpriced` states, and a 10-minute timeout when the transaction is not outpriced. |
 | List compression | Cloudflare strips zstd, so origin responses are uncompressed | Gzip fallback was added in `34c3664`; the original finding explains that change. |
@@ -240,10 +240,11 @@ usable push timestamps when correlating the August 24 incident.
   the image also carries `scripts/`, so `docker compose run --rm backend bun run
   scripts/importGenesisState.ts …` works; images before it, including any `latest`
   pulled before September 9, 19:07 UTC, fail with `Module not found`.
-- Kubernetes uses the indexer-published **decoder** package. Compose defaults to
-  the upstream `arkiv-transaction-decoder:v0.3.0` package (since v0.6.0-udc.1;
-  v0.2.x before). Indexer decoder release
-  tags are indexer versions, not upstream decoder versions.
+- Kubernetes uses the indexer-published **decoder** package. Compose builds the
+  decoder from the arkiv-transaction-decoder commit it pins (v0.6.0: 896e341,
+  v0.3.0, untagged upstream, so no upstream image exists; v0.2.x images before),
+  the same ref `publish-images.yml` builds the published package from. Indexer
+  decoder release tags are indexer versions, not upstream decoder versions.
 - The db-chain chart (through 0.24.0) renders the backend with a fixed environment:
   no entity index and no shadow RPC upstream. db-chain-mgr #387 (draft, September 9)
   adds `spec.indexer.entityQueryIndex` and `spec.indexer.shadowRpc` for chart 0.25.0,

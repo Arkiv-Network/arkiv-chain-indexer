@@ -1,18 +1,16 @@
-import { Clipboard, Filter, ListPlus, Search } from "lucide-react";
+import { Clipboard, Filter, Search } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "@/components/copy-cell";
 import { buildRouteHref, shouldHandleClientNavigation, writePermalink } from "@/permalinks";
 
 /**
- * Where a query condition goes: a page's own query handlers (run it alone, or
- * add it to the current query), or — without them — a link that opens the
- * entity explorer with it.
+ * Where a query condition goes: a link that opens the entity explorer with it.
+ * (The explorer's own results use its FilterPopup, which can also add to the
+ * current query.)
  */
 export interface ConditionActions {
-  onQueryOnly?: (expression: string) => void;
-  onAddToQuery?: (expression: string) => void;
-  /** Without handlers: the SPA navigation callback for the entity explorer link. */
+  /** The SPA navigation callback for the entity explorer link. */
   onLocationChange?: () => void;
 }
 
@@ -27,9 +25,9 @@ export function openExplorerQuery(expression: string, onLocationChange?: () => v
 }
 
 /**
- * A small menu offering to query by one value, add it to the current query, or
- * copy the condition (and, when given, the bare value). Triggered by the
- * funnel button next to a key, address or indexed attribute.
+ * A small menu offering to query by one value in the entity explorer, or copy
+ * the condition (and, when given, the bare value). Triggered by the funnel
+ * button next to a key, address or indexed attribute.
  */
 export function FilterMenu({
   expression,
@@ -121,39 +119,10 @@ export function FilterMenu({
       </button>
       {open && position ? createPortal(
         <span ref={menuRef} style={position} className="z-[1000] block min-w-52 border border-border bg-popover p-1 text-popover-foreground shadow-md" role="menu">
-          {actions.onQueryOnly ? (
-            <button
-              type="button"
-              role="menuitem"
-              className={itemClass}
-              onClick={() => {
-                setOpen(false);
-                actions.onQueryOnly?.(expression);
-              }}
-            >
-              <Search className="size-3 text-muted-foreground" />
-              Query by {label} only
-            </button>
-          ) : (
-            <a role="menuitem" className={itemClass} href={href} onClick={onLink}>
-              <Search className="size-3 text-muted-foreground" />
-              Query by {label} in Entities
-            </a>
-          )}
-          {actions.onAddToQuery ? (
-            <button
-              type="button"
-              role="menuitem"
-              className={itemClass}
-              onClick={() => {
-                setOpen(false);
-                actions.onAddToQuery?.(expression);
-              }}
-            >
-              <ListPlus className="size-3 text-muted-foreground" />
-              Add to current query
-            </button>
-          ) : null}
+          <a role="menuitem" className={itemClass} href={href} onClick={onLink}>
+            <Search className="size-3 text-muted-foreground" />
+            Query by {label} in Entities
+          </a>
           <button type="button" role="menuitem" className={itemClass} onClick={() => void copy("condition")}>
             <Clipboard className="size-3 text-muted-foreground" />
             {copied === "condition" ? "Copied" : "Copy condition"}

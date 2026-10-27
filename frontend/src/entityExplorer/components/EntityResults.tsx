@@ -34,6 +34,8 @@ export interface EntityResultsProps {
   timeZone: string;
   /** The permalink that opens one entity on the entity explorer. */
   entityHref: (entityKey: string) => string;
+  /** The entity's indexed history page; omitted when this deployment has none (no transaction data). */
+  historyHref?: (entityKey: string) => string;
   /** The query to go back to after following an entity reference. */
   previousQuery: string | null;
   onBack: () => void;
@@ -57,6 +59,7 @@ export function EntityResults({
   expirationFilter,
   timeZone,
   entityHref,
+  historyHref,
   previousQuery,
   onBack,
   onLoadMore,
@@ -150,6 +153,7 @@ export function EntityResults({
           timing={timing}
           timeZone={timeZone}
           entityHref={entityHref}
+          {...(historyHref ? { historyHref } : {})}
           onQueryOnly={onQueryOnly}
           onAddToQuery={onAddToQuery}
           onOpenEntity={onOpenEntity}

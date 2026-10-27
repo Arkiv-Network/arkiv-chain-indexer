@@ -47,6 +47,7 @@ export function ResultTable({
   timing,
   timeZone,
   entityHref,
+  historyHref,
   onQueryOnly,
   onAddToQuery,
   onOpenEntity,
@@ -55,6 +56,7 @@ export function ResultTable({
   timing: BlockTiming | null;
   timeZone: string;
   entityHref: (entityKey: string) => string;
+  historyHref?: (entityKey: string) => string;
   onQueryOnly: (expression: string) => void;
   onAddToQuery: (expression: string) => void;
   onOpenEntity: (entityKey: string) => void;
@@ -196,6 +198,7 @@ export function ResultTable({
                             timing={timing}
                             timeZone={timeZone}
                             linkHref={entityHref(key)}
+                            {...(historyHref ? { historyHref: historyHref(key) } : {})}
                             onQueryOnly={onQueryOnly}
                             onAddToQuery={onAddToQuery}
                             onOpenEntity={onOpenEntity}

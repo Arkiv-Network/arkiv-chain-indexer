@@ -161,7 +161,7 @@ docker compose up --build
   the block hash of every returned log through one `getBlockHashesByNumber` call: doing it per block cost a
   round trip per distinct block in the result (~420ms for a 1,000-block query, versus ~10ms batched).
 - `src/jsonRpcPassthrough.ts` is the one hole in that: a transaction has to reach a node's mempool, so
-  `SHADOW_RPC_UPSTREAM` (see `serverConfig.ts`) relays an allowlist — `eth_sendRawTransaction` and the four
+  `SHADOW_RPC_UPSTREAM` (see `serverConfig.ts`) relays an allowlist — `eth_sendRawTransaction` and the three
   `ARKIV_READ_METHODS` by default — to a real node and returns its answers unchanged. With no explicit upstream, it resolves the
   scanner-recorded node; until a node is available, forwarded methods return `-32000`. Three rules hold: **allowlist only**, never an open proxy; a
   listed method **outranks the local handler and the transaction-data gate**, which makes the list a general

@@ -7,7 +7,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import type { Hex } from "viem";
 import { copyText } from "@/components/copy-cell";
 import { Badge } from "@/components/ui/badge";
-import { entityDetailHref, shouldHandleClientNavigation } from "@/permalinks";
+import { shouldHandleClientNavigation } from "@/permalinks";
 import { findBytesHint } from "../lib/bytes";
 import type { BlockTiming } from "../lib/client";
 import { getAttributes, getSchemaName, isFilterable, schemaFilter, type ExplorerEntity } from "../lib/entity";
@@ -23,6 +23,7 @@ export function EntityDocument({
   timing,
   timeZone,
   linkHref,
+  historyHref,
   onQueryOnly,
   onAddToQuery,
   onOpenEntity,
@@ -32,6 +33,8 @@ export function EntityDocument({
   timeZone: string;
   /** A permalink that opens this entity on the entity explorer. */
   linkHref: string;
+  /** The entity's indexed history page (`/entity/<key>`); no link without it. */
+  historyHref?: string;
   onQueryOnly: (expression: string) => void;
   onAddToQuery: (expression: string) => void;
   onOpenEntity?: (key: string) => void;
@@ -96,15 +99,17 @@ export function EntityDocument({
           </button>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <a
-            className="flex shrink-0 items-center gap-1 border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"
-            href={entityDetailHref(entityKey)}
-            title="The entity's indexed history: every version, its operations and the rent they paid"
-            onClick={openHistory}
-          >
-            <History className="size-3" />
-            History
-          </a>
+          {historyHref ? (
+            <a
+              className="flex shrink-0 items-center gap-1 border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+              href={historyHref}
+              title="The entity's indexed history: every version, its operations and the rent they paid"
+              onClick={openHistory}
+            >
+              <History className="size-3" />
+              History
+            </a>
+          ) : null}
           <button
             type="button"
             className="flex shrink-0 items-center gap-1 border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"

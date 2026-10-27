@@ -35,7 +35,9 @@ The explorer env (`UDC_E2E_DIR/explorer.env`) points both RPC URLs at
 the entity explorer and "Load from node" read through, reaches the devnet
 node, which answers no CORS), sets `ENTITY_INDEX_GENESIS=auto`,
 `SAVE_TRANSACTION_DATA=true`, `ENTITY_QUERY_INDEX=true`, backfill from block 0, a
-dummy `RPC_PROXY_UPSTREAM`, and keeps the genesis progress file inside the
+statistics sweep every 15 s (the default 5 min leaves the statistics screenshot
+empty, or unavailable when the first sweep races the schema), a dummy
+`RPC_PROXY_UPSTREAM`, and keeps the genesis progress file inside the
 container (`/tmp`) so nothing root-owned lands in the state dir. The decoder
 is the one `docker-compose.yml` pins (built from its git commit by `up
 --build`) unless `ARKIV_DECODER_IMAGE` names an existing image, which then runs
