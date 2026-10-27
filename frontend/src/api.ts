@@ -942,6 +942,18 @@ export interface BaseloadConfigsResponse {
   configs: StoredBaseloadConfigSummary[];
 }
 
+/** `GET /balances/live`: an account's balance read from the chain's node at its head. */
+export interface LiveBalance {
+  address: string;
+  balanceWei: string;
+  blockTag: "latest";
+  fetchedAtUtc: string;
+}
+
+export function fetchLiveBalance(address: string): Promise<LiveBalance> {
+  return getJson<LiveBalance>("/balances/live", new URLSearchParams({ address }));
+}
+
 async function getJson<T>(
   path: string,
   params: URLSearchParams,

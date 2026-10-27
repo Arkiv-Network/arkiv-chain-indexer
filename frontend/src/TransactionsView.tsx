@@ -1,5 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
+import { fetchLiveBalance, fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { AddressFace } from "./AddressFace";
 import { BlockCell } from "@/components/block-cell";
@@ -387,9 +388,12 @@ export function TransactionsView({
         onLocationChange={onLocationChange}
       />
       {locked ? (
-        <div className="flex items-center gap-2 border border-border bg-card px-3 py-2">
-          <AddressFace address={lockedAddr} />
-          <CopyCell value={lockedAddr} label={lockedAddr} copyLabel="address" />
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border border-border bg-card px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <AddressFace address={lockedAddr} />
+            <CopyCell value={lockedAddr} label={lockedAddr} copyLabel="address" />
+          </div>
+          <LiveBalanceField address={lockedAddr} tokenSymbol={tokenSymbol} />
         </div>
       ) : null}
 
@@ -717,3 +721,33 @@ function shortHash(value: string | null | undefined): string {
 
 // Keep the public helper available to query history and existing consumers.
 export { copyText } from "@/components/copy-cell";
+
+/**
+ * What the wallet holds now, read from the chain's node rather than the index
+ * (which keeps no balances for chains whose node serves only its head).
+ */
+function LiveBalanceField({ address, tokenSymbol }: { address: string; tokenSymbol: string }) {
+  const balance = useQuery({
+    queryKey: ["live-balance", address.toLowerCase()],
+    queryFn: () => fetchLiveBalance(address),
+    // A reading of the node's head: refreshed each time the page is opened, never trusted for long.
+    staleTime: 10_000,
+  });
+
+  return (
+    <div className="flex items-baseline gap-2 text-xs">
+      <span className="text-muted-foreground">Balance</span>
+      {balance.data ? (
+        <span className="font-mono font-medium" title={`${balance.data.balanceWei} wei, read from the node at its latest block`}>
+          {fmtTokenAmount(balance.data.balanceWei, tokenSymbol)}
+        </span>
+      ) : balance.error ? (
+        <span className="text-muted-foreground" title={balance.error.message}>
+          unavailable
+        </span>
+      ) : (
+        <span className="text-muted-foreground">…</span>
+      )}
+    </div>
+  );
+}

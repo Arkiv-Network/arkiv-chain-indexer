@@ -162,6 +162,16 @@ async function main(): Promise<void> {
       timeoutMs: config.jsonRpcPassthrough.timeoutMs,
       rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
     });
+    // A wallet's current balance, for GET /balances/live: the indexed chain's
+    // own node (the same one /shadow-rpc relays to), asked only eth_getBalance.
+    const liveBalance = new JsonRpcPassthrough({
+      url: config.jsonRpcPassthrough.url ?? (() => passthroughStorage.getScannerRpcUrl()),
+      ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
+      methods: ["eth_getBalance"],
+      timeoutMs: config.jsonRpcPassthrough.timeoutMs,
+      rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
+      logLabel: "live balance",
+    });
     // The frontend entity explorer's node: a public RPC, keyed here.
     const entityExplorerRpc = new JsonRpcPassthrough({
       url: config.entityExplorerRpc.url,
@@ -235,6 +245,7 @@ async function main(): Promise<void> {
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
       entityExplorerRpc,
+      liveBalance,
       ...(entityIndex ? { entityIndex } : {}),
       metricsEnabled: config.metricsEnabled,
     });

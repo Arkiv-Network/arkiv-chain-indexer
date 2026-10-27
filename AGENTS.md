@@ -192,7 +192,11 @@ docker compose up --build
   switched on and the series is sparse (a row exists only where an address was touched). `getBalanceAt` takes
   the newest reading at or before a block; when there is none, `eth_getBalance` and `GET /balances` say so
   rather than answering `0x0` — an unindexed account and an empty one are different facts, and conflating them
-  is the `eth_getLogs`-below-the-floor mistake again.
+  is the `eth_getLogs`-below-the-floor mistake again. Tracking reads each block's state, so it needs a node that
+  serves past state; Jalebi serves only its head, and a failed read retries the block forever. For that case
+  `GET /balances/live?address=` asks the indexed chain's node (the `/shadow-rpc` relay's node and key, allowlisted
+  to `eth_getBalance` at `latest`, same rate limit) what an account holds now, uncached and with no history;
+  the frontend's wallet page shows it.
 - The frontend entity explorer (`/entity-explorer`, code in `frontend/src/entityExplorer/`) speaks the user-defined column format: entities carry
   typed attributes (indexed or stored only, zero or more `bytes` blobs, an `arkiv.schema` tag) instead of a
   payload and content type. It queries a public node through `@arkiv-network/sdk@next`, by way of the backend's
@@ -205,10 +209,13 @@ docker compose up --build
   `sdk_test` is the public SDK test key). The node caps a page at 100 entities, and `select: "*"`
   leaves out `$attributeSchema`, so the explorer names every field it needs (`EXPLORER_SELECT`). It does not use `/shadow-rpc` or the entity index, whose
   projection still folds the payload format. It fetches with TanStack Query and keeps `q`, `pageSize` and
-  `expiration` in the URL with nuqs; both providers wrap the page inside its lazy chunk, since no
-  other page uses them. Layout: `EntityExplorerView.tsx` composes the page, `hooks/` holds the run
+  `expiration` in the URL with nuqs; the nuqs adapter wraps the page inside its lazy chunk, since no
+  other page uses it. Layout: `EntityExplorerView.tsx` composes the page, `hooks/` holds the run
   (`useEntitySearch`) and saved queries, `components/` the UI, `lib/` the framework-free logic the frontend
   tests cover. `/data`, the page's old path, still resolves to it.
+- Frontend data fetching goes through TanStack Query (`useQuery` / `useInfiniteQuery`), never `fetch` inside a
+  `useEffect`. The one `QueryClient` is `frontend/src/queryClient.ts` (no retries, no refetch on focus), provided
+  app-wide in `frontend/src/main.tsx`. Older views still fetch in effects; move them over when touching them.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

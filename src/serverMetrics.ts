@@ -60,6 +60,7 @@ const ROUTE_TEMPLATES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/shadow-rpc$/, "/shadow-rpc"],
   [/^\/shadow-rpc\/experimental$/, "/shadow-rpc/experimental"],
   [/^\/entity-explorer\/rpc$/, "/entity-explorer/rpc"],
+  [/^\/balances\/live$/, "/balances/live"],
   [/^\/guzzlers$/, "/guzzlers"],
   [/^\/guzzler\/.+$/, "/guzzler/:address"],
   [/^\/blocks$/, "/blocks"],

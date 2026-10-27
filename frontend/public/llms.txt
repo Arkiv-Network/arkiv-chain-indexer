@@ -118,6 +118,7 @@ Related scanner and worker settings:
 | `GET` | `/transaction-records` | Top stored transaction records by gas, fee, and effective fee. |
 | `GET` | `/senders` | Precomputed sender-address activity stats. |
 | `GET` | `/balances` | Account balance readings per block, for addresses a block touched. |
+| `GET` | `/balances/live` | An account's current balance, asked of the chain's node at `latest` (`?address=`). |
 | `GET` | `/guzzlers` | Redis-cached active sender leaderboards over recent windows. |
 | `GET` | `/guzzler/:address` | One sender's recent per-minute guzzler history. |
 | `GET` | `/baseload` | Current backend Baseload state and worker statuses. |
@@ -682,6 +683,13 @@ balance row is a compact JSON array of values in `names` order:
 ```txt
 blockNumber, blockDate, address, balanceWei
 ```
+
+## `GET /balances/live`
+
+`?address=0x…` (required). What the account holds now, from the indexed chain's node (`eth_getBalance` at
+`latest`), not from the index: works on nodes that serve only their head, has no history, is not cached and
+shares the `/shadow-rpc` relay's rate limit. Returns `{ address, balanceWei, blockTag, fetchedAtUtc }`;
+`400` bad address, `429` rate limited, `502` node failure, `503` no node available.
 
 ## `GET /guzzlers`
 

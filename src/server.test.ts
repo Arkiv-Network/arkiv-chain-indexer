@@ -41,6 +41,8 @@ import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperatio
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
 import { ResponseCache } from "./responseCache";
+import { JsonRpcError } from "./jsonRpc";
+import { JSON_RPC_LIMIT_EXCEEDED } from "./jsonRpcPassthrough";
 import { ValueCache } from "./valueCache";
 import type {
   BalanceQueryFilter,
@@ -336,6 +338,49 @@ describe("POST /entity-explorer/rpc relays to the explorer's public node", () =>
 
   test("is a 404 when the deployment has no relay", async () => {
     expect((await post("arkiv_query")).status).toBe(404);
+  });
+});
+
+describe("GET /balances/live", () => {
+  const ADDRESS = "0x44a22aCf16f0a1e958E0B28135D7e27067909b3F";
+  const forwarder = (answer: () => unknown) => ({
+    calls: [] as unknown[][],
+    methods: new Set(["eth_getBalance"]),
+    async forward(_method: string, params: unknown[]) {
+      this.calls.push(params);
+      return answer();
+    },
+  });
+  const get = (query: string, options = {}) =>
+    handleRequest(new Request(`http://example.test/balances/live${query}`), {} as ScannerStorage, options);
+
+  test("asks the node for the balance at its head and answers it in wei", async () => {
+    const liveBalance = forwarder(() => "0x10a741a462780000");
+    const response = await get(`?address=${ADDRESS}`, { liveBalance });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ address: ADDRESS.toLowerCase(), balanceWei: "1200000000000000000", blockTag: "latest" });
+    expect(liveBalance.calls).toEqual([[ADDRESS.toLowerCase(), "latest"]]);
+  });
+
+  test("rejects a malformed address before asking the node", async () => {
+    const liveBalance = forwarder(() => "0x0");
+    expect((await get("?address=0x1234", { liveBalance })).status).toBe(400);
+    expect(liveBalance.calls).toEqual([]);
+  });
+
+  test("is a 503 without a node, a 429 when rate limited and a 502 when the node fails", async () => {
+    expect((await get(`?address=${ADDRESS}`)).status).toBe(503);
+    const limited = forwarder(() => {
+      throw new JsonRpcError(JSON_RPC_LIMIT_EXCEEDED, "eth_getBalance is rate limited");
+    });
+    expect((await get(`?address=${ADDRESS}`, { liveBalance: limited })).status).toBe(429);
+    const failing = forwarder(() => {
+      throw new JsonRpcError(-32000, "eth_getBalance could not be forwarded to the upstream node");
+    });
+    const response = await get(`?address=${ADDRESS}`, { liveBalance: failing });
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toBe("eth_getBalance could not be forwarded to the upstream node");
   });
 });
 

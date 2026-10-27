@@ -22,7 +22,8 @@ import {
 import { type BaseloadRuntime, type BaseloadState } from "./baseloadRuntime";
 import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
-import { handleJsonRpcText, type JsonRpcForwarder, type JsonRpcMethodHandler } from "./jsonRpc";
+import { handleJsonRpcText, JsonRpcError, type JsonRpcForwarder, type JsonRpcMethodHandler } from "./jsonRpc";
+import { JSON_RPC_LIMIT_EXCEEDED } from "./jsonRpcPassthrough";
 import { ARKIV_INDEX_METHODS, createArkivIndexMethods } from "./arkivJsonRpc";
 import type { EntityVersion } from "./entityIndex";
 import type { EntityIndexReader, EntityIndexStats, GenesisImportStatus } from "./entityIndexStorage";
@@ -126,6 +127,11 @@ export interface BlockServerOptions {
    * deployment's API key. Omitted, `POST /entity-explorer/rpc` is a 404.
    */
   entityExplorerRpc?: JsonRpcForwarder;
+  /**
+   * Asks the indexed chain's node for an account's balance at its head, for
+   * `GET /balances/live`. Omitted, that route is a 503.
+   */
+  liveBalance?: JsonRpcForwarder;
   /**
    * The experimental entity index. When present, `POST /shadow-rpc/experimental`
    * answers the `arkiv_*` reads from it; absent, that path is a 404 and only
@@ -325,6 +331,8 @@ export interface HealthResponseBody {
     jsonRpcPassthrough: string[] | false;
     /** Methods `POST /entity-explorer/rpc` relays to its public node, sorted; `false` when it is off. */
     entityExplorerRpc: string[] | false;
+    /** Whether `GET /balances/live` can ask the node for a current balance. */
+    liveBalance: boolean;
     /**
      * The experimental entity index behind `POST /shadow-rpc/experimental`:
      * `false` when the deployment has not enabled it, else where its
@@ -685,6 +693,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.statisticsProvider ? { statisticsProvider: options.statisticsProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
         ...(options.entityExplorerRpc ? { entityExplorerRpc: options.entityExplorerRpc } : {}),
+        ...(options.liveBalance ? { liveBalance: options.liveBalance } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
         ...(options.search ? { search: options.search } : {}),
         ...(options.metricsEnabled !== undefined ? { metricsEnabled: options.metricsEnabled } : {}),
@@ -879,6 +888,7 @@ async function routeRequest(
       options.jsonRpcPassthrough,
       options.entityIndex,
       options.entityExplorerRpc,
+      options.liveBalance,
     );
   }
 
@@ -957,6 +967,10 @@ async function routeRequest(
 
   if (url.pathname === "/balances") {
     return handleGetBalances(request, url, storage);
+  }
+
+  if (url.pathname === "/balances/live") {
+    return handleGetLiveBalance(url, options.liveBalance);
   }
 
   if (url.pathname === "/senders") {
@@ -1090,6 +1104,7 @@ async function handleGetHealth(
   jsonRpcPassthrough: JsonRpcForwarder | undefined,
   entityIndex: BlockServerOptions["entityIndex"],
   entityExplorerRpc: JsonRpcForwarder | undefined,
+  liveBalance: JsonRpcForwarder | undefined,
 ): Promise<Response> {
   const guzzlers = await readGuzzlerCacheHealth(guzzlerStore);
   const now = new Date();
@@ -1140,6 +1155,7 @@ async function handleGetHealth(
         ? [...jsonRpcPassthrough.methods].sort()
         : false,
       entityExplorerRpc: entityExplorerRpc ? [...entityExplorerRpc.methods].sort() : false,
+      liveBalance: liveBalance !== undefined,
       entityQueryIndex,
     },
     guzzlers,
@@ -1883,6 +1899,52 @@ async function handleGetBalances(
   };
 
   return compressedJsonResponse(request, body);
+}
+
+export interface LiveBalanceResponseBody {
+  address: string;
+  /** Decimal string, read from the node at its head (`latest`), not from the index. */
+  balanceWei: string;
+  blockTag: "latest";
+  fetchedAtUtc: string;
+}
+
+/**
+ * `GET /balances/live?address=0x…`: what an account holds now, asked of the
+ * indexed chain's node. The scanner's balance readings (`GET /balances`) need
+ * a node that serves past state; this needs only the head, so it works where
+ * those cannot, at the cost of having no history. Not cached here: it is a
+ * reading of the node, and the relay's rate limit guards the node's quota.
+ */
+async function handleGetLiveBalance(url: URL, liveBalance: JsonRpcForwarder | undefined): Promise<Response> {
+  const address = url.searchParams.get("address") ?? "";
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    return jsonError(400, "address must be a 20-byte hex address");
+  }
+  if (!liveBalance) {
+    return jsonError(503, "Live balances are not available on this deployment");
+  }
+  let result: unknown;
+  try {
+    result = await liveBalance.forward("eth_getBalance", [address.toLowerCase(), "latest"]);
+  } catch (error) {
+    if (error instanceof JsonRpcError) {
+      // The relay already reduced transport failures to a fixed message, so
+      // nothing here names the node or its key.
+      return jsonError(error.code === JSON_RPC_LIMIT_EXCEEDED ? 429 : 502, error.message);
+    }
+    throw error;
+  }
+  if (typeof result !== "string" || !/^0x[0-9a-fA-F]+$/.test(result)) {
+    return jsonError(502, "The node returned a malformed balance");
+  }
+  const body: LiveBalanceResponseBody = {
+    address: address.toLowerCase(),
+    balanceWei: BigInt(result).toString(),
+    blockTag: "latest",
+    fetchedAtUtc: new Date().toISOString(),
+  };
+  return jsonResponse(body);
 }
 
 export function parseBalanceFilterFromQuery(params: URLSearchParams): BalanceQueryFilter {

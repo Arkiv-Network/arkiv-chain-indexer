@@ -778,6 +778,25 @@ curl 'http://localhost:3000/balances?block=638598'
 curl 'http://localhost:3000/balances?address=0xaaaa...aaaa&limit=100'
 ```
 
+### `GET /balances/live`
+
+What an account holds now, asked of the indexed chain's node (`eth_getBalance` at `latest`) rather than
+read from the index. It uses the node and key `/shadow-rpc` relays to (`SHADOW_RPC_UPSTREAM` /
+`SHADOW_RPC_UPSTREAM_API_KEY`, or the node the scanner recorded) and shares that relay's per-minute rate
+limit. It works on nodes that serve only their head (such as Jalebi), where `SCANNER_TRACK_BALANCES` cannot,
+but has no history. The wallet page shows it.
+
+| Query param | Description |
+| --- | --- |
+| `address` | Required 20-byte hex address. |
+
+Returns `{ address, balanceWei, blockTag: "latest", fetchedAtUtc }`; `400` for a malformed address, `429`
+when rate limited, `502` when the node fails, `503` when no node is available.
+
+```sh
+curl 'http://localhost:3000/balances/live?address=0xaaaa...aaaa'
+```
+
 ### `GET /ranges`
 
 Returns aggregated fixed-size windows ordered by `range_start` ascending. Each request targets a single
