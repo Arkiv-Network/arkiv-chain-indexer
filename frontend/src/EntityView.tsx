@@ -265,7 +265,8 @@ function EntityDetail({
     <Card className="gap-4 p-4">
       <div className="flex flex-wrap items-center gap-3">
         <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
-        <span className="min-w-0 flex-1 font-mono text-xs break-all text-foreground">{entityKey}</span>
+        {/* A basis keeps the key readable: on a narrow screen the badges wrap below it instead of squeezing it. */}
+        <span className="min-w-0 flex-[1_1_18rem] font-mono text-xs break-all text-foreground">{entityKey}</span>
         {current.schemaName ? <SchemaBadge name={current.schemaName} actions={actions} /> : null}
         {current.permanent ? <PermanentBadge /> : null}
         <CopyButton value={entityKey} label="entity key" />
