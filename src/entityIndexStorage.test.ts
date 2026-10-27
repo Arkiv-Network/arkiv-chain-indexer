@@ -1165,6 +1165,47 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(await keysOf("*", { atBlock: "0x0" })).toEqual([0, 1, 2, 3, 4, 5, 6].map(keyOf));
   });
 
+  test("a node that refuses every cursor fails the import after three restarts instead of walking forever", async () => {
+    await index.reset();
+    const expired = new GenesisRpcError(
+      "arkiv_query",
+      -32005,
+      "query rejected (cursor): the cursor expired, is malformed, or belongs to another query, block or selection",
+    );
+    const source = createFakeGenesisSource(SEVEN, { cursorError: expired });
+    const logs: string[] = [];
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 3, pageSize: 3 }, log: (line) => logs.push(line) });
+    const statuses: Array<string | undefined> = [];
+    for (let tick = 0; tick < 8; tick++) statuses.push((await projector.runOnce()).genesisStatus);
+    // Each tick reads the first page and is refused the second: three restarts, then the fourth refusal fails it.
+    expect(statuses.slice(0, 4)).toEqual(["running", "running", "running", "failed"]);
+    expect(statuses.slice(4).every((status) => status === "failed")).toBe(true);
+    expect(source.pages).toBe(8);
+    expect(logs.filter((line) => line.includes("restarting the walk from the first page"))).toHaveLength(3);
+    const failed = await index.getGenesisImport();
+    expect(failed).toMatchObject({ status: "failed", phase: null });
+    expect(failed?.error).toMatch(/refused the genesis walk's cursor 4 times in a row/);
+    // Failed closed: nothing is served from a partial genesis.
+    expect((await call("arkiv_getEntityCount")).error?.message).toMatch(/entity index/);
+  });
+
+  test("a restart run ends once a cursor works again, so later node restarts each get their own restarts", async () => {
+    await index.reset();
+    const expired = () =>
+      new GenesisRpcError("arkiv_query", -32005, "query rejected (cursor): the cursor expired, is malformed, or belongs to another query, block or selection");
+    const source = createFakeGenesisSource(SEVEN);
+    // Each tick reads the first page and is refused the second (pages 2, 4, 6): three restarts.
+    for (const n of [2, 4, 6]) source.failPage(n, expired());
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 1, pageSize: 3 }, log: () => {} });
+    for (let tick = 0; tick < 3; tick++) expect((await projector.runOnce()).genesisStatus).toBe("running");
+    // The fourth tick's cursor works (page 8), so the expiry on page 9 starts a new run instead of failing.
+    source.failPage(9, expired());
+    expect((await projector.runOnce()).genesisStatus).toBe("running");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "running", cursor: null, imported: 0 });
+    expect((await projector.runOnce()).genesisStatus).toBe("done");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "done", imported: 7, total: 7 });
+  });
+
   test("stop() ends the walk after the batch in flight, and the next start resumes it", async () => {
     await index.reset();
     const source = createFakeGenesisSource(SEVEN);

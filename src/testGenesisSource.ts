@@ -23,6 +23,8 @@ export interface FakeGenesisSourceOptions {
   count?: number | (() => Promise<number>);
   /** What `describe()` throws, when it should. */
   describeError?: Error;
+  /** Thrown by every page request that carries a cursor (a node whose cursors never last). */
+  cursorError?: Error;
 }
 
 export function createFakeGenesisSource(
@@ -62,6 +64,7 @@ export function createFakeGenesisSource(
         failures.delete(pages);
         throw failure;
       }
+      if (cursor !== undefined && options.cursorError) throw options.cursorError;
       const start = cursor === undefined ? 0 : Number(cursor.slice("c:".length));
       const data = oldestFirst.slice(start, start + limit);
       const end = start + data.length;

@@ -125,6 +125,12 @@ const LIVE_COUNT_DUTY_FACTOR = 20;
 export const DEFAULT_GENESIS_RPC_LIMIT = 1_000_000;
 const DEFAULT_GENESIS_BATCH_ENTITIES = 5_000;
 const DEFAULT_GENESIS_PROBE_RETRY_MS = 60_000;
+/**
+ * Walk restarts after a cursor expiry (-32005) allowed in a row before the
+ * import fails: a node restart costs one, a node whose cursors never last
+ * from one page to the next would cost one per tick forever.
+ */
+export const GENESIS_CURSOR_RESTART_LIMIT = 3;
 
 interface GenesisStageOutcome {
   status: GenesisImportStatus | undefined;
@@ -169,6 +175,12 @@ export class EntityProjector {
   /** `startedAt` of the import the tracker describes; a new import gets a new tracker. */
   private progressTrackedImport: string | undefined;
   private progressPages = 0;
+  /**
+   * Cursor expiries (-32005) since a page was last fetched with a cursor. A
+   * node restart costs one; a node that refuses every cursor would otherwise
+   * restart the walk forever.
+   */
+  private genesisCursorRestarts = 0;
   private progressAttributes = 0;
   private progressRepairBatches = 0;
   private progressRepaired = 0;
@@ -636,6 +648,9 @@ export class EntityProjector {
       return outcome;
     };
 
+    // The cursor the next page is requested with: a page that arrives for a
+    // cursor proves the node keeps its cursors, which ends a run of restarts.
+    let requestCursor = state.cursor;
     const walk = walkGenesisEntities(source, {
       cursor: state.cursor,
       imported: state.imported,
@@ -644,6 +659,8 @@ export class EntityProjector {
     });
     try {
       for await (const page of walk) {
+        if (requestCursor !== null) this.genesisCursorRestarts = 0;
+        requestCursor = page.cursor;
         this.progressPages += 1;
         for (const version of page.versions) this.progressAttributes += version.attributes.length;
         pending.push(...page.versions);
@@ -681,7 +698,18 @@ export class EntityProjector {
         // The node restarted and forgot the walk's cursor (UDC cursors are
         // process-local). Start over from the first page: positions are the
         // node's order and every row is written idempotently, so the rows
-        // already in are rewritten as they are.
+        // already in are rewritten as they are. A node that refuses cursor
+        // after cursor is not restarting, and the walk would never end.
+        this.genesisCursorRestarts += 1;
+        if (this.genesisCursorRestarts > GENESIS_CURSOR_RESTART_LIMIT) {
+          this.genesisCursorRestarts = 0;
+          await this.failGenesis(
+            `the node refused the genesis walk's cursor ${GENESIS_CURSOR_RESTART_LIMIT + 1} times in a row, ` +
+              `${GENESIS_CURSOR_RESTART_LIMIT} restarts from the first page included, so its cursors do not last from one page ` +
+              `to the next (${error.message}); import the genesis offline or fix the node, then reset the import`,
+          );
+          return { ...GENESIS_IDLE, status: "failed", imported: importedNow };
+        }
         await this.restartGenesisWalk(error.message);
         return { ...blocked, imported: importedNow };
       }
