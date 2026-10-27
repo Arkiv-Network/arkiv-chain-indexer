@@ -11,6 +11,7 @@ function bucket(timestampMs: number, gasUsed = "277259", feeWei = "8844562100000
     transactionCount: 1,
     totalGasUsed: gasUsed,
     totalFeeWei: feeWei,
+    totalRentFeeWei: "0",
     firstSeenMs: timestampMs,
     lastSeenMs: timestampMs,
   };
@@ -37,8 +38,8 @@ describe("guzzler Redis bucket serialization", () => {
   test("parses versioned tuple bucket values", () => {
     const buckets = [bucket(T0)];
     const encoded = {
-      v: 1,
-      b: [[buckets[0]!.minute, 1, "277259", "88445621000000000", T0, T0]],
+      v: 2,
+      b: [[buckets[0]!.minute, 1, "277259", "88445621000000000", "0", T0, T0]],
     };
 
     expect(parseBuckets(JSON.stringify(encoded))).toEqual(buckets);
@@ -58,13 +59,16 @@ describe("guzzler Redis bucket serialization", () => {
       value: JSON.stringify(serializeBuckets(buckets)),
     });
     expect(JSON.parse(client.hsetCalls[0]!.value)).toEqual({
-      v: 1,
-      b: [[Math.floor(T0 / MINUTE), 1, "21000", "1000", T0, T0]],
+      v: 2,
+      b: [[Math.floor(T0 / MINUTE), 1, "21000", "1000", "0", T0, T0]],
     });
   });
 
-  test("ignores unknown versioned bucket values", () => {
-    expect(parseBuckets(JSON.stringify({ v: 2, b: [[Math.floor(T0 / MINUTE), 1, "1", "2", T0, T0]] }))).toEqual(
+  test("ignores unknown versioned bucket values, including the rent-less version 1", () => {
+    expect(parseBuckets(JSON.stringify({ v: 1, b: [[Math.floor(T0 / MINUTE), 1, "1", "2", T0, T0]] }))).toEqual(
+      [],
+    );
+    expect(parseBuckets(JSON.stringify({ v: 3, b: [[Math.floor(T0 / MINUTE), 1, "1", "2", "0", T0, T0]] }))).toEqual(
       [],
     );
   });
@@ -72,11 +76,11 @@ describe("guzzler Redis bucket serialization", () => {
   test("ignores malformed tuple entries and keeps valid ones", () => {
     const valid = bucket(T0, "300", "30");
     const encoded = {
-      v: 1,
+      v: 2,
       b: [
-        [valid.minute, valid.transactionCount, valid.totalGasUsed, valid.totalFeeWei, valid.firstSeenMs],
-        [valid.minute, valid.transactionCount, 300, valid.totalFeeWei, valid.firstSeenMs, valid.lastSeenMs],
-        [valid.minute, valid.transactionCount, valid.totalGasUsed, valid.totalFeeWei, valid.firstSeenMs, valid.lastSeenMs],
+        [valid.minute, valid.transactionCount, valid.totalGasUsed, valid.totalFeeWei, valid.totalRentFeeWei, valid.firstSeenMs],
+        [valid.minute, valid.transactionCount, 300, valid.totalFeeWei, valid.totalRentFeeWei, valid.firstSeenMs, valid.lastSeenMs],
+        [valid.minute, valid.transactionCount, valid.totalGasUsed, valid.totalFeeWei, valid.totalRentFeeWei, valid.firstSeenMs, valid.lastSeenMs],
       ],
     };
 

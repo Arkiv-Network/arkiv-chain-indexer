@@ -41,8 +41,9 @@ import {
   TOMBSTONE_TYPE_ID,
   TYPE_IDS,
   TYPE_TAGS_BY_ID,
+  U64_MAX,
   compareUtf8,
-  toStoredAttributeValue,
+  fromWireAttributeValue,
   type AttributeTypeTag,
   type StoredAttributeValue,
 } from "./entityValues";
@@ -75,11 +76,13 @@ export interface EntityOpRecord {
   entityKey: string;
   /** The transaction sender, lowercase. */
   sender: string;
-  contentType: string | null;
-  payloadSizeBytes: number;
+  /** create: the raw flag byte from calldata, used when no `EntityCreated` log was stored. */
+  creationFlags: number | null;
   attributes: ArkivOperationAttribute[];
-  /** The decoder's single block count: a lifetime, or a deadline when only that was given. */
-  expiresAtBlocks: number;
+  /** create/extend: the requested absolute deadline; null for other operations. */
+  expiresAt: bigint | null;
+  /** create/extend: the requested lifetime floor in blocks from the landing block. */
+  minLifetime: bigint | null;
   newOwner: string | null;
   /** Set when the transaction's receipt logs were stored and matched this operation. */
   event?: EntityOpEvent;
@@ -118,27 +121,22 @@ export interface EntityVersion {
 }
 
 /**
- * The engine's `max(expiresAt, block + minLifetime)`, reconstructed from the
- * one number the decoder stored. A count that does not reach past the current
- * block cannot be a deadline (the entity would be dead on arrival), so it is
- * read as a lifetime; anything larger is read as the absolute deadline it most
- * likely was. Exact whenever an operation gave only one of the two, which is
- * what every SDK helper does.
+ * The engine's `max(expiresAt, block + minLifetime)`, exactly, capped at
+ * 2^64 − 1 (the permanent expiry, which a huge lifetime reaches too).
  */
-export function resolveRequestedExpiry(blockNumber: number, expiresAtBlocks: number): bigint {
-  const count = BigInt(Math.max(0, Math.floor(expiresAtBlocks)));
-  const block = BigInt(blockNumber);
-  return count > block ? count : block + count;
+export function resolveRequestedExpiry(blockNumber: number, expiresAt: bigint, minLifetime: bigint): bigint {
+  const floor = BigInt(blockNumber) + minLifetime;
+  const resolved = expiresAt > floor ? expiresAt : floor;
+  return resolved > U64_MAX ? U64_MAX : resolved;
 }
 
+/** The receipt event's expiry when it was stored, else the calldata pair resolved at the operation's block. */
 function resolveExpiry(op: EntityOpRecord): bigint {
-  return op.event?.expiresAt ?? resolveRequestedExpiry(op.blockNumber, op.expiresAtBlocks);
+  return op.event?.expiresAt ?? resolveRequestedExpiry(op.blockNumber, op.expiresAt ?? 0n, op.minLifetime ?? 0n);
 }
 
 function typeTagOf(attribute: ArkivOperationAttribute): AttributeTypeTag | undefined {
-  const byName = TYPE_IDS[attribute.valueTypeName as AttributeTypeTag];
-  if (byName !== undefined && byName === attribute.valueType) return attribute.valueTypeName as AttributeTypeTag;
-  return TYPE_TAGS_BY_ID.get(attribute.valueType);
+  return TYPE_TAGS_BY_ID.get(attribute.typeId & 0x7f);
 }
 
 function compareOps(a: EntityOpRecord, b: EntityOpRecord): number {
@@ -157,15 +155,16 @@ function sortedAttributes(byName: Map<string, StoredEntityAttribute>): StoredEnt
  */
 function applyAttributes(byName: Map<string, StoredEntityAttribute>, cells: ArkivOperationAttribute[]): void {
   for (const cell of cells) {
-    if (cell.valueType === TOMBSTONE_TYPE_ID) {
-      byName.delete(cell.key);
+    if (cell.error !== undefined) continue;
+    if (cell.typeId === TOMBSTONE_TYPE_ID) {
+      byName.delete(cell.name);
       continue;
     }
     const tag = typeTagOf(cell);
     if (!tag) continue;
-    const stored = toStoredAttributeValue(tag, cell.value);
+    const stored = fromWireAttributeValue(tag, cell.value);
     if (!stored) continue;
-    byName.set(cell.key, { name: cell.key, typeId: TYPE_IDS[tag], ...stored });
+    byName.set(cell.name, { name: cell.name, typeId: TYPE_IDS[tag], ...stored });
   }
 }
 
@@ -221,9 +220,9 @@ export function foldEntityVersions(
         createdOpIndex: op.opIndex,
         updatedAt: op.blockNumber,
         expiresAt: resolveExpiry(op),
-        creationFlags: op.event?.creationFlags ?? null,
-        contentType: op.contentType ?? "",
-        payloadSize: op.payloadSizeBytes,
+        creationFlags: op.event?.creationFlags ?? op.creationFlags,
+        contentType: "",
+        payloadSize: 0,
         attributes: sortedAttributes(attributes),
       });
       continue;
@@ -242,14 +241,7 @@ export function foldEntityVersions(
     switch (op.operationType) {
       case OPERATION_UPDATE: {
         applyAttributes(attributes, op.attributes);
-        push({
-          ...base,
-          // The decoder only reports the cells a patch carried, so an absent
-          // content type or an empty payload reads as "untouched".
-          contentType: op.contentType ?? current.contentType,
-          payloadSize: op.payloadSizeBytes > 0 ? op.payloadSizeBytes : current.payloadSize,
-          attributes: sortedAttributes(attributes),
-        });
+        push({ ...base, attributes: sortedAttributes(attributes) });
         break;
       }
       case OPERATION_EXTEND:

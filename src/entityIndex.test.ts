@@ -14,16 +14,18 @@ import {
   type EntityVersion,
 } from "./entityIndex";
 import type { ArkivOperationAttribute } from "./arkivOperations";
+import { udcAttribute } from "./testUdc";
 
 const KEY = "0x" + "ab".repeat(32);
 const ALICE = "0x" + "aa".repeat(20);
 const BOB = "0x" + "bb".repeat(20);
 
-const str = (key: string, value: string): ArkivOperationAttribute => ({ key, valueType: 8, valueTypeName: "str", value });
-const u64 = (key: string, value: string): ArkivOperationAttribute => ({ key, valueType: 3, valueTypeName: "u64", value });
-const i32 = (key: string, value: string): ArkivOperationAttribute => ({ key, valueType: 2, valueTypeName: "i32", value });
-const dec = (key: string, value: string): ArkivOperationAttribute => ({ key, valueType: 5, valueTypeName: "dec", value });
-const tombstone = (key: string): ArkivOperationAttribute => ({ key, valueType: 0, valueTypeName: "tombstone", value: "" });
+// Values in the decoder's (= the node's) wire encoding.
+const str = (name: string, value: string): ArkivOperationAttribute => udcAttribute(name, "str", value);
+const u64 = (name: string, value: string): ArkivOperationAttribute => udcAttribute(name, "u64", `0x${BigInt(value).toString(16)}`);
+const i32 = (name: string, value: string): ArkivOperationAttribute => udcAttribute(name, "i32", Number(value));
+const dec = (name: string, value: string): ArkivOperationAttribute => udcAttribute(name, "dec", value);
+const tombstone = (name: string): ArkivOperationAttribute => udcAttribute(name, "tombstone", null);
 
 function op(overrides: Partial<EntityOpRecord> & { blockNumber: number; operationType: number }): EntityOpRecord {
   return {
@@ -31,10 +33,10 @@ function op(overrides: Partial<EntityOpRecord> & { blockNumber: number; operatio
     opIndex: 0,
     entityKey: KEY,
     sender: ALICE,
-    contentType: null,
-    payloadSizeBytes: 0,
+    creationFlags: null,
     attributes: [],
-    expiresAtBlocks: 0,
+    expiresAt: null,
+    minLifetime: null,
     newOwner: null,
     ...overrides,
   };
@@ -44,20 +46,22 @@ const create = (blockNumber: number, extra: Partial<EntityOpRecord> = {}) =>
   op({
     blockNumber,
     operationType: OPERATION_CREATE,
-    contentType: "text/plain",
-    payloadSizeBytes: 12,
     attributes: [str("project", "demo"), u64("rank", "7")],
-    expiresAtBlocks: 900,
+    expiresAt: 0n,
+    minLifetime: 900n,
     ...extra,
   });
 
 describe("resolveRequestedExpiry", () => {
-  test("reads a count within reach of the block as a lifetime, beyond it as a deadline", () => {
-    expect(resolveRequestedExpiry(1000, 900)).toBe(1900n);
-    expect(resolveRequestedExpiry(1000, 1000)).toBe(2000n);
-    expect(resolveRequestedExpiry(1000, 1001)).toBe(1001n);
-    expect(resolveRequestedExpiry(1000, 0)).toBe(1000n);
-    expect(resolveRequestedExpiry(1000, -5)).toBe(1000n);
+  test("is exactly max(expiresAt, block + minLifetime), capped at 2^64 - 1", () => {
+    expect(resolveRequestedExpiry(1000, 0n, 900n)).toBe(1900n);
+    expect(resolveRequestedExpiry(1000, 5000n, 900n)).toBe(5000n);
+    expect(resolveRequestedExpiry(1000, 1001n, 0n)).toBe(1001n);
+    expect(resolveRequestedExpiry(1000, 0n, 0n)).toBe(1000n);
+    const u64Max = (1n << 64n) - 1n;
+    expect(resolveRequestedExpiry(1000, u64Max, 0n)).toBe(u64Max);
+    // A lifetime that reaches past u64 is permanence too.
+    expect(resolveRequestedExpiry(1000, 0n, u64Max - 10n)).toBe(u64Max);
   });
 });
 
@@ -80,8 +84,8 @@ describe("foldEntityVersions", () => {
       updatedAt: 1000,
       expiresAt: 1900n,
       creationFlags: null,
-      contentType: "text/plain",
-      payloadSize: 12,
+      contentType: "",
+      payloadSize: 0,
       attributes: [
         { name: "project", typeId: 8, valueText: "demo", valueNum: null },
         { name: "rank", typeId: 3, valueText: "7", valueNum: 7n },
@@ -121,8 +125,6 @@ describe("foldEntityVersions", () => {
     expect(v1.updatedAt).toBe(1010);
     expect(v1.createdAt).toBe(1000);
     expect(v1.expiresAt).toBe(1900n);
-    expect(v1.contentType).toBe("text/plain");
-    expect(v1.payloadSize).toBe(12);
     expect(v1.attributes).toEqual([
       { name: "new", typeId: 8, valueText: "x", valueNum: null },
       { name: "rank", typeId: 2, valueText: "-2", valueNum: -2n },
@@ -130,22 +132,11 @@ describe("foldEntityVersions", () => {
     ]);
   });
 
-  test("a patch carrying payload or content type cells replaces those fields", () => {
-    const versions = foldEntityVersions(KEY, [
-      create(1000),
-      op({ blockNumber: 1001, operationType: OPERATION_UPDATE, contentType: "application/json", payloadSizeBytes: 40 }),
-      op({ blockNumber: 1002, operationType: OPERATION_UPDATE, attributes: [str("k", "v")] }),
-    ]);
-    expect(versions[1]).toMatchObject({ contentType: "application/json", payloadSize: 40 });
-    // A patch that carried neither cell leaves both alone.
-    expect(versions[2]).toMatchObject({ contentType: "application/json", payloadSize: 40 });
-  });
-
   test("extend replaces the expiry (event first, calldata otherwise); transfer replaces the owner", () => {
     const versions = foldEntityVersions(KEY, [
       create(1000),
-      op({ blockNumber: 1500, operationType: OPERATION_EXTEND, expiresAtBlocks: 901 }),
-      op({ blockNumber: 1600, operationType: OPERATION_EXTEND, expiresAtBlocks: 5, event: { expiresAt: 9999n } }),
+      op({ blockNumber: 1500, operationType: OPERATION_EXTEND, expiresAt: 0n, minLifetime: 901n }),
+      op({ blockNumber: 1600, operationType: OPERATION_EXTEND, expiresAt: 0n, minLifetime: 5n, event: { expiresAt: 9999n } }),
       op({ blockNumber: 1700, operationType: OPERATION_TRANSFER, newOwner: BOB.toUpperCase().replace("0X", "0x") }),
     ]);
     expect(versions.map((version) => version.expiresAt)).toEqual([1900n, 2401n, 9999n, 9999n]);
@@ -179,10 +170,10 @@ describe("foldEntityVersions", () => {
     const [v0] = foldEntityVersions(KEY, [
       create(1000, {
         attributes: [
-          { key: "legacy", valueType: 1, valueTypeName: "uint", value: "5" },
-          { key: "blob", valueType: 7, valueTypeName: "bytes", value: "<9 bytes>" },
-          { key: "broken", valueType: 3, valueTypeName: "u64", value: "not a number" },
-          { key: "ok", valueType: 9, valueTypeName: "addr", value: "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa" },
+          { name: "invalid", typeId: 0x87, type: "invalid(0x87)", indexed: true, value: null, size: 0, error: "bytes cannot be indexed" },
+          udcAttribute("blob", "bytes", null, { size: 9, keccak256: `0x${"ab".repeat(32)}` }),
+          udcAttribute("broken", "u64", "not a number"),
+          udcAttribute("ok", "addr", "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa"),
         ],
       }),
     ]);
@@ -286,7 +277,7 @@ describe("foldEntityVersions with a genesis base", () => {
       KEY,
       [
         op({ blockNumber: 10, position: 2, operationType: OPERATION_UPDATE, attributes: [tombstone("project"), i32("rank", "-1"), str("new", "x")] }),
-        op({ blockNumber: 20, operationType: OPERATION_EXTEND, expiresAtBlocks: 9000 }),
+        op({ blockNumber: 20, operationType: OPERATION_EXTEND, expiresAt: 9000n, minLifetime: 0n }),
         op({ blockNumber: 30, operationType: OPERATION_TRANSFER, newOwner: BOB }),
         op({ blockNumber: 40, operationType: OPERATION_DELETE }),
       ],
@@ -312,7 +303,7 @@ describe("foldEntityVersions with a genesis base", () => {
   });
 
   test("a create on a based key is ignored, like a create on any existing entity", () => {
-    const versions = foldEntityVersions(KEY, [create(15), op({ blockNumber: 16, operationType: OPERATION_EXTEND, expiresAtBlocks: 7000 })], base());
+    const versions = foldEntityVersions(KEY, [create(15), op({ blockNumber: 16, operationType: OPERATION_EXTEND, expiresAt: 7000n, minLifetime: 0n })], base());
     expect(versions).toHaveLength(2);
     expect(versions[0]).toMatchObject({ version: 0, fromBlock: 0, toBlock: 16, contentType: "application/json" });
     expect(versions[1]).toMatchObject({ version: 1, fromBlock: 16, expiresAt: 7000n });

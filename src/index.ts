@@ -19,24 +19,23 @@ async function main(): Promise<void> {
     const batcherCollector = config.batcherCollectorUrl
       ? new HttpBatcherCollector(config.batcherCollectorUrl)
       : undefined;
-    // Probe the chain id once. The decoder needs it to verify payload
-    // references against the right trusted-signer allowlist, and the HTTP
-    // backend's JSON-RPC endpoint answers eth_chainId from the persisted copy
-    // (it never talks to a node). On failure the decoder falls back to its own
-    // default chain id (degrades verification trust off the dev chain, so make
-    // it visible) and the backend keeps whatever chain id was stored before.
+    // Probe the chain id once: the HTTP backend's JSON-RPC endpoint answers
+    // eth_chainId from the persisted copy (it never talks to a node). On
+    // failure the backend keeps whatever chain id was stored before.
     const chainId = await rpc.getChainId().catch((error) => {
       console.warn(
-        `Could not determine chain id; the Arkiv decoder will use its default and eth_chainId keeps the stored value: ${
+        `Could not determine chain id; eth_chainId keeps the stored value: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
       return undefined;
     });
-    const decoderClient = config.decoderUrl
-      ? new ArkivDecoderClient(config.decoderUrl, chainId)
-      : undefined;
+    const decoderClient = config.decoderUrl ? new ArkivDecoderClient(config.decoderUrl) : undefined;
     storage = await ScannerStorage.open(config.databaseUrl);
+    // Bind the database to this chain's block 0 before writing anything: a
+    // restarted chain keeps its chain id, so the id alone cannot tell an old
+    // chain's database from this one's.
+    await storage.bindGenesisHash(await readGenesisHashWithRetry(rpc, config.retryMs));
     if (chainId !== undefined) {
       await storage.saveChainId(BigInt(chainId));
     }
@@ -62,6 +61,21 @@ async function main(): Promise<void> {
   } finally {
     await guzzlerService?.stop();
     await storage?.close();
+  }
+}
+
+/** Block 0's hash, retried until the node answers: the scanner never writes without it. */
+async function readGenesisHashWithRetry(rpc: EthereumRpcClient, retryMs: number): Promise<string> {
+  for (;;) {
+    try {
+      return await rpc.getBlockHash(0n);
+    } catch (error) {
+      console.error(
+        `Failed to read block 0's hash via RPC endpoint ${rpc.rpcUrl}; retrying after ${retryMs}ms`,
+        error,
+      );
+      await Bun.sleep(retryMs);
+    }
   }
 }
 

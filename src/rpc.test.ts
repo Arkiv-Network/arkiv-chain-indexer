@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EthereumRpcClient } from "./rpc";
+import { EthereumRpcClient, MAX_RPC_BATCH_SIZE } from "./rpc";
 import { attachRpcKeyRing } from "./rpcKeyRing";
 
 const originalFetch = globalThis.fetch;
@@ -128,6 +128,25 @@ describe("EthereumRpcClient getBalances", () => {
     ]);
     // Stats still count the individual calls, not the single round trip.
     expect(rpc.getStatsSince(snapshot).calls).toBe(2);
+  });
+
+  test("splits more addresses than one batch may carry into batches of 64", async () => {
+    const bodies = mockBatch((calls) =>
+      calls.map((call) => ({ jsonrpc: "2.0", id: call.id, result: `0x${call.id.toString(16)}` })),
+    );
+    const rpc = new EthereumRpcClient("https://example.test");
+    const addresses = Array.from({ length: 150 }, (_unused, index) => `0x${index.toString(16).padStart(40, "0")}`);
+
+    const balances = await rpc.getBalances(addresses, 7n);
+
+    expect(MAX_RPC_BATCH_SIZE).toBe(64);
+    expect(bodies.map((body) => (JSON.parse(body) as unknown[]).length)).toEqual([64, 64, 22]);
+    expect(balances.size).toBe(150);
+    // Every address keeps the answer to its own call across the batches.
+    const calls = bodies.flatMap((body) => JSON.parse(body) as Array<{ id: number; params: [string, string] }>);
+    for (const call of calls) {
+      expect(balances.get(call.params[0])).toBe(BigInt(call.id));
+    }
   });
 
   test("deduplicates addresses and lowercases them", async () => {

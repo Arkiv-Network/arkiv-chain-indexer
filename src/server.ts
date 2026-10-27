@@ -2,7 +2,7 @@ import { AuthService, anonymousSession, authError, privateResponse, requireAdmin
 import { readFile } from "node:fs/promises";
 import { isDatabaseError, publicErrorMessage } from "./internalError";
 import { DEFAULT_RANGE_SIZE, parseRangeSize } from "./ranges";
-import { type ArkivOperationSummaryEntry } from "./arkivOperations";
+import { type ArkivOperationSummaryEntry, type StoredArkivOperation } from "./arkivOperations";
 import { type BlockInspectionResult } from "./blockInspector";
 import {
   DEFAULT_GUZZLER_LIMIT,
@@ -29,11 +29,6 @@ import type { EntityIndexReader, EntityIndexStats, GenesisImportStatus } from ".
 import { TYPE_TAGS_BY_ID, wireAttributeValue } from "./entityValues";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
 import type { StatisticsResponse } from "./indexerStatisticsTypes";
-import {
-  buildPayloadProviderPaymentBreakdown,
-  PayloadProviderPaymentResolver,
-  type PayloadProviderPaymentBreakdown,
-} from "./payloadProviderPayments";
 import { ResponseCache, type CachedResponse } from "./responseCache";
 import {
   PROMETHEUS_CONTENT_TYPE,
@@ -85,7 +80,6 @@ export interface BlockServerOptions {
   baseloadRuntime?: BaseloadRuntime;
   auth?: AuthService;
   guzzlerStore?: GuzzlerStore;
-  payloadProviderPaymentResolver?: PayloadProviderPaymentResolver;
   /**
    * Bounded cache for /entity/:entityKey responses. Omitted (e.g. in most
    * tests) the endpoint hits storage on every request; serve.ts always
@@ -183,9 +177,8 @@ export interface TransactionsResponseBody {
 }
 
 export interface TransactionByHashResponseBody {
-  transaction: StoredTransaction & {
-    payloadProviderPayments?: PayloadProviderPaymentBreakdown;
-  };
+  /** The stored transaction with its decoded Arkiv operations (empty when it carried none). */
+  transaction: StoredTransaction & { operations: StoredArkivOperation[] };
 }
 
 /**
@@ -395,6 +388,8 @@ export const BLOCK_RESPONSE_NAMES = [
   "blockRewardWei",
   "burntFeesWei",
   "totalTransactionFeeWei",
+  "totalRentFeeWei",
+  "totalBurnedWei",
   "feePriceSumWei",
   "priorityFeeSumWei",
   "priorityFeeWeightedNumeratorWei",
@@ -447,8 +442,12 @@ export const RANGE_RESPONSE_NAMES = [
   "transactionCount",
   "totalBlockRewardWei",
   "totalBurntFeesWei",
+  "totalRentFeeWei",
+  "totalBurnedWei",
   "averageBlockRewardWei",
   "averageBurntFeesWei",
+  "averageRentFeeWei",
+  "averageBurnedWei",
   "averageFeePriceWei",
   "averageTransactionGasUsed",
   "averageTransactionInputDataSizeBytes",
@@ -473,6 +472,7 @@ export const GUZZLER_STAT_RESPONSE_NAMES = [
   "transactionCount",
   "totalGasUsed",
   "totalFeeWei",
+  "totalRentFeeWei",
   "firstSeen",
   "lastSeen",
 ] as const satisfies readonly (keyof GuzzlerStat)[];
@@ -486,6 +486,7 @@ export const GUZZLER_HISTORY_POINT_RESPONSE_NAMES = [
   "transactionCount",
   "totalGasUsed",
   "totalFeeWei",
+  "totalRentFeeWei",
   "firstSeen",
   "lastSeen",
 ] as const satisfies readonly (keyof GuzzlerHistoryPoint)[];
@@ -517,6 +518,8 @@ const TRANSACTION_RESPONSE_BASE_NAMES = [
   "effectiveGasPriceWei",
   "priorityFeeWei",
   "transactionFeeWei",
+  "rentFeeWei",
+  "totalCostWei",
   "status",
   "contractAddress",
 ] as const satisfies readonly (keyof StoredTransaction)[];
@@ -575,6 +578,8 @@ export const SENDER_STATS_RESPONSE_NAMES = [
   "transactionCount",
   "totalGasUsed",
   "totalTransactionFeeWei",
+  "totalRentFeeWei",
+  "totalCostWei",
   "totalValueWei",
   "averageGasUsed",
   "averageTransactionFeeWei",
@@ -605,15 +610,19 @@ export const ENTITY_OPERATION_RESPONSE_NAMES = [
   "operationType",
   "operation",
   "entityKey",
-  "contentType",
-  "payloadSizeBytes",
-  "attributes",
-  "expiresAtBlocks",
+  "salt",
+  "creationFlags",
+  "expiresAt",
+  "minLifetime",
+  "resolvedExpiresAt",
+  "permanent",
   "newOwner",
-  "isReference",
-  "payloadReference",
-  "referenceVerification",
-  "referenceError",
+  "bytesSize",
+  "schemaName",
+  "attributes",
+  "transactionStatus",
+  "transactionRentFeeWei",
+  "transactionOperationCount",
 ] as const satisfies readonly (keyof StoredEntityOperation)[];
 
 export type EntityOperationResponseName = (typeof ENTITY_OPERATION_RESPONSE_NAMES)[number];
@@ -664,9 +673,6 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.baseloadRuntime ? { baseloadRuntime: options.baseloadRuntime } : {}),
         ...(options.auth ? { auth: options.auth } : {}),
         ...(options.guzzlerStore ? { guzzlerStore: options.guzzlerStore } : {}),
-        ...(options.payloadProviderPaymentResolver
-          ? { payloadProviderPaymentResolver: options.payloadProviderPaymentResolver }
-          : {}),
         ...(options.entityHistoryCache ? { entityHistoryCache: options.entityHistoryCache } : {}),
         ...(options.entityHistoryLimit !== undefined
           ? { entityHistoryLimit: options.entityHistoryLimit }
@@ -912,11 +918,7 @@ async function routeRequest(
     if (!transactionDataEnabled) {
       return jsonError(404, "Transaction data is disabled");
     }
-    return handleGetTransactionByHash(
-      transactionByHashMatch[1],
-      storage,
-      options.payloadProviderPaymentResolver,
-    );
+    return handleGetTransactionByHash(transactionByHashMatch[1], storage);
   }
 
   const entityByKeyMatch = url.pathname.match(/^\/entity\/(0x[0-9a-fA-F]{64})$/);
@@ -1476,39 +1478,14 @@ async function handleGetTransactions(
   return compressedJsonResponse(request, body);
 }
 
-async function handleGetTransactionByHash(
-  hash: string,
-  storage: ScannerStorage,
-  payloadProviderPaymentResolver?: PayloadProviderPaymentResolver,
-): Promise<Response> {
+async function handleGetTransactionByHash(hash: string, storage: ScannerStorage): Promise<Response> {
   const transaction = await storage.getTransactionByHash(hash);
   if (!transaction) {
     return jsonError(404, `Transaction ${hash} was not found in storage`);
   }
   const operations = await storage.getOperationsByHash(hash);
-  let payloadProviderPayments: PayloadProviderPaymentBreakdown | null = null;
-  if (payloadProviderPaymentResolver) {
-    const resolved = await payloadProviderPaymentResolver.resolve(transaction.blockNumberDecimal);
-    payloadProviderPayments = buildPayloadProviderPaymentBreakdown(
-      operations,
-      resolved.params,
-      resolved.source,
-      transaction.baseBlockFeeWei,
-    );
-  } else {
-    payloadProviderPayments = buildPayloadProviderPaymentBreakdown(
-      operations,
-      null,
-      "unconfigured",
-      transaction.baseBlockFeeWei,
-    );
-  }
   return jsonResponse({
-    transaction: {
-      ...transaction,
-      operations,
-      ...(payloadProviderPayments ? { payloadProviderPayments } : {}),
-    },
+    transaction: { ...transaction, operations },
   } satisfies TransactionByHashResponseBody);
 }
 

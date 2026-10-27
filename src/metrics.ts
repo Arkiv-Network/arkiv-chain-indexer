@@ -34,6 +34,7 @@ export function computeBlockMetrics(
   const priorityFees: bigint[] = [];
   const feePrices: bigint[] = [];
   let totalTransactionFee = 0n;
+  let totalRentFee = 0n;
   let feePriceSum = 0n;
   let priorityFeeSum = 0n;
   let weightedPriorityFeeNumerator = 0n;
@@ -58,6 +59,7 @@ export function computeBlockMetrics(
     feePrices.push(effectiveGasPrice);
     priorityFees.push(priorityFee);
     totalTransactionFee += transactionFee;
+    totalRentFee += hexToBigInt(receipt.rentFee);
     feePriceSum += effectiveGasPrice;
     priorityFeeSum += priorityFee;
     weightedPriorityFeeNumerator += priorityFee * transactionFee;
@@ -65,6 +67,7 @@ export function computeBlockMetrics(
     totalReceiptGasUsed += gasUsed;
   }
 
+  const burntFees = baseFee * totalGasUsed;
   const weightedPriorityFee =
     totalReceiptGasUsed === 0n ? 0n : gasWeightedPriorityFeeNumerator / totalReceiptGasUsed;
   const transactionCount = includedTransactions.length;
@@ -90,8 +93,10 @@ export function computeBlockMetrics(
     maxGasInBlock: hexToBigInt(block.gasLimit).toString(),
     transactionCount,
     blockRewardWei: gasWeightedPriorityFeeNumerator.toString(),
-    burntFeesWei: (baseFee * totalGasUsed).toString(),
+    burntFeesWei: burntFees.toString(),
     totalTransactionFeeWei: totalTransactionFee.toString(),
+    totalRentFeeWei: totalRentFee.toString(),
+    totalBurnedWei: (burntFees + totalRentFee).toString(),
     feePriceSumWei: feePriceSum.toString(),
     priorityFeeSumWei: priorityFeeSum.toString(),
     priorityFeeWeightedNumeratorWei: weightedPriorityFeeNumerator.toString(),

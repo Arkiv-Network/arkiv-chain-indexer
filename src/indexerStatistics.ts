@@ -50,6 +50,9 @@ export async function gatherIndexerStatistics(
         coalesce(sum(transaction_count), 0)::text AS transactions,
         coalesce(sum(total_input_data_size_bytes::numeric), 0)::text AS "inputBytes",
         coalesce(sum(total_input_data_compressed_size_bytes::numeric), 0)::text AS "compressedInputBytes",
+        coalesce(sum(total_transaction_fee_wei::numeric), 0)::text AS "gasFeeWei",
+        coalesce(sum(total_rent_fee_wei::numeric), 0)::text AS "rentFeeWei",
+        coalesce(sum(total_burned_wei::numeric), 0)::text AS "burnedWei",
         count(*) FILTER (WHERE block_number <= $10::bigint)::text AS "throughHead",
         count(*) FILTER (WHERE block_number <= $11::bigint)::text AS "throughCoverageHead"
       FROM ${table("blocks")} GROUP BY band`, [...timeBounds, head, coverageHead?.toString() ?? null])).rows;
@@ -68,16 +71,20 @@ export async function gatherIndexerStatistics(
         count(*) FILTER (WHERE t.status = '0')::text AS reverted,
         count(*) FILTER (WHERE t.status IS NULL OR t.status NOT IN ('0', '1'))::text AS "unknownStatus",
         count(*) FILTER (WHERE t.status = '1' AND o.operation_type = 1 AND o.entity_key IS NULL)::text AS "createsWithoutKey",
-        count(*) FILTER (WHERE t.status = '1' AND o.payload_size_bytes > 0)::text AS "payloadWrites",
-        coalesce(sum(o.payload_size_bytes) FILTER (WHERE t.status = '1'), 0)::text AS "payloadBytes",
-        count(*) FILTER (WHERE t.status = '1' AND o.is_reference)::text AS "referenceWrites",
-        coalesce(sum(CASE WHEN o.payload_reference->>'sizeBytes' ~ '^[0-9]+$'
-          THEN (o.payload_reference->>'sizeBytes')::numeric END)
-          FILTER (WHERE t.status = '1' AND o.is_reference), 0)::text AS "referenceBytes",
-        count(*) FILTER (WHERE t.status = '1' AND o.is_reference
-          AND coalesce(o.payload_reference->>'sizeBytes' ~ '^[0-9]+$', false) = false)::text AS "referencesWithoutSize"
+        count(*) FILTER (WHERE t.status = '1' AND o.bytes_size > 0)::text AS "bytesWrites",
+        coalesce(sum(o.bytes_size) FILTER (WHERE t.status = '1'), 0)::text AS "bytesWritten",
+        coalesce(sum(a.indexed) FILTER (WHERE t.status = '1'), 0)::text AS "indexedAttributeWrites",
+        coalesce(sum(a.stored) FILTER (WHERE t.status = '1'), 0)::text AS "storedAttributeWrites",
+        coalesce(sum(a.unsets) FILTER (WHERE t.status = '1'), 0)::text AS "attributeUnsets",
+        count(*) FILTER (WHERE t.status = '1' AND o.schema_name IS NOT NULL)::text AS "schemaTaggedWrites"
       FROM ${table("transaction_operations")} o
       LEFT JOIN ${table("transactions")} t USING (block_number, position)
+      CROSS JOIN LATERAL (
+        SELECT count(*) FILTER (WHERE (e->>'typeId')::int <> 0 AND (e->>'indexed')::boolean) AS indexed,
+          count(*) FILTER (WHERE (e->>'typeId')::int <> 0 AND NOT (e->>'indexed')::boolean) AS stored,
+          count(*) FILTER (WHERE (e->>'typeId')::int = 0) AS unsets
+        FROM jsonb_array_elements(o.attributes) e
+      ) a
       GROUP BY band, o.operation_type`, timeBounds)).rows;
     const activity = foldStatisticsActivity(blockBands, transactionBands, operationBands);
     const blockStats = { ...activity.blocks, ...blockStatisticsBounds(blockBands) };
@@ -146,7 +153,8 @@ export async function gatherIndexerStatistics(
       "Input bytes are calldata sizes, not full serialized signed transaction sizes. Historical size fields defaulted to zero and cannot be distinguished from measured zero without rescanning.",
       "Entity state and active counts are evaluated at the projection block, not the live chain at collection time. Missing creates, pending refolds and pre-log expiry estimates can limit accuracy.",
       "Recorded entity payload sizes are projection metadata, not verified provider storage usage. Reference size totals are declared bytes per write, include repeated references, and exclude references without a usable size.",
-      "Payload contents, full raw transaction sizes, unique payload storage and exact encoded attribute byte sizes are unavailable from the stored data.",
+      "Bytes attribute contents are never stored (only their sizes and keccak256), and neither are full raw transaction sizes or exact encoded attribute byte sizes.",
+      "Fee totals are gas fees only (gas used × effective gas price). Rent is the receipts' rentFee, burned outside gas; burned is the base-fee burn plus rent.",
     ];
     return {
       version: 1, gatheredAtUtc, completedAtUtc: new Date().toISOString(), durationMs: Date.now() - started,

@@ -58,6 +58,20 @@ describe("rangeStartFor", () => {
     expect(() => rangeStartFor(-1n, 100n)).toThrow();
   });
 
+  test("totals and averages rent apart from the base-fee burn, and burned as their sum", () => {
+    const blocks = makeBlocks(0n, 10n, (offset) => ({
+      burntFeesWei: "1000",
+      totalRentFeeWei: offset === 3n ? "11804100000000000" : "0",
+      totalBurnedWei: offset === 3n ? "11804100000001000" : "1000",
+    }));
+    const range = computeBlockRange(0n, 10n, blocks);
+    expect(range.totalBurntFeesWei).toBe("10000");
+    expect(range.totalRentFeeWei).toBe("11804100000000000");
+    expect(range.totalBurnedWei).toBe("11804100000010000");
+    expect(range.averageRentFeeWei).toBe("1180410000000000");
+    expect(range.averageBurnedWei).toBe("1180410000001000");
+  });
+
   test("rejects unsupported range sizes", () => {
     expect(() => rangeStartFor(0n, 7n)).toThrow();
   });
@@ -378,6 +392,8 @@ function makeBlocks(
       totalGasUsed: "0",
       maxGasInBlock: "30000000",
       transactionCount: 0,
+      totalRentFeeWei: "0",
+      totalBurnedWei: "0",
       averageFeePriceWei: "0",
       averageTransactionFeeWei: "0",
       averageTransactionGasUsed: "0",

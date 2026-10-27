@@ -1040,6 +1040,9 @@ function receiptObject(
     logsBloom: null,
     status: decimalToQuantity(transaction.status),
     type: decimalToQuantity(transaction.type) ?? "0x0",
+    // The Arkiv node's extension: storage rent burned beside gasUsed ×
+    // effectiveGasPrice (0x0 for a failed transaction).
+    rentFee: quantity(BigInt(transaction.rentFeeWei)),
   };
 }
 

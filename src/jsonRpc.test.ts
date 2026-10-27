@@ -52,6 +52,8 @@ function fakeBlock(overrides: Partial<StoredBlock> & { blockNumber: number }): S
     totalGasUsed: "0",
     maxGasInBlock: "30000000",
     transactionCount: 0,
+    totalRentFeeWei: "0",
+    totalBurnedWei: "0",
     averageFeePriceWei: "0",
     averageTransactionFeeWei: "0",
     averageTransactionGasUsed: "0",
@@ -86,6 +88,8 @@ function fakeTransaction(
     effectiveGasPriceWei: "1010",
     priorityFeeWei: "10",
     transactionFeeWei: "21210000",
+    rentFeeWei: "0",
+    totalCostWei: "21210000",
     status: "1",
     contractAddress: null,
     logCount: null,
@@ -464,6 +468,7 @@ describe("blocks, transactions and receipts", () => {
     hash: `0x${"a".repeat(64)}`,
     contractAddress: "0xCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCc",
     logCount: 2,
+    rentFeeWei: "11804100000000000",
   });
   const REGISTRY = "0x4400000000000000000000000000000000000044";
   const CREATED = `0x${"b2".repeat(32)}`;
@@ -750,10 +755,13 @@ describe("blocks, transactions and receipts", () => {
       logsBloom: null,
       status: "0x1",
       type: "0x2",
+      // The node's rent field, beside (never inside) the gas fee.
+      rentFee: "0x29efc43364a800",
     });
     // Stored before logs were kept → null; stored with no events → [].
     const failed = (await result(source, "eth_getTransactionReceipt", [txB.hash])) as Record<string, unknown>;
     expect(failed.status).toBe("0x0");
+    expect(failed.rentFee).toBe("0x0");
     expect(failed.logs).toBeNull();
     const quiet = fakeSource({ blocks: [fakeBlock({ blockNumber: 1 })], transactions: [fakeTransaction({ blockNumber: 1, position: 0, logCount: 0 })] });
     const noEvents = (await result(quiet, "eth_getTransactionReceipt", [`0x${"10".padEnd(64, "a")}`])) as Record<string, unknown>;
@@ -876,6 +884,8 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> & { blockNumber: b
     blockRewardWei: "0",
     burntFeesWei: "0",
     totalTransactionFeeWei: "0",
+    totalRentFeeWei: "0",
+    totalBurnedWei: "0",
     feePriceSumWei: "0",
     priorityFeeSumWei: "0",
     priorityFeeWeightedNumeratorWei: "0",
@@ -911,6 +921,7 @@ function inspectedTransactionFixture(
     effectiveGasPriceWei: "110",
     priorityFeeWei: "10",
     transactionFeeWei: "2310000",
+    rentFeeWei: "0",
     status: "1",
     contractAddress: null,
     ...overrides,

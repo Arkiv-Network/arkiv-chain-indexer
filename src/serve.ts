@@ -10,7 +10,6 @@ import { BaseloadRuntime } from "./baseloadRuntime";
 import { PrecomputedResponse } from "./precomputedResponse";
 import { ResponseCache } from "./responseCache";
 import { ValueCache } from "./valueCache";
-import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import { EntityProjector } from "./entityProjector";
@@ -34,7 +33,11 @@ async function main(): Promise<void> {
 
   try {
     const config = parseServerConfig(process.argv.slice(2));
+    // open() refuses a database of another data model; the recorded genesis
+    // hash must also match the stored block 0 (the scanner checks it against
+    // the node itself).
     storage = await ScannerStorage.open(config.databaseUrl);
+    await storage.assertStoredGenesisHash();
     let auth: AuthService | undefined;
     if (config.auth) {
       authStorage = await AuthStorage.open(config.databaseUrl);
@@ -140,18 +143,6 @@ async function main(): Promise<void> {
           `(${initialBaseloadConfig.workers.length} workers)`,
       );
     }
-    const payloadProviderPaymentResolver =
-      config.protocolScheduleUrl ||
-      config.protocolSchedulePath ||
-      config.payloadProviderPaymentShareBps !== undefined
-        ? new PayloadProviderPaymentResolver({
-            ...(config.protocolScheduleUrl ? { scheduleUrl: config.protocolScheduleUrl } : {}),
-            ...(config.protocolSchedulePath ? { schedulePath: config.protocolSchedulePath } : {}),
-            ...(config.payloadProviderPaymentShareBps !== undefined
-              ? { providerShareBps: config.payloadProviderPaymentShareBps }
-              : {}),
-          })
-        : undefined;
     // The only path from /shadow-rpc to a real node: the configured upstream,
     // or the node the scanner recorded for itself.
     const passthroughStorage = storage;
@@ -221,7 +212,6 @@ async function main(): Promise<void> {
       baseloadRuntime,
       ...(auth ? { auth } : {}),
       ...(guzzlerStore ? { guzzlerStore } : {}),
-      ...(payloadProviderPaymentResolver ? { payloadProviderPaymentResolver } : {}),
       entityHistoryCache,
       entityHistoryLimit: config.entityHistoryLimit,
       listCache,

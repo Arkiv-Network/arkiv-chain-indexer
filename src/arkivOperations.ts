@@ -7,6 +7,24 @@ export const ARKIV_REGISTRY_ADDRESS = "0x440000000000000000000000000000000000004
 export const ENTITY_CREATED_TOPIC0 =
   "0xb282d7c494b8899aa8015cd07be621530beb03409eb8c5e8fdc1411ba64356a5";
 
+/** The only response format this indexer reads: arkiv-transaction-decoder v0.3's UDC model. */
+export const DECODER_FORMAT = "udc";
+
+/**
+ * The SDK's named-schema tag: an indexed `str` attribute whose value names the
+ * schema an entity was written through. An ordinary user attribute to the
+ * node; the explorer lifts it out as `schema_name`.
+ */
+export const SCHEMA_ATTRIBUTE_NAME = "arkiv.schema";
+
+/** `expiresAt` of an entity that never expires: 2^64 − 1. */
+export const PERMANENT_EXPIRES_AT = "18446744073709551615";
+const U64_MAX = (1n << 64n) - 1n;
+
+/** The bit of an attribute's raw `typeId` that asks the node to index it. */
+export const INDEXED_TYPE_FLAG = 0x80;
+const STR_TYPE_ID = 8;
+
 const arkivRegistryAddress = ARKIV_REGISTRY_ADDRESS.toLowerCase();
 
 const CREATE_OPERATION_TYPE = 1;
@@ -16,9 +34,8 @@ const REJECTION_WARNING_INTERVAL = 1000;
 
 /**
  * Pulls the decoder's explanation out of a 400 body, which is
- * `{"error":{"message":"…"},"ok":false}`. Older builds answer with a bare
- * `{"error":"…"}` string, so accept both and give up quietly on anything else —
- * the reason only decorates a warning.
+ * `{"error":"…"}` (v0.3) or `{"error":{"message":"…"}}`; gives up quietly on
+ * anything else — the reason only decorates a warning.
  */
 async function readRejectionReason(response: Response): Promise<string | undefined> {
   const body: unknown = await response.json().catch(() => null);
@@ -28,85 +45,105 @@ async function readRejectionReason(response: Response): Promise<string | undefin
   return undefined;
 }
 
+/**
+ * One attribute triple as the decoder reports it, and as
+ * `transaction_operations.attributes` stores it.
+ *
+ * `value` uses the node's `arkiv_query` encoding (u64/u256 as `0x`
+ * quantities, i32 as a JSON number, bool as a JSON boolean, dec as a trimmed
+ * decimal string, str as text, bytes32/key/addr as lowercase hex), so a
+ * decoded value compares to the node's with plain equality. It is `null` for
+ * `bytes` (whose content is never stored — only `size` and `keccak256`), for a
+ * tombstone and for a triple the node would refuse (then `error` says why).
+ */
 export interface ArkivOperationAttribute {
-  key: string;
-  valueType: number;
-  /** "uint" | "string" | "entityKey" | "unknown" */
-  valueTypeName: string;
-  value: string;
-}
-
-/**
- * Offline EIP-191 verification verdict a decoder returns for a payload
- * reference. Mirrors a reference-parsing decoder's `ReferenceVerification` and
- * the on-chain precompile: `valid` is true only when every check the chain
- * would make passed, and `signerTrusted` records whether the recovered signer
- * is in the trusted payload-provider allowlist for the decode `chainId`.
- */
-export interface ArkivReferenceVerification {
-  valid: boolean;
-  signerTrusted: boolean;
-  chainId: number;
-  claimedSigner: string | null;
-  recoveredSigner: string | null;
-  messageHash: string | null;
-  errors: string[];
-}
-
-/**
- * Parsed v1 payload reference embedded in an operation payload. Under
- * reference mode the entity bytes never travel on-chain; this carries only the
- * provider's content-addressed receipt metadata (id/checksum/sizeBytes/
- * signature) — never the entity bytes. Kept loose so a parsed-but-evolving
- * reference still round-trips through storage as jsonb.
- */
-export interface ArkivPayloadReference {
-  kind: string;
-  version: number;
-  provider: string;
-  id: string;
-  namespace: string;
-  contentType?: string;
-  checksum: string;
-  sizeBytes: number;
-  submittedAt: string;
-  nonce: string;
-  /** Signed provider payment gas units. Converted to wei with the block base fee. */
-  payment: number;
-  signature: {
-    scheme: string;
-    signer: string;
-    receipt: Record<string, unknown>;
-    messageHash: string;
-    signature: string;
-    r: string;
-    s: string;
-    v: number;
-  };
+  /** Case-sensitive. */
+  name: string;
+  /** The raw byte: the type in the low seven bits, {@link INDEXED_TYPE_FLAG} on top. */
+  typeId: number;
+  /** `typeId & 0x7f` as its tag (`str`, `bytes`, …), `tombstone` for 0, `invalid(0x..)` otherwise. */
+  type: string;
+  indexed: boolean;
+  value: string | number | boolean | null;
+  /** Bytes of the value as calldata carries them: 32 for a word type, the UTF-8 length of a str. */
+  size: number;
+  /** `bytes` only: keccak256 of the content. */
+  keccak256?: string;
+  /** Present only when the triple is malformed. */
+  error?: string;
 }
 
 export interface ArkivOperation {
   /** 0-based index of the operation within the transaction's execute() call. */
   opIndex: number;
-  /** 1=create 2=update 3=extend 4=transfer 5=delete 6=expire */
+  /** 1=create 2=patch 3=extend 4=transfer 5=delete; any other tag is reported, not refused. */
   operationType: number;
-  /** "create" | "update" | "extend" | "transfer" | "delete" | "expire" | "unknown(N)" */
+  /** "create" | "patch" | "extend" | "transfer" | "delete" | "unknown(N)" */
   operation: string;
+  /** Lowercase; a create's comes from its `EntityCreated` log (calldata carries none). */
   entityKey: string | null;
-  contentType: string | null;
-  /** Size only — the payload bytes/hex/text are never stored anywhere. */
-  payloadSizeBytes: number;
-  attributes: ArkivOperationAttribute[];
-  expiresAtBlocks: number;
+  /** create: the uint128 salt as a decimal string. */
+  salt: string | null;
+  /** create: the raw flag byte (bit 0 readonly, bit 1 permissionless extension). */
+  creationFlags: number | null;
+  /** create/extend: the absolute deadline (block height) as an exact decimal string; "0" when unset. */
+  expiresAt: string | null;
+  /** create/extend: the lifetime floor in blocks from the landing block, exact decimal; "0" when unset. */
+  minLifetime: string | null;
+  /** transfer: lowercase. */
   newOwner: string | null;
-  /** True when the payload is a v1 payload reference (decoder `payload.isReference`). */
-  isReference: boolean;
-  /** Parsed v1 reference metadata; null unless this op carries a payload reference. */
-  payloadReference: ArkivPayloadReference | null;
-  /** Offline EIP-191 verification verdict; null unless a reference was present. */
-  referenceVerification: ArkivReferenceVerification | null;
-  /** Set when contentType is a reference but the payload failed to parse. */
-  referenceError: string | null;
+  /** Bytes held by the operation's `bytes` attributes together. */
+  bytesSize: number;
+  /** The value of the operation's indexed str `arkiv.schema` attribute, if it sets one. */
+  schemaName: string | null;
+  /** create: the attributes; patch: the mutations in calldata order, tombstones included. */
+  attributes: ArkivOperationAttribute[];
+}
+
+/**
+ * A stored operation as the API serves it: the calldata fields plus the
+ * expiry the engine resolved them to at the operation's block.
+ *
+ * Permanence is a property of the *resolved* expiry, never of the request
+ * alone: the node makes an entity permanent whenever `max(expiresAt, block +
+ * minLifetime)` reaches 2^64 − 1, which a huge `minLifetime` does too. (The
+ * decoder's own `permanent` flag only says the deadline asked for it, so it is
+ * not stored.)
+ */
+export interface StoredArkivOperation extends ArkivOperation {
+  /** create/extend: `max(expiresAt, block + minLifetime)` capped at 2^64 − 1, decimal; null otherwise. */
+  resolvedExpiresAt: string | null;
+  /** create/extend: `resolvedExpiresAt` is 2^64 − 1; null otherwise. */
+  permanent: boolean | null;
+}
+
+/**
+ * The expiry the engine resolves a create's or extend's pair to at its landing
+ * block: `max(expiresAt, block + minLifetime)`, capped at 2^64 − 1. Null for
+ * operations that carry no expiry. The engine announces the same value in the
+ * operation's `EntityCreated` / `ExpiryExtended` log, which callers that have
+ * it should prefer.
+ */
+export function resolveOperationExpiry(
+  blockNumber: number | bigint,
+  operation: Pick<ArkivOperation, "expiresAt" | "minLifetime">,
+): string | null {
+  if (operation.expiresAt === null || operation.minLifetime === null) return null;
+  const expiresAt = BigInt(operation.expiresAt);
+  const floor = BigInt(blockNumber) + BigInt(operation.minLifetime);
+  const resolved = expiresAt > floor ? expiresAt : floor;
+  return (resolved > U64_MAX ? U64_MAX : resolved).toString();
+}
+
+/** The schema name an operation's attributes carry: the indexed str `arkiv.schema`, else null. */
+export function schemaNameOf(attributes: readonly ArkivOperationAttribute[]): string | null {
+  const tag = attributes.find(
+    (attribute) =>
+      attribute.name === SCHEMA_ATTRIBUTE_NAME &&
+      attribute.typeId === (STR_TYPE_ID | INDEXED_TYPE_FLAG) &&
+      typeof attribute.value === "string",
+  );
+  return tag ? (tag.value as string) : null;
 }
 
 export interface ArkivOperationSummaryEntry {
@@ -122,22 +159,31 @@ export interface TransactionArkivOperations {
 }
 
 /**
- * Client for the arkiv-transaction-decoder microservice. A 400 response means
- * the calldata is not an Arkiv execute() call (not an error); any other failure
- * throws so the caller retries the whole block and no silent gaps are created.
- *
- * `chainId`, when set, is sent with each request so the decoder verifies any
- * embedded payload reference against the trusted-signer allowlist for the
- * scanner's actual chain (the decoder otherwise falls back to its own default).
+ * The decoder answered 2xx with something other than the UDC operation
+ * shape: a decoder older (or newer) than this indexer. Thrown so the block
+ * retries — storing a partial reading would leave a silent gap — and loud,
+ * naming the decoder version, because it will not fix itself.
+ */
+export class DecoderContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DecoderContractError";
+  }
+}
+
+/**
+ * Client for the arkiv-transaction-decoder microservice (v0.3, the UDC
+ * format). A 400 response means the calldata is not an Arkiv execute() call
+ * (not an error); any other failure — transport, status or a response that is
+ * not the UDC shape — throws so the caller retries the whole block and no
+ * silent gaps are created.
  */
 export class ArkivDecoderClient {
   /** How many calls the decoder has refused, per selector. See {@link noteRejection}. */
   private readonly rejectedSelectors = new Map<string, number>();
+  private version: string | undefined;
 
-  constructor(
-    readonly baseUrl: string,
-    readonly chainId?: number,
-  ) {
+  constructor(readonly baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 
@@ -150,8 +196,7 @@ export class ArkivDecoderClient {
    * the chain accepted, and those operations go unstored. A decoder older than
    * the chain's current `execute()` wire format refuses *every* registry call,
    * which without this warning is indistinguishable from a chain carrying no
-   * Arkiv traffic at all — the failure mode this repo actually hit, where
-   * `transaction_operations` sat empty across 786k scanned transactions.
+   * Arkiv traffic at all.
    */
   private noteRejection(data: Hex, reason: string | undefined): void {
     const selector = data.slice(0, 10);
@@ -166,18 +211,33 @@ export class ArkivDecoderClient {
     );
   }
 
+  /**
+   * The decoder's own version (`GET /version`), for error messages. Cached
+   * once read; "unknown" when the decoder does not say.
+   */
+  async decoderVersion(): Promise<string> {
+    if (this.version !== undefined) return this.version;
+    try {
+      const response = await fetch(`${this.baseUrl}/version`);
+      const body: unknown = response.ok ? await response.json() : null;
+      if (isRecord(body) && typeof body.version === "string") {
+        this.version = body.version;
+        return this.version;
+      }
+    } catch {
+      // Reported as unknown below.
+    }
+    return "unknown";
+  }
+
   async decodeCalldata(data: Hex): Promise<ArkivOperation[] | null> {
     const url = `${this.baseUrl}/decode`;
-    const body =
-      this.chainId !== undefined
-        ? JSON.stringify({ data, chainId: this.chainId })
-        : JSON.stringify({ data });
     let response: Response;
     try {
       response = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body,
+        body: JSON.stringify({ data }),
       });
     } catch (error) {
       throw new Error(
@@ -193,7 +253,18 @@ export class ArkivDecoderClient {
       throw new Error(`Arkiv decoder at ${url} returned HTTP ${response.status}`);
     }
 
-    return parseDecoderResponse(await response.json());
+    const body: unknown = await response.json().catch(() => undefined);
+    try {
+      return parseDecoderResponse(body);
+    } catch (error) {
+      if (!(error instanceof DecoderContractError)) throw error;
+      const version = await this.decoderVersion();
+      throw new DecoderContractError(
+        `Arkiv decoder at ${this.baseUrl} (version ${version}) answered outside the UDC contract: ` +
+          `${error.message}. This indexer reads the "${DECODER_FORMAT}" format of ` +
+          `arkiv-transaction-decoder v0.3; upgrade the decoder. The block is retried until then.`,
+      );
+    }
   }
 }
 
@@ -284,87 +355,145 @@ export function fillCreateEntityKeys(
 
   creates.forEach((operation, index) => {
     if (operation.entityKey === null) {
-      operation.entityKey = createdKeys[index]!;
+      operation.entityKey = createdKeys[index]!.toLowerCase();
     }
   });
 }
 
-function parseDecoderResponse(body: unknown): ArkivOperation[] {
-  if (!isRecord(body) || !Array.isArray(body.operations)) {
-    throw new Error("Arkiv decoder returned an unexpected response shape");
+// ---------------------------------------------------------------------------
+// The v0.3 response contract. Every field of every operation is present, null
+// where the operation's tag has none; anything else is a decoder this indexer
+// does not speak to, and fails the block loudly rather than storing guesses.
+
+const DECIMAL = /^\d+$/;
+const HEX = /^0x[0-9a-f]*$/;
+
+/** Parse a v0.3 `/decode` body. Throws {@link DecoderContractError} on any other shape. */
+export function parseDecoderResponse(body: unknown): ArkivOperation[] {
+  if (!isRecord(body)) throw new DecoderContractError("the response is not a JSON object");
+  if (body.format !== DECODER_FORMAT) {
+    throw new DecoderContractError(
+      `the response format is ${JSON.stringify(body.format ?? null)}, not "${DECODER_FORMAT}"`,
+    );
   }
+  if (body.functionName !== "execute") {
+    throw new DecoderContractError(`functionName is ${JSON.stringify(body.functionName ?? null)}, not "execute"`);
+  }
+  if (!Array.isArray(body.operations)) throw new DecoderContractError("operations is not an array");
   return body.operations.map((operation, index) => parseDecoderOperation(operation, index));
 }
 
 function parseDecoderOperation(operation: unknown, opIndex: number): ArkivOperation {
-  if (
-    !isRecord(operation) ||
-    typeof operation.operationType !== "number" ||
-    typeof operation.operation !== "string" ||
-    !isRecord(operation.payload) ||
-    typeof operation.payload.size !== "number" ||
-    !Array.isArray(operation.attributes)
-  ) {
-    throw new Error(`Arkiv decoder returned an unexpected operation shape at index ${opIndex}`);
-  }
+  const where = `operation ${opIndex}`;
+  if (!isRecord(operation)) throw new DecoderContractError(`${where} is not an object`);
+  const field = <T>(name: string, check: (value: unknown) => value is T, expected: string): T => {
+    if (!(name in operation)) throw new DecoderContractError(`${where} has no ${name}`);
+    const value = operation[name];
+    if (!check(value)) {
+      throw new DecoderContractError(`${where}.${name} is ${describe(value)}, expected ${expected}`);
+    }
+    return value;
+  };
+  const operationType = field("operationType", isNonNegativeInteger, "an integer tag");
+  const name = field("operation", isString, "a string");
+  const entityKey = field("entityKey", nullable(isHexOfBytes(32)), "lowercase 32-byte hex or null");
+  const salt = field("salt", nullable(isDecimal), "a decimal string or null");
+  const creationFlags = field("creationFlags", nullable(isByte), "a flag byte or null");
+  const expiresAt = field("expiresAt", nullable(isDecimal), "a decimal string or null");
+  const minLifetime = field("minLifetime", nullable(isDecimal), "a decimal string or null");
+  // Checked as part of the contract but not kept: permanence is derived from
+  // the resolved expiry (see StoredArkivOperation).
+  field("permanent", nullable(isBoolean), "a boolean or null");
+  const newOwner = field("newOwner", nullable(isHexOfBytes(20)), "a lowercase address or null");
+  const bytesSize = field("bytesSize", isNonNegativeInteger, "a byte count");
+  const rawAttributes = field("attributes", Array.isArray, "an array");
+  const attributes = rawAttributes.map((attribute, index) =>
+    parseDecoderAttribute(attribute, `${where}.attributes[${index}]`),
+  );
   return {
     opIndex,
-    operationType: operation.operationType,
-    operation: operation.operation,
-    entityKey: typeof operation.entityKey === "string" ? operation.entityKey : null,
-    contentType: typeof operation.contentType === "string" ? operation.contentType : null,
-    // Drop payload.hex / payload.text on purpose: only the size is kept.
-    payloadSizeBytes: operation.payload.size,
-    attributes: operation.attributes.map(parseDecoderAttribute),
-    expiresAtBlocks: typeof operation.expiresAtBlocks === "number" ? operation.expiresAtBlocks : 0,
-    newOwner: typeof operation.newOwner === "string" ? operation.newOwner : null,
-    // Reference-mode metadata. `isReference` lives under `payload`; the parsed
-    // reference, its verification verdict, and any parse error are top-level.
-    // The reference carries provider receipt metadata only — never entity bytes.
-    isReference:
-      typeof operation.payload.isReference === "boolean" ? operation.payload.isReference : false,
-    payloadReference: isRecord(operation.payloadReference)
-      ? (operation.payloadReference as unknown as ArkivPayloadReference)
-      : null,
-    referenceVerification: isRecord(operation.referenceVerification)
-      ? parseReferenceVerification(operation.referenceVerification)
-      : null,
-    referenceError: typeof operation.referenceError === "string" ? operation.referenceError : null,
+    operationType,
+    operation: name,
+    entityKey,
+    salt,
+    creationFlags,
+    expiresAt,
+    minLifetime,
+    newOwner,
+    bytesSize,
+    schemaName: schemaNameOf(attributes),
+    attributes,
   };
 }
 
-function parseReferenceVerification(value: Record<string, unknown>): ArkivReferenceVerification {
-  return {
-    valid: value.valid === true,
-    signerTrusted: value.signerTrusted === true,
-    chainId: typeof value.chainId === "number" ? value.chainId : 0,
-    // The decoder omits these fields (serde skip-if-none/empty) rather than
-    // emitting null, so treat absence as null/[].
-    claimedSigner: typeof value.claimedSigner === "string" ? value.claimedSigner : null,
-    recoveredSigner: typeof value.recoveredSigner === "string" ? value.recoveredSigner : null,
-    messageHash: typeof value.messageHash === "string" ? value.messageHash : null,
-    errors: Array.isArray(value.errors)
-      ? value.errors.filter((entry): entry is string => typeof entry === "string")
-      : [],
-  };
-}
-
-function parseDecoderAttribute(attribute: unknown): ArkivOperationAttribute {
-  if (
-    !isRecord(attribute) ||
-    typeof attribute.key !== "string" ||
-    typeof attribute.valueType !== "number" ||
-    typeof attribute.valueTypeName !== "string" ||
-    typeof attribute.value !== "string"
-  ) {
-    throw new Error("Arkiv decoder returned an unexpected attribute shape");
+function parseDecoderAttribute(attribute: unknown, where: string): ArkivOperationAttribute {
+  if (!isRecord(attribute)) throw new DecoderContractError(`${where} is not an object`);
+  const { name, typeId, type, indexed, value, size, keccak256, error } = attribute;
+  if (!isString(name)) throw new DecoderContractError(`${where}.name is ${describe(name)}`);
+  if (!isByte(typeId)) throw new DecoderContractError(`${where}.typeId is ${describe(typeId)}`);
+  if (!isString(type)) throw new DecoderContractError(`${where}.type is ${describe(type)}`);
+  if (!isBoolean(indexed)) throw new DecoderContractError(`${where}.indexed is ${describe(indexed)}`);
+  if (!(value === null || isString(value) || isBoolean(value) || (typeof value === "number" && Number.isFinite(value)))) {
+    throw new DecoderContractError(`${where}.value is ${describe(value)}`);
+  }
+  if (!isNonNegativeInteger(size)) throw new DecoderContractError(`${where}.size is ${describe(size)}`);
+  if (keccak256 !== undefined && !isHexOfBytes(32)(keccak256)) {
+    throw new DecoderContractError(`${where}.keccak256 is ${describe(keccak256)}`);
+  }
+  if (error !== undefined && !isString(error)) throw new DecoderContractError(`${where}.error is ${describe(error)}`);
+  // bytes content never reaches this process from a v0.3 decoder; refuse one
+  // that sends it rather than store it.
+  if (type === "bytes" && value !== null) {
+    throw new DecoderContractError(`${where} is a bytes attribute with a value; bytes content is never stored`);
   }
   return {
-    key: attribute.key,
-    valueType: attribute.valueType,
-    valueTypeName: attribute.valueTypeName,
-    value: attribute.value,
+    name,
+    typeId,
+    type,
+    indexed,
+    value,
+    size,
+    ...(keccak256 !== undefined ? { keccak256 } : {}),
+    ...(error !== undefined ? { error } : {}),
   };
+}
+
+function describe(value: unknown): string {
+  if (value === undefined) return "missing";
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  if (typeof value === "string") return value.length > 40 ? `a string of ${value.length} characters` : JSON.stringify(value);
+  if (typeof value === "object") return "an object";
+  return `${typeof value} ${String(value)}`;
+}
+
+function nullable<T>(check: (value: unknown) => value is T): (value: unknown) => value is T | null {
+  return (value: unknown): value is T | null => value === null || check(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isByte(value: unknown): value is number {
+  return isNonNegativeInteger(value) && value <= 255;
+}
+
+function isDecimal(value: unknown): value is string {
+  return typeof value === "string" && DECIMAL.test(value);
+}
+
+function isHexOfBytes(bytes: number): (value: unknown) => value is string {
+  return (value: unknown): value is string =>
+    typeof value === "string" && HEX.test(value) && value.length === 2 + bytes * 2;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

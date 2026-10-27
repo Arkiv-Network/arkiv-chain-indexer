@@ -50,6 +50,8 @@ describe("computeBlockMetrics", () => {
       blockRewardWei: "280",
       burntFeesWei: "1000",
       totalTransactionFeeWei: "1280",
+      totalRentFeeWei: "0",
+      totalBurnedWei: "1000",
       feePriceSumWei: "310",
       priorityFeeSumWei: "110",
       priorityFeeWeightedNumeratorWei: "48800",
@@ -62,6 +64,43 @@ describe("computeBlockMetrics", () => {
       averagePriorityFeeWeightedWei: "28",
       averagePriorityFeeWei: "55",
     });
+  });
+
+  test("sums receipt rent apart from gas: the fee stays gas-only, burned is base-fee burn plus rent", () => {
+    // Live UDC block 48: the permanent create paid 0.0118 GLM rent beside
+    // 54,760 gas at a flat 1 gwei.
+    const block: RpcBlock = {
+      number: "0x30",
+      timestamp: "0x6adfb434",
+      baseFeePerGas: "0x3b9aca00",
+      gasUsed: "0xd5e8",
+      gasLimit: "0x5f5e100",
+      transactions: [
+        { hash: "0xaeb0ee8887ee4414ed8e95edaa2557721d25a864d9a0d2c2f1a49b2b59cae3be", input: "0x49650044" },
+        { hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", input: "0x" },
+      ],
+    };
+    const receipts: RpcReceipt[] = [
+      {
+        transactionHash: "0xaeb0ee8887ee4414ed8e95edaa2557721d25a864d9a0d2c2f1a49b2b59cae3be",
+        gasUsed: "0xd5e8",
+        effectiveGasPrice: "0x3b9aca00",
+        rentFee: "0x29efc43364a800",
+      },
+      // A node without rent (or a failed transaction) reads as zero.
+      {
+        transactionHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        gasUsed: "0x0",
+        effectiveGasPrice: "0x3b9aca00",
+      },
+    ];
+
+    const metrics = computeBlockMetrics(block, receipts);
+    expect(metrics.totalTransactionFeeWei).toBe((54_760n * 1_000_000_000n).toString());
+    expect(metrics.totalRentFeeWei).toBe(BigInt("0x29efc43364a800").toString());
+    expect(metrics.burntFeesWei).toBe((54_760n * 1_000_000_000n).toString());
+    expect(metrics.totalBurnedWei).toBe((54_760n * 1_000_000_000n + BigInt("0x29efc43364a800")).toString());
+    expect(metrics.averageTransactionFeeWei).toBe(((54_760n * 1_000_000_000n) / 2n).toString());
   });
 
   test("stores zero averages for empty blocks", () => {
@@ -80,6 +119,8 @@ describe("computeBlockMetrics", () => {
       blockRewardWei: "0",
       burntFeesWei: "0",
       totalTransactionFeeWei: "0",
+      totalRentFeeWei: "0",
+      totalBurnedWei: "0",
       feePriceSumWei: "0",
       priorityFeeSumWei: "0",
       priorityFeeWeightedNumeratorWei: "0",

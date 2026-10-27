@@ -37,7 +37,8 @@ import {
   type TransactionResponseRow,
   type TransactionsResponseBody,
 } from "./server";
-import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperations";
+import type { ArkivOperationSummaryEntry, StoredArkivOperation } from "./arkivOperations";
+import { udcAttribute, udcOperation } from "./testUdc";
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
 import { ResponseCache } from "./responseCache";
@@ -51,7 +52,6 @@ import type {
   TransactionQueryFilter,
 } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
-import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
 import {
   closeTestPools,
   createIsolatedStorage,
@@ -855,6 +855,8 @@ describe("GET /blocks", () => {
           totalGasUsed: "21000",
           maxGasInBlock: "30000000",
           transactionCount: 1,
+          totalRentFeeWei: "5000",
+          totalBurnedWei: "2105000",
           averageFeePriceWei: "100",
           averageTransactionFeeWei: "2100000",
           averageTransactionGasUsed: "21000",
@@ -883,6 +885,8 @@ describe("GET /blocks", () => {
         null,
         null,
         null,
+        "5000",
+        "2105000",
         null,
         null,
         null,
@@ -1309,6 +1313,8 @@ describe("GET /transactions", () => {
             effectiveGasPriceWei: "110",
             priorityFeeWei: "10",
             transactionFeeWei: "2310000",
+            rentFeeWei: "0",
+            totalCostWei: "2310000",
             status: "1",
             contractAddress: null,
           },
@@ -1407,21 +1413,18 @@ describe("GET /transaction/:hash", () => {
   const hash = `0x${"ab".repeat(32)}` as `0x${string}`;
 
   test("attaches stored Arkiv operations to the transaction", async () => {
-    const operations: ArkivOperation[] = [
+    const operations: StoredArkivOperation[] = [
       {
-        opIndex: 0,
-        operationType: 1,
-        operation: "create",
-        entityKey: `0x${"11".repeat(32)}`,
-        contentType: "text/plain",
-        payloadSizeBytes: 64,
-        attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
-        expiresAtBlocks: 100,
-        newOwner: null,
-        isReference: false,
-        payloadReference: null,
-        referenceVerification: null,
-        referenceError: null,
+        ...udcOperation({
+          opIndex: 0,
+          operationType: 1,
+          entityKey: `0x${"11".repeat(32)}`,
+          expiresAt: "18446744073709551615",
+          minLifetime: "0",
+          attributes: [udcAttribute("project", "str", "demo"), udcAttribute("body", "bytes", null, { size: 4, keccak256: `0x${"ee".repeat(32)}` })],
+        }),
+        resolvedExpiresAt: "18446744073709551615",
+        permanent: true,
       },
     ];
     const requestedHashes: string[] = [];
@@ -1446,78 +1449,6 @@ describe("GET /transaction/:hash", () => {
     expect(requestedHashes).toEqual([hash]);
     expect(body.transaction.hash).toBe(hash);
     expect(body.transaction.operations).toEqual(operations);
-  });
-
-  test("attaches payload provider payment breakdown to reference transactions", async () => {
-    const operations: ArkivOperation[] = [
-      {
-        opIndex: 0,
-        operationType: 1,
-        operation: "create",
-        entityKey: `0x${"11".repeat(32)}`,
-        contentType: "application/vnd.atlas.payload-reference+json",
-        payloadSizeBytes: 64,
-        attributes: [],
-        expiresAtBlocks: 100,
-        newOwner: null,
-        isReference: true,
-        payloadReference: {
-          kind: "atlas.payloadReference",
-          version: 1,
-          provider: "atlas-payload-provider",
-          id: "a".repeat(64),
-          namespace: "atlas.test",
-          checksum: `sha256:${"b".repeat(64)}`,
-          sizeBytes: 64,
-          submittedAt: "2026-06-24T15:24:30Z",
-          nonce: `0x${"00".repeat(31)}01`,
-          payment: 1000,
-          signature: {
-            scheme: "eip191",
-            signer: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
-            receipt: {},
-            messageHash: `0x${"cd".repeat(32)}`,
-            signature: `0x${"ef".repeat(65)}`,
-            r: `0x${"11".repeat(32)}`,
-            s: `0x${"22".repeat(32)}`,
-            v: 27,
-          },
-        },
-        referenceVerification: {
-          valid: true,
-          signerTrusted: true,
-          chainId: 42069,
-          claimedSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
-          recoveredSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
-          messageHash: `0x${"cd".repeat(32)}`,
-          errors: [],
-        },
-        referenceError: null,
-      },
-    ];
-    const storage = {
-      getTransactionByHash: async () => ({ ...storedTransactionFixture(), blockNumberDecimal: "123" }),
-      getOperationsByHash: async () => operations,
-    } as unknown as ScannerStorage;
-    const resolver = new PayloadProviderPaymentResolver({ providerShareBps: 7000 });
-
-    const response = await handleRequest(
-      new Request(`http://example.test/transaction/${hash}`),
-      storage,
-      { payloadProviderPaymentResolver: resolver },
-    );
-    const body = (await response.json()) as TransactionByHashResponseBody;
-
-    expect(response.status).toBe(200);
-    expect(body.transaction.payloadProviderPayments).toMatchObject({
-      enabled: true,
-      providerShareBps: 7000,
-      totalPaymentGasUnits: "1000",
-      totalPaymentWei: "100000",
-      totalProviderEarnedWei: "70000",
-      totalBurnedWei: "30000",
-      source: "configuredShareBps",
-    });
   });
 
   test("returns an empty operations array when none are stored", async () => {
@@ -1564,15 +1495,19 @@ describe("GET /entity/:entityKey", () => {
       operationType: 1,
       operation: "create",
       entityKey,
-      contentType: "text/plain",
-      payloadSizeBytes: 64,
-      attributes: [],
-      expiresAtBlocks: 100,
+      salt: "1",
+      creationFlags: 0,
+      expiresAt: "0",
+      minLifetime: "100",
+      resolvedExpiresAt: "142",
+      permanent: false,
       newOwner: null,
-      isReference: false,
-      payloadReference: null,
-      referenceVerification: null,
-      referenceError: null,
+      bytesSize: 0,
+      schemaName: null,
+      attributes: [],
+      transactionStatus: "1",
+      transactionRentFeeWei: "1000",
+      transactionOperationCount: 1,
       ...overrides,
     };
   }
@@ -1587,9 +1522,12 @@ describe("GET /entity/:entityKey", () => {
         hash: `0x${"cd".repeat(32)}`,
         operationType: 5,
         operation: "delete",
-        contentType: null,
-        payloadSizeBytes: 0,
-        expiresAtBlocks: 0,
+        salt: null,
+        creationFlags: null,
+        expiresAt: null,
+        minLifetime: null,
+        resolvedExpiresAt: null,
+        permanent: null,
       }),
     ];
     const storage = {
@@ -1622,7 +1560,7 @@ describe("GET /entity/:entityKey", () => {
       blockNumber: 43,
       blockNumberDecimal: "43",
       operationType: 2,
-      operation: "update",
+      operation: "patch",
     });
     const first = entityOperationFixture({ blockNumber: 7, blockNumberDecimal: "7" });
     const storage = {
@@ -1654,7 +1592,7 @@ describe("GET /entity/:entityKey", () => {
       getEntityOperationHistory: async () => {
         storageCalls += 1;
         return {
-          operations: [entityOperationFixture({ payloadSizeBytes: storageCalls })],
+          operations: [entityOperationFixture({ bytesSize: storageCalls })],
           totalOperations: 1,
           firstOperation: null,
         };
@@ -1675,7 +1613,7 @@ describe("GET /entity/:entityKey", () => {
     cache.invalidate(entityKey);
     const thirdBody = (await (await request()).json()) as EntityByKeyResponseBody;
     expect(storageCalls).toBe(2);
-    expect(entityOperationValue(thirdBody.operations[0], "payloadSizeBytes")).toBe(2);
+    expect(entityOperationValue(thirdBody.operations[0], "bytesSize")).toBe(2);
   });
 
   test("caches not-found responses", async () => {
@@ -1821,6 +1759,8 @@ describe("GET /senders", () => {
             transactionCount: "2",
             totalGasUsed: "63000",
             totalTransactionFeeWei: "6930000",
+            totalRentFeeWei: "70000",
+            totalCostWei: "7000000",
             totalValueWei: "3000",
             averageGasUsed: "31500",
             averageTransactionFeeWei: "3465000",
@@ -1888,6 +1828,8 @@ describe("conditional GET (ETag / 304)", () => {
           transactionCount: "2",
           totalGasUsed: "63000",
           totalTransactionFeeWei: "6930000",
+          totalRentFeeWei: "70000",
+          totalCostWei: "7000000",
           totalValueWei: "3000",
           averageGasUsed: "31500",
           averageTransactionFeeWei: "3465000",
@@ -2484,6 +2426,8 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     blockRewardWei: "210000",
     burntFeesWei: "2100000",
     totalTransactionFeeWei: "2310000",
+    totalRentFeeWei: "0",
+    totalBurnedWei: "2100000",
     feePriceSumWei: "110",
     priorityFeeSumWei: "10",
     priorityFeeWeightedNumeratorWei: "23100000",
@@ -2523,6 +2467,8 @@ function storedTransactionFixture() {
     effectiveGasPriceWei: "110",
     priorityFeeWei: "10",
     transactionFeeWei: "2310000",
+    rentFeeWei: "0",
+    totalCostWei: "2310000",
     status: "1",
     contractAddress: null,
     logCount: null,
@@ -2560,6 +2506,8 @@ function transactionRecordFixture(
     effectiveGasPriceWei: "110",
     priorityFeeWei: "10",
     transactionFeeWei: "2310000",
+    rentFeeWei: "0",
+    totalCostWei: "2310000",
     status: "1",
     contractAddress: null,
     ...overrides,

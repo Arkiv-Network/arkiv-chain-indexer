@@ -14,7 +14,10 @@ export type StatisticsPeriod = typeof STATISTICS_PERIODS[number]["id"];
 
 /** Stored activity only. Current entity state never belongs to a time window. */
 export interface StatisticsActivity {
-  blocks: Pick<IndexerStatistics["blocks"], "indexed" | "transactions" | "inputBytes" | "compressedInputBytes">;
+  blocks: Pick<
+    IndexerStatistics["blocks"],
+    "indexed" | "transactions" | "inputBytes" | "compressedInputBytes" | "gasFeeWei" | "rentFeeWei" | "burnedWei"
+  >;
   transactions: IndexerStatistics["transactions"];
   operations: IndexerStatistics["operations"];
 }
@@ -54,6 +57,12 @@ export interface IndexerStatistics {
     transactions: string;
     inputBytes: string;
     compressedInputBytes: string;
+    /** Gas fees paid (Σ gasUsed × effectiveGasPrice), wei. */
+    gasFeeWei: string;
+    /** Storage rent burned outside gas, wei. */
+    rentFeeWei: string;
+    /** Base-fee burn plus rent, wei. */
+    burnedWei: string;
   };
   transactions: {
     indexed: string;
@@ -65,11 +74,18 @@ export interface IndexerStatistics {
   operations: {
     byType: Array<{ type: number; name: string; successful: string; reverted: string; unknownStatus: string }>;
     successfulCreatesWithoutKey: string;
-    successfulPayloadWrites: string;
-    successfulPayloadBytes: string;
-    successfulReferenceWrites: string;
-    referencedPayloadBytes: string;
-    referencesWithoutSize: string;
+    /** Successful creates/patches that wrote at least one bytes attribute. */
+    successfulBytesWrites: string;
+    /** Bytes those bytes attributes held, counted per write (contents are never stored). */
+    successfulBytesWritten: string;
+    /** Attribute triples set by successful creates/patches with the indexed flag (queryable). */
+    successfulIndexedAttributeWrites: string;
+    /** Attribute triples set without it (stored, returned, never matched by a query). */
+    successfulStoredAttributeWrites: string;
+    /** Patch tombstones that unset an attribute. */
+    successfulAttributeUnsets: string;
+    /** Successful creates/patches that set an `arkiv.schema` tag. */
+    successfulSchemaTaggedWrites: string;
   };
   entities: {
     status: "available" | "unavailable" | "importing" | "not-ready";

@@ -69,6 +69,15 @@ describe("inspectBlockFromRpc", () => {
     expect(inspectBlockFromRpc(blockFixture(), receiptsFixture()).transactions[0]!.logs).toBeUndefined();
   });
 
+  test("takes each transaction's rent from its receipt, apart from the gas fee", () => {
+    const receipts = receiptsFixture();
+    receipts[0]!.rentFee = "0x29efc43364a800";
+    const inspected = inspectBlockFromRpc(blockFixture(), receipts);
+    expect(inspected.transactions[0]).toMatchObject({ transactionFeeWei: "1500", rentFeeWei: "11804100000000000" });
+    // No rentFee field (a failed transaction reports 0x0; a node without rent omits it).
+    expect(inspected.transactions[1]).toMatchObject({ transactionFeeWei: "160", rentFeeWei: "0" });
+  });
+
   test("requires one receipt per transaction", () => {
     expect(() => inspectBlockFromRpc(blockFixture(), receiptsFixture().slice(0, 1))).toThrow(
       /Receipt count/,

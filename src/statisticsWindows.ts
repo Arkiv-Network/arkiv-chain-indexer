@@ -13,15 +13,16 @@ export interface OperationStatisticsBand {
   reverted: string;
   unknownStatus: string;
   createsWithoutKey: string;
-  payloadWrites: string;
-  payloadBytes: string;
-  referenceWrites: string;
-  referenceBytes: string;
-  referencesWithoutSize: string;
+  bytesWrites: string;
+  bytesWritten: string;
+  indexedAttributeWrites: string;
+  storedAttributeWrites: string;
+  attributeUnsets: string;
+  schemaTaggedWrites: string;
 }
 
 const OP_NAMES: Record<number, string> = {
-  1: "created", 2: "updated", 3: "extended", 4: "ownerChanged", 5: "deleted", 6: "expired",
+  1: "created", 2: "patched", 3: "extended", 4: "ownerChanged", 5: "deleted",
 };
 
 export const sumStatistics = <T, K extends keyof T>(rows: readonly T[], key: K): string =>
@@ -44,6 +45,8 @@ export function foldStatisticsActivity(
     blocks: {
       indexed: sumStatistics(blocks, "indexed"), transactions: sumStatistics(blocks, "transactions"),
       inputBytes: sumStatistics(blocks, "inputBytes"), compressedInputBytes: sumStatistics(blocks, "compressedInputBytes"),
+      gasFeeWei: sumStatistics(blocks, "gasFeeWei"), rentFeeWei: sumStatistics(blocks, "rentFeeWei"),
+      burnedWei: sumStatistics(blocks, "burnedWei"),
     },
     transactions: {
       indexed: sumStatistics(transactions, "indexed"), withInput: sumStatistics(transactions, "withInput"),
@@ -59,11 +62,12 @@ export function foldStatisticsActivity(
         };
       }),
       successfulCreatesWithoutKey: sumStatistics(operations, "createsWithoutKey"),
-      successfulPayloadWrites: sumStatistics(operations, "payloadWrites"),
-      successfulPayloadBytes: sumStatistics(operations, "payloadBytes"),
-      successfulReferenceWrites: sumStatistics(operations, "referenceWrites"),
-      referencedPayloadBytes: sumStatistics(operations, "referenceBytes"),
-      referencesWithoutSize: sumStatistics(operations, "referencesWithoutSize"),
+      successfulBytesWrites: sumStatistics(operations, "bytesWrites"),
+      successfulBytesWritten: sumStatistics(operations, "bytesWritten"),
+      successfulIndexedAttributeWrites: sumStatistics(operations, "indexedAttributeWrites"),
+      successfulStoredAttributeWrites: sumStatistics(operations, "storedAttributeWrites"),
+      successfulAttributeUnsets: sumStatistics(operations, "attributeUnsets"),
+      successfulSchemaTaggedWrites: sumStatistics(operations, "schemaTaggedWrites"),
     },
   };
 }

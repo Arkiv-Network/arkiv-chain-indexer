@@ -418,6 +418,7 @@ async function recordGuzzlerTransactions(
         hash: transaction.hash,
         gasUsed: transaction.gasUsed,
         feeWei: transaction.transactionFeeWei,
+        rentFeeWei: transaction.rentFeeWei,
       })),
     );
   } catch (error) {

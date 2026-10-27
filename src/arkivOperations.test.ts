@@ -2,10 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   ARKIV_REGISTRY_ADDRESS,
   ArkivDecoderClient,
+  DecoderContractError,
   ENTITY_CREATED_TOPIC0,
   decodeBlockArkivOperations,
+  parseDecoderResponse,
+  resolveOperationExpiry,
+  schemaNameOf,
 } from "./arkivOperations";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
+import { LIVE_BLOCKS, decoderOperationJson, decoderResponseJson, udcAttribute } from "./testUdc";
 import type { Hex, RpcBlock, RpcLog, RpcReceipt, RpcTransaction } from "./types";
 
 const originalFetch = globalThis.fetch;
@@ -21,10 +26,12 @@ interface RecordedDecodeCall {
 
 function stubFetch(
   handler: (data: string) => Response | Promise<Response>,
+  version: unknown = { service: "arkiv-transaction-decoder", version: "v0.3.0" },
 ): RecordedDecodeCall[] {
   const calls: RecordedDecodeCall[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.endsWith("/version")) return Response.json(version);
     const body = init?.body !== undefined ? JSON.parse(String(init.body)) : undefined;
     calls.push({ url, body });
     return handler((body as { data: string }).data);
@@ -32,76 +39,10 @@ function stubFetch(
   return calls;
 }
 
-function decoderOperationFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    operationType: 1,
-    operation: "create",
-    entityKey: `0x${"11".repeat(32)}`,
-    payload: { hex: "0xdeadbeef", size: 4, text: "secret payload" },
-    contentType: "text/plain",
-    attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
-    expiresAtBlocks: 100,
-    approxExpiresInSeconds: 200,
-    newOwner: null,
-    ...overrides,
-  };
-}
-
-const REFERENCE_CONTENT_TYPE = "application/vnd.atlas.payload-reference+json";
-
-/**
- * A reference-mode operation as the decoder emits it: the payload is flagged
- * `isReference` and carries hex bytes (which must still be dropped), with the
- * parsed reference, verdict, and any parse error alongside it.
- */
-function referenceOperationFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    operationType: 1,
-    operation: "create",
-    entityKey: `0x${"00".repeat(32)}`,
-    contentType: REFERENCE_CONTENT_TYPE,
-    payload: { hex: "0xb10bb10b", size: 700, isReference: true },
-    payloadReference: {
-      kind: "atlas.payloadReference",
-      version: 1,
-      provider: "atlas-payload-provider",
-      id: "a".repeat(64),
-      namespace: "atlas.test",
-      checksum: `sha256:${"b".repeat(64)}`,
-      sizeBytes: 700,
-      submittedAt: "2026-06-24T15:24:30Z",
-      nonce: `0x${"00".repeat(31)}01`,
-      payment: 100000,
-      signature: {
-        scheme: "eip191",
-        signer: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
-        receipt: { service: "atlas-payload-provider" },
-        messageHash: `0x${"cd".repeat(32)}`,
-        signature: `0x${"ef".repeat(65)}`,
-        r: `0x${"11".repeat(32)}`,
-        s: `0x${"22".repeat(32)}`,
-        v: 27,
-      },
-    },
-    referenceVerification: {
-      valid: true,
-      signerTrusted: true,
-      chainId: 1337,
-      claimedSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
-      recoveredSigner: "0x7e5f4552091a69125d5dFcB7b8C2659029395Bdf",
-      messageHash: `0x${"cd".repeat(32)}`,
-      errors: [],
-    },
-    attributes: [],
-    expiresAtBlocks: 10,
-    approxExpiresInSeconds: 20,
-    newOwner: null,
-    ...overrides,
-  };
-}
+const decoderOperationFixture = decoderOperationJson;
 
 function decoderResponse(operations: unknown[]): Response {
-  return Response.json({ functionName: "execute", operations });
+  return Response.json(decoderResponseJson(operations));
 }
 
 function transactionFixture(index: number, overrides: Partial<RpcTransaction> = {}): RpcTransaction {
@@ -122,8 +63,121 @@ function blockFixture(transactions: RpcTransaction[]): RpcBlock {
   };
 }
 
+describe("parseDecoderResponse", () => {
+  test("reads every live golden as the decoder sent it", () => {
+    for (const block of LIVE_BLOCKS) {
+      for (const transaction of block.transactions) {
+        const operations = parseDecoderResponse(transaction.decoded);
+        expect(operations).toHaveLength(transaction.decoded.operations.length);
+        operations.forEach((operation, index) => {
+          const raw = transaction.decoded.operations[index]!;
+          expect(operation.opIndex).toBe(index);
+          expect(operation.operationType).toBe(raw.operationType as number);
+          expect(operation.expiresAt).toBe(raw.expiresAt as string | null);
+          expect(operation.minLifetime).toBe(raw.minLifetime as string | null);
+          expect(operation.salt).toBe(raw.salt as string | null);
+          expect(operation.bytesSize).toBe(raw.bytesSize as number);
+          expect(operation.attributes).toEqual(raw.attributes as unknown as typeof operation.attributes);
+        });
+      }
+    }
+  });
+
+  test("keeps the permanent create's exact 2^64 - 1 expiry and drops the decoder's permanent flag", () => {
+    const block48 = LIVE_BLOCKS.find((block) => block.blockNumber === 48)!;
+    const [create] = parseDecoderResponse(block48.transactions[0]!.decoded);
+    expect(create!.expiresAt).toBe("18446744073709551615");
+    expect(create).not.toHaveProperty("permanent");
+    expect(resolveOperationExpiry(48, create!)).toBe("18446744073709551615");
+  });
+
+  test("keeps a patch's tombstones, retypes and flags in calldata order", () => {
+    const block22 = LIVE_BLOCKS.find((block) => block.blockNumber === 22)!;
+    const [patch] = parseDecoderResponse(block22.transactions[0]!.decoded);
+    expect(patch!.operation).toBe("patch");
+    const raw = block22.transactions[0]!.decoded.operations[0]!.attributes as Array<Record<string, unknown>>;
+    expect(patch!.attributes.map((attribute): unknown[] => [attribute.name, attribute.type, attribute.indexed])).toEqual(
+      raw.map((attribute): unknown[] => [attribute.name, attribute.type, attribute.indexed]),
+    );
+    expect(patch!.attributes.some((attribute) => attribute.typeId === 0 && attribute.value === null)).toBe(true);
+  });
+
+  test("refuses another format, naming it", () => {
+    expect(() => parseDecoderResponse({ functionName: "execute", format: "tagged", operations: [] })).toThrow(
+      'the response format is "tagged", not "udc"',
+    );
+    expect(() => parseDecoderResponse({ functionName: "execute", operations: [] })).toThrow(DecoderContractError);
+  });
+
+  test("refuses a payload-era operation", () => {
+    const legacy = {
+      operationType: 1,
+      operation: "create",
+      entityKey: null,
+      payload: { size: 4 },
+      contentType: "text/plain",
+      attributes: [{ key: "project", valueType: 8, valueTypeName: "str", value: "demo" }],
+      expiresAtBlocks: 100,
+      newOwner: null,
+    };
+    expect(() => parseDecoderResponse(decoderResponseJson([legacy]))).toThrow("operation 0 has no salt");
+  });
+
+  test("requires every field, null where it does not apply", () => {
+    const { creationFlags: _dropped, ...missing } = decoderOperationFixture();
+    expect(() => parseDecoderResponse(decoderResponseJson([missing]))).toThrow("operation 0 has no creationFlags");
+    expect(() => parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ expiresAt: 100 })]))).toThrow(
+      "operation 0.expiresAt is number 100, expected a decimal string or null",
+    );
+    expect(() =>
+      parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ attributes: [{ name: "x", typeId: 8 }] })])),
+    ).toThrow("operation 0.attributes[0].type is missing");
+  });
+
+  test("accepts every value encoding the node uses", () => {
+    const attributes = [
+      udcAttribute("a", "bool", true),
+      udcAttribute("b", "i32", -10),
+      udcAttribute("c", "u64", "0x1fffffffffffff"),
+      udcAttribute("d", "dec", "-0.25"),
+      udcAttribute("e", "str", "hello"),
+      udcAttribute("f", "bytes", null, { size: 3, keccak256: `0x${"ab".repeat(32)}` }),
+      udcAttribute("g", "tombstone", null),
+      { name: "h", typeId: 0x87, type: "invalid(0x87)", indexed: true, value: null, size: 0, error: "bytes cannot be indexed" },
+    ];
+    const [operation] = parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ attributes })]));
+    expect(operation!.attributes).toEqual(attributes);
+  });
+
+  test("refuses a bytes attribute that carries its content", () => {
+    expect(() =>
+      parseDecoderResponse(
+        decoderResponseJson([decoderOperationFixture({ attributes: [udcAttribute("blob", "bytes", "0x010203")] })]),
+      ),
+    ).toThrow("bytes content is never stored");
+  });
+});
+
+describe("schemaNameOf and resolveOperationExpiry", () => {
+  test("the schema is the indexed str arkiv.schema only", () => {
+    expect(schemaNameOf([udcAttribute("arkiv.schema", "str", "posts")])).toBe("posts");
+    expect(schemaNameOf([udcAttribute("arkiv.schema", "str", "posts", { indexed: false })])).toBeNull();
+    expect(schemaNameOf([udcAttribute("arkiv.schema", "i32", 3)])).toBeNull();
+    expect(schemaNameOf([udcAttribute("schema", "str", "posts")])).toBeNull();
+  });
+
+  test("expiry is max(expiresAt, block + minLifetime), capped at 2^64 - 1", () => {
+    expect(resolveOperationExpiry(16, { expiresAt: "0", minLifetime: "1800" })).toBe("1816");
+    expect(resolveOperationExpiry(16, { expiresAt: "5000", minLifetime: "1800" })).toBe("5000");
+    expect(resolveOperationExpiry(16, { expiresAt: "0", minLifetime: "18446744073709551615" })).toBe(
+      "18446744073709551615",
+    );
+    expect(resolveOperationExpiry(16, { expiresAt: null, minLifetime: null })).toBeNull();
+  });
+});
+
 describe("ArkivDecoderClient.decodeCalldata", () => {
-  test("maps decoder operations and drops payload contents", async () => {
+  test("maps decoder operations and posts only the calldata", async () => {
     const calls = stubFetch(() => decoderResponse([decoderOperationFixture()]));
     const client = new ArkivDecoderClient("http://decoder.test/");
 
@@ -135,30 +189,16 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
         opIndex: 0,
         operationType: 1,
         operation: "create",
-        entityKey: `0x${"11".repeat(32)}`,
-        contentType: "text/plain",
-        payloadSizeBytes: 4,
-        attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
-        expiresAtBlocks: 100,
+        entityKey: null,
+        salt: "42",
+        creationFlags: 0,
+        expiresAt: "0",
+        minLifetime: "1800",
         newOwner: null,
-        isReference: false,
-        payloadReference: null,
-        referenceVerification: null,
-        referenceError: null,
+        bytesSize: 0,
+        schemaName: null,
+        attributes: [udcAttribute("project", "str", "demo")],
       },
-    ]);
-    expect(JSON.stringify(operations)).not.toContain("0xdeadbeef");
-    expect(JSON.stringify(operations)).not.toContain("secret payload");
-  });
-
-  test("sends the chain id in the request body when configured", async () => {
-    const calls = stubFetch(() => decoderResponse([decoderOperationFixture()]));
-    const client = new ArkivDecoderClient("http://decoder.test", 42069);
-
-    await client.decodeCalldata("0x1234");
-
-    expect(calls).toEqual([
-      { url: "http://decoder.test/decode", body: { data: "0x1234", chainId: 42069 } },
     ]);
   });
 
@@ -166,7 +206,17 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
     stubFetch(() =>
       decoderResponse([
         decoderOperationFixture(),
-        decoderOperationFixture({ operationType: 5, operation: "delete" }),
+        decoderOperationFixture({
+          operationType: 5,
+          operation: "delete",
+          entityKey: `0x${"11".repeat(32)}`,
+          salt: null,
+          creationFlags: null,
+          expiresAt: null,
+          minLifetime: null,
+          permanent: null,
+          attributes: [],
+        }),
       ]),
     );
     const client = new ArkivDecoderClient("http://decoder.test");
@@ -185,12 +235,7 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
   });
 
   test("warns once per selector when the decoder cannot read registry calldata", async () => {
-    stubFetch(() =>
-      Response.json(
-        { error: { message: "input is neither Arkiv execute() calldata (selector 0xba8ccf92)" } },
-        { status: 400 },
-      ),
-    );
+    stubFetch(() => Response.json({ error: "input is not an Arkiv execute() call (selector 0xba8ccf92)" }, { status: 400 }));
     const client = new ArkivDecoderClient("http://decoder.test");
     const warnings: string[] = [];
     const originalWarn = console.warn;
@@ -235,81 +280,25 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
     );
   });
 
-  test("throws on unexpected response shapes", async () => {
-    stubFetch(() => Response.json({ functionName: "execute", operations: "nope" }));
+  test("an old-format decoder fails loudly, naming its version", async () => {
+    stubFetch(
+      () => Response.json({ functionName: "execute", format: "tagged", operations: [] }),
+      { service: "arkiv-transaction-decoder", version: "v0.2.2" },
+    );
     const client = new ArkivDecoderClient("http://decoder.test");
 
-    expect(client.decodeCalldata("0xabcd")).rejects.toThrow(
-      "Arkiv decoder returned an unexpected response shape",
+    const failure = client.decodeCalldata("0xabcd");
+    expect(failure).rejects.toThrow(DecoderContractError);
+    expect(failure).rejects.toThrow(
+      'Arkiv decoder at http://decoder.test (version v0.2.2) answered outside the UDC contract: the response format is "tagged", not "udc"',
     );
   });
 
-  test("captures reference-mode metadata and verdict while still dropping payload bytes", async () => {
-    stubFetch(() => decoderResponse([referenceOperationFixture()]));
-    const client = new ArkivDecoderClient("http://decoder.test", 1337);
+  test("a decoder that cannot say its version is reported as unknown", async () => {
+    stubFetch(() => Response.json({ functionName: "execute", operations: "nope" }), null);
+    const client = new ArkivDecoderClient("http://decoder.test");
 
-    const operations = await client.decodeCalldata("0x1234");
-
-    expect(operations).toHaveLength(1);
-    expect(operations?.[0]).toMatchObject({
-      isReference: true,
-      contentType: REFERENCE_CONTENT_TYPE,
-      payloadSizeBytes: 700,
-      payloadReference: { provider: "atlas-payload-provider", id: "a".repeat(64) },
-      referenceVerification: { valid: true, signerTrusted: true, errors: [] },
-      referenceError: null,
-    });
-    // The reference receipt is kept, but the raw payload bytes are not.
-    expect(JSON.stringify(operations)).not.toContain("0xb10bb10b");
-  });
-
-  test("captures a reference parse error without a parsed reference", async () => {
-    stubFetch(() =>
-      decoderResponse([
-        referenceOperationFixture({
-          payloadReference: undefined,
-          referenceVerification: undefined,
-          referenceError: "payload is not a valid payload reference: expected value",
-        }),
-      ]),
-    );
-    const client = new ArkivDecoderClient("http://decoder.test", 1337);
-
-    const operations = await client.decodeCalldata("0x1234");
-
-    expect(operations?.[0]).toMatchObject({
-      isReference: true,
-      payloadReference: null,
-      referenceVerification: null,
-      referenceError: "payload is not a valid payload reference: expected value",
-    });
-  });
-
-  test("preserves a failed verification verdict and its errors", async () => {
-    stubFetch(() =>
-      decoderResponse([
-        referenceOperationFixture({
-          referenceVerification: {
-            valid: false,
-            signerTrusted: false,
-            chainId: 42069,
-            recoveredSigner: "0x7e5f4552091a69125d5dFcB7b8C2659029395Bdf",
-            errors: ["signer 0x7e5f… is not in the trusted payload-provider allowlist for chain 42069"],
-          },
-        }),
-      ]),
-    );
-    const client = new ArkivDecoderClient("http://decoder.test", 42069);
-
-    const operations = await client.decodeCalldata("0x1234");
-
-    expect(operations?.[0]?.referenceVerification).toMatchObject({
-      valid: false,
-      signerTrusted: false,
-      claimedSigner: null,
-      messageHash: null,
-    });
-    expect(operations?.[0]?.referenceVerification?.errors).toHaveLength(1);
+    expect(client.decodeCalldata("0xabcd")).rejects.toThrow("(version unknown)");
   });
 });
 
@@ -321,7 +310,7 @@ describe("decodeBlockArkivOperations", () => {
       if (data === "0x06") {
         return decoderResponse([
           decoderOperationFixture(),
-          decoderOperationFixture({ operationType: 5, operation: "delete" }),
+          decoderOperationFixture({ operationType: 5, operation: "delete", entityKey: `0x${"11".repeat(32)}` }),
         ]);
       }
       throw new Error(`unexpected decode request for ${data}`);
@@ -398,7 +387,7 @@ describe("create entity keys from receipts", () => {
     stubFetch(() =>
       decoderResponse([
         decoderOperationFixture({ entityKey: null }),
-        decoderOperationFixture({ operationType: 2, operation: "update" }),
+        decoderOperationFixture({ operationType: 2, operation: "patch", entityKey: `0x${"11".repeat(32)}` }),
         decoderOperationFixture({ entityKey: null }),
       ]),
     );

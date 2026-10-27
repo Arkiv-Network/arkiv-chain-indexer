@@ -43,9 +43,6 @@ export interface ServerConfig {
   auth?: AuthConfig;
   baseloadInitialConfigPath?: string;
   redisUrl?: string;
-  protocolScheduleUrl?: string;
-  protocolSchedulePath?: string;
-  payloadProviderPaymentShareBps?: number;
   entityHistoryLimit: number;
   entityCacheMaxEntries: number;
   entityCacheMaxBytes: number;
@@ -145,24 +142,6 @@ const SPEC: CliSpec = {
       description:
         "Optional Redis connection string. When set, the /guzzlers endpoint serves recent-sender statistics.",
       env: ["REDIS_URL", "SERVER_REDIS_URL"],
-    },
-    {
-      flags: "--protocol-schedule-url <url>",
-      description:
-        "Optional Arkiv protocol schedule URL used to split payload-provider payments.",
-      env: ["ARKIV_PROTOCOL_SCHEDULE_URL", "SERVER_PROTOCOL_SCHEDULE_URL"],
-    },
-    {
-      flags: "--protocol-schedule-path <path>",
-      description:
-        "Optional local Arkiv protocol schedule JSON path used to split payload-provider payments.",
-      env: ["ARKIV_PROTOCOL_SCHEDULE_PATH", "SERVER_PROTOCOL_SCHEDULE_PATH"],
-    },
-    {
-      flags: "--payload-provider-payment-share-bps <bps>",
-      description:
-        "Optional provider-share basis points override used when no protocol schedule is configured.",
-      env: ["PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS", "SERVER_PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS"],
     },
     {
       flags: "--entity-history-limit <count>",
@@ -349,18 +328,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   const auth = parseAuthConfig(env);
   const baseloadInitialConfigPath = cli.value("baseload-initial-config");
   const redisUrl = cli.value("redis-url");
-  const protocolScheduleUrl = cli.value("protocol-schedule-url");
-  const protocolSchedulePath = cli.value("protocol-schedule-path");
-  const payloadProviderPaymentShareBpsValue = cli.value("payload-provider-payment-share-bps");
-  const payloadProviderPaymentShareBps = payloadProviderPaymentShareBpsValue
-    ? coerceInt("--payload-provider-payment-share-bps", payloadProviderPaymentShareBpsValue)
-    : undefined;
-  if (
-    payloadProviderPaymentShareBps !== undefined &&
-    (payloadProviderPaymentShareBps < 0 || payloadProviderPaymentShareBps > 10_000)
-  ) {
-    throw new Error("--payload-provider-payment-share-bps must be between 0 and 10000");
-  }
   // Compose-style `${VAR:-}` interpolation hands empty strings to unset env
   // vars; treat those as "use the default" instead of failing coercion.
   const intOrDefault = (flag: string, raw: string | undefined, fallback: number) =>
@@ -509,9 +476,6 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
     ...(auth ? { auth } : {}),
     ...(baseloadInitialConfigPath ? { baseloadInitialConfigPath } : {}),
     ...(redisUrl ? { redisUrl } : {}),
-    ...(protocolScheduleUrl ? { protocolScheduleUrl } : {}),
-    ...(protocolSchedulePath ? { protocolSchedulePath } : {}),
-    ...(payloadProviderPaymentShareBps !== undefined ? { payloadProviderPaymentShareBps } : {}),
     entityHistoryLimit,
     entityCacheMaxEntries,
     entityCacheMaxBytes,

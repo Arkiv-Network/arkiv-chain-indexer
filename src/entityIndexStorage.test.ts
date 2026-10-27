@@ -2,6 +2,7 @@ import { testAuth, testAdminHeaders } from "./testAuth";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { ARKIV_INDEX_METHODS, createArkivIndexMethods, cursorBinding, defaultProjection, encodeCursor, projectionFingerprint } from "./arkivJsonRpc";
 import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperations";
+import { udcAttribute, udcOperation } from "./testUdc";
 import type { InspectedLog, InspectedTransaction } from "./blockInspector";
 import { ENTITY_EVENT_TOPICS } from "./entityIndex";
 import { EntityIndexStorage, foldKeyBatches } from "./entityIndexStorage";
@@ -54,6 +55,8 @@ function metrics(blockNumber: number, transactionCount: number): BlockMetrics {
     blockRewardWei: "0",
     burntFeesWei: "0",
     totalTransactionFeeWei: "0",
+    totalRentFeeWei: "0",
+    totalBurnedWei: "0",
     feePriceSumWei: "0",
     priorityFeeSumWei: "0",
     priorityFeeWeightedNumeratorWei: "0",
@@ -93,6 +96,7 @@ function registryTx(
     effectiveGasPriceWei: "100",
     priorityFeeWei: "10",
     transactionFeeWei: "5000000",
+    rentFeeWei: "0",
     status: options.status ?? "1",
     contractAddress: null,
     ...(options.logs ? { logs: options.logs } : {}),
@@ -100,30 +104,20 @@ function registryTx(
 }
 
 type Attr = ArkivOperation["attributes"][number];
-const str = (key: string, value: string): Attr => ({ key, valueType: 8, valueTypeName: "str", value });
-const u64 = (key: string, value: string): Attr => ({ key, valueType: 3, valueTypeName: "u64", value });
-const i32 = (key: string, value: string): Attr => ({ key, valueType: 2, valueTypeName: "i32", value });
-const dec = (key: string, value: string): Attr => ({ key, valueType: 5, valueTypeName: "dec", value });
-const bool = (key: string, value: string): Attr => ({ key, valueType: 1, valueTypeName: "bool", value });
-const addr = (key: string, value: string): Attr => ({ key, valueType: 9, valueTypeName: "addr", value });
-const tombstone = (key: string): Attr => ({ key, valueType: 0, valueTypeName: "tombstone", value: "" });
+// Values in the decoder's (= the node's) wire encoding.
+const str = (name: string, value: string): Attr => udcAttribute(name, "str", value);
+const u64 = (name: string, value: string): Attr => udcAttribute(name, "u64", `0x${BigInt(value).toString(16)}`);
+const i32 = (name: string, value: string): Attr => udcAttribute(name, "i32", Number(value));
+const dec = (name: string, value: string): Attr => udcAttribute(name, "dec", value);
+const bool = (name: string, value: string): Attr => udcAttribute(name, "bool", value === "true");
+const addr = (name: string, value: string): Attr => udcAttribute(name, "addr", value.toLowerCase());
+const tombstone = (name: string): Attr => udcAttribute(name, "tombstone", null);
+/** The calldata expiry pair: a lifetime from the landing block, or an absolute deadline. */
+const lifetime = (blocks: number) => ({ expiresAt: "0", minLifetime: String(blocks) });
+const deadline = (block: number) => ({ expiresAt: String(block), minLifetime: "0" });
 
 function operation(overrides: Partial<ArkivOperation> & { opIndex: number; operationType: number }): ArkivOperation {
-  const names: Record<number, string> = { 1: "create", 2: "update", 3: "extend", 4: "transfer", 5: "delete" };
-  return {
-    operation: names[overrides.operationType] ?? "unknown",
-    entityKey: null,
-    contentType: null,
-    payloadSizeBytes: 0,
-    attributes: [],
-    expiresAtBlocks: 0,
-    newOwner: null,
-    isReference: false,
-    payloadReference: null,
-    referenceVerification: null,
-    referenceError: null,
-    ...overrides,
-  };
+  return udcOperation({ attributes: [], ...overrides });
 }
 
 const log = (logIndex: number, topics: string[], data = "0x"): InspectedLog => ({
@@ -180,9 +174,7 @@ function fixtureChain(): FixtureBlock[] {
               opIndex: 0,
               operationType: 1,
               entityKey: KEY_A,
-              contentType: "text/plain",
-              payloadSizeBytes: 12,
-              expiresAtBlocks: 50,
+              ...lifetime(50),
               attributes: [str("project", "demo"), u64("rank", "5"), dec("score", "1.5"), bool("flag", "true"), i32("level", "-3")],
             }),
           ],
@@ -195,9 +187,7 @@ function fixtureChain(): FixtureBlock[] {
               opIndex: 0,
               operationType: 1,
               entityKey: KEY_B,
-              contentType: "application/json",
-              payloadSizeBytes: 3,
-              expiresAtBlocks: 200,
+              ...deadline(200),
               attributes: [str("project", "demo"), u64("rank", "9"), str("name", "bob")],
             }),
           ],
@@ -206,14 +196,14 @@ function fixtureChain(): FixtureBlock[] {
           position: 2,
           hash: registryTx(100, 2, ALICE).hash,
           operations: [
-            operation({ opIndex: 0, operationType: 1, entityKey: KEY_E, expiresAtBlocks: 3, attributes: [str("project", "short")] }),
+            operation({ opIndex: 0, operationType: 1, entityKey: KEY_E, ...lifetime(3), attributes: [str("project", "short")] }),
           ],
         },
         {
           position: 3,
           hash: registryTx(100, 3, ALICE).hash,
           operations: [
-            operation({ opIndex: 0, operationType: 1, entityKey: KEY_F, expiresAtBlocks: 50, attributes: [str("project", "nolog")] }),
+            operation({ opIndex: 0, operationType: 1, entityKey: KEY_F, ...lifetime(50), attributes: [str("project", "nolog")] }),
           ],
         },
       ],
@@ -228,12 +218,12 @@ function fixtureChain(): FixtureBlock[] {
           position: 0,
           hash: registryTx(101, 0, CAROL).hash,
           operations: [
-            operation({ opIndex: 0, operationType: 1, entityKey: KEY_C, expiresAtBlocks: 1000, attributes: [str("project", "other")] }),
+            operation({ opIndex: 0, operationType: 1, entityKey: KEY_C, ...lifetime(1000), attributes: [str("project", "other")] }),
             operation({
               opIndex: 1,
               operationType: 1,
               entityKey: KEY_D,
-              expiresAtBlocks: 1000,
+              ...lifetime(1000),
               attributes: [str("project", "demo"), str("tag", "demo-x")],
             }),
           ],
@@ -268,7 +258,7 @@ function fixtureChain(): FixtureBlock[] {
         {
           position: 0,
           hash: registryTx(103, 0, ALICE).hash,
-          operations: [operation({ opIndex: 0, operationType: 3, entityKey: KEY_B, expiresAtBlocks: 300 })],
+          operations: [operation({ opIndex: 0, operationType: 3, entityKey: KEY_B, ...deadline(300) })],
         },
         {
           position: 1,
@@ -467,9 +457,9 @@ describeWithPostgres("entity index (Postgres)", () => {
       [105, true],
     ]);
 
-    // No stored logs: expiry from the calldata rule, flags unknown.
+    // No stored logs: expiry and flags from the calldata, which carries both exactly.
     const f = await index.getEntityVersions(KEY_F);
-    expect(f[0]).toMatchObject({ expiresAt: 150n, creationFlags: null });
+    expect(f[0]).toMatchObject({ expiresAt: 150n, creationFlags: 0 });
   });
 
   test("* lists the entities live at the projection head, newest first", async () => {
@@ -516,9 +506,8 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(await keysOf("$expiresAt <= u64(300)")).toEqual([KEY_F, KEY_B, KEY_A]);
     expect(await keysOf(`$key = key(${KEY_A})`)).toEqual([KEY_A]);
     expect(await keysOf(`$key = '${KEY_D}'`)).toEqual([]);
-    expect(await keysOf("$contentType = str('text/plain')")).toEqual([KEY_A]);
-    expect(await keysOf("$contentType STARTSWITH str('application')")).toEqual([KEY_B]);
-    expect(await keysOf("$contentType = ''")).toEqual([KEY_C, KEY_F]);
+    // UDC entities carry no content type.
+    expect(await keysOf("$contentType = ''")).toEqual([KEY_C, KEY_F, KEY_B, KEY_A]);
   });
 
   test("atBlock evaluates the state as of that block", async () => {
@@ -617,7 +606,7 @@ describeWithPostgres("entity index (Postgres)", () => {
       updatedAt: "0x67",
       expiresAt: "0x12c",
       creationFlags: { readonly: true, permissionlessExtension: true, raw: 3 },
-      contentType: "application/json",
+      contentType: "",
       attributeSchema: [
         { name: "name", type: "str" },
         { name: "project", type: "str" },
@@ -649,10 +638,11 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(defaults).toEqual({ key: KEY_A });
     const [nothing] = (await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_A})`, { select: {} }])).data;
     expect(nothing).toEqual({});
-    const [unknownFlags] = (
+    // Without a stored EntityCreated log the flags come from the calldata.
+    const [calldataFlags] = (
       await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_F})`, { select: { creationFlags: true } }])
     ).data;
-    expect(unknownFlags).toEqual({ creationFlags: null });
+    expect(calldataFlags).toEqual({ creationFlags: { readonly: false, permissionlessExtension: false, raw: 0 } });
   });
 
   test("malformed options and queries answer the node's codes", async () => {
@@ -718,7 +708,7 @@ describeWithPostgres("entity index (Postgres)", () => {
 
   test("arkiv_getEntity reads one entity, in full, as of a block", async () => {
     const a = await result<Record<string, unknown>>("arkiv_getEntity", [KEY_A]);
-    expect(a).toMatchObject({ key: KEY_A, owner: ALICE, createdAt: "0x64", updatedAt: "0x66", expiresAt: "0x96", contentType: "text/plain" });
+    expect(a).toMatchObject({ key: KEY_A, owner: ALICE, createdAt: "0x64", updatedAt: "0x66", expiresAt: "0x96", contentType: "" });
     expect(a).not.toHaveProperty("payload");
     expect(a).not.toHaveProperty("attributeSchema");
     expect((a.attributes as unknown[]).length).toBe(5);
@@ -772,8 +762,8 @@ describeWithPostgres("entity index (Postgres)", () => {
           position: 0,
           hash: registryTx(106, 0, BOB).hash,
           operations: [
-            operation({ opIndex: 0, operationType: 1, entityKey: high, expiresAtBlocks: 394, attributes: [str("project", "new")] }),
-            operation({ opIndex: 1, operationType: 1, entityKey: low, expiresAtBlocks: 394, attributes: [str("project", "new")] }),
+            operation({ opIndex: 0, operationType: 1, entityKey: high, ...lifetime(394), attributes: [str("project", "new")] }),
+            operation({ opIndex: 1, operationType: 1, entityKey: low, ...lifetime(394), attributes: [str("project", "new")] }),
           ],
         },
       ],
@@ -862,7 +852,7 @@ describeWithPostgres("entity index (Postgres)", () => {
         {
           position: 0,
           hash: registryTx(99, 0, BOB).hash,
-          operations: [operation({ opIndex: 0, operationType: 1, entityKey: key, expiresAtBlocks: 401, attributes: [str("project", "backfilled")] })],
+          operations: [operation({ opIndex: 0, operationType: 1, entityKey: key, ...lifetime(401), attributes: [str("project", "backfilled")] })],
         },
       ],
     );
@@ -1098,7 +1088,7 @@ describeWithPostgres("genesis import (Postgres)", () => {
         {
           position: 1,
           hash: registryTx(2, 1, OWNER).hash,
-          operations: [operation({ opIndex: 0, operationType: 3, entityKey: keyOf(1), expiresAtBlocks: 500 })],
+          operations: [operation({ opIndex: 0, operationType: 3, entityKey: keyOf(1), ...deadline(500) })],
         },
         {
           position: 2,
@@ -1190,7 +1180,7 @@ describeWithPostgres("genesis import (Postgres)", () => {
         {
           position: 0,
           hash: registryTx(5, 0, ALICE).hash,
-          operations: [operation({ opIndex: 0, operationType: 1, entityKey: KEY_A, expiresAtBlocks: 900, attributes: [str("project", "onchain")] })],
+          operations: [operation({ opIndex: 0, operationType: 1, entityKey: KEY_A, ...deadline(900), attributes: [str("project", "onchain")] })],
         },
       ],
     });

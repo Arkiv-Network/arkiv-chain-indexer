@@ -29,7 +29,10 @@ export interface InspectedTransaction {
   maxPriorityFeePerGasWei: string | null;
   effectiveGasPriceWei: string;
   priorityFeeWei: string;
+  /** Gas fee only: `gasUsed × effectiveGasPrice`. Rent is {@link rentFeeWei}. */
   transactionFeeWei: string;
+  /** Receipt `rentFee`: storage rent burned outside gas; "0" for a failed transaction or a node without rent. */
+  rentFeeWei: string;
   status: string | null;
   contractAddress: Hex | null;
   /**
@@ -54,6 +57,8 @@ export interface InspectedBlock extends BatcherMetrics {
   blockRewardWei?: string;
   burntFeesWei?: string;
   totalTransactionFeeWei?: string;
+  totalRentFeeWei?: string;
+  totalBurnedWei?: string;
   averageFeePriceWei?: string;
   averageTransactionFeeWei?: string;
   averageTransactionGasUsed?: string;
@@ -138,6 +143,7 @@ function inspectTransaction(
     effectiveGasPriceWei: effectiveGasPrice.toString(),
     priorityFeeWei: priorityFee.toString(),
     transactionFeeWei: transactionFee.toString(),
+    rentFeeWei: hexToBigInt(receipt.rentFee).toString(),
     status: hexToDecimalString(receipt.status),
     contractAddress: receipt.contractAddress ?? null,
     ...(receipt.logs === undefined ? {} : { logs: inspectLogs(receipt.logs) }),

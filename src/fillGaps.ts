@@ -273,23 +273,10 @@ async function main(): Promise<void> {
     const config = parseConfig(process.argv.slice(2));
     const rpc = new EthereumRpcClient(config.rpcUrl);
     await attachRpcKeyRing(rpc, "gap-filler");
-    // Probe the chain id once so the decoder verifies payload references against
-    // the right trusted-signer allowlist; fall back to the decoder default and
-    // warn on failure. Only probed when decoding is enabled.
-    const decoderChainId = config.decoderUrl
-      ? await rpc.getChainId().catch((error) => {
-          console.warn(
-            `Could not determine chain id for the Arkiv decoder; reference verification will use the decoder default: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          return undefined;
-        })
-      : undefined;
-    const decoderClient = config.decoderUrl
-      ? new ArkivDecoderClient(config.decoderUrl, decoderChainId)
-      : undefined;
+    const decoderClient = config.decoderUrl ? new ArkivDecoderClient(config.decoderUrl) : undefined;
     storage = await ScannerStorage.open(config.databaseUrl);
+    // A writer like the scanner: never fill one chain's gaps into another's database.
+    await storage.bindGenesisHash(await rpc.getBlockHash(0n));
 
     console.log(
       `Gap filler starting (interval=${config.intervalMs}ms, ` +

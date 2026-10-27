@@ -30,6 +30,7 @@ function bucket(timestampMs: number, gasUsed: string, feeWei = "0"): GuzzlerBuck
     transactionCount: 1,
     totalGasUsed: gasUsed,
     totalFeeWei: feeWei,
+    totalRentFeeWei: "0",
     firstSeenMs: timestampMs,
     lastSeenMs: timestampMs,
   };

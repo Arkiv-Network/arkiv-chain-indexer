@@ -69,7 +69,7 @@ function blockTx(
   gasUsed = "21000",
   feeWei = "1000",
 ): GuzzlerBlockTransaction {
-  return { from, hash, gasUsed, feeWei };
+  return { from, hash, gasUsed, feeWei, rentFeeWei: "0" };
 }
 
 function service(store: GuzzlerStore, now: number, options: { sweepIntervalMs?: number } = {}) {
@@ -94,6 +94,7 @@ describe("GuzzlerService", () => {
         transactionCount: 1,
         totalGasUsed: "21000",
         totalFeeWei: "1000",
+        totalRentFeeWei: "0",
         firstSeenMs: T0,
         lastSeenMs: T0,
       },
@@ -151,6 +152,7 @@ describe("GuzzlerService", () => {
               transactionCount: 1,
               totalGasUsed: "21000",
               totalFeeWei: "1000",
+              totalRentFeeWei: "0",
               firstSeenMs: T0,
               lastSeenMs: T0,
             },

@@ -21,15 +21,30 @@ function bucket(timestampMs: number, gasUsed: string, feeWei = "0", count = 1): 
     transactionCount: count,
     totalGasUsed: gasUsed,
     totalFeeWei: feeWei,
+    totalRentFeeWei: "0",
     firstSeenMs: timestampMs,
     lastSeenMs: timestampMs,
   };
 }
 
 describe("GuzzlerTracker", () => {
+  test("sums rent beside the gas fee, never into it", () => {
+    const tracker = new GuzzlerTracker();
+    tracker.record("0xabc", { timestampMs: T0, gasUsed: "54760", feeWei: "54760000000000", rentFeeWei: "11804100000000000" }, T0);
+    tracker.record("0xabc", { timestampMs: T0 + 1, gasUsed: "21000", feeWei: "21000000000000", rentFeeWei: "0" }, T0 + 1);
+    expect(tracker.getStatistics(T0 + 1).guzzlers[0]).toMatchObject({
+      totalFeeWei: "75760000000000",
+      totalRentFeeWei: "11804100000000000",
+    });
+    const [window] = tracker.getLeaderboards(T0 + 1).windows;
+    expect(window!.guzzlers[0]).toMatchObject({ totalFeeWei: "75760000000000", totalRentFeeWei: "11804100000000000" });
+    const history = buildGuzzlerHistory("0xabc", tracker.getSenderBuckets("0xabc")!, T0 + 1);
+    expect(history.points[0]).toMatchObject({ totalRentFeeWei: "11804100000000000" });
+  });
+
   test("tracks a sender and reports it in statistics", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xAbC", { timestampMs: T0, gasUsed: "21000", feeWei: "1000" }, T0);
+    tracker.record("0xAbC", { timestampMs: T0, gasUsed: "21000", feeWei: "1000", rentFeeWei: "0" }, T0);
 
     const stats = tracker.getStatistics(T0);
     expect(stats.count).toBe(1);
@@ -43,8 +58,8 @@ describe("GuzzlerTracker", () => {
 
   test("folds transactions in the same minute into one bucket", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xa", { timestampMs: T0, gasUsed: "100", feeWei: "10" }, T0);
-    tracker.record("0xa", { timestampMs: T0 + 5000, gasUsed: "200", feeWei: "20" }, T0 + 5000);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "100", feeWei: "10", rentFeeWei: "0" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 5000, gasUsed: "200", feeWei: "20", rentFeeWei: "0" }, T0 + 5000);
 
     const buckets = tracker.getSenderBuckets("0xa");
     expect(buckets).toHaveLength(1);
@@ -57,8 +72,8 @@ describe("GuzzlerTracker", () => {
 
   test("splits transactions in different minutes into separate buckets", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xa", { timestampMs: T0, gasUsed: "100", feeWei: "0" }, T0);
-    tracker.record("0xa", { timestampMs: T0 + 2 * MINUTE, gasUsed: "200", feeWei: "0" }, T0 + 2 * MINUTE);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "100", feeWei: "0", rentFeeWei: "0" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 2 * MINUTE, gasUsed: "200", feeWei: "0", rentFeeWei: "0" }, T0 + 2 * MINUTE);
 
     const buckets = tracker.getSenderBuckets("0xa");
     expect(buckets?.map((b) => b.transactionCount)).toEqual([1, 1]);
@@ -70,8 +85,8 @@ describe("GuzzlerTracker", () => {
 
   test("normalizes addresses case-insensitively", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xAAA", { timestampMs: T0, gasUsed: "10", feeWei: "0" }, T0);
-    tracker.record("0xaaa", { timestampMs: T0 + 1000, gasUsed: "20", feeWei: "0" }, T0 + 1000);
+    tracker.record("0xAAA", { timestampMs: T0, gasUsed: "10", feeWei: "0", rentFeeWei: "0" }, T0);
+    tracker.record("0xaaa", { timestampMs: T0 + 1000, gasUsed: "20", feeWei: "0", rentFeeWei: "0" }, T0 + 1000);
 
     const stats = tracker.getStatistics(T0 + 1000);
     expect(stats.count).toBe(1);
@@ -81,8 +96,8 @@ describe("GuzzlerTracker", () => {
 
   test("evicts buckets older than the retention window on record", () => {
     const tracker = new GuzzlerTracker(2 * MINUTE);
-    tracker.record("0xa", { timestampMs: T0, gasUsed: "10", feeWei: "0" }, T0);
-    tracker.record("0xa", { timestampMs: T0 + 3 * MINUTE, gasUsed: "20", feeWei: "0" }, T0 + 3 * MINUTE);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "10", feeWei: "0", rentFeeWei: "0" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 3 * MINUTE, gasUsed: "20", feeWei: "0", rentFeeWei: "0" }, T0 + 3 * MINUTE);
 
     const stats = tracker.getStatistics(T0 + 3 * MINUTE);
     expect(stats.guzzlers[0]?.transactionCount).toBe(1);
@@ -91,8 +106,8 @@ describe("GuzzlerTracker", () => {
 
   test("sweep removes senders whose buckets all aged out", () => {
     const tracker = new GuzzlerTracker(2 * MINUTE);
-    tracker.record("0xa", { timestampMs: T0, gasUsed: "10", feeWei: "0" }, T0);
-    tracker.record("0xb", { timestampMs: T0 + 90 * 1000, gasUsed: "10", feeWei: "0" }, T0 + 90 * 1000);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "10", feeWei: "0", rentFeeWei: "0" }, T0);
+    tracker.record("0xb", { timestampMs: T0 + 90 * 1000, gasUsed: "10", feeWei: "0", rentFeeWei: "0" }, T0 + 90 * 1000);
 
     const { removed, updated } = tracker.sweep(T0 + 3 * MINUTE);
     expect(removed).toEqual(["0xa"]);
@@ -103,9 +118,9 @@ describe("GuzzlerTracker", () => {
 
   test("returns only senders active in the window, sorted by gas used desc", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xsmall", { timestampMs: T0, gasUsed: "100", feeWei: "0" }, T0);
-    tracker.record("0xsmall", { timestampMs: T0 + 1000, gasUsed: "100", feeWei: "0" }, T0 + 1000);
-    tracker.record("0xbig", { timestampMs: T0 + 2000, gasUsed: "500", feeWei: "0" }, T0 + 2000);
+    tracker.record("0xsmall", { timestampMs: T0, gasUsed: "100", feeWei: "0", rentFeeWei: "0" }, T0);
+    tracker.record("0xsmall", { timestampMs: T0 + 1000, gasUsed: "100", feeWei: "0", rentFeeWei: "0" }, T0 + 1000);
+    tracker.record("0xbig", { timestampMs: T0 + 2000, gasUsed: "500", feeWei: "0", rentFeeWei: "0" }, T0 + 2000);
 
     const stats = tracker.getStatistics(T0 + 2000);
     expect(stats.guzzlers.map((g) => g.address)).toEqual(["0xbig", "0xsmall"]);
@@ -115,8 +130,8 @@ describe("GuzzlerTracker", () => {
 
   test("reports first and last seen timestamps across buckets", () => {
     const tracker = new GuzzlerTracker();
-    tracker.record("0xa", { timestampMs: T0, gasUsed: "1", feeWei: "0" }, T0);
-    tracker.record("0xa", { timestampMs: T0 + 5 * MINUTE, gasUsed: "1", feeWei: "0" }, T0 + 5 * MINUTE);
+    tracker.record("0xa", { timestampMs: T0, gasUsed: "1", feeWei: "0", rentFeeWei: "0" }, T0);
+    tracker.record("0xa", { timestampMs: T0 + 5 * MINUTE, gasUsed: "1", feeWei: "0", rentFeeWei: "0" }, T0 + 5 * MINUTE);
 
     const stat = tracker.getStatistics(T0 + 5 * MINUTE).guzzlers[0];
     expect(stat?.firstSeen).toBe(new Date(T0).toISOString());

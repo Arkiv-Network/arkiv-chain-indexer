@@ -31,17 +31,14 @@ services:
 
   # Arkiv-Network/arkiv-transaction-decoder (Bun) microservice used by the
   # scanners to decode Arkiv registry execute() calldata into operation metadata.
-  # It reads the tagged-union format the chain carries today (selector
-  # 0x49650044) as well as the older struct format still sitting in historical
-  # blocks, and reports a payload as its size alone — entity payload bytes never
-  # leave it. PORT puts it on 28884, matching the DECODER_URL defaults below.
-  #
-  # The decoder it replaced only knew the struct format, and so refused every
-  # registry call the chain now makes. This one does not parse v1 payload
-  # references, so is_reference / payload_reference / reference_verification
-  # stay unset until it learns to.
+  # v0.3 reads the UDC format (schema-typed attributes with an indexed flag, no
+  # payload or content type) and reports a bytes attribute as its size and
+  # keccak256 alone — bytes contents never leave it. The scanner refuses any
+  # other response format loudly and retries the block, so an older decoder
+  # stalls the scan instead of storing gaps. PORT puts it on 28884, matching the
+  # DECODER_URL defaults below.
   decoder:
-    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.2}
+    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.0}
     environment:
       PORT: 28884
     restart: unless-stopped
@@ -392,9 +389,6 @@ services:
       ENTITY_INDEX_GENESIS_RPC: ${ENTITY_INDEX_GENESIS_RPC:-}
       ENTITY_INDEX_GENESIS_RPC_LIMIT: ${ENTITY_INDEX_GENESIS_RPC_LIMIT:-}
       ENTITY_INDEX_GENESIS_PROGRESS_FILE: ${ENTITY_INDEX_GENESIS_PROGRESS_FILE:-}
-      ARKIV_PROTOCOL_SCHEDULE_URL: ${ARKIV_PROTOCOL_SCHEDULE_URL:-}
-      ARKIV_PROTOCOL_SCHEDULE_PATH: ${ARKIV_PROTOCOL_SCHEDULE_PATH:-}
-      PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: ${PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS:-}
       # Prometheus text metrics on GET /metrics (see docs/prometheus.md). The
       # nginx site configs return 404 for /api/metrics, so the scrape target is
       # the loopback backend port. /metrics is open; deployment controls external access.

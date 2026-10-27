@@ -43,6 +43,12 @@ export interface RpcReceipt {
   status?: Hex;
   contractAddress?: Hex | null;
   logs?: RpcLog[];
+  /**
+   * Wei the transaction burned as storage rent, beside `gasUsed ×
+   * effectiveGasPrice` (Arkiv UDC nodes; `0x0` when it failed). Absent on a
+   * node that charges no rent, which reads as zero.
+   */
+  rentFee?: Hex;
 }
 
 export interface BlockMetrics extends BatcherMetrics {
@@ -59,8 +65,14 @@ export interface BlockMetrics extends BatcherMetrics {
   maxGasInBlock: string;
   transactionCount: number;
   blockRewardWei: string;
+  /** Base fee × gas used: the gas side of what the block burned. */
   burntFeesWei: string;
+  /** Gas fees only (`Σ gasUsed × effectiveGasPrice`); rent is {@link totalRentFeeWei}. */
   totalTransactionFeeWei: string;
+  /** Σ receipt `rentFee`: storage rent the block's transactions burned, outside gas. */
+  totalRentFeeWei: string;
+  /** `burntFeesWei + totalRentFeeWei`. */
+  totalBurnedWei: string;
   feePriceSumWei: string;
   priorityFeeSumWei: string;
   priorityFeeWeightedNumeratorWei: string;

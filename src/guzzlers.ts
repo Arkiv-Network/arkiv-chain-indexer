@@ -69,8 +69,10 @@ export interface GuzzlerTransactionInput {
   timestampMs: number;
   /** Gas used by the transaction, as a decimal string. */
   gasUsed: string;
-  /** Transaction fee in wei, as a decimal string. */
+  /** Transaction fee in wei (gas only), as a decimal string. */
   feeWei: string;
+  /** Storage rent in wei (outside gas), as a decimal string; "0" when none. */
+  rentFeeWei: string;
 }
 
 /** A transaction as surfaced by the scanner while ingesting a block. */
@@ -79,6 +81,7 @@ export interface GuzzlerBlockTransaction {
   hash: string;
   gasUsed: string;
   feeWei: string;
+  rentFeeWei: string;
 }
 
 /**
@@ -92,8 +95,10 @@ export interface GuzzlerBucket {
   transactionCount: number;
   /** Total gas used across the bucket, as a decimal string. */
   totalGasUsed: string;
-  /** Total fee in wei across the bucket, as a decimal string. */
+  /** Total fee in wei (gas only) across the bucket, as a decimal string. */
   totalFeeWei: string;
+  /** Total storage rent in wei across the bucket, as a decimal string. */
+  totalRentFeeWei: string;
   /** Earliest transaction timestamp folded into the bucket, in ms. */
   firstSeenMs: number;
   /** Latest transaction timestamp folded into the bucket, in ms. */
@@ -106,6 +111,7 @@ export interface GuzzlerStat {
   transactionCount: number;
   totalGasUsed: string;
   totalFeeWei: string;
+  totalRentFeeWei: string;
   /** ISO timestamp of the oldest retained transaction. */
   firstSeen: string;
   /** ISO timestamp of the newest retained transaction. */
@@ -121,6 +127,7 @@ export interface GuzzlerHistoryPoint {
   transactionCount: number;
   totalGasUsed: string;
   totalFeeWei: string;
+  totalRentFeeWei: string;
   /** ISO timestamp of the earliest transaction in the minute. */
   firstSeen: string;
   /** ISO timestamp of the latest transaction in the minute. */
@@ -251,6 +258,7 @@ export function isValidBucket(value: unknown): value is GuzzlerBucket {
     Number.isFinite(bucket.transactionCount) &&
     typeof bucket.totalGasUsed === "string" &&
     typeof bucket.totalFeeWei === "string" &&
+    typeof bucket.totalRentFeeWei === "string" &&
     Number.isFinite(bucket.firstSeenMs) &&
     Number.isFinite(bucket.lastSeenMs)
   );
@@ -262,6 +270,7 @@ interface MutableBucket {
   count: number;
   gas: bigint;
   fee: bigint;
+  rent: bigint;
   firstMs: number;
   lastMs: number;
 }
@@ -272,6 +281,7 @@ function serializeBucket(bucket: MutableBucket): GuzzlerBucket {
     transactionCount: bucket.count,
     totalGasUsed: bucket.gas.toString(),
     totalFeeWei: bucket.fee.toString(),
+    totalRentFeeWei: bucket.rent.toString(),
     firstSeenMs: bucket.firstMs,
     lastSeenMs: bucket.lastMs,
   };
@@ -321,12 +331,13 @@ export class GuzzlerTracker {
     const minute = minuteOf(tx.timestampMs);
     let bucket = buckets.get(minute);
     if (!bucket) {
-      bucket = { minute, count: 0, gas: 0n, fee: 0n, firstMs: tx.timestampMs, lastMs: tx.timestampMs };
+      bucket = { minute, count: 0, gas: 0n, fee: 0n, rent: 0n, firstMs: tx.timestampMs, lastMs: tx.timestampMs };
       buckets.set(minute, bucket);
     }
     bucket.count += 1;
     bucket.gas += toBigInt(tx.gasUsed);
     bucket.fee += toBigInt(tx.feeWei);
+    bucket.rent += toBigInt(tx.rentFeeWei);
     if (tx.timestampMs < bucket.firstMs) bucket.firstMs = tx.timestampMs;
     if (tx.timestampMs > bucket.lastMs) bucket.lastMs = tx.timestampMs;
 
@@ -368,6 +379,7 @@ export class GuzzlerTracker {
         count: bucket.transactionCount,
         gas: toBigInt(bucket.totalGasUsed),
         fee: toBigInt(bucket.totalFeeWei),
+        rent: toBigInt(bucket.totalRentFeeWei),
         firstMs: bucket.firstSeenMs,
         lastMs: bucket.lastSeenMs,
       });
@@ -399,6 +411,7 @@ export class GuzzlerTracker {
       let count = 0;
       let gas = 0n;
       let fee = 0n;
+      let rent = 0n;
       let firstSeen = Number.POSITIVE_INFINITY;
       let lastSeen = Number.NEGATIVE_INFINITY;
       for (const bucket of buckets.values()) {
@@ -408,6 +421,7 @@ export class GuzzlerTracker {
         count += bucket.count;
         gas += bucket.gas;
         fee += bucket.fee;
+        rent += bucket.rent;
         if (bucket.firstMs < firstSeen) firstSeen = bucket.firstMs;
         if (bucket.lastMs > lastSeen) lastSeen = bucket.lastMs;
       }
@@ -420,6 +434,7 @@ export class GuzzlerTracker {
         transactionCount: count,
         totalGasUsed: gas.toString(),
         totalFeeWei: fee.toString(),
+        totalRentFeeWei: rent.toString(),
         firstSeen: new Date(firstSeen).toISOString(),
         lastSeen: new Date(lastSeen).toISOString(),
       });
@@ -460,6 +475,7 @@ export class GuzzlerTracker {
         count: 0,
         gas: 0n,
         fee: 0n,
+        rent: 0n,
         first: Number.POSITIVE_INFINITY,
         last: Number.NEGATIVE_INFINITY,
       }));
@@ -484,6 +500,7 @@ export class GuzzlerTracker {
           a.count += bucket.count;
           a.gas += bucket.gas;
           a.fee += bucket.fee;
+          a.rent += bucket.rent;
           if (bucket.firstMs < a.first) a.first = bucket.firstMs;
           if (bucket.lastMs > a.last) a.last = bucket.lastMs;
         }
@@ -499,6 +516,7 @@ export class GuzzlerTracker {
           transactionCount: a.count,
           totalGasUsed: a.gas.toString(),
           totalFeeWei: a.fee.toString(),
+          totalRentFeeWei: a.rent.toString(),
           firstSeen: new Date(a.first).toISOString(),
           lastSeen: new Date(a.last).toISOString(),
         });
@@ -585,6 +603,7 @@ export function buildGuzzlerHistory(
       transactionCount: bucket.transactionCount,
       totalGasUsed: bucket.totalGasUsed,
       totalFeeWei: bucket.totalFeeWei,
+      totalRentFeeWei: bucket.totalRentFeeWei,
       firstSeen: new Date(bucket.firstSeenMs).toISOString(),
       lastSeen: new Date(bucket.lastSeenMs).toISOString(),
     }));

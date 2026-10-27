@@ -134,13 +134,15 @@ export class RedisGuzzlerStore implements GuzzlerStore {
   }
 }
 
-const SENDER_BUCKET_FORMAT_VERSION = 1;
+/** 2 added the rent total; a version-1 envelope (no rent) is discarded like any unreadable one. */
+const SENDER_BUCKET_FORMAT_VERSION = 2;
 
 type SerializedBucketTuple = [
   minute: number,
   transactionCount: number,
   totalGasUsed: string,
   totalFeeWei: string,
+  totalRentFeeWei: string,
   firstSeenMs: number,
   lastSeenMs: number,
 ];
@@ -158,6 +160,7 @@ export function serializeBuckets(buckets: GuzzlerBucket[]): SerializedBucketEnve
       bucket.transactionCount,
       bucket.totalGasUsed,
       bucket.totalFeeWei,
+      bucket.totalRentFeeWei,
       bucket.firstSeenMs,
       bucket.lastSeenMs,
     ]),
@@ -185,15 +188,16 @@ function isSerializedBucketEnvelope(value: unknown): value is SerializedBucketEn
 }
 
 function parseBucketTuple(value: unknown): GuzzlerBucket | null {
-  if (!Array.isArray(value) || value.length !== 6) {
+  if (!Array.isArray(value) || value.length !== 7) {
     return null;
   }
-  const [minute, transactionCount, totalGasUsed, totalFeeWei, firstSeenMs, lastSeenMs] = value;
+  const [minute, transactionCount, totalGasUsed, totalFeeWei, totalRentFeeWei, firstSeenMs, lastSeenMs] = value;
   const bucket = {
     minute,
     transactionCount,
     totalGasUsed,
     totalFeeWei,
+    totalRentFeeWei,
     firstSeenMs,
     lastSeenMs,
   };

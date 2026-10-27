@@ -27,6 +27,13 @@ export interface RpcStats {
 
 const textEncoder = new TextEncoder();
 
+/**
+ * Most calls one JSON-RPC batch may carry. Arkiv nodes refuse larger batches
+ * outright (arkiv-state-db-experiment caps them at 64), so a longer list is
+ * sent as several batches.
+ */
+export const MAX_RPC_BATCH_SIZE = 64;
+
 export class EthereumRpcClient {
   private nextId = 1;
   private stats: RpcStats = {
@@ -74,6 +81,18 @@ export class EthereumRpcClient {
     return Number(BigInt(result));
   }
 
+  /** The lowercase hash of one block, without its transactions. */
+  async getBlockHash(blockNumber: bigint): Promise<string> {
+    const result = await this.request<{ hash?: Hex | null } | null>("eth_getBlockByNumber", [
+      blockNumberToHex(blockNumber),
+      false,
+    ]);
+    if (result === null || typeof result.hash !== "string") {
+      throw new Error(`Block ${blockNumber.toString()} was not found`);
+    }
+    return result.hash.toLowerCase();
+  }
+
   async getBlockWithTransactions(blockNumber: bigint): Promise<RpcBlock> {
     const result = await this.request<RpcBlock | null>("eth_getBlockByNumber", [
       blockNumberToHex(blockNumber),
@@ -88,8 +107,9 @@ export class EthereumRpcClient {
   }
 
   /**
-   * Balances of several accounts at the end of one block, in a single JSON-RPC
-   * batch.
+   * Balances of several accounts at the end of one block, in JSON-RPC batches
+   * of at most {@link MAX_RPC_BATCH_SIZE} calls — one batch for the usual
+   * handful of addresses.
    *
    * The scanner snapshots every address a block touched, so this runs once per
    * block over a handful of addresses. Sending them one at a time would
@@ -109,12 +129,15 @@ export class EthereumRpcClient {
     if (unique.length === 0) return balances;
 
     const blockTag = blockNumberToHex(blockNumber);
-    const results = await this.batchRequest<Hex>(
-      unique.map((address) => ({ method: "eth_getBalance", params: [address, blockTag] })),
-    );
-    for (const [index, address] of unique.entries()) {
-      const result = results[index];
-      if (result !== undefined) balances.set(address, BigInt(result));
+    for (let start = 0; start < unique.length; start += MAX_RPC_BATCH_SIZE) {
+      const chunk = unique.slice(start, start + MAX_RPC_BATCH_SIZE);
+      const results = await this.batchRequest<Hex>(
+        chunk.map((address) => ({ method: "eth_getBalance", params: [address, blockTag] })),
+      );
+      for (const [index, address] of chunk.entries()) {
+        const result = results[index];
+        if (result !== undefined) balances.set(address, BigInt(result));
+      }
     }
     return balances;
   }

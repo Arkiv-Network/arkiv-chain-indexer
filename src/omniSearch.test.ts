@@ -121,16 +121,16 @@ describe.skipIf(!hasPostgresForTests())("omni search (Postgres)", () => {
     // Strongly skewed: 12k transactions/operations for one address/entity.
     // A DISTINCT implementation would repeatedly read the whole run.
     await db.query(`INSERT INTO "${schema}".transactions
-      (block_number, block_date, base_block_fee_wei, position, hash, from_address, to_address, value_wei, gas_limit, gas_used, effective_gas_price_wei, priority_fee_wei, transaction_fee_wei)
-      SELECT n, '2026-09-09', '1', 0, '0x'||lpad(to_hex(n),64,'0'), $1, $2, '0', '1', '1', '1', '0', '1' FROM generate_series(1,12000) n`, [address("aaaaaa"), address("bbbbbb")]);
+      (block_number, block_date, base_block_fee_wei, position, hash, from_address, to_address, value_wei, gas_limit, gas_used, input_data_size_bytes, input_data_compressed_size_bytes, effective_gas_price_wei, priority_fee_wei, transaction_fee_wei, rent_fee_wei)
+      SELECT n, '2026-09-09', '1', 0, '0x'||lpad(to_hex(n),64,'0'), $1, $2, '0', '1', '1', '0', '0', '1', '0', '1', '0' FROM generate_series(1,12000) n`, [address("aaaaaa"), address("bbbbbb")]);
     await db.query(`INSERT INTO "${schema}".transaction_operations
-      (block_number, position, op_index, hash, block_date, operation_type, operation, entity_key, content_type, attributes)
-      SELECT n, 0, 0, '0x'||lpad(to_hex(n),64,'0'), '2026-09-09', 1, 'create', $1, 'application/json',
-        '[{"key":"name","valueType":8,"value":"Alice Smith"},{"key":"count","valueType":3,"value":"18446744073709551615"}]'::jsonb
+      (block_number, position, op_index, hash, block_date, operation_type, operation, entity_key, bytes_size, attributes)
+      SELECT n, 0, 0, '0x'||lpad(to_hex(n),64,'0'), '2026-09-09', 1, 'create', $1, 0,
+        '[{"name":"name","typeId":136,"type":"str","indexed":true,"value":"Alice Smith","size":11},{"name":"count","typeId":131,"type":"u64","indexed":true,"value":"0xffffffffffffffff","size":32}]'::jsonb
       FROM generate_series(1,12000) n`, [hash("cccccc")]);
     await db.query(`UPDATE "${schema}".transactions SET from_address=$1 WHERE block_number=12000`, [address("aaaaaa1")]);
     await db.query(`UPDATE "${schema}".transaction_operations SET entity_key=$1 WHERE block_number=12000`, [hash("cccccc1")]);
-    await db.query(`UPDATE "${schema}".transaction_operations SET attributes='[{"key":"ancient","valueType":8,"value":"historicalOnly"}]'::jsonb WHERE block_number=1`);
+    await db.query(`UPDATE "${schema}".transaction_operations SET attributes='[{"name":"ancient","typeId":136,"type":"str","indexed":true,"value":"historicalOnly","size":14}]'::jsonb WHERE block_number=1`);
     await db.query(`INSERT INTO "${schema}".account_balances VALUES (12000,'2026-09-09',$1,'42')`, [address("dddddd")]);
     await db.query(`INSERT INTO "${schema}".entity_versions
       (entity_key,version,from_block,from_position,from_op_index,owner,creator,created_at,created_position,created_op_index,updated_at,expires_at)
@@ -212,7 +212,7 @@ describe.skipIf(!hasPostgresForTests())("omni search (Postgres)", () => {
 function metrics(): BlockMetrics {
   return { blockNumber: 9007199254740993n, blockHash: hash("abcdef"), blockDate: "2026-09-09", blockTimeSeconds: "2",
     baseBlockFeeWei: "1", totalGasUsed: "1", totalInputDataSizeBytes: "0", totalInputDataCompressedSizeBytes: "0",
-    maxGasInBlock: "100", transactionCount: 1, blockRewardWei: "0", burntFeesWei: "0", totalTransactionFeeWei: "0",
+    maxGasInBlock: "100", transactionCount: 1, blockRewardWei: "0", burntFeesWei: "0", totalTransactionFeeWei: "0", totalRentFeeWei: "0", totalBurnedWei: "0",
     feePriceSumWei: "0", priorityFeeSumWei: "0", priorityFeeWeightedNumeratorWei: "0", priorityFeeGasWeightedNumeratorWei: "0",
     averageFeePriceWei: "0", averageTransactionFeeWei: "0", averageTransactionGasUsed: "0", averageTransactionInputDataSizeBytes: "0",
     averageTransactionInputDataCompressedSizeBytes: "0", averagePriorityFeeWeightedWei: "0", averagePriorityFeeWei: "0" };

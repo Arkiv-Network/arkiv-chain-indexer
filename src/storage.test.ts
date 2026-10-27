@@ -1,11 +1,13 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { openDb } from "./db";
 import {
+  DATA_MODEL,
+  IncompatibleDatabaseError,
   MAX_BLOCKS_PER_QUERY,
   MAX_RANGES_PER_QUERY,
   MAX_SENDERS_PER_QUERY,
   MAX_TRANSACTIONS_PER_QUERY,
-  type ScannerStorage,
+  ScannerStorage,
 } from "./storage";
 import { DEFAULT_RANGE_SIZE } from "./ranges";
 import {
@@ -15,6 +17,7 @@ import {
   hasPostgresForTests,
 } from "./testPostgres";
 import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperations";
+import { udcAttribute, udcOperation } from "./testUdc";
 import type { BlockMetrics } from "./types";
 import type { InspectedTransaction } from "./blockInspector";
 
@@ -61,6 +64,8 @@ if (!hasPostgresForTests()) {
         blockRewardWei: "210000",
         burntFeesWei: "2100000",
         totalTransactionFeeWei: "2310000",
+        totalRentFeeWei: "0",
+        totalBurnedWei: "2100000",
         feePriceSumWei: "110",
         priorityFeeSumWei: "10",
         priorityFeeWeightedNumeratorWei: "23100000",
@@ -130,6 +135,8 @@ if (!hasPostgresForTests()) {
           blockRewardWei: "210000",
           burntFeesWei: "2100000",
           totalTransactionFeeWei: "2310000",
+          totalRentFeeWei: "0",
+          totalBurnedWei: "2100000",
           feePriceSumWei: "110",
           priorityFeeSumWei: "10",
           priorityFeeWeightedNumeratorWei: "23100000",
@@ -165,6 +172,8 @@ if (!hasPostgresForTests()) {
         blockRewardWei: "210000",
         burntFeesWei: "2100000",
         totalTransactionFeeWei: "2310000",
+        totalRentFeeWei: "0",
+        totalBurnedWei: "2100000",
         feePriceSumWei: "110",
         priorityFeeSumWei: "10",
         priorityFeeWeightedNumeratorWei: "23100000",
@@ -325,7 +334,8 @@ if (!hasPostgresForTests()) {
       expect(byName.get("account_balances")?.rowCount).toBe("0");
       expect(byName.get("block_ranges")?.rowCount).toBe("1");
       expect(byName.get("sender_stats")?.rowCount).toBe("0");
-      expect(byName.get("scanner_state")?.rowCount).toBe("1");
+      // The data-model marker and the chain progress row.
+      expect(byName.get("scanner_state")?.rowCount).toBe("2");
       expect(byName.get("baseload_configs")?.rowCount).toBe("0");
       for (const table of stats.tables) {
         expect(BigInt(table.tableSizeBytes)).toBeGreaterThanOrEqual(0n);
@@ -439,6 +449,8 @@ if (!hasPostgresForTests()) {
           blockRewardWei: "231000",
           burntFeesWei: "259245000",
           totalTransactionFeeWei: "210",
+          totalRentFeeWei: "0",
+          totalBurnedWei: "259245000",
           feePriceSumWei: "45",
           priorityFeeSumWei: "35",
           priorityFeeWeightedNumeratorWei: "2310",
@@ -475,6 +487,8 @@ if (!hasPostgresForTests()) {
         blockRewardWei: "231000",
         burntFeesWei: "259245000",
         totalTransactionFeeWei: "210",
+        totalRentFeeWei: "0",
+        totalBurnedWei: "259245000",
         feePriceSumWei: "45",
         priorityFeeSumWei: "35",
         priorityFeeWeightedNumeratorWei: "2310",
@@ -678,8 +692,12 @@ if (!hasPostgresForTests()) {
         transactionCount: 200,
         totalBlockRewardWei: "700000",
         totalBurntFeesWei: "14950000",
+        totalRentFeeWei: "0",
+        totalBurnedWei: "14950000",
         averageBlockRewardWei: "7000",
         averageBurntFeesWei: "149500",
+        averageRentFeeWei: "0",
+        averageBurnedWei: "149500",
         averageFeePriceWei: "9",
         averageTransactionGasUsed: "500",
         averageTransactionInputDataSizeBytes: "0",
@@ -782,6 +800,7 @@ if (!hasPostgresForTests()) {
             valueWei: "2000",
             gasUsed: "42000",
             transactionFeeWei: "4620000",
+            rentFeeWei: "500",
           }),
           transactionFixture({
             position: 1,
@@ -801,6 +820,8 @@ if (!hasPostgresForTests()) {
         transactionCount: "2",
         totalGasUsed: "63000",
         totalTransactionFeeWei: "6930000",
+        totalRentFeeWei: "500",
+        totalCostWei: "6930500",
         totalValueWei: "3000",
         averageGasUsed: "31500",
         averageTransactionFeeWei: "3465000",
@@ -1180,23 +1201,25 @@ if (!hasPostgresForTests()) {
       );
 
       const stored = await storage.getOperationsByHash("0xFEED");
-      expect(stored).toEqual(operations[0]!.operations);
-      // Attributes roundtrip through jsonb; uint32-max expiry survives BIGINT.
-      expect(stored[0]?.attributes).toEqual([
-        { key: "project", valueType: 2, valueTypeName: "string", value: "demo" },
-        { key: "version", valueType: 1, valueTypeName: "uint", value: "7" },
-      ]);
-      expect(stored[0]?.expiresAtBlocks).toBe(4_294_967_295);
-      // Reference receipt + verdict round-trip through jsonb; the inline op
-      // reads back with the reference columns null/false.
-      expect(stored[0]?.isReference).toBe(true);
-      expect(stored[0]?.payloadReference?.provider).toBe("atlas-payload-provider");
-      expect(stored[0]?.referenceVerification).toMatchObject({ valid: true, signerTrusted: true });
-      expect(stored[1]).toMatchObject({
-        isReference: false,
-        payloadReference: null,
-        referenceVerification: null,
-        referenceError: null,
+      // Everything the decoder reported round-trips exactly: exact decimal
+      // expiry and salt through NUMERIC, every attribute's flag, type, value,
+      // size and bytes hash through jsonb. The resolved expiry and permanence
+      // are derived from the stored pair and the block.
+      expect(stored).toEqual(
+        operations[0]!.operations.map((operation) => ({
+          ...operation,
+          resolvedExpiresAt: operation.operationType === 1 ? "18446744073709551615" : null,
+          permanent: operation.operationType === 1 ? true : null,
+        })),
+      );
+      expect(stored[0]?.attributes.find((attribute) => attribute.name === "blob")).toEqual({
+        name: "blob",
+        typeId: 7,
+        type: "bytes",
+        indexed: false,
+        value: null,
+        size: 3,
+        keccak256: `0x${"f1".repeat(32)}`,
       });
       expect(await storage.getOperationsByHash("0xother")).toEqual([]);
     });
@@ -1223,15 +1246,14 @@ if (!hasPostgresForTests()) {
               operationType: 5,
               operation: "delete",
               entityKey,
-              contentType: null,
-              payloadSizeBytes: 0,
-              attributes: [],
-              expiresAtBlocks: 0,
+              salt: null,
+              creationFlags: null,
+              expiresAt: null,
+              minLifetime: null,
               newOwner: null,
-              isReference: false,
-              payloadReference: null,
-              referenceVerification: null,
-              referenceError: null,
+              bytesSize: 0,
+              schemaName: null,
+              attributes: [],
             },
           ],
         },
@@ -1286,22 +1308,21 @@ if (!hasPostgresForTests()) {
             operationType,
             operation,
             entityKey,
-            contentType: operation === "create" ? "text/plain" : null,
-            payloadSizeBytes: 0,
-            attributes: [],
-            expiresAtBlocks: 0,
+            salt: null,
+            creationFlags: null,
+            expiresAt: null,
+            minLifetime: null,
             newOwner: null,
-            isReference: false,
-            payloadReference: null,
-            referenceVerification: null,
-            referenceError: null,
+            bytesSize: 0,
+            schemaName: null,
+            attributes: [],
           },
         ],
       });
       const blocks: Array<[bigint, string, number]> = [
         [20n, "create", 1],
-        [21n, "update", 2],
-        [22n, "update", 2],
+        [21n, "patch", 2],
+        [22n, "patch", 2],
         [23n, "delete", 5],
       ];
       for (const [blockNumber, operation, operationType] of blocks) {
@@ -1318,7 +1339,7 @@ if (!hasPostgresForTests()) {
       expect(history.totalOperations).toBe(4);
       // The slice holds the newest two operations in chain order…
       expect(history.operations.map((operation) => operation.operation)).toEqual([
-        "update",
+        "patch",
         "delete",
       ]);
       expect(history.operations.map((operation) => operation.blockNumber)).toEqual([22, 23]);
@@ -1360,15 +1381,14 @@ if (!hasPostgresForTests()) {
                   operationType: 1,
                   operation: "create",
                   entityKey,
-                  contentType: "text/plain",
-                  payloadSizeBytes: 3,
-                  attributes: [],
-                  expiresAtBlocks: 0,
+                  salt: null,
+                  creationFlags: null,
+                  expiresAt: null,
+                  minLifetime: null,
                   newOwner: null,
-                  isReference: false,
-                  payloadReference: null,
-                  referenceVerification: null,
-                  referenceError: null,
+                  bytesSize: 0,
+                  schemaName: null,
+                  attributes: [],
                 },
               ],
             },
@@ -1430,15 +1450,14 @@ if (!hasPostgresForTests()) {
         operationType: 5,
         operation: "delete",
         entityKey: `0x${"cd".repeat(32)}`,
-        contentType: null,
-        payloadSizeBytes: 0,
-        attributes: [],
-        expiresAtBlocks: 0,
+        salt: null,
+        creationFlags: null,
+        expiresAt: null,
+        minLifetime: null,
         newOwner: null,
-        isReference: false,
-        payloadReference: null,
-        referenceVerification: null,
-        referenceError: null,
+        bytesSize: 0,
+        schemaName: null,
+        attributes: [],
       };
       const operations: TransactionArkivOperations[] = [
         {
@@ -1499,7 +1518,7 @@ if (!hasPostgresForTests()) {
 
     test("chunks operation inserts past the bind-parameter limit", async () => {
       const storage = await withStorage();
-      // 5,050 rows × 17 columns would exceed Postgres's 65,535 bind-parameter
+      // 5,050 rows × 16 columns would exceed Postgres's 65,535 bind-parameter
       // cap in a single INSERT; the writer must split into chunked statements.
       const operationCount = 5_050;
       const baseOperation = arkivOperationsFixture("0xfeed", 0)[0]!.operations[1]!;
@@ -1525,38 +1544,205 @@ if (!hasPostgresForTests()) {
       expect(await storage.getOperationsByHash("0xfeed")).toHaveLength(operationCount);
     });
 
-    test("transaction_operations stores only the payload size, never payload bytes", async () => {
-      await withStorage();
+    test("transaction_operations keeps operation metadata and never bytes contents or calldata", async () => {
+      const { schema, cleanup } = await createIsolatedStorage("storage");
+      cleanups.push(cleanup);
       const db = openDb(TEST_DATABASE_URL!, { max: 1 });
       try {
         const result = await db.query<{ column_name: string }>(
-          `SELECT DISTINCT column_name
+          `SELECT column_name
            FROM information_schema.columns
-           WHERE table_name = 'transaction_operations'`,
+           WHERE table_schema = $1 AND table_name = 'transaction_operations'`,
+          [schema],
         );
         expect(result.rows.map((row) => row.column_name).sort()).toEqual([
           "attributes",
           "block_date",
           "block_number",
-          "content_type",
+          "bytes_size",
+          "creation_flags",
           "entity_key",
-          "expires_at_blocks",
+          "expires_at",
           "hash",
-          "is_reference",
+          "min_lifetime",
           "new_owner",
           "op_index",
           "operation",
           "operation_type",
-          "payload_reference",
-          "payload_size_bytes",
           "position",
-          "reference_error",
-          "reference_verification",
+          "salt",
           "scanned_at",
+          "schema_name",
         ]);
       } finally {
         await db.close();
       }
+    });
+  });
+
+  describe("ScannerStorage data model guard", () => {
+    async function freshSchema(): Promise<{ schema: string; db: ReturnType<typeof openDb> }> {
+      const schema = `guard_${Math.random().toString(36).slice(2, 10)}`;
+      const db = openDb(TEST_DATABASE_URL!, { max: 1 });
+      cleanups.push(async () => {
+        await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        await db.close();
+      });
+      await db.query(`CREATE SCHEMA "${schema}"`);
+      return { schema, db };
+    }
+
+    test("claims an empty schema and reopens it", async () => {
+      const { schema, db } = await freshSchema();
+      const first = await ScannerStorage.open(TEST_DATABASE_URL!, { schema });
+      await first.close();
+      const marker = await db.query<{ value: string }>(
+        `SELECT value FROM "${schema}".scanner_state WHERE key = 'data_model'`,
+      );
+      expect(marker.rows[0]?.value).toBe(DATA_MODEL);
+      const again = await ScannerStorage.open(TEST_DATABASE_URL!, { schema });
+      await again.close();
+    });
+
+    test("refuses a pre-UDC database that holds data but no marker, before touching it", async () => {
+      const { schema, db } = await freshSchema();
+      // The shape an older indexer left: its own transaction_operations
+      // columns, a stored block and scanner progress, no data_model row.
+      await db.query(`CREATE TABLE "${schema}".scanner_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      await db.query(`INSERT INTO "${schema}".scanner_state (key, value) VALUES ('last_successful_block', '100'), ('chain_id', '7706815')`);
+      await db.query(`CREATE TABLE "${schema}".transaction_operations (block_number BIGINT, content_type TEXT, payload_size_bytes INTEGER)`);
+      const failure = ScannerStorage.open(TEST_DATABASE_URL!, { schema });
+      expect(failure).rejects.toThrow(IncompatibleDatabaseError);
+      expect(failure).rejects.toThrow("holds data (scanner_state) but no data model marker");
+      // Nothing was created or claimed.
+      const tables = await db.query<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`,
+        [schema],
+      );
+      expect(tables.rows.map((row) => row.table_name)).toEqual(["scanner_state", "transaction_operations"]);
+    });
+
+    test("refuses a database written by another data model", async () => {
+      const { schema, db } = await freshSchema();
+      await db.query(`CREATE TABLE "${schema}".scanner_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      await db.query(`INSERT INTO "${schema}".scanner_state (key, value) VALUES ('data_model', 'arkiv-legacy-0')`);
+      expect(ScannerStorage.open(TEST_DATABASE_URL!, { schema })).rejects.toThrow(
+        'was written by data model "arkiv-legacy-0"',
+      );
+    });
+
+    test("refuses empty tables of an older layout, which would only fail at the first write", async () => {
+      const { schema, db } = await freshSchema();
+      await db.query(`CREATE TABLE "${schema}".transactions (block_number BIGINT, position INTEGER, transaction_fee_wei TEXT)`);
+      expect(ScannerStorage.open(TEST_DATABASE_URL!, { schema })).rejects.toThrow(
+        "has tables of an older layout (transactions)",
+      );
+    });
+
+    test("an old schema without data is accepted (tables come back in the final shape only when absent)", async () => {
+      const { schema, db } = await freshSchema();
+      await db.query(`CREATE TABLE "${schema}".scanner_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      await db.query(`INSERT INTO "${schema}".scanner_state (key, value) VALUES ('chain_id', '1')`);
+      const storage = await ScannerStorage.open(TEST_DATABASE_URL!, { schema });
+      await storage.close();
+    });
+
+    test("binds the database to one genesis hash and refuses another", async () => {
+      const storage = await withStorage();
+      const genesis = `0x${"37".repeat(32)}`;
+      await storage.bindGenesisHash(genesis.toUpperCase().replace("0X", "0x"));
+      expect(await storage.getGenesisHash()).toBe(genesis);
+      await storage.bindGenesisHash(genesis);
+      expect(storage.bindGenesisHash(`0x${"03".repeat(32)}`)).rejects.toThrow(IncompatibleDatabaseError);
+      expect(storage.bindGenesisHash(`0x${"03".repeat(32)}`)).rejects.toThrow("belongs to another chain");
+      await storage.assertStoredGenesisHash();
+    });
+
+    test("the backend's check catches a recorded hash that is not the stored block 0's", async () => {
+      const storage = await withStorage();
+      await storage.saveBlockMetrics(blockMetricsFixture({ blockNumber: 0n, blockHash: `0x${"aa".repeat(32)}` }));
+      await storage.assertStoredGenesisHash();
+      // The scanner binding a node whose block 0 differs from the stored one is refused too.
+      expect(storage.bindGenesisHash(`0x${"bb".repeat(32)}`)).rejects.toThrow("the stored block 0 is");
+      await storage.bindGenesisHash(`0x${"aa".repeat(32)}`);
+      await storage.assertStoredGenesisHash();
+    });
+  });
+
+  describe("ScannerStorage rent", () => {
+    test("stores rent apart from the gas fee and serves total cost beside it", async () => {
+      const storage = await withStorage();
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({
+          blockNumber: 48n,
+          transactionCount: 2,
+          burntFeesWei: "54760000000000",
+          totalTransactionFeeWei: "54760000000000",
+          totalRentFeeWei: "11804100000000000",
+          totalBurnedWei: "11858860000000000",
+        }),
+        { kind: "lastSuccessfulBlock" },
+        [
+          transactionFixture({
+            position: 0,
+            hash: "0xaeb0",
+            gasUsed: "54760",
+            transactionFeeWei: "54760000000000",
+            rentFeeWei: "11804100000000000",
+          }),
+          // A failed transaction: gas charged, no rent.
+          transactionFixture({ position: 1, hash: "0xfa11", status: "0", transactionFeeWei: "21000", rentFeeWei: "0" }),
+        ],
+      );
+      const [block] = await storage.queryBlocks({ limit: 1 });
+      expect(block).toMatchObject({
+        totalTransactionFeeWei: "54760000000000",
+        totalRentFeeWei: "11804100000000000",
+        totalBurnedWei: "11858860000000000",
+      });
+      const transaction = await storage.getTransactionByHash("0xaeb0");
+      expect(transaction).toMatchObject({
+        transactionFeeWei: "54760000000000",
+        rentFeeWei: "11804100000000000",
+        totalCostWei: "11858860000000000",
+      });
+      expect(await storage.getTransactionByHash("0xfa11")).toMatchObject({ rentFeeWei: "0", totalCostWei: "21000" });
+      const inspected = await storage.getInspectedBlock(48n);
+      expect(inspected?.totalRentFeeWei).toBe("11804100000000000");
+      expect(inspected?.transactions[0]?.rentFeeWei).toBe("11804100000000000");
+    });
+
+    test("entity history carries the transaction's status, rent and how many operations share it", async () => {
+      const storage = await withStorage();
+      const entityKey = `0x${"ab".repeat(32)}`;
+      await storage.saveBlockMetrics(
+        blockMetricsFixture({ blockNumber: 52n, transactionCount: 1 }),
+        { kind: "lastSuccessfulBlock" },
+        [transactionFixture({ position: 0, hash: "0xb52", rentFeeWei: "2984000000000" })],
+        undefined,
+        [
+          {
+            position: 0,
+            hash: "0xb52",
+            operations: [
+              udcOperation({ opIndex: 0, operationType: 1, entityKey, minLifetime: "1800" }),
+              udcOperation({ opIndex: 1, operationType: 3, entityKey, expiresAt: "0", minLifetime: "3600" }),
+              udcOperation({ opIndex: 2, operationType: 5, entityKey: `0x${"cd".repeat(32)}` }),
+            ],
+          },
+        ],
+      );
+      const history = await storage.getEntityOperationHistory(entityKey);
+      expect(history.operations).toHaveLength(2);
+      expect(history.operations[0]).toMatchObject({
+        operation: "create",
+        transactionStatus: "1",
+        transactionRentFeeWei: "2984000000000",
+        transactionOperationCount: 3,
+        resolvedExpiresAt: "1852",
+        permanent: false,
+      });
+      expect(history.operations[1]).toMatchObject({ operation: "extend", resolvedExpiresAt: "3652" });
     });
   });
 }
@@ -1567,70 +1753,36 @@ function arkivOperationsFixture(hash: string, position: number): TransactionArki
       position,
       hash: hash as `0x${string}`,
       operations: [
-        {
+        // A permanent create, as the live chain's block 48 carried it: every
+        // value type the attributes JSONB has to round-trip, a bytes
+        // attribute (size and keccak256 only), and the exact 2^64 - 1 expiry
+        // and uint128 salt that no JSON number holds.
+        udcOperation({
           opIndex: 0,
           operationType: 1,
-          operation: "create",
           entityKey: `0x${"ab".repeat(32)}`,
-          contentType: "application/vnd.atlas.payload-reference+json",
-          payloadSizeBytes: 512,
+          salt: "301422594741892035395901909940662583783",
+          creationFlags: 2,
+          expiresAt: "18446744073709551615",
+          minLifetime: "0",
+          bytesSize: 3,
+          schemaName: "posts",
           attributes: [
-            { key: "project", valueType: 2, valueTypeName: "string", value: "demo" },
-            { key: "version", valueType: 1, valueTypeName: "uint", value: "7" },
+            udcAttribute("amount", "u256", "0x100000000000000000000000000000000000000000000000000"),
+            udcAttribute("arkiv.schema", "str", "posts"),
+            udcAttribute("blob", "bytes", null, { size: 3, keccak256: `0x${"f1".repeat(32)}` }),
+            udcAttribute("flagged", "bool", true),
+            udcAttribute("negative", "i32", -10),
+            udcAttribute("score", "dec", "3.5"),
+            udcAttribute("title", "str", "hello", { indexed: false }),
           ],
-          expiresAtBlocks: 4_294_967_295,
-          newOwner: null,
-          // Reference op: receipt metadata + verdict round-trip through jsonb.
-          isReference: true,
-          payloadReference: {
-            kind: "atlas.payloadReference",
-            version: 1,
-            provider: "atlas-payload-provider",
-            id: "a".repeat(64),
-            namespace: "atlas.test",
-            checksum: `sha256:${"b".repeat(64)}`,
-            sizeBytes: 700,
-            submittedAt: "2026-06-24T15:24:30Z",
-            nonce: `0x${"00".repeat(31)}01`,
-            payment: 100000,
-            signature: {
-              scheme: "eip191",
-              signer: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
-              receipt: { service: "atlas-payload-provider" },
-              messageHash: `0x${"cd".repeat(32)}`,
-              signature: `0x${"ef".repeat(65)}`,
-              r: `0x${"11".repeat(32)}`,
-              s: `0x${"22".repeat(32)}`,
-              v: 27,
-            },
-          },
-          referenceVerification: {
-            valid: true,
-            signerTrusted: true,
-            chainId: 1337,
-            claimedSigner: "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
-            recoveredSigner: "0x7e5f4552091a69125d5dFcB7b8C2659029395Bdf",
-            messageHash: `0x${"cd".repeat(32)}`,
-            errors: [],
-          },
-          referenceError: null,
-        },
-        {
+        }),
+        udcOperation({
           opIndex: 1,
           operationType: 4,
-          operation: "transfer",
           entityKey: `0x${"cd".repeat(32)}`,
-          contentType: null,
-          payloadSizeBytes: 0,
-          attributes: [],
-          expiresAtBlocks: 0,
           newOwner: "0x9999999999999999999999999999999999999999",
-          // Inline (non-reference) op: reference columns stay null/false.
-          isReference: false,
-          payloadReference: null,
-          referenceVerification: null,
-          referenceError: null,
-        },
+        }),
       ],
     },
   ];
@@ -1664,6 +1816,8 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     blockRewardWei: "210000",
     burntFeesWei: "2100000",
     totalTransactionFeeWei: "2310000",
+    totalRentFeeWei: "0",
+    totalBurnedWei: "2100000",
     feePriceSumWei: "110",
     priorityFeeSumWei: "10",
     priorityFeeWeightedNumeratorWei: "23100000",
@@ -1699,6 +1853,7 @@ function transactionFixture(overrides: Partial<InspectedTransaction> = {}): Insp
     effectiveGasPriceWei: "110",
     priorityFeeWei: "10",
     transactionFeeWei: "2310000",
+    rentFeeWei: "0",
     status: "1",
     contractAddress: null,
     ...overrides,

@@ -96,7 +96,7 @@ export class GuzzlerService implements GuzzlerRecorder {
       }
       this.tracker.record(
         tx.from,
-        { timestampMs: blockTimestampMs, gasUsed: tx.gasUsed, feeWei: tx.feeWei },
+        { timestampMs: blockTimestampMs, gasUsed: tx.gasUsed, feeWei: tx.feeWei, rentFeeWei: tx.rentFeeWei },
         now,
       );
       touched.add(normalizeAddress(tx.from));

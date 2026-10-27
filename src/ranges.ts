@@ -46,8 +46,15 @@ export interface BlockRangeMetrics {
   transactionCount: number;
   totalBlockRewardWei: string;
   totalBurntFeesWei: string;
+  /** Storage rent burned in the range, outside gas. */
+  totalRentFeeWei: string;
+  /** `totalBurntFeesWei + totalRentFeeWei`. */
+  totalBurnedWei: string;
   averageBlockRewardWei: string;
   averageBurntFeesWei: string;
+  /** Per block, like the other block averages. */
+  averageRentFeeWei: string;
+  averageBurnedWei: string;
   averageFeePriceWei: string;
   averageTransactionGasUsed: string;
   averageTransactionInputDataSizeBytes: string;
@@ -157,6 +164,7 @@ export function computeBlockRange(
   let maxMaxGasInBlock = minMaxGasInBlock;
   let totalBlockReward = 0n;
   let totalBurntFees = 0n;
+  let totalRentFees = 0n;
   let transactionCount = 0;
   let gasWeightedPriorityFeeNumerator = 0n;
   let feePriceNumerator = 0n;
@@ -210,6 +218,7 @@ export function computeBlockRange(
     const gasWeight = priorityFeeGasWeightFor(block);
     totalBlockReward += blockRewardFor(block);
     totalBurntFees += burntFeesFor(block);
+    totalRentFees += BigInt(block.totalRentFeeWei);
     gasWeightedPriorityFeeNumerator += gasWeight.weightedPriorityFeeNumerator;
     feePriceNumerator += exactOrAverageSum(
       block.feePriceSumWei,
@@ -292,8 +301,12 @@ export function computeBlockRange(
     transactionCount,
     totalBlockRewardWei: totalBlockReward.toString(),
     totalBurntFeesWei: totalBurntFees.toString(),
+    totalRentFeeWei: totalRentFees.toString(),
+    totalBurnedWei: (totalBurntFees + totalRentFees).toString(),
     averageBlockRewardWei: (totalBlockReward / rangeSize).toString(),
     averageBurntFeesWei: (totalBurntFees / rangeSize).toString(),
+    averageRentFeeWei: (totalRentFees / rangeSize).toString(),
+    averageBurnedWei: ((totalBurntFees + totalRentFees) / rangeSize).toString(),
     averageFeePriceWei: averageFeePrice.toString(),
     averageTransactionGasUsed: averageTransactionGasUsed.toString(),
     averageTransactionInputDataSizeBytes: averageTransactionInputDataSizeBytes.toString(),

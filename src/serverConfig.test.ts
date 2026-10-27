@@ -31,9 +31,6 @@ describe("parseServerConfig", () => {
       SAVE_TRANSACTION_DATA: "false",
       BASELOAD_AUTOMATION_TOKEN: "env-secret",
       BASELOAD_INITIAL_CONFIG_PATH: "/app/baseload-config/config.json",
-      ARKIV_PROTOCOL_SCHEDULE_URL: "http://schedule/atlas-protocol-schedule.json",
-      ARKIV_PROTOCOL_SCHEDULE_PATH: "/app/schedule.json",
-      PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: "7000",
     });
     expect(config.databaseUrl).toBe("postgres://envhost/db");
     expect(config.port).toBe(4500);
@@ -41,9 +38,6 @@ describe("parseServerConfig", () => {
     expect(config.transactionDataEnabled).toBe(false);
     expect(config).not.toHaveProperty("baseloadAutomationToken");
     expect(config.baseloadInitialConfigPath).toBe("/app/baseload-config/config.json");
-    expect(config.protocolScheduleUrl).toBe("http://schedule/atlas-protocol-schedule.json");
-    expect(config.protocolSchedulePath).toBe("/app/schedule.json");
-    expect(config.payloadProviderPaymentShareBps).toBe(7000);
   });
 
   test("server-specific transaction data flag overrides shared env", () => {
@@ -68,12 +62,6 @@ describe("parseServerConfig", () => {
         "false",
         "--baseload-initial-config",
         "/tmp/baseload.json",
-        "--protocol-schedule-url",
-        "http://cli/schedule.json",
-        "--protocol-schedule-path",
-        "/tmp/schedule.json",
-        "--payload-provider-payment-share-bps",
-        "6000",
       ],
       {
         DATABASE_URL: "postgres://env/db",
@@ -81,9 +69,6 @@ describe("parseServerConfig", () => {
         SERVER_TRANSACTION_DATA_ENABLED: "true",
         BASELOAD_AUTOMATION_TOKEN: "env-secret",
         BASELOAD_INITIAL_CONFIG_PATH: "/app/baseload-config/config.json",
-        ARKIV_PROTOCOL_SCHEDULE_URL: "http://env/schedule.json",
-        ARKIV_PROTOCOL_SCHEDULE_PATH: "/app/schedule.json",
-        PAYLOAD_PROVIDER_PAYMENT_SHARE_BPS: "7000",
       },
     );
     expect(config.databaseUrl).toBe("postgres://cli/db");
@@ -92,9 +77,6 @@ describe("parseServerConfig", () => {
     expect(config.transactionDataEnabled).toBe(false);
     expect(config).not.toHaveProperty("baseloadAutomationToken");
     expect(config.baseloadInitialConfigPath).toBe("/tmp/baseload.json");
-    expect(config.protocolScheduleUrl).toBe("http://cli/schedule.json");
-    expect(config.protocolSchedulePath).toBe("/tmp/schedule.json");
-    expect(config.payloadProviderPaymentShareBps).toBe(6000);
   });
 
   test("rejects an invalid port", () => {
@@ -109,12 +91,6 @@ describe("parseServerConfig", () => {
         SAVE_TRANSACTION_DATA: "maybe",
       }),
     ).toThrow("--transaction-data-enabled must be a boolean");
-  });
-
-  test("rejects invalid payload provider payment share", () => {
-    expect(() =>
-      parseServerConfig(["--payload-provider-payment-share-bps", "10001"], BASE_ENV),
-    ).toThrow("--payload-provider-payment-share-bps must be between 0 and 10000");
   });
 
   test("no upstream means the passthrough follows the node the scanner recorded", () => {

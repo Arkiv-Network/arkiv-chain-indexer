@@ -8,13 +8,14 @@ import {
 } from "./ranges";
 import type { BlockMetrics, Hex } from "./types";
 import type { InspectedBlock, InspectedLog, InspectedTransaction } from "./blockInspector";
-import type {
-  ArkivOperation,
-  ArkivOperationAttribute,
-  ArkivOperationSummaryEntry,
-  ArkivPayloadReference,
-  ArkivReferenceVerification,
-  TransactionArkivOperations,
+import {
+  PERMANENT_EXPIRES_AT,
+  resolveOperationExpiry,
+  type ArkivOperation,
+  type ArkivOperationAttribute,
+  type ArkivOperationSummaryEntry,
+  type StoredArkivOperation,
+  type TransactionArkivOperations,
 } from "./arkivOperations";
 import type { BaseloadConfig } from "./baseloadConfig";
 import type { BatcherMetrics } from "./batcher";
@@ -27,6 +28,24 @@ const SAFE_HEAD_BLOCK_KEY = "safe_head_block";
 const LATEST_OBSERVED_AT_KEY = "latest_observed_at";
 const CHAIN_ID_KEY = "chain_id";
 const SCANNER_RPC_URL_KEY = "scanner_rpc_url";
+const DATA_MODEL_KEY = "data_model";
+const GENESIS_HASH_KEY = "genesis_hash";
+
+/**
+ * The data model this build writes, recorded in `scanner_state.data_model`.
+ * `arkiv-udc-1`: the Arkiv UDC entity model (schema-typed attributes with an
+ * indexed flag, no payload or content type), storage rent beside gas fees.
+ * A database written under any other model is refused, never migrated.
+ */
+export const DATA_MODEL = "arkiv-udc-1";
+
+/** The database belongs to another data model or another chain; it is refused, never migrated. */
+export class IncompatibleDatabaseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IncompatibleDatabaseError";
+  }
+}
 
 /** Upper bound on blocks one eth_feeHistory call may cover (the JSON-RPC spec's own cap). */
 export const MAX_FEE_HISTORY_BLOCKS = 1024;
@@ -58,6 +77,7 @@ const TRANSACTION_SELECT_COLUMNS = [
   "effective_gas_price_wei",
   "priority_fee_wei",
   "transaction_fee_wei",
+  "rent_fee_wei",
   "status",
   "contract_address",
   "log_count",
@@ -200,6 +220,10 @@ export interface StoredBlock {
   blockRewardWei?: string;
   burntFeesWei?: string;
   totalTransactionFeeWei?: string;
+  /** Storage rent the block's transactions burned, outside gas. */
+  totalRentFeeWei: string;
+  /** `burntFeesWei + totalRentFeeWei`. */
+  totalBurnedWei: string;
   feePriceSumWei?: string;
   priorityFeeSumWei?: string;
   priorityFeeWeightedNumeratorWei?: string;
@@ -224,19 +248,27 @@ export interface StoredTransaction extends InspectedTransaction {
   blockNumberDecimal: string;
   blockDate: string;
   baseBlockFeeWei: string;
-  /** Number of stored event logs; null for rows scanned before logs were kept. */
+  /** Number of stored event logs; null when the receipt carried no logs field. */
   logCount: number | null;
-  operations?: ArkivOperation[];
+  /** Gas fee plus rent: everything the sender paid beside the value. */
+  totalCostWei: string;
+  operations?: StoredArkivOperation[];
   operationsSummary?: ArkivOperationSummaryEntry[];
 }
 
 /** One stored operation joined with its transaction context, for entity history. */
-export interface StoredEntityOperation extends ArkivOperation {
+export interface StoredEntityOperation extends StoredArkivOperation {
   blockNumber: number;
   blockNumberDecimal: string;
   blockDate: string;
   position: number;
   hash: string;
+  /** The transaction's receipt status ("1" applied, "0" reverted); null when the row has no transaction. */
+  transactionStatus: string | null;
+  /** Rent the whole transaction burned (shared by its operations); null when the row has no transaction. */
+  transactionRentFeeWei: string | null;
+  /** How many operations the transaction carried, i.e. how many share that rent. */
+  transactionOperationCount: number;
 }
 
 /** The most recent slice of one entity's stored operation history. */
@@ -269,7 +301,12 @@ export interface StoredSenderStats {
   latestNonce: string | null;
   transactionCount: string;
   totalGasUsed: string;
+  /** Gas fees only. */
   totalTransactionFeeWei: string;
+  /** Storage rent, outside gas. */
+  totalRentFeeWei: string;
+  /** Gas fees plus rent. */
+  totalCostWei: string;
   totalValueWei: string;
   averageGasUsed: string;
   averageTransactionFeeWei: string;
@@ -312,8 +349,12 @@ export interface StoredBlockRange {
   transactionCount: number;
   totalBlockRewardWei: string;
   totalBurntFeesWei: string;
+  totalRentFeeWei: string;
+  totalBurnedWei: string;
   averageBlockRewardWei: string;
   averageBurntFeesWei: string;
+  averageRentFeeWei: string;
+  averageBurnedWei: string;
   averageFeePriceWei: string;
   averageTransactionGasUsed: string;
   averageTransactionInputDataSizeBytes: string;
@@ -444,7 +485,12 @@ export class ScannerStorage {
   ): Promise<ScannerStorage> {
     const db = openDb(connectionString);
     const storage = new ScannerStorage(db, options);
-    await storage.initSchema();
+    try {
+      await storage.initSchema();
+    } catch (error) {
+      await db.close();
+      throw error;
+    }
     return storage;
   }
 
@@ -457,33 +503,135 @@ export class ScannerStorage {
     return storage;
   }
 
+  /**
+   * Refuse a schema written by another data model before touching it.
+   *
+   * Every chain gets a fresh database: the tables are created in their final
+   * shape and never migrated, so a schema left by an older indexer (payloads,
+   * references, the pre-UDC attribute model) keeps its old columns, and the
+   * failure would otherwise surface much later as a confusing SQL error — or,
+   * worse, as old rows read through the new model. The chain id cannot tell
+   * two databases apart (a restarted chain reuses it), so the schema carries
+   * its own marker: `scanner_state.data_model`. A schema without it is
+   * accepted only while it holds no data; {@link initSchema} then writes it.
+   */
+  private async assertDataModel(): Promise<void> {
+    const tables = [
+      "scanner_state",
+      "blocks",
+      "transactions",
+      "transaction_operations",
+      "transaction_logs",
+      "transaction_records",
+      "account_balances",
+      "block_ranges",
+      "sender_stats",
+      "entity_versions",
+    ];
+    const present = await this.db.query<{ name: string; present: boolean }>(
+      `SELECT name, to_regclass(format('%I.%I', $1::text, name)) IS NOT NULL AS present
+       FROM unnest($2::text[]) AS name`,
+      [this.schema, textArrayLiteral(tables)],
+    );
+    const existing = present.rows.filter((row) => row.present).map((row) => row.name);
+    let marker: string | undefined;
+    if (existing.includes("scanner_state")) {
+      const result = await this.db.query<{ value: string }>(
+        `SELECT value FROM ${this.qScannerState} WHERE key = $1`,
+        [DATA_MODEL_KEY],
+      );
+      marker = result.rows[0]?.value;
+    }
+    if (marker === DATA_MODEL) return;
+    if (marker !== undefined) {
+      throw new IncompatibleDatabaseError(
+        `database schema "${this.schema}" was written by data model "${marker}"; this indexer writes ` +
+          `"${DATA_MODEL}" and needs a fresh database per chain. Point DATABASE_URL at an empty database.`,
+      );
+    }
+    const holdingData: string[] = [];
+    for (const table of existing) {
+      const qualified = `${quoteIdent(this.schema)}.${quoteIdent(table)}`;
+      const where =
+        table === "scanner_state" ? ` WHERE key IN ('last_successful_block', 'backfill_next_block')` : "";
+      const result = await this.db.query<{ any: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM ${qualified}${where}) AS any`,
+      );
+      if (result.rows[0]?.any) holdingData.push(table);
+    }
+    if (holdingData.length > 0) {
+      throw new IncompatibleDatabaseError(
+        `database schema "${this.schema}" holds data (${holdingData.join(", ")}) but no data model marker: ` +
+          `it was written by an indexer older than "${DATA_MODEL}". Each chain needs a fresh database; ` +
+          `point DATABASE_URL at an empty database.`,
+      );
+    }
+    // Empty but old-shaped tables would survive CREATE TABLE IF NOT EXISTS and
+    // fail at the first write; a column only this model has tells them apart.
+    const sentinels: Record<string, string> = {
+      blocks: "total_rent_fee_wei",
+      transactions: "rent_fee_wei",
+      transaction_operations: "schema_name",
+      transaction_records: "rent_fee_wei",
+      block_ranges: "total_rent_fee_wei",
+      sender_stats: "total_rent_fee_wei",
+    };
+    const expected = existing.filter((table) => sentinels[table] !== undefined);
+    if (expected.length > 0) {
+      const columns = await this.db.query<{ table_name: string; column_name: string }>(
+        `SELECT table_name, column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = ANY($2::text[])`,
+        [this.schema, textArrayLiteral(expected)],
+      );
+      const present = new Set(columns.rows.map((row) => `${row.table_name}.${row.column_name}`));
+      const outdated = expected.filter((table) => !present.has(`${table}.${sentinels[table]}`));
+      if (outdated.length > 0) {
+        throw new IncompatibleDatabaseError(
+          `database schema "${this.schema}" has tables of an older layout (${outdated.join(", ")}) and no data ` +
+            `model marker; this indexer (${DATA_MODEL}) never migrates them. Drop them or point DATABASE_URL at ` +
+            `an empty database.`,
+        );
+      }
+    }
+  }
+
   private async initSchema(): Promise<void> {
     if (this.schema !== "public") {
       await this.db.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(this.schema)}`);
     }
+    await this.assertDataModel();
+    // Wei and gas amounts are decimal TEXT (bigint-exact, see AGENTS.md); the
+    // fee columns are gas-only, and rent — burned outside gas on Arkiv UDC
+    // chains — has columns of its own. Every table is created in its final
+    // shape: a database belongs to one chain and one data model, so nothing
+    // here ever migrates an older layout (see assertDataModel).
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBlocks} (
         block_number BIGINT PRIMARY KEY,
+        block_hash TEXT,
+        parent_hash TEXT,
         block_date TEXT NOT NULL,
-        block_time_seconds TEXT NOT NULL DEFAULT '2',
+        block_time_seconds TEXT NOT NULL,
         base_block_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
-        total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        total_input_data_size_bytes TEXT NOT NULL,
+        total_input_data_compressed_size_bytes TEXT NOT NULL,
         max_gas_in_block TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
-        block_reward_wei TEXT NOT NULL DEFAULT '0',
-        burnt_fees_wei TEXT NOT NULL DEFAULT '0',
-        total_transaction_fee_wei TEXT NOT NULL DEFAULT '0',
-        fee_price_sum_wei TEXT NOT NULL DEFAULT '0',
-        priority_fee_sum_wei TEXT NOT NULL DEFAULT '0',
-        priority_fee_weighted_numerator_wei TEXT NOT NULL DEFAULT '0',
-        priority_fee_gas_weighted_numerator_wei TEXT NOT NULL DEFAULT '0',
-        average_fee_price_wei TEXT NOT NULL DEFAULT '0',
+        block_reward_wei TEXT NOT NULL,
+        burnt_fees_wei TEXT NOT NULL,
+        total_transaction_fee_wei TEXT NOT NULL,
+        total_rent_fee_wei TEXT NOT NULL,
+        total_burned_wei TEXT NOT NULL,
+        fee_price_sum_wei TEXT NOT NULL,
+        priority_fee_sum_wei TEXT NOT NULL,
+        priority_fee_weighted_numerator_wei TEXT NOT NULL,
+        priority_fee_gas_weighted_numerator_wei TEXT NOT NULL,
+        average_fee_price_wei TEXT NOT NULL,
         average_transaction_fee_wei TEXT NOT NULL,
-        average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
-        average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        average_transaction_gas_used TEXT NOT NULL,
+        average_transaction_input_data_size_bytes TEXT NOT NULL,
+        average_transaction_input_data_compressed_size_bytes TEXT NOT NULL,
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
         batcher_queue_size TEXT,
@@ -496,70 +644,6 @@ export class ScannerStorage {
       )
     `);
     await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS block_time_seconds TEXT NOT NULL DEFAULT '2'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS total_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS block_reward_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS total_transaction_fee_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS fee_price_sum_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS priority_fee_sum_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS priority_fee_weighted_numerator_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS priority_fee_gas_weighted_numerator_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS average_fee_price_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlocks}
-       ADD COLUMN IF NOT EXISTS average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.addNullableTextColumn(this.qBlocks, "batcher_queue_size");
-    await this.addNullableTextColumn(this.qBlocks, "batcher_intensity");
-    await this.addNullableTextColumn(this.qBlocks, "batcher_lower_threshold");
-    await this.addNullableTextColumn(this.qBlocks, "batcher_upper_threshold");
-    await this.addNullableTextColumn(this.qBlocks, "batcher_max_block_size");
-    await this.addNullableTextColumn(this.qBlocks, "batcher_max_tx_size");
-    await this.addNullableTextColumn(this.qBlocks, "block_hash");
-    await this.addNullableTextColumn(this.qBlocks, "parent_hash");
-    await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("blocks_block_hash_idx")}
        ON ${this.qBlocks} (block_hash)`,
     );
@@ -570,6 +654,13 @@ export class ScannerStorage {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // Claim an empty schema for this data model; a concurrent starter writing
+    // the same marker is fine.
+    await this.db.query(
+      `INSERT INTO ${this.qScannerState} (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO NOTHING`,
+      [DATA_MODEL_KEY, DATA_MODEL],
+    );
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qBaseloadConfigs} (
         name TEXT PRIMARY KEY,
@@ -587,6 +678,8 @@ export class ScannerStorage {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // log_count is null when the receipt carried no `logs` field ("not
+    // indexed"); 0 means "no events".
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactions} (
         block_number BIGINT NOT NULL,
@@ -601,8 +694,8 @@ export class ScannerStorage {
         value_wei TEXT NOT NULL,
         gas_limit TEXT NOT NULL,
         gas_used TEXT NOT NULL,
-        input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        input_data_size_bytes TEXT NOT NULL,
+        input_data_compressed_size_bytes TEXT NOT NULL,
         cumulative_gas_used TEXT,
         gas_price_wei TEXT,
         max_fee_per_gas_wei TEXT,
@@ -610,8 +703,10 @@ export class ScannerStorage {
         effective_gas_price_wei TEXT NOT NULL,
         priority_fee_wei TEXT NOT NULL,
         transaction_fee_wei TEXT NOT NULL,
+        rent_fee_wei TEXT NOT NULL,
         status TEXT,
         contract_address TEXT,
+        log_count INTEGER,
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (block_number, position)
       )
@@ -631,18 +726,6 @@ export class ScannerStorage {
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transactions_from_address_block_idx")}
        ON ${this.qTransactions} (LOWER(from_address), block_number, position)`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactions}
-       ADD COLUMN IF NOT EXISTS input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactions}
-       ADD COLUMN IF NOT EXISTS input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    // Null on rows written before logs were stored; 0 means "no events".
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactions} ADD COLUMN IF NOT EXISTS log_count INTEGER`,
     );
     // Receipt event logs: address, up to four topics and the ABI data — never
     // calldata. One row per log, keyed like the transaction it belongs to.
@@ -684,11 +767,14 @@ export class ScannerStorage {
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("account_balances_address_block_idx")}
        ON ${this.qAccountBalances} (address, block_number DESC)`,
     );
-    // Decoded Arkiv operation metadata per transaction. Payloads/calldata are
-    // never stored — only payload_size_bytes. Under reference mode we also keep
-    // the provider's payload-reference receipt metadata and the offline
-    // verification verdict (never the entity bytes). expires_at_blocks is BIGINT
-    // because uint32 max exceeds the int4 range.
+    // Decoded Arkiv operations, one row per execute() operation, as the
+    // decoder (v0.3, UDC) reported them. Calldata is never stored, and neither
+    // is any bytes attribute's content: `attributes` keeps each triple's
+    // name, raw typeId, type tag, indexed flag, value (null for bytes) and
+    // size, plus a bytes value's keccak256. The expiry pair is exact
+    // (NUMERIC(20) holds 2^64 − 1, the permanent expiry), as is the uint128
+    // salt; schema_name is the value of the operation's indexed str
+    // `arkiv.schema`, when it sets one.
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactionOperations} (
         block_number BIGINT NOT NULL,
@@ -699,37 +785,18 @@ export class ScannerStorage {
         operation_type INTEGER NOT NULL,
         operation TEXT NOT NULL,
         entity_key TEXT,
-        content_type TEXT,
-        payload_size_bytes INTEGER NOT NULL DEFAULT 0,
-        attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
-        expires_at_blocks BIGINT,
+        salt NUMERIC(39, 0),
+        creation_flags SMALLINT,
+        expires_at NUMERIC(20, 0),
+        min_lifetime NUMERIC(20, 0),
         new_owner TEXT,
-        is_reference BOOLEAN NOT NULL DEFAULT FALSE,
-        payload_reference JSONB,
-        reference_verification JSONB,
-        reference_error TEXT,
+        bytes_size INTEGER NOT NULL,
+        schema_name TEXT,
+        attributes JSONB NOT NULL,
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (block_number, position, op_index)
       )
     `);
-    // Backfill columns on tables created before reference mode. Defaults keep
-    // existing rows valid; the rich reference objects stay null until re-scanned.
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactionOperations}
-       ADD COLUMN IF NOT EXISTS is_reference BOOLEAN NOT NULL DEFAULT FALSE`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactionOperations}
-       ADD COLUMN IF NOT EXISTS payload_reference JSONB`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactionOperations}
-       ADD COLUMN IF NOT EXISTS reference_verification JSONB`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactionOperations}
-       ADD COLUMN IF NOT EXISTS reference_error TEXT`,
-    );
     await this.db.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_operations_hash_idx")}
        ON ${this.qTransactionOperations} (hash)`,
@@ -754,8 +821,8 @@ export class ScannerStorage {
         value_wei TEXT NOT NULL,
         gas_limit TEXT NOT NULL,
         gas_used TEXT NOT NULL,
-        input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        input_data_size_bytes TEXT NOT NULL,
+        input_data_compressed_size_bytes TEXT NOT NULL,
         cumulative_gas_used TEXT,
         gas_price_wei TEXT,
         max_fee_per_gas_wei TEXT,
@@ -763,6 +830,7 @@ export class ScannerStorage {
         effective_gas_price_wei TEXT NOT NULL,
         priority_fee_wei TEXT NOT NULL,
         transaction_fee_wei TEXT NOT NULL,
+        rent_fee_wei TEXT NOT NULL,
         status TEXT,
         contract_address TEXT,
         recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -777,14 +845,6 @@ export class ScannerStorage {
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("transaction_records_hash_idx")}
        ON ${this.qTransactionRecords} (hash)`,
     );
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactionRecords}
-       ADD COLUMN IF NOT EXISTS input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qTransactionRecords}
-       ADD COLUMN IF NOT EXISTS input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qSenderStats} (
         address TEXT PRIMARY KEY,
@@ -792,6 +852,7 @@ export class ScannerStorage {
         transaction_count BIGINT NOT NULL,
         total_gas_used TEXT NOT NULL,
         total_transaction_fee_wei TEXT NOT NULL,
+        total_rent_fee_wei TEXT NOT NULL,
         total_value_wei TEXT NOT NULL,
         average_gas_used TEXT NOT NULL,
         average_transaction_fee_wei TEXT NOT NULL,
@@ -813,36 +874,40 @@ export class ScannerStorage {
         range_end BIGINT NOT NULL,
         min_block_date TEXT NOT NULL,
         max_block_date TEXT NOT NULL,
-        average_block_time_seconds TEXT NOT NULL DEFAULT '2',
-        min_block_time_seconds TEXT NOT NULL DEFAULT '2',
-        max_block_time_seconds TEXT NOT NULL DEFAULT '2',
+        average_block_time_seconds TEXT NOT NULL,
+        min_block_time_seconds TEXT NOT NULL,
+        max_block_time_seconds TEXT NOT NULL,
         min_base_fee_wei TEXT NOT NULL,
         max_base_fee_wei TEXT NOT NULL,
         average_base_fee_wei TEXT NOT NULL,
         total_gas_used TEXT NOT NULL,
-        average_total_gas_used TEXT NOT NULL DEFAULT '0',
-        min_total_gas_used TEXT NOT NULL DEFAULT '0',
-        max_total_gas_used TEXT NOT NULL DEFAULT '0',
-        total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        average_total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        min_total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        max_total_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
-        average_total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
-        min_total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
-        max_total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        average_total_gas_used TEXT NOT NULL,
+        min_total_gas_used TEXT NOT NULL,
+        max_total_gas_used TEXT NOT NULL,
+        total_input_data_size_bytes TEXT NOT NULL,
+        average_total_input_data_size_bytes TEXT NOT NULL,
+        min_total_input_data_size_bytes TEXT NOT NULL,
+        max_total_input_data_size_bytes TEXT NOT NULL,
+        total_input_data_compressed_size_bytes TEXT NOT NULL,
+        average_total_input_data_compressed_size_bytes TEXT NOT NULL,
+        min_total_input_data_compressed_size_bytes TEXT NOT NULL,
+        max_total_input_data_compressed_size_bytes TEXT NOT NULL,
         total_max_gas TEXT NOT NULL,
         min_max_gas_in_block TEXT NOT NULL,
         max_max_gas_in_block TEXT NOT NULL,
         transaction_count INTEGER NOT NULL,
-        total_block_reward_wei TEXT NOT NULL DEFAULT '0',
-        total_burnt_fees_wei TEXT NOT NULL DEFAULT '0',
-        average_block_reward_wei TEXT NOT NULL DEFAULT '0',
-        average_burnt_fees_wei TEXT NOT NULL DEFAULT '0',
-        average_fee_price_wei TEXT NOT NULL DEFAULT '0',
-        average_transaction_gas_used TEXT NOT NULL DEFAULT '0',
-        average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0',
-        average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0',
+        total_block_reward_wei TEXT NOT NULL,
+        total_burnt_fees_wei TEXT NOT NULL,
+        total_rent_fee_wei TEXT NOT NULL,
+        total_burned_wei TEXT NOT NULL,
+        average_block_reward_wei TEXT NOT NULL,
+        average_burnt_fees_wei TEXT NOT NULL,
+        average_rent_fee_wei TEXT NOT NULL,
+        average_burned_wei TEXT NOT NULL,
+        average_fee_price_wei TEXT NOT NULL,
+        average_transaction_gas_used TEXT NOT NULL,
+        average_transaction_input_data_size_bytes TEXT NOT NULL,
+        average_transaction_input_data_compressed_size_bytes TEXT NOT NULL,
         average_priority_fee_weighted_wei TEXT NOT NULL,
         average_priority_fee_wei TEXT NOT NULL,
         min_batcher_queue_size TEXT,
@@ -858,126 +923,7 @@ export class ScannerStorage {
         PRIMARY KEY (range_size, range_start)
       )
     `);
-    const blockRangeMetricColumnsWereMissing = await this.hasMissingColumns("block_ranges", [
-      "average_block_time_seconds",
-      "min_block_time_seconds",
-      "max_block_time_seconds",
-      "average_total_gas_used",
-      "min_total_gas_used",
-      "max_total_gas_used",
-      "average_total_input_data_size_bytes",
-      "min_total_input_data_size_bytes",
-      "max_total_input_data_size_bytes",
-      "average_total_input_data_compressed_size_bytes",
-      "min_total_input_data_compressed_size_bytes",
-      "max_total_input_data_compressed_size_bytes",
-    ]);
-    await this.addRequiredTextColumn(this.qBlockRanges, "average_total_gas_used");
-    await this.addRequiredTextColumn(this.qBlockRanges, "average_block_time_seconds", "2");
-    await this.addRequiredTextColumn(this.qBlockRanges, "min_block_time_seconds", "2");
-    await this.addRequiredTextColumn(this.qBlockRanges, "max_block_time_seconds", "2");
-    await this.addRequiredTextColumn(this.qBlockRanges, "min_total_gas_used");
-    await this.addRequiredTextColumn(this.qBlockRanges, "max_total_gas_used");
-    await this.addRequiredTextColumn(this.qBlockRanges, "average_total_input_data_size_bytes");
-    await this.addRequiredTextColumn(this.qBlockRanges, "min_total_input_data_size_bytes");
-    await this.addRequiredTextColumn(this.qBlockRanges, "max_total_input_data_size_bytes");
-    await this.addRequiredTextColumn(this.qBlockRanges, "average_total_input_data_compressed_size_bytes");
-    await this.addRequiredTextColumn(this.qBlockRanges, "min_total_input_data_compressed_size_bytes");
-    await this.addRequiredTextColumn(this.qBlockRanges, "max_total_input_data_compressed_size_bytes");
-    if (blockRangeMetricColumnsWereMissing) {
-      await this.db.query(`DELETE FROM ${this.qBlockRanges}`);
-    }
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS total_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS total_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS total_block_reward_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS total_burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS average_block_reward_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS average_burnt_fees_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS average_fee_price_wei TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS average_transaction_gas_used TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS average_transaction_input_data_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS average_transaction_input_data_compressed_size_bytes TEXT NOT NULL DEFAULT '0'`,
-    );
-    await this.addNullableTextColumn(this.qBlockRanges, "min_batcher_queue_size");
-    await this.addNullableTextColumn(this.qBlockRanges, "max_batcher_queue_size");
-    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_queue_size");
-    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_intensity");
-    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_lower_threshold");
-    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_upper_threshold");
-    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_block_size");
-    await this.addNullableTextColumn(this.qBlockRanges, "average_batcher_max_tx_size");
-    await this.db.query(
-      `ALTER TABLE ${this.qBlockRanges}
-       ADD COLUMN IF NOT EXISTS is_complete BOOLEAN NOT NULL DEFAULT TRUE`,
-    );
-    // Repair jsonb values that were double-encoded into string scalars by the
-    // initial Bun.sql migration (it bound pre-stringified JSON params, which
-    // Bun encodes as JSON strings): unwrap the inner document. Idempotent —
-    // matches nothing once repaired.
-    await this.db.query(
-      `UPDATE ${this.qBaseloadConfigs}
-       SET config_json = (config_json #>> '{}')::jsonb
-       WHERE jsonb_typeof(config_json) = 'string'`,
-    );
-    await this.db.query(
-      `UPDATE ${this.qTransactionOperations}
-       SET attributes = (attributes #>> '{}')::jsonb
-       WHERE jsonb_typeof(attributes) = 'string'`,
-    );
   }
-
-  private async addNullableTextColumn(table: string, column: string): Promise<void> {
-    await this.db.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT`);
-  }
-
-  private async addRequiredTextColumn(table: string, column: string, defaultValue = "0"): Promise<void> {
-    await this.db.query(
-      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} TEXT NOT NULL DEFAULT ${quoteStringLiteral(defaultValue)}`,
-    );
-  }
-
-  private async hasMissingColumns(tableName: string, columns: readonly string[]): Promise<boolean> {
-    const result = await this.db.query<{ column_name: string }>(
-      `SELECT column_name
-       FROM information_schema.columns
-       WHERE table_schema = $1
-         AND table_name = $2
-         AND column_name = ANY($3::text[])`,
-      [this.schema, tableName, textArrayLiteral(columns)],
-    );
-    const present = new Set(result.rows.map((row) => row.column_name));
-    return columns.some((column) => !present.has(column));
-  }
-
   async getLastSuccessfulBlock(): Promise<bigint | undefined> {
     return this.getStateBigInt(LAST_SUCCESSFUL_BLOCK_KEY);
   }
@@ -996,6 +942,55 @@ export class ScannerStorage {
 
   async saveChainId(chainId: bigint): Promise<void> {
     await this.upsertStateValue(this.db, CHAIN_ID_KEY, chainId.toString());
+  }
+
+  /** The block-0 hash of the chain this database indexes, as the scanner recorded it. */
+  async getGenesisHash(): Promise<string | undefined> {
+    return this.getStateValue(GENESIS_HASH_KEY);
+  }
+
+  /**
+   * Bind the database to the chain whose block 0 is `genesisHash` (lowercase
+   * hex), or refuse it when it already belongs to another. The chain id alone
+   * cannot tell: a restarted chain keeps its id, and an index of the old one
+   * would otherwise keep serving — and mixing in — the old chain's rows.
+   * Checked against the recorded hash and against a stored block 0.
+   */
+  async bindGenesisHash(genesisHash: string): Promise<void> {
+    const expected = genesisHash.toLowerCase();
+    await this.assertStoredGenesisHash(expected);
+    await this.db.query(
+      `INSERT INTO ${this.qScannerState} (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO NOTHING`,
+      [GENESIS_HASH_KEY, expected],
+    );
+    await this.assertStoredGenesisHash(expected);
+  }
+
+  /**
+   * The backend's half of {@link bindGenesisHash}, which needs no node: the
+   * recorded genesis hash must be the hash of the stored block 0 when both
+   * are there. Throws {@link IncompatibleDatabaseError} otherwise.
+   */
+  async assertStoredGenesisHash(expected?: string): Promise<void> {
+    const recorded = await this.getGenesisHash();
+    const block0 = await this.db.query<{ block_hash: string | null }>(
+      `SELECT block_hash FROM ${this.qBlocks} WHERE block_number = 0`,
+    );
+    const stored = block0.rows[0]?.block_hash?.toLowerCase() ?? undefined;
+    const claims = [
+      ...(expected !== undefined ? [["the node's block 0", expected] as const] : []),
+      ...(recorded !== undefined ? [["the recorded genesis hash", recorded] as const] : []),
+      ...(stored !== undefined ? [["the stored block 0", stored] as const] : []),
+    ];
+    const [first, ...rest] = claims;
+    const conflict = first ? rest.find(([, hash]) => hash !== first[1]) : undefined;
+    if (first && conflict) {
+      throw new IncompatibleDatabaseError(
+        `database schema "${this.schema}" belongs to another chain: ${first[0]} is ${first[1]} but ` +
+          `${conflict[0]} is ${conflict[1]}. Each chain needs a fresh database; point DATABASE_URL at an empty database.`,
+      );
+    }
   }
 
   /**
@@ -1279,8 +1274,10 @@ export class ScannerStorage {
           batcher_max_tx_size,
           block_hash,
           parent_hash,
+          total_rent_fee_wei,
+          total_burned_wei,
           scanned_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, NOW())
         ON CONFLICT (block_number) DO UPDATE SET
           block_date = EXCLUDED.block_date,
           block_time_seconds = EXCLUDED.block_time_seconds,
@@ -1312,6 +1309,8 @@ export class ScannerStorage {
           batcher_max_tx_size = COALESCE(EXCLUDED.batcher_max_tx_size, existing.batcher_max_tx_size),
           block_hash = COALESCE(EXCLUDED.block_hash, existing.block_hash),
           parent_hash = COALESCE(EXCLUDED.parent_hash, existing.parent_hash),
+          total_rent_fee_wei = EXCLUDED.total_rent_fee_wei,
+          total_burned_wei = EXCLUDED.total_burned_wei,
           scanned_at = NOW()`,
         [
           metrics.blockNumber.toString(),
@@ -1345,6 +1344,8 @@ export class ScannerStorage {
           metrics.batcherMaxTxSize ?? null,
           metrics.blockHash ?? null,
           metrics.parentHash ?? null,
+          metrics.totalRentFeeWei,
+          metrics.totalBurnedWei,
         ],
       );
       if (transactions !== undefined) {
@@ -1434,7 +1435,7 @@ export class ScannerStorage {
       transaction: InspectedTransaction;
     }>,
   ): Promise<void> {
-    const columnsPerRow = 25;
+    const columnsPerRow = 26;
     const params: Array<string | number | null> = [];
     const values = rows.map((row, rowIndex) => {
       const offset = rowIndex * columnsPerRow;
@@ -1463,6 +1464,7 @@ export class ScannerStorage {
         transaction.effectiveGasPriceWei,
         transaction.priorityFeeWei,
         transaction.transactionFeeWei,
+        transaction.rentFeeWei,
         transaction.status,
         transaction.contractAddress,
       );
@@ -1498,6 +1500,7 @@ export class ScannerStorage {
         effective_gas_price_wei,
         priority_fee_wei,
         transaction_fee_wei,
+        rent_fee_wei,
         status,
         contract_address
       ) VALUES ${values.join(", ")}
@@ -1522,6 +1525,7 @@ export class ScannerStorage {
         effective_gas_price_wei = EXCLUDED.effective_gas_price_wei,
         priority_fee_wei = EXCLUDED.priority_fee_wei,
         transaction_fee_wei = EXCLUDED.transaction_fee_wei,
+        rent_fee_wei = EXCLUDED.rent_fee_wei,
         status = EXCLUDED.status,
         contract_address = EXCLUDED.contract_address,
         recorded_at = NOW()`,
@@ -1596,7 +1600,7 @@ export class ScannerStorage {
       return;
     }
 
-    const columnsPerRow = 24;
+    const columnsPerRow = 25;
     const params: Array<string | number | null> = [];
     const values = transactions.map((transaction, rowIndex) => {
       const offset = rowIndex * columnsPerRow;
@@ -1622,6 +1626,7 @@ export class ScannerStorage {
         transaction.effectiveGasPriceWei,
         transaction.priorityFeeWei,
         transaction.transactionFeeWei,
+        transaction.rentFeeWei,
         transaction.status,
         transaction.contractAddress,
         transaction.logs === undefined ? null : transaction.logs.length,
@@ -1656,6 +1661,7 @@ export class ScannerStorage {
         effective_gas_price_wei,
         priority_fee_wei,
         transaction_fee_wei,
+        rent_fee_wei,
         status,
         contract_address,
         log_count
@@ -1752,19 +1758,11 @@ export class ScannerStorage {
     // Postgres caps one statement at 65,535 bind parameters and a single
     // transaction can pack thousands of cheap operations, so insert in bounded
     // chunks. Still atomic: saveBlockMetrics wraps this in BEGIN/COMMIT.
-    const columnsPerRow = 17;
+    const columnsPerRow = 16;
     const maxRowsPerInsert = 2_000;
     for (let start = 0; start < rows.length; start += maxRowsPerInsert) {
       const chunk = rows.slice(start, start + maxRowsPerInsert);
-      const params: Array<
-        | string
-        | number
-        | boolean
-        | null
-        | ArkivOperationAttribute[]
-        | ArkivPayloadReference
-        | ArkivReferenceVerification
-      > = [];
+      const params: Array<string | number | null | ArkivOperationAttribute[]> = [];
       const values = chunk.map(({ transaction, operation }, rowIndex) => {
         const offset = rowIndex * columnsPerRow;
         params.push(
@@ -1775,28 +1773,27 @@ export class ScannerStorage {
           metrics.blockDate,
           operation.operationType,
           operation.operation,
-          operation.entityKey,
-          operation.contentType,
-          operation.payloadSizeBytes,
-          // Bind the array/object itself: Bun.sql serializes JS objects/arrays
-          // to jsonb documents but double-encodes pre-stringified JSON strings
-          // into jsonb string scalars.
-          operation.attributes,
-          operation.expiresAtBlocks.toString(),
+          operation.entityKey?.toLowerCase() ?? null,
+          operation.salt,
+          operation.creationFlags,
+          operation.expiresAt,
+          operation.minLifetime,
           operation.newOwner,
-          operation.isReference,
-          // Reference receipt metadata + verdict (never entity bytes); jsonb.
-          operation.payloadReference,
-          operation.referenceVerification,
-          operation.referenceError,
+          operation.bytesSize,
+          operation.schemaName,
+          // Bind the array itself: Bun.sql serializes JS arrays to jsonb
+          // documents but double-encodes pre-stringified JSON into a jsonb
+          // string scalar.
+          operation.attributes,
         );
         const placeholders = Array.from(
           { length: columnsPerRow },
           (_unused, columnIndex) => `$${offset + columnIndex + 1}`,
         );
-        placeholders[10] = `${placeholders[10]}::jsonb`; // attributes
-        placeholders[14] = `${placeholders[14]}::jsonb`; // payload_reference
-        placeholders[15] = `${placeholders[15]}::jsonb`; // reference_verification
+        placeholders[8] = `${placeholders[8]}::numeric`; // salt
+        placeholders[10] = `${placeholders[10]}::numeric`; // expires_at
+        placeholders[11] = `${placeholders[11]}::numeric`; // min_lifetime
+        placeholders[15] = `${placeholders[15]}::jsonb`; // attributes
         return `(${placeholders.join(", ")})`;
       });
 
@@ -1810,15 +1807,14 @@ export class ScannerStorage {
           operation_type,
           operation,
           entity_key,
-          content_type,
-          payload_size_bytes,
-          attributes,
-          expires_at_blocks,
+          salt,
+          creation_flags,
+          expires_at,
+          min_lifetime,
           new_owner,
-          is_reference,
-          payload_reference,
-          reference_verification,
-          reference_error
+          bytes_size,
+          schema_name,
+          attributes
         ) VALUES ${values.join(", ")}`,
         params,
       );
@@ -1887,69 +1883,54 @@ export class ScannerStorage {
     return () => subscription.unlisten();
   }
 
-  async getOperationsByHash(hash: string): Promise<ArkivOperation[]> {
+  async getOperationsByHash(hash: string): Promise<StoredArkivOperation[]> {
     const result = await this.db.query<TransactionOperationRow>(
-      `SELECT
-        op_index,
-        operation_type,
-        operation,
-        entity_key,
-        content_type,
-        payload_size_bytes,
-        attributes,
-        expires_at_blocks,
-        new_owner,
-        is_reference,
-        payload_reference,
-        reference_verification,
-        reference_error
-      FROM ${this.qTransactionOperations}
-      WHERE hash = $1
-      ORDER BY block_number, position, op_index`,
+      `SELECT ${OPERATION_SELECT_COLUMNS}
+      FROM ${this.qTransactionOperations} o
+      WHERE o.hash = $1
+      ORDER BY o.block_number, o.position, o.op_index`,
       [hash.toLowerCase()],
     );
     return result.rows.map(mapTransactionOperationRow);
   }
 
-  /** Column list shared by the entity-history queries. */
-  private static readonly ENTITY_OPERATION_COLUMNS = `block_number,
-        position,
-        op_index,
-        hash,
-        block_date,
-        operation_type,
-        operation,
-        entity_key,
-        content_type,
-        payload_size_bytes,
-        attributes,
-        expires_at_blocks,
-        new_owner,
-        is_reference,
-        payload_reference,
-        reference_verification,
-        reference_error`;
+  /**
+   * The entity-history columns: the operation, its transaction context, and
+   * what the transaction paid in rent — which belongs to the transaction as a
+   * whole, so the number of operations sharing it comes along.
+   */
+  private entityOperationColumns(): string {
+    return `${OPERATION_SELECT_COLUMNS},
+        o.hash,
+        o.block_date,
+        t.status AS transaction_status,
+        t.rent_fee_wei AS transaction_rent_fee_wei,
+        (SELECT COUNT(*)::int FROM ${this.qTransactionOperations} n
+          WHERE n.block_number = o.block_number AND n.position = o.position) AS transaction_operation_count`;
+  }
 
   /**
    * The most recent `limit` stored operations on one entity key (create,
-   * update, extend, transfer, delete, expire) in chain order, each joined with
-   * its transaction context (block, position, hash, date), plus the total
-   * stored count. Served by the entity_key index. When older operations fall
-   * outside the slice, the earliest stored one is fetched separately so the
-   * create stays reachable.
+   * patch, extend, transfer, delete) in chain order, each joined with its
+   * transaction context (block, position, hash, date, status, rent), plus the
+   * total stored count. Served by the entity_key index. When older operations
+   * fall outside the slice, the earliest stored one is fetched separately so
+   * the create stays reachable.
    */
   async getEntityOperationHistory(
     entityKey: string,
     limit = DEFAULT_ENTITY_HISTORY_LIMIT,
   ): Promise<EntityOperationHistory> {
     const key = entityKey.toLowerCase();
+    const from = `FROM ${this.qTransactionOperations} o
+      LEFT JOIN ${this.qTransactions} t ON t.block_number = o.block_number AND t.position = o.position
+      WHERE o.entity_key = $1`;
     const result = await this.db.query<EntityOperationRow & { total_operations: string }>(
       `SELECT
-        ${ScannerStorage.ENTITY_OPERATION_COLUMNS},
+        ${this.entityOperationColumns()},
         COUNT(*) OVER () AS total_operations
-      FROM ${this.qTransactionOperations}
-      WHERE entity_key = $1
-      ORDER BY block_number DESC, position DESC, op_index DESC
+      ${from}
+      ORDER BY o.block_number DESC, o.position DESC, o.op_index DESC
       LIMIT $2`,
       [key, limit],
     );
@@ -1959,10 +1940,9 @@ export class ScannerStorage {
     let firstOperation: StoredEntityOperation | null = null;
     if (totalOperations > operations.length) {
       const first = await this.db.query<EntityOperationRow>(
-        `SELECT ${ScannerStorage.ENTITY_OPERATION_COLUMNS}
-        FROM ${this.qTransactionOperations}
-        WHERE entity_key = $1
-        ORDER BY block_number ASC, position ASC, op_index ASC
+        `SELECT ${this.entityOperationColumns()}
+        ${from}
+        ORDER BY o.block_number ASC, o.position ASC, o.op_index ASC
         LIMIT 1`,
         [key],
       );
@@ -2145,6 +2125,8 @@ export class ScannerStorage {
         block_reward_wei,
         burnt_fees_wei,
         total_transaction_fee_wei,
+        total_rent_fee_wei,
+        total_burned_wei,
         fee_price_sum_wei,
         priority_fee_sum_wei,
         priority_fee_weighted_numerator_wei,
@@ -2183,6 +2165,8 @@ export class ScannerStorage {
       block_reward_wei: string;
       burnt_fees_wei: string;
       total_transaction_fee_wei: string;
+      total_rent_fee_wei: string;
+      total_burned_wei: string;
       fee_price_sum_wei: string;
       priority_fee_sum_wei: string;
       priority_fee_weighted_numerator_wei: string;
@@ -2219,6 +2203,8 @@ export class ScannerStorage {
       blockRewardWei: row.block_reward_wei,
       burntFeesWei: row.burnt_fees_wei,
       totalTransactionFeeWei: row.total_transaction_fee_wei,
+      totalRentFeeWei: row.total_rent_fee_wei,
+      totalBurnedWei: row.total_burned_wei,
       feePriceSumWei: row.fee_price_sum_wei,
       priorityFeeSumWei: row.priority_fee_sum_wei,
       priorityFeeWeightedNumeratorWei: row.priority_fee_weighted_numerator_wei,
@@ -2390,6 +2376,7 @@ export class ScannerStorage {
       effective_gas_price_wei: string;
       priority_fee_wei: string;
       transaction_fee_wei: string;
+      rent_fee_wei: string;
       status: string | null;
       contract_address: string | null;
       log_count: number | null;
@@ -2662,6 +2649,7 @@ export class ScannerStorage {
            effective_gas_price_wei,
            priority_fee_wei,
            transaction_fee_wei,
+           rent_fee_wei,
            status,
            contract_address,
            to_char(recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS recorded_at_utc
@@ -2703,6 +2691,8 @@ export class ScannerStorage {
       ...(block.totalTransactionFeeWei != null
         ? { totalTransactionFeeWei: block.totalTransactionFeeWei }
         : {}),
+      totalRentFeeWei: block.totalRentFeeWei,
+      totalBurnedWei: block.totalBurnedWei,
       ...(block.averageFeePriceWei != null ? { averageFeePriceWei: block.averageFeePriceWei } : {}),
       ...(block.averageTransactionFeeWei != null
         ? { averageTransactionFeeWei: block.averageTransactionFeeWei }
@@ -2742,6 +2732,7 @@ export class ScannerStorage {
           transaction_count,
           total_gas_used,
           total_transaction_fee_wei,
+          total_rent_fee_wei,
           total_value_wei,
           average_gas_used,
           average_transaction_fee_wei,
@@ -2757,6 +2748,7 @@ export class ScannerStorage {
           COUNT(*) AS transaction_count,
           SUM(gas_used::numeric)::text AS total_gas_used,
           SUM(transaction_fee_wei::numeric)::text AS total_transaction_fee_wei,
+          SUM(rent_fee_wei::numeric)::text AS total_rent_fee_wei,
           SUM(value_wei::numeric)::text AS total_value_wei,
           TRUNC(SUM(gas_used::numeric) / COUNT(*), 0)::text AS average_gas_used,
           TRUNC(SUM(transaction_fee_wei::numeric) / COUNT(*), 0)::text AS average_transaction_fee_wei,
@@ -2787,6 +2779,7 @@ export class ScannerStorage {
          transaction_count,
          total_gas_used,
          total_transaction_fee_wei,
+         total_rent_fee_wei,
          total_value_wei,
          average_gas_used,
          average_transaction_fee_wei,
@@ -3014,9 +3007,13 @@ export class ScannerStorage {
         average_batcher_upper_threshold,
         average_batcher_max_block_size,
         average_batcher_max_tx_size,
+        total_rent_fee_wei,
+        total_burned_wei,
+        average_rent_fee_wei,
+        average_burned_wei,
         is_complete,
         aggregated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, TRUE, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, TRUE, NOW())
       ON CONFLICT (range_size, range_start) DO UPDATE SET
         range_end = EXCLUDED.range_end,
         min_block_date = EXCLUDED.min_block_date,
@@ -3061,6 +3058,10 @@ export class ScannerStorage {
         average_batcher_upper_threshold = EXCLUDED.average_batcher_upper_threshold,
         average_batcher_max_block_size = EXCLUDED.average_batcher_max_block_size,
         average_batcher_max_tx_size = EXCLUDED.average_batcher_max_tx_size,
+        total_rent_fee_wei = EXCLUDED.total_rent_fee_wei,
+        total_burned_wei = EXCLUDED.total_burned_wei,
+        average_rent_fee_wei = EXCLUDED.average_rent_fee_wei,
+        average_burned_wei = EXCLUDED.average_burned_wei,
         is_complete = TRUE,
         aggregated_at = NOW()`,
       [
@@ -3109,6 +3110,10 @@ export class ScannerStorage {
         metrics.averageBatcherUpperThreshold ?? null,
         metrics.averageBatcherMaxBlockSize ?? null,
         metrics.averageBatcherMaxTxSize ?? null,
+        metrics.totalRentFeeWei,
+        metrics.totalBurnedWei,
+        metrics.averageRentFeeWei,
+        metrics.averageBurnedWei,
       ],
     );
   }
@@ -3176,8 +3181,12 @@ export class ScannerStorage {
         transaction_count,
         total_block_reward_wei,
         total_burnt_fees_wei,
+        total_rent_fee_wei,
+        total_burned_wei,
         average_block_reward_wei,
         average_burnt_fees_wei,
+        average_rent_fee_wei,
+        average_burned_wei,
         average_fee_price_wei,
         average_transaction_gas_used,
         average_transaction_input_data_size_bytes,
@@ -3228,8 +3237,12 @@ export class ScannerStorage {
       transaction_count: number;
       total_block_reward_wei: string;
       total_burnt_fees_wei: string;
+      total_rent_fee_wei: string;
+      total_burned_wei: string;
       average_block_reward_wei: string;
       average_burnt_fees_wei: string;
+      average_rent_fee_wei: string;
+      average_burned_wei: string;
       average_fee_price_wei: string;
       average_transaction_gas_used: string;
       average_transaction_input_data_size_bytes: string;
@@ -3276,8 +3289,12 @@ export class ScannerStorage {
       transactionCount: row.transaction_count,
       totalBlockRewardWei: row.total_block_reward_wei,
       totalBurntFeesWei: row.total_burnt_fees_wei,
+      totalRentFeeWei: row.total_rent_fee_wei,
+      totalBurnedWei: row.total_burned_wei,
       averageBlockRewardWei: row.average_block_reward_wei,
       averageBurntFeesWei: row.average_burnt_fees_wei,
+      averageRentFeeWei: row.average_rent_fee_wei,
+      averageBurnedWei: row.average_burned_wei,
       averageFeePriceWei: row.average_fee_price_wei,
       averageTransactionGasUsed: row.average_transaction_gas_used,
       averageTransactionInputDataSizeBytes: row.average_transaction_input_data_size_bytes,
@@ -3550,10 +3567,6 @@ function quoteIdent(name: string): string {
   return `"${name}"`;
 }
 
-function quoteStringLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 function regclassName(schema: string, tableName: string): string {
   return `${quoteIdent(schema)}.${quoteIdent(tableName)}`;
 }
@@ -3593,6 +3606,7 @@ interface SenderStatsRow {
   transaction_count: string;
   total_gas_used: string;
   total_transaction_fee_wei: string;
+  total_rent_fee_wei: string;
   total_value_wei: string;
   average_gas_used: string;
   average_transaction_fee_wei: string;
@@ -3610,29 +3624,45 @@ type TransactionRecordRow = {
   recorded_at_utc: string;
 } & TransactionRow;
 
+/** The stored operation columns, in the shape mapTransactionOperationRow reads, over the alias `o`. */
+const OPERATION_SELECT_COLUMNS = `o.block_number,
+        o.position,
+        o.op_index,
+        o.operation_type,
+        o.operation,
+        o.entity_key,
+        o.salt::text AS salt,
+        o.creation_flags,
+        o.expires_at::text AS expires_at,
+        o.min_lifetime::text AS min_lifetime,
+        o.new_owner,
+        o.bytes_size,
+        o.schema_name,
+        o.attributes`;
+
 interface TransactionOperationRow {
+  block_number: string;
+  position: number;
   op_index: number;
   operation_type: number;
   operation: string;
   entity_key: string | null;
-  content_type: string | null;
-  payload_size_bytes: number;
-  attributes: ArkivOperationAttribute[] | string;
-  expires_at_blocks: string | null;
+  salt: string | null;
+  creation_flags: number | null;
+  expires_at: string | null;
+  min_lifetime: string | null;
   new_owner: string | null;
-  is_reference: boolean;
-  // The `| string` union mirrors `attributes`: defends against a legacy
-  // double-encoded jsonb row written before Bun.sql object-binding.
-  payload_reference: ArkivPayloadReference | string | null;
-  reference_verification: ArkivReferenceVerification | string | null;
-  reference_error: string | null;
+  bytes_size: number;
+  schema_name: string | null;
+  attributes: ArkivOperationAttribute[];
 }
 
 type EntityOperationRow = TransactionOperationRow & {
-  block_number: string;
-  position: number;
   hash: string;
   block_date: string;
+  transaction_status: string | null;
+  transaction_rent_fee_wei: string | null;
+  transaction_operation_count: number;
 };
 
 interface TransactionRow {
@@ -3657,6 +3687,7 @@ interface TransactionRow {
   effective_gas_price_wei: string;
   priority_fee_wei: string;
   transaction_fee_wei: string;
+  rent_fee_wei: string;
   status: string | null;
   contract_address: string | null;
   /** Absent on transaction_records rows, which never carry logs. */
@@ -3763,6 +3794,8 @@ function mapSenderStatsRow(row: SenderStatsRow): StoredSenderStats {
     transactionCount: row.transaction_count,
     totalGasUsed: row.total_gas_used,
     totalTransactionFeeWei: row.total_transaction_fee_wei,
+    totalRentFeeWei: row.total_rent_fee_wei,
+    totalCostWei: (BigInt(row.total_transaction_fee_wei) + BigInt(row.total_rent_fee_wei)).toString(),
     totalValueWei: row.total_value_wei,
     averageGasUsed: row.average_gas_used,
     averageTransactionFeeWei: row.average_transaction_fee_wei,
@@ -3794,28 +3827,27 @@ function parseTransactionRecordCategory(value: string): TransactionRecordCategor
   throw new Error(`Unknown transaction record category: ${value}`);
 }
 
-function mapTransactionOperationRow(row: TransactionOperationRow): ArkivOperation {
-  return {
+function mapTransactionOperationRow(row: TransactionOperationRow): StoredArkivOperation {
+  const operation: ArkivOperation = {
     opIndex: row.op_index,
     operationType: row.operation_type,
     operation: row.operation,
     entityKey: row.entity_key,
-    contentType: row.content_type,
-    payloadSizeBytes: row.payload_size_bytes,
-    // Bun.sql parses jsonb on read, so attributes normally arrive as an array.
-    // Rows written while Bun double-encoded stringified params surface as JSON
-    // strings instead; parse those. expires_at_blocks is BIGINT (string).
-    attributes:
-      typeof row.attributes === "string"
-        ? (JSON.parse(row.attributes) as ArkivOperationAttribute[])
-        : row.attributes,
-    expiresAtBlocks: Number(row.expires_at_blocks ?? 0),
+    salt: row.salt,
+    creationFlags: row.creation_flags,
+    expiresAt: row.expires_at,
+    minLifetime: row.min_lifetime,
     newOwner: row.new_owner,
-    // is_reference is NOT NULL DEFAULT FALSE, so always a real boolean.
-    isReference: row.is_reference,
-    payloadReference: parseJsonbColumn<ArkivPayloadReference>(row.payload_reference),
-    referenceVerification: parseJsonbColumn<ArkivReferenceVerification>(row.reference_verification),
-    referenceError: row.reference_error,
+    bytesSize: row.bytes_size,
+    schemaName: row.schema_name,
+    // Bun.sql parses jsonb on read.
+    attributes: row.attributes,
+  };
+  const resolvedExpiresAt = resolveOperationExpiry(BigInt(row.block_number), operation);
+  return {
+    ...operation,
+    resolvedExpiresAt,
+    permanent: resolvedExpiresAt === null ? null : resolvedExpiresAt === PERMANENT_EXPIRES_AT,
   };
 }
 
@@ -3827,17 +3859,10 @@ function mapEntityOperationRow(row: EntityOperationRow): StoredEntityOperation {
     blockDate: row.block_date,
     position: row.position,
     hash: row.hash,
+    transactionStatus: row.transaction_status,
+    transactionRentFeeWei: row.transaction_rent_fee_wei,
+    transactionOperationCount: row.transaction_operation_count,
   };
-}
-
-/**
- * Read a nullable jsonb column. Bun.sql parses jsonb to a JS value on read, but
- * a legacy double-encoded row surfaces as a JSON string — parse those, mirroring
- * the attributes handling above.
- */
-function parseJsonbColumn<T>(value: T | string | null): T | null {
-  if (value === null) return null;
-  return typeof value === "string" ? (JSON.parse(value) as T) : value;
 }
 
 function mapTransactionRow(row: TransactionRow): StoredTransaction {
@@ -3864,6 +3889,8 @@ function mapTransactionRow(row: TransactionRow): StoredTransaction {
     effectiveGasPriceWei: row.effective_gas_price_wei,
     priorityFeeWei: row.priority_fee_wei,
     transactionFeeWei: row.transaction_fee_wei,
+    rentFeeWei: row.rent_fee_wei,
+    totalCostWei: (BigInt(row.transaction_fee_wei) + BigInt(row.rent_fee_wei)).toString(),
     status: row.status,
     contractAddress: row.contract_address as Hex | null,
     logCount: row.log_count ?? null,
@@ -3890,6 +3917,7 @@ function stripStoredTransactionContext(row: StoredTransaction): InspectedTransac
     effectiveGasPriceWei: row.effectiveGasPriceWei,
     priorityFeeWei: row.priorityFeeWei,
     transactionFeeWei: row.transactionFeeWei,
+    rentFeeWei: row.rentFeeWei,
     status: row.status,
     contractAddress: row.contractAddress,
   };

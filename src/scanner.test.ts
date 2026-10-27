@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { udcAttribute } from "./testUdc";
 import {
   backfillDownForSlice,
   fillRecentMissingBatcherMetrics,
@@ -8,6 +9,7 @@ import {
 } from "./scanner";
 import {
   ARKIV_REGISTRY_ADDRESS,
+  DecoderContractError,
   ENTITY_CREATED_TOPIC0,
   type ArkivDecoderClient,
   type ArkivOperation,
@@ -283,6 +285,49 @@ describe("scanOneBlock", () => {
     );
 
     expect(storage.savedOperations[0]?.[0]?.operations[0]?.entityKey).toBe(entityKey);
+  });
+
+  test("a decoder answering outside the UDC contract fails the block, which is retried until it does not", async () => {
+    const block = blockWithTransactions(1);
+    block.transactions[0] = {
+      ...block.transactions[0]!,
+      to: ARKIV_REGISTRY_ADDRESS as Hex,
+      input: "0x1234" as Hex,
+    };
+    const rpc = new StaticBlockRpc(block);
+    const storage = new FakeStorage();
+    const runtime = new FakeRuntime();
+    const decoder = new FakeDecoderClient();
+    let refusals = 2;
+    const original = decoder.decodeCalldata.bind(decoder);
+    decoder.decodeCalldata = async (data: Hex) => {
+      if (refusals-- > 0) {
+        throw new DecoderContractError("Arkiv decoder at http://decoder.test (version v0.2.2) answered outside the UDC contract");
+      }
+      return original(data);
+    };
+    const captured = captureConsoleError();
+    try {
+      await scanForwardToSafeHead(
+        1n,
+        1n,
+        config({ retryMs: 7 }),
+        rpc as unknown as EthereumRpcClient,
+        storage as unknown as ScannerStorage,
+        runtime,
+        undefined,
+        undefined,
+        decoder as unknown as ArkivDecoderClient,
+      );
+    } finally {
+      captured.restore();
+    }
+
+    // Two failed attempts stored nothing; the third stored the block with its operations.
+    expect(runtime.sleeps).toEqual([7, 7]);
+    expect(captured.calls[0]?.[1]).toBeInstanceOf(DecoderContractError);
+    expect(storage.savedOperations).toHaveLength(1);
+    expect(storage.lastSuccessfulBlock).toBe(1n);
   });
 
   test("skips Arkiv decoding when transaction row storage is disabled", async () => {
@@ -844,15 +889,14 @@ class FakeDecoderClient {
       operationType: 1,
       operation: "create",
       entityKey: `0x${"11".repeat(32)}`,
-      contentType: "text/plain",
-      payloadSizeBytes: 4,
-      attributes: [{ key: "project", valueType: 2, valueTypeName: "string", value: "demo" }],
-      expiresAtBlocks: 100,
+      salt: "1",
+      creationFlags: 0,
+      expiresAt: "0",
+      minLifetime: "100",
       newOwner: null,
-      isReference: false,
-      payloadReference: null,
-      referenceVerification: null,
-      referenceError: null,
+      bytesSize: 0,
+      schemaName: null,
+      attributes: [udcAttribute("project", "str", "demo")],
     },
   ];
 
@@ -1012,6 +1056,8 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     blockRewardWei: "0",
     burntFeesWei: "0",
     totalTransactionFeeWei: "0",
+    totalRentFeeWei: "0",
+    totalBurnedWei: "0",
     feePriceSumWei: "0",
     priorityFeeSumWei: "0",
     priorityFeeWeightedNumeratorWei: "0",

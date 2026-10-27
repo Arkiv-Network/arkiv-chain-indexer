@@ -257,10 +257,10 @@ interface OperationRow {
   op_index: number;
   operation_type: number;
   entity_key: string | null;
-  content_type: string | null;
-  payload_size_bytes: number;
-  attributes: ArkivOperationAttribute[] | string;
-  expires_at_blocks: string | null;
+  creation_flags: number | null;
+  attributes: ArkivOperationAttribute[];
+  expires_at: string | null;
+  min_lifetime: string | null;
   new_owner: string | null;
   from_address: string | null;
   status: string | null;
@@ -805,8 +805,8 @@ export class EntityIndexStorage implements EntityIndexReader {
     const operations = await client.query<OperationRow>(
       `WITH txs AS (${txs})
        SELECT o.block_number::text AS block_number, o.position, o.op_index, o.operation_type, o.entity_key,
-              o.content_type, o.payload_size_bytes, o.attributes, o.expires_at_blocks::text AS expires_at_blocks,
-              o.new_owner, t.from_address, t.status, t.log_count
+              o.creation_flags, o.attributes, o.expires_at::text AS expires_at,
+              o.min_lifetime::text AS min_lifetime, o.new_owner, t.from_address, t.status, t.log_count
        FROM ${this.qOperations} o
        JOIN txs ON txs.block_number = o.block_number AND txs.position = o.position
        JOIN ${this.qTransactions} t ON t.block_number = o.block_number AND t.position = o.position
@@ -852,10 +852,10 @@ export class EntityIndexStorage implements EntityIndexReader {
         operationType: row.operation_type,
         entityKey: row.entity_key.toLowerCase(),
         sender: row.from_address.toLowerCase(),
-        contentType: row.content_type,
-        payloadSizeBytes: row.payload_size_bytes,
-        attributes: typeof row.attributes === "string" ? (JSON.parse(row.attributes) as ArkivOperationAttribute[]) : row.attributes,
-        expiresAtBlocks: Number(row.expires_at_blocks ?? 0),
+        creationFlags: row.creation_flags,
+        attributes: row.attributes,
+        expiresAt: row.expires_at === null ? null : BigInt(row.expires_at),
+        minLifetime: row.min_lifetime === null ? null : BigInt(row.min_lifetime),
         newOwner: row.new_owner,
       };
       const txKey = `${row.block_number}:${row.position}`;

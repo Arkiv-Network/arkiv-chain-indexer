@@ -312,6 +312,8 @@ function blockMetricsFixture(overrides: Partial<BlockMetrics> = {}): BlockMetric
     blockRewardWei: "210000",
     burntFeesWei: "2100000",
     totalTransactionFeeWei: "2310000",
+    totalRentFeeWei: "0",
+    totalBurnedWei: "2100000",
     feePriceSumWei: "110",
     priorityFeeSumWei: "10",
     priorityFeeWeightedNumeratorWei: "23100000",
