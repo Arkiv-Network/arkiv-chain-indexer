@@ -6,6 +6,7 @@ import {
   attributeCondition,
   attributeText,
   conditionUnavailableReason,
+  sameAttributeValue,
   type AttributeChange,
   type AttributeView,
 } from "@/attributes";
@@ -95,7 +96,8 @@ export function AttributeTable({ attributes, changes, actions, bytes, emptyText 
 
 function NameCell({ name, struck = false }: { name: string; struck?: boolean }) {
   return (
-    <td className={cn("max-w-56 py-1.5 pr-2 font-mono break-all text-foreground", struck && "text-muted-foreground line-through")}>
+    // Names are at most 32 bytes on the node, so they never wrap; a narrow screen scrolls the table instead.
+    <td className={cn("py-1.5 pr-3 font-mono whitespace-nowrap text-foreground", struck && "text-muted-foreground line-through")}>
       {name}
     </td>
   );
@@ -181,7 +183,7 @@ function ChangeRow({
               {change.priorUnknown ? "unset (previous value not in the stored history)" : "was not set"}
             </span>
           )
-        ) : change.kind === "changed" && before && after ? (
+        ) : change.kind === "changed" && before && after && !sameAttributeValue(before, after) ? (
           <span className="flex flex-col gap-0.5">
             <span className="text-muted-foreground line-through">
               <AttributeValue attribute={before} bytes={null} onLocationChange={onLocationChange} plain />

@@ -80,6 +80,9 @@ describe("AttributeTable", () => {
     expect(count).toContain(">5<");
     expect(count).toContain(">5.5<");
     expect(note).toContain("Now indexed");
+    // Only the flag changed: the value is shown once, not as old → new.
+    expect(note.match(/>hi</g)?.length).toBe(1);
+    expect(count.match(/line-through/g)?.length).toBeGreaterThan(0);
     expect(note).toContain(">stored<");
     expect(note).toContain(">indexed<");
     expect(gone).toContain(">unset<");

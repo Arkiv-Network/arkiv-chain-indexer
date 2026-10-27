@@ -212,9 +212,11 @@ function TransactionDetail({
         {failed ? (
           <p className="border border-red-600/30 bg-red-600/5 px-3 py-2 text-xs text-red-700 dark:border-red-400/30 dark:text-red-300" role="note">
             The transaction reverted: gas was charged, no rent was, and{" "}
-            {operations.length > 0
-              ? `none of its ${operations.length === 1 ? "operation" : `${operations.length} operations`} changed any entity.`
-              : "it changed no state."}
+            {operations.length === 0
+              ? "it changed no state."
+              : operations.length === 1
+                ? "its operation changed no entity."
+                : `none of its ${operations.length} operations changed any entity.`}
           </p>
         ) : null}
 
@@ -396,7 +398,8 @@ function OperationCard({
   const mutations = operation.attributes.map(fromOperationAttribute);
   const blockNumber = Number(transaction.blockNumberDecimal);
   const bytesSource = { entityKey, atBlock: Number.isSafeInteger(blockNumber) ? blockNumber : undefined };
-  const actions = { onLocationChange };
+  // A failed operation's values never reached the chain, so there is nothing to query by.
+  const actions = failed ? undefined : { onLocationChange };
   const kind = event ? (event.kind === "failed" ? event.attemptedKind : event.kind) : null;
 
   return (
@@ -405,7 +408,7 @@ function OperationCard({
         <OpBadge operation={operation.operation} />
         <span className="text-xs text-muted-foreground">#{operation.opIndex}</span>
         {kind === "extended-to-permanent" ? <span className="text-xs font-medium text-violet-700 dark:text-violet-300">extended to permanent</span> : null}
-        {operation.schemaName ? <SchemaBadge name={operation.schemaName} actions={actions} /> : null}
+        {operation.schemaName ? <SchemaBadge name={operation.schemaName} actions={{ onLocationChange }} /> : null}
         {failed ? <StatusBadge tone="fail">not applied</StatusBadge> : null}
       </div>
       <dl className="flex flex-col">
@@ -472,7 +475,7 @@ function OperationCard({
       ) : operation.operation === "patch" ? (
         <div className="mt-3">
           <h4 className="mb-1 flex flex-wrap items-baseline gap-2 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
-            <span>Changes ({mutations.length})</span>
+            <span>{failed ? "Attempted changes" : "Changes"} ({mutations.length})</span>
             <span className="normal-case tracking-normal">
               {event ? summarizeChanges(event.changes) : history?.status === "loading" ? "loading the previous values…" : "previous values unavailable"}
             </span>

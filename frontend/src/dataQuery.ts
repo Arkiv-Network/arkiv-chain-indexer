@@ -304,6 +304,21 @@ export function locateQueryPosition(query: string, position: number): { line: nu
 // ---------------------------------------------------------------------------
 // Block timing
 
+/**
+ * The node's block timing with a duration dates can be estimated from. The
+ * node reports whole seconds between its last two block timestamps, so at
+ * sub-second blocks `duration` is 0 (or flickers to 1) and every block would
+ * be dated at the head; the deployment's configured block time stands in
+ * then. Null when neither gives a positive duration.
+ */
+export function withUsableDuration(timing: BlockTiming | null, configuredSeconds: number): BlockTiming | null {
+  if (!timing) return null;
+  const configured = Number.isFinite(configuredSeconds) && configuredSeconds > 0 ? configuredSeconds : null;
+  const reported = timing.blockDurationSeconds;
+  if (reported > 0 && !(configured !== null && configured < 1 && reported <= 1)) return timing;
+  return configured === null ? null : { ...timing, blockDurationSeconds: configured };
+}
+
 export function estimateBlockTimestampMs(blockNumber: number, timing: BlockTiming): number {
   const deltaBlocks = blockNumber - timing.currentBlock;
   return (timing.currentBlockTime + deltaBlocks * timing.blockDurationSeconds) * 1000;

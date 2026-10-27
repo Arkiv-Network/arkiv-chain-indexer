@@ -606,6 +606,7 @@ export function App() {
             timeZone={timeZone}
             adminModeActive={adminModeIsActive}
             csrfToken={csrfToken}
+            blockTimeMs={pageSettings.blockTimeMs}
           />
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView

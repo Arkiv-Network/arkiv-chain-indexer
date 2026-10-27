@@ -7,6 +7,7 @@ import {
   describeQueryError,
   estimateBlockTimestampMs,
   expiryBlockNumber,
+  withUsableDuration,
   formatRelativeMs,
   isExpiringSoon,
   lifetimeProgress,
@@ -292,5 +293,25 @@ describe("query block selection", () => {
     for (const input of ["-1", "1.5", "1e3", "junk", "9007199254740993"]) {
       expect(() => parseQueryBlock(input)).toThrow("block number");
     }
+  });
+});
+
+describe("usable block timing", () => {
+  const timing = { currentBlock: 900, currentBlockTime: 1_700_000_000, blockDurationSeconds: 2 };
+
+  test("keeps the node's duration when it is a real one", () => {
+    expect(withUsableDuration(timing, 2)).toBe(timing);
+    expect(withUsableDuration(timing, 0)).toBe(timing);
+  });
+
+  test("falls back to the configured block time when whole-second timestamps cannot express it", () => {
+    expect(withUsableDuration({ ...timing, blockDurationSeconds: 0 }, 0.5)?.blockDurationSeconds).toBe(0.5);
+    expect(withUsableDuration({ ...timing, blockDurationSeconds: 1 }, 0.5)?.blockDurationSeconds).toBe(0.5);
+    expect(withUsableDuration({ ...timing, blockDurationSeconds: 0 }, 2)?.blockDurationSeconds).toBe(2);
+  });
+
+  test("gives up rather than dating every block at the head", () => {
+    expect(withUsableDuration({ ...timing, blockDurationSeconds: 0 }, 0)).toBeNull();
+    expect(withUsableDuration(null, 2)).toBeNull();
   });
 });

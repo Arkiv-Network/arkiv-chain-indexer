@@ -19,6 +19,7 @@ import {
   EXAMPLE_QUERIES,
   EXPIRATION_FILTERS,
   expiryBlockNumber,
+  withUsableDuration,
   isExpiringSoon,
   normalizeQueryInput,
   PAGE_SIZE_OPTIONS,
@@ -93,6 +94,8 @@ interface DataViewProps {
   adminModeActive: boolean;
   /** The current session's CSRF token, sent only to the application relay. */
   csrfToken: string | undefined;
+  /** The configured block time, for dates when the node's own timing cannot give one (sub-second blocks). */
+  blockTimeMs: number;
 }
 
 type BackendForwarding =
@@ -135,7 +138,8 @@ const EMPTY_RESULTS: ResultState = {
   error: null,
 };
 
-export function DataView({ locationSearch, onLocationChange, timeZone, adminModeActive, csrfToken }: DataViewProps) {
+export function DataView({ locationSearch, onLocationChange, timeZone, adminModeActive, csrfToken, blockTimeMs }: DataViewProps) {
+  const blockSeconds = blockTimeMs / 1000;
   const urlFilters = readFiltersFromSearch(locationSearch, DATA_FILTER_KEYS, EMPTY_DATA_FILTERS);
 
   // A link that names an endpoint wins over the remembered one, without overwriting it.
@@ -267,7 +271,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
           entities: more ? [...previous.entities, ...page.entities] : page.entities,
           cursor: page.cursor,
           blockNumber: page.blockNumber,
-          timing: timingResult ?? previous.timing,
+          timing: withUsableDuration(timingResult, blockSeconds) ?? previous.timing,
           durationMs,
           running: null,
           error: null,
@@ -282,7 +286,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [source, csrfToken, adminModeActive, resetCount],
+    [source, csrfToken, adminModeActive, resetCount, blockSeconds],
   );
 
   /**
@@ -359,7 +363,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         entities: shown.entities,
         cursor: shown.cursor,
         blockNumber: shown.blockNumber,
-        timing: nodeTiming ?? indexTiming,
+        timing: withUsableDuration(nodeTiming ?? indexTiming, blockSeconds),
         durationMs: nodeSide.page ? nodeSide.durationMs : indexSide.durationMs,
         running: null,
         error: null,
@@ -374,7 +378,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [csrfToken, adminModeActive, resetCount]);
+  }, [csrfToken, adminModeActive, resetCount, blockSeconds]);
 
   /** Counting runs where the query would: the node or the index (both answer arkiv_getEntityCount {query, block}). */
   const countSource: RpcSource | null = mode === "index" || mode === "node" ? { kind: mode, customUrl: "" } : null;
