@@ -10,18 +10,18 @@
  * size of the dataset.
  *
  * This module fills the hole from the node. `arkiv_query("*")` pinned at
- * block 0 pages every genesis entity newest-first — the node's entity-id
- * order, and ids were handed out in seed order, `0..N-1` — and each entity
- * becomes a version-0 row with `created_at = 0`, the genesis marker (block 0
- * never carries a transaction), and `created_position` = its id, so the
- * index's `(created_at, created_position, key)` order reproduces the node's
- * and its cursors page correctly. The walk resumes from a stored cursor: the
- * node binds a cursor to the query text, the block and the `select`, all of
- * which are constants here, so a cursor is as good after a restart as before.
+ * block 0 pages every genesis entity oldest-first — the node's entity-id
+ * order, and ids were handed out in seed order — and each entity becomes a
+ * version-0 row with `created_at = 0`, the genesis marker (block 0 never
+ * carries a transaction), and `created_position` = its place in that order,
+ * so the index's `(created_at, created_position, created_op_index)` order
+ * reproduces the node's. The walk resumes from a stored cursor while the node
+ * keeps it; the UDC node's cursors are process-local, so after a node restart
+ * the cursor answers `-32005` and the walk starts over from the first page —
+ * the rows are deterministic and written idempotently, so nothing doubles.
  *
- * The payload is never selected: payload bytes are never stored, and a
- * hundred-million-entity seed would be a hundred gigabytes of them. A
- * genesis row's `payload_size` is 0 when it came over RPC.
+ * Every attribute is selected with its schema (the indexed flag lives there).
+ * A `bytes` value is hashed and measured on arrival and its content dropped.
  *
  * The scale limit is the node's, not the index's: its query paging collects
  * every matching id before it slices a page, so each page costs O(N) — fine
@@ -29,7 +29,7 @@
  * `scripts/importGenesisState.ts` reads the seed's state dump offline instead
  * (see `entityGenesisDump.ts`); both paths write the same rows.
  */
-import type { EntityVersion, StoredEntityAttribute } from "./entityIndex";
+import { summarizeAttributes, type EntityVersion, type StoredEntityAttribute } from "./entityIndex";
 import {
   compareUtf8,
   fromWireAttributeValue,
@@ -41,7 +41,7 @@ import {
 /** The node's page-size ceiling. */
 export const GENESIS_PAGE_SIZE = 200;
 
-/** Everything a node can say about an entity except its payload. */
+/** Everything a node can say about an entity: every `RpcSelect` key. */
 export const GENESIS_SELECT: Readonly<Record<string, boolean>> = Object.freeze({
   key: true,
   owner: true,
@@ -50,9 +50,12 @@ export const GENESIS_SELECT: Readonly<Record<string, boolean>> = Object.freeze({
   updatedAt: true,
   expiresAt: true,
   creationFlags: true,
-  contentType: true,
+  attributeSchema: true,
   attributes: true,
 });
+
+/** The node forgot a walk's cursor (it restarted): the walk must begin again. */
+export const JSON_RPC_CURSOR_EXPIRED = -32005;
 
 /** The largest entity id a genesis row can carry: `created_position` is a Postgres int4. */
 export const MAX_GENESIS_POSITION = 2 ** 31 - 1;
@@ -279,10 +282,11 @@ const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 /**
  * One entity as the node describes it at block 0, as the version it is in
  * the index: version 0 of a history that starts at block 0, at `position`
- * (its entity id) among the genesis entities. Anything the index cannot
- * store faithfully — a creation block other than 0, an attribute of a type
- * it does not know, a value that is not of its type — is refused, because a
- * silently different row is worse than a stopped import.
+ * (its place in the node's id order) among the genesis entities. Anything
+ * the index cannot store faithfully — a creation block other than 0, an
+ * attribute of a type it does not know or missing from the schema, a value
+ * that is not of its type — is refused, because a silently different row is
+ * worse than a stopped import.
  */
 export function genesisEntityToVersion(entity: unknown, position: number): EntityVersion {
   if (!isPlainObject(entity)) throw new GenesisEntityError(undefined, "an entity is not an object");
@@ -319,8 +323,16 @@ export function genesisEntityToVersion(entity: unknown, position: number): Entit
       creationFlags = (flags.readonly === true ? 1 : 0) | (flags.permissionlessExtension === true ? 2 : 0);
     }
   }
-  const contentType = entity.contentType === undefined ? "" : entity.contentType;
-  if (typeof contentType !== "string") throw refuse("contentType is not a string");
+  // The indexed flag is only in the schema; every attribute must be in it.
+  const indexedByName = new Map<string, boolean>();
+  const schema = entity.attributeSchema ?? [];
+  if (!Array.isArray(schema)) throw refuse("attributeSchema is not an array");
+  for (const entry of schema as unknown[]) {
+    if (!isPlainObject(entry) || typeof entry.name !== "string" || typeof entry.indexed !== "boolean") {
+      throw refuse("an attributeSchema entry has no name or indexed flag");
+    }
+    indexedByName.set(entry.name, entry.indexed);
+  }
 
   const attributes: StoredEntityAttribute[] = [];
   const cells = entity.attributes;
@@ -337,10 +349,13 @@ export function genesisEntityToVersion(entity: unknown, position: number): Entit
       if (names.has(name)) throw refuse(`attribute ${name} appears twice`);
       names.add(name);
       const typeId = TYPE_IDS[type as AttributeTypeTag];
-      if (typeId === undefined || type === "bytes") throw refuse(`attribute ${name} has a type the index cannot store: ${type}`);
+      if (typeId === undefined) throw refuse(`attribute ${name} has a type the index cannot store: ${type}`);
+      const indexed = indexedByName.get(name);
+      if (indexed === undefined) throw refuse(`attribute ${name} is missing from attributeSchema`);
+      if (indexed && type === "bytes") throw refuse(`attribute ${name} is an indexed bytes attribute`);
       const stored = fromWireAttributeValue(type as AttributeTypeTag, cell.value);
       if (!stored) throw refuse(`attribute ${name} does not carry a ${type} value`);
-      attributes.push({ name, typeId, valueText: stored.valueText, valueNum: stored.valueNum });
+      attributes.push({ name, typeId, indexed, valueText: stored.valueText, valueNum: stored.valueNum });
     }
     attributes.sort((a, b) => compareUtf8(a.name, b.name));
   }
@@ -361,8 +376,7 @@ export function genesisEntityToVersion(entity: unknown, position: number): Entit
     updatedAt: 0,
     expiresAt,
     creationFlags,
-    contentType,
-    payloadSize: 0,
+    ...summarizeAttributes(attributes),
     attributes,
   };
 }
@@ -389,10 +403,10 @@ export interface GenesisWalkPage {
 }
 
 /**
- * Page the genesis entities newest-first from where a previous walk stopped,
- * assigning each its entity id from the count: the first entity of the walk
- * is the newest, id `total - 1`. The next page is requested while the caller
- * commits the current one. Any page that does not fit — another block, a
+ * Page the genesis entities oldest-first from where a previous walk stopped,
+ * each at the next position in the node's id order: the first entity of the
+ * walk is position 0. The next page is requested while the caller commits the
+ * current one. Any page that does not fit — another block, a
  * repeated cursor, more entities than counted, or a walk that ends short —
  * ends the walk with a {@link GenesisEntityError}, since positions would be
  * wrong from there on.
@@ -431,7 +445,7 @@ export async function* walkGenesisEntities(
         `the walk returned more than the ${resume.total} entities the node counted at block 0`,
       );
     }
-    const versions = page.data.map((entity, offset) => genesisEntityToVersion(entity, resume.total - 1 - imported - offset));
+    const versions = page.data.map((entity, offset) => genesisEntityToVersion(entity, imported + offset));
     imported += versions.length;
     cursor = page.cursor;
     if (cursor !== undefined) {

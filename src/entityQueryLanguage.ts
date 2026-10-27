@@ -19,7 +19,7 @@
  * Every value carries a type tag and a predicate matches only an attribute of
  * that same type. A bare number means `i32`; a bare string is only legal for
  * the system attributes that have one obvious type (`$owner`, `$creator`,
- * `$key`, `$contentType`). Ordering (`< <= > >=`) exists for i32/u64/u256/dec
+ * `$key`). Ordering (`< <= > >=`) exists for i32/u64/u256/dec
  * alone. `exists(…)`, `typeof(…)` and `!=` are reserved but unsupported, and
  * `* AND …` is an error — exactly as on the node.
  *
@@ -97,7 +97,7 @@ export type QueryValue =
   | { type: "key"; value: string }
   | { type: "bytes32"; value: string };
 
-export type BuiltInField = "owner" | "creator" | "key" | "expiresAt" | "createdAt" | "contentType";
+export type BuiltInField = "owner" | "creator" | "key" | "expiresAt" | "createdAt";
 
 export type AttributeRef = { kind: "user"; name: string } | { kind: "builtin"; field: BuiltInField };
 
@@ -624,8 +624,6 @@ function builtinType(field: BuiltInField): AttributeTypeTag {
     case "expiresAt":
     case "createdAt":
       return "u64";
-    case "contentType":
-      return "str";
   }
 }
 
@@ -636,14 +634,23 @@ function builtinFromName(name: string, position: number): BuiltInField {
     case "key":
     case "expiresAt":
     case "createdAt":
-    case "contentType":
       return name;
     case "updatedAt":
       throw typeError(position, "$updatedAt is not queryable — it is returned by projections only");
     case "creationFlags":
       throw typeError(position, "$creationFlags is not queryable — it is returned by projections only");
+    // Entities have no payload or content type: they live in bytes and str
+    // attributes. The node's exact messages.
     case "payload":
-      throw typeError(position, "$payload is not queryable — bytes values carry no index");
+      throw typeError(
+        position,
+        "unknown system attribute $payload — entities have no payload; store data in a bytes attribute, which is never indexed",
+      );
+    case "contentType":
+      throw typeError(
+        position,
+        "unknown system attribute $contentType — entities have no content type; store one in an indexed str attribute",
+      );
     case "expiration":
       throw typeError(position, "unknown system attribute $expiration — it is now $expiresAt");
     case "createdAtBlock":
@@ -651,7 +658,7 @@ function builtinFromName(name: string, position: number): BuiltInField {
     default:
       throw typeError(
         position,
-        `unknown system attribute $${name} — expected $key, $owner, $creator, $expiresAt, $createdAt or $contentType`,
+        `unknown system attribute $${name} — expected $key, $owner, $creator, $expiresAt or $createdAt`,
       );
   }
 }
@@ -684,9 +691,6 @@ function bareStrValue(key: AttributeRef, content: string, position: number): Que
     throw typeError(position, "untagged strings are only valid for system attributes — write str('…')");
   }
   switch (key.field) {
-    case "contentType":
-      validateStrLength(content, position);
-      return { type: "str", value: content };
     case "owner":
     case "creator":
       return { type: "addr", value: parseAddr(content, position) };
@@ -927,14 +931,35 @@ export function parseEntityQuery(input: string): QueryAst {
   return new Parser(tokens, src.length).parseTopLevel();
 }
 
-/** The JSON-RPC `error` object the node answers a bad query with. */
-export function queryErrorBody(error: QueryParseError): { code: number; message: string; data: Record<string, unknown> } {
+/** The SDK's name for each failure kind, as the node puts it in its messages. */
+const QUERY_ERROR_KIND_NAMES: Record<QueryParseErrorKind, string> = {
+  malformed: "parse",
+  type: "type",
+  literal: "literal",
+  limit: "limits",
+};
+
+/**
+ * The JSON-RPC error object for a refused query, in the node's shape:
+ * `query rejected (<kind>): <message>`, and — for an error at a known place —
+ * `data: {position, got}` (plus `expected` for a parse error), `got` being the
+ * query text from that byte offset up to the next whitespace, at most 32
+ * characters, or `end of query`.
+ */
+export function queryErrorBody(
+  error: QueryParseError,
+  source: string,
+): { code: number; message: string; data?: Record<string, unknown> } {
+  const message = `query rejected (${QUERY_ERROR_KIND_NAMES[error.kind]}): ${error.message}`;
+  if (error.position === undefined) return { code: error.rpcCode, message };
+  const bytes = Buffer.from(source, "utf8");
+  const position = Math.min(error.position, bytes.length);
+  const rest = bytes.subarray(position).toString("utf8");
+  const token = rest.split(/\s+/).find((part) => part.length > 0);
+  const got = token === undefined ? "end of query" : [...token].slice(0, 32).join("");
   return {
     code: error.rpcCode,
-    message: error.message,
-    data:
-      error.position === undefined
-        ? { message: error.message }
-        : { position: error.position, message: error.message },
+    message,
+    data: { position, got, ...(error.kind === "malformed" ? { expected: error.message } : {}) },
   };
 }

@@ -93,9 +93,10 @@ export async function gatherIndexerStatistics(
     const entities: IndexerStatistics["entities"] = {
       status: "unavailable", floorBlock: null, asOfBlock: null, lagBehindObservedHead: null,
       lastFoldAtUtc: null, genesisStatus: null, known: null, active: null, expired: null, deleted: null,
-      activeWithPayload: null, activeRecordedPayloadBytes: null, maxActiveRecordedPayloadBytes: null,
-      activeAttributes: null, activeWithAttributes: null, maxAttributesPerActiveEntity: null,
-      attributeTypes: [], topContentTypes: [],
+      activePermanent: null, activeWithBytes: null, activeBytes: null, maxActiveBytes: null,
+      activeAttributes: null, activeIndexedAttributes: null, activeStoredAttributes: null,
+      activeWithAttributes: null, maxAttributesPerActiveEntity: null,
+      attributeTypes: [], topSchemas: [], activeUntagged: null,
     };
     const exists = (await tx.query<{ present: boolean }>(
       "SELECT to_regclass($1) IS NOT NULL AND to_regclass($2) IS NOT NULL AS present",
@@ -115,44 +116,54 @@ export async function gatherIndexerStatistics(
         const at = entities.asOfBlock!;
         if (head !== null) entities.lagBehindObservedHead = (BigInt(head) > BigInt(at) ? BigInt(head) - BigInt(at) : 0n).toString();
         // Use version validity, not to_block IS NULL: a refold can already include later versions.
-        const versions = `FROM ${table("entity_versions")} v WHERE v.from_block <= $1::bigint
-          AND (v.to_block IS NULL OR v.to_block > $1::bigint)`;
+        const validAt = "v.from_block <= $1::bigint AND (v.to_block IS NULL OR v.to_block > $1::bigint)";
+        const versions = `FROM ${table("entity_versions")} v WHERE ${validAt}`;
+        // The same rows with each version's count of indexed attributes beside it.
+        const versionsWithFlags = `FROM ${table("entity_versions")} v
+          CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE (e->>'indexed')::boolean) AS indexed
+            FROM jsonb_array_elements(v.attributes) e) flags
+          WHERE ${validAt}`;
         const active = "NOT deleted AND expires_at > $1::numeric";
         const counts = (await tx.query<Partial<IndexerStatistics["entities"]>>(`
           SELECT count(*)::text AS known,
             count(*) FILTER (WHERE ${active})::text AS active,
             count(*) FILTER (WHERE NOT deleted AND expires_at <= $1::numeric)::text AS expired,
             count(*) FILTER (WHERE deleted)::text AS deleted,
-            count(*) FILTER (WHERE ${active} AND payload_size > 0)::text AS "activeWithPayload",
-            coalesce(sum(payload_size) FILTER (WHERE ${active}), 0)::text AS "activeRecordedPayloadBytes",
-            coalesce(max(payload_size) FILTER (WHERE ${active}), 0)::text AS "maxActiveRecordedPayloadBytes",
+            count(*) FILTER (WHERE ${active} AND expires_at = 18446744073709551615)::text AS "activePermanent",
+            count(*) FILTER (WHERE ${active} AND bytes_size > 0)::text AS "activeWithBytes",
+            coalesce(sum(bytes_size) FILTER (WHERE ${active}), 0)::text AS "activeBytes",
+            coalesce(max(bytes_size) FILTER (WHERE ${active}), 0)::text AS "maxActiveBytes",
             coalesce(sum(jsonb_array_length(attributes)) FILTER (WHERE ${active}), 0)::text AS "activeAttributes",
+            coalesce(sum(flags.indexed) FILTER (WHERE ${active}), 0)::text AS "activeIndexedAttributes",
+            coalesce(sum(jsonb_array_length(attributes) - flags.indexed) FILTER (WHERE ${active}), 0)::text AS "activeStoredAttributes",
             count(*) FILTER (WHERE ${active} AND jsonb_array_length(attributes) > 0)::text AS "activeWithAttributes",
-            coalesce(max(jsonb_array_length(attributes)) FILTER (WHERE ${active}), 0)::text AS "maxAttributesPerActiveEntity"
-          ${versions}`, [at])).rows[0]!;
+            coalesce(max(jsonb_array_length(attributes)) FILTER (WHERE ${active}), 0)::text AS "maxAttributesPerActiveEntity",
+            count(*) FILTER (WHERE ${active} AND schema_name IS NULL)::text AS "activeUntagged"
+          ${versionsWithFlags}`, [at])).rows[0]!;
         Object.assign(entities, counts);
-        entities.attributeTypes = (await tx.query<{ typeId: number; count: string }>(`
-          SELECT (a->>'typeId')::int AS "typeId", count(*)::text AS count
+        entities.attributeTypes = (await tx.query<{ typeId: number; count: string; indexed: string }>(`
+          SELECT (a->>'typeId')::int AS "typeId", count(*)::text AS count,
+            count(*) FILTER (WHERE (a->>'indexed')::boolean)::text AS indexed
           FROM (SELECT attributes ${versions} AND ${active}) live,
             LATERAL jsonb_array_elements(live.attributes) a
           GROUP BY (a->>'typeId')::int ORDER BY (a->>'typeId')::int`, [at])).rows.map((r) => ({
             ...r, name: TYPE_TAGS_BY_ID.get(r.typeId) ?? `unknown(${r.typeId})`,
           }));
-        entities.topContentTypes = (await tx.query<IndexerStatistics["entities"]["topContentTypes"][number]>(`
-          SELECT content_type AS "contentType", count(*)::text AS entities,
-            coalesce(sum(payload_size), 0)::text AS "recordedPayloadBytes"
-          ${versions} AND ${active} GROUP BY content_type
-          ORDER BY count(*) DESC, content_type COLLATE "C" ASC LIMIT 20`, [at])).rows;
+        entities.topSchemas = (await tx.query<IndexerStatistics["entities"]["topSchemas"][number]>(`
+          SELECT schema_name AS "schemaName", count(*)::text AS entities,
+            coalesce(sum(bytes_size), 0)::text AS bytes
+          ${versions} AND ${active} AND schema_name IS NOT NULL GROUP BY schema_name
+          ORDER BY count(*) DESC, schema_name COLLATE "C" ASC LIMIT 20`, [at])).rows;
       }
     }
     const limitations = [
       "Coverage excludes the newest 10 observed blocks from both the stored count and the chain total. Older gaps still reduce coverage; chains with 10 or fewer blocks have no coverage percentage yet. The head observation can be stale.",
       "All totals cover stored data only. Skipped transactions, disabled transaction storage, missing decoder history and unimported genesis entities cannot be recovered from these counts.",
-      "Finite activity windows use stored block timestamps, with an inclusive start and exclusive end at gatheredAtUtc. All time includes every stored row, including future-dated rows. Empty windows are zero stored activity, not proof of complete chain coverage. Current entity, payload and attribute state is not filtered by the selected period.",
+      "Finite activity windows use stored block timestamps, with an inclusive start and exclusive end at gatheredAtUtc. All time includes every stored row, including future-dated rows. Empty windows are zero stored activity, not proof of complete chain coverage. Current entity, bytes and attribute state is not filtered by the selected period.",
       "Operation counts are attempts grouped by receipt outcome; only status 1 counts as successful. Repeated updates count separately. Genesis entities have no create transaction.",
       "Input bytes are calldata sizes, not full serialized signed transaction sizes. Historical size fields defaulted to zero and cannot be distinguished from measured zero without rescanning.",
       "Entity state and active counts are evaluated at the projection block, not the live chain at collection time. Missing creates, pending refolds and pre-log expiry estimates can limit accuracy.",
-      "Recorded entity payload sizes are projection metadata, not verified provider storage usage. Reference size totals are declared bytes per write, include repeated references, and exclude references without a usable size.",
+      "Entity bytes totals are the sizes of bytes attributes as decoded from calldata; the contents are never stored. Only indexed attributes are queryable; stored-only attributes are counted separately.",
       "Bytes attribute contents are never stored (only their sizes and keccak256), and neither are full raw transaction sizes or exact encoded attribute byte sizes.",
       "Fee totals are gas fees only (gas used × effective gas price). Rent is the receipts' rentFee, burned outside gas; burned is the base-fee burn plus rent.",
     ];

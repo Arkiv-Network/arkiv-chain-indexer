@@ -35,6 +35,7 @@ import {
   GENESIS_PAGE_SIZE,
   GenesisEntityError,
   GenesisRpcError,
+  JSON_RPC_CURSOR_EXPIRED,
   GenesisSourceUnavailable,
   MAX_GENESIS_POSITION,
   walkGenesisEntities,
@@ -676,6 +677,14 @@ export class EntityProjector {
         }
       }
     } catch (error) {
+      if (error instanceof GenesisRpcError && error.code === JSON_RPC_CURSOR_EXPIRED) {
+        // The node restarted and forgot the walk's cursor (UDC cursors are
+        // process-local). Start over from the first page: positions are the
+        // node's order and every row is written idempotently, so the rows
+        // already in are rewritten as they are.
+        await this.restartGenesisWalk(error.message);
+        return { ...blocked, imported: importedNow };
+      }
       if (error instanceof GenesisEntityError || error instanceof GenesisRpcError || error instanceof GenesisSourceUnavailable) {
         await this.failGenesis(error.message);
         return { ...GENESIS_IDLE, status: "failed", imported: importedNow };
@@ -687,6 +696,16 @@ export class EntityProjector {
     if (!handed || handed.status !== "running" || handed.phase !== "repair") return { ...blocked, imported: importedNow };
     const repair = await this.repairGenesis(handed);
     return { ...repair, imported: importedNow };
+  }
+
+  /** Rewind a running RPC walk to its first page, keeping the rows written so far. */
+  private async restartGenesisWalk(reason: string): Promise<void> {
+    await this.storage.withFoldLock(async (client) => {
+      const current = await this.storage.getGenesisImport(client);
+      if (!current || current.status !== "running" || current.phase !== "walk" || current.source !== "rpc") return;
+      await this.storage.setGenesisImport({ ...current, cursor: null, imported: 0 }, client);
+    });
+    this.log(`entity index: the node no longer knows the genesis walk's cursor (${reason}); restarting the walk from the first page`);
   }
 
   private async failGenesis(message: string): Promise<void> {

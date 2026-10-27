@@ -9,7 +9,9 @@
  * complements within the live set, exactly as the node's `$all \ match`.
  *
  * Typing follows the node: a predicate names a type, and only an attribute of
- * that type can match it. Ordered types compare `value_num` (an exact NUMERIC
+ * that type can match it — and only an *indexed* one: the node keeps
+ * unindexed attributes out of its index, so `title = str('x')` never matches
+ * an entity whose `title` is stored without the flag. Ordered types compare `value_num` (an exact NUMERIC
  * of the integer or scaled decimal); the rest compare `value_text` in its
  * canonical form. `STARTSWITH` is a `LIKE` on the escaped prefix, which is a
  * byte-prefix match for valid UTF-8 the same way the node's index scan is.
@@ -89,8 +91,6 @@ function builtinColumn(field: Exclude<AttributeRef, { kind: "user" }>["field"]):
       return { column: "v.expires_at", cast: "::numeric" };
     case "createdAt":
       return { column: "v.created_at", cast: "::bigint" };
-    case "contentType":
-      return { column: "v.content_type", cast: "" };
   }
 }
 
@@ -135,7 +135,7 @@ function compileNode(node: QueryAst, params: Params, attributesTable: string): s
       const cast = ordered ? "::numeric" : "";
       return (
         `(EXISTS (SELECT 1 FROM ${attributesTable} a` +
-        ` WHERE a.entity_key = v.entity_key AND a.version = v.version` +
+        ` WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed` +
         ` AND a.name = ${params.add(node.key.name)}` +
         ` AND a.type_id = ${params.add(TYPE_IDS[node.value.type])}::smallint` +
         ` AND ${valueColumn} ${operator} ${params.add(operand)}${cast}${escape}))`

@@ -13,7 +13,7 @@ import type { ScannerStorage } from "./storage";
 import type { BlockMetrics } from "./types";
 import { TEST_DATABASE_URL, closeTestPools, createIsolatedStorage, hasPostgresForTests } from "./testPostgres";
 import { openDb, type Db } from "./db";
-import { GenesisSourceUnavailable } from "./entityGenesis";
+import { GenesisRpcError, GenesisSourceUnavailable } from "./entityGenesis";
 import { FAKE_GENESIS_OWNER, createFakeGenesisSource, fakeWireEntity } from "./testGenesisSource";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -365,6 +365,16 @@ describeWithPostgres("entity index (Postgres)", () => {
     (await result<{ data: Array<{ key: string }> }>("arkiv_query", [query, { limit: 50, ...options }])).data.map((entity) => entity.key);
   const errorOf = async (method: string, params: unknown[]) => (await call(method, params)).error!;
 
+  /** What `arkiv_getEntity` used to answer, through `arkiv_query` (the UDC node has no getEntity). */
+  const getEntity = async (key: string, block?: number): Promise<Record<string, unknown> | null> => {
+    const select = { key: true, owner: true, creator: true, createdAt: true, updatedAt: true, expiresAt: true, creationFlags: true, attributes: true };
+    const page = await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [
+      `$key = key(${key.toLowerCase()})`,
+      { select, ...(block === undefined ? {} : { atBlock: `0x${block.toString(16)}` }) },
+    ]);
+    return page.data[0] ?? null;
+  };
+
   beforeAll(async () => {
     const isolated = await createIsolatedStorage("entity_index");
     storage = isolated.storage;
@@ -462,16 +472,17 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(f[0]).toMatchObject({ expiresAt: 150n, creationFlags: 0 });
   });
 
-  test("* lists the entities live at the projection head, newest first", async () => {
+  test("* lists the entities live at the projection head, oldest first", async () => {
     const page = await result<{ data: Array<{ key: string }>; blockNumber: string; cursor?: string }>("arkiv_query", ["*"]);
     expect(page.blockNumber).toBe("0x69");
     expect(page.cursor).toBeUndefined();
-    // D is deleted and E expired at 103; C and D shared a block, C first.
-    expect(page.data.map((entity) => entity.key)).toEqual([KEY_C, KEY_F, KEY_B, KEY_A]);
+    // D is deleted and E expired at 103; the node's id order is creation
+    // order — block, transaction, then operation within it.
+    expect(page.data.map((entity) => entity.key)).toEqual([KEY_A, KEY_B, KEY_F, KEY_C]);
   });
 
   test("typed predicates match only attributes of their type", async () => {
-    expect(await keysOf("project = str('demo')")).toEqual([KEY_B, KEY_A]);
+    expect(await keysOf("project = str('demo')")).toEqual([KEY_A, KEY_B]);
     expect(await keysOf("rank > u64(4)")).toEqual([KEY_B]);
     expect(await keysOf("rank = i32(7)")).toEqual([KEY_A]);
     expect(await keysOf("rank = 7")).toEqual([KEY_A]);
@@ -488,11 +499,11 @@ describeWithPostgres("entity index (Postgres)", () => {
 
   test("STARTSWITH, NOT, AND and OR compose over the live set", async () => {
     expect(await keysOf("name STARTSWITH str('b')")).toEqual([KEY_B]);
-    expect(await keysOf("project STARTSWITH str('dem')")).toEqual([KEY_B, KEY_A]);
+    expect(await keysOf("project STARTSWITH str('dem')")).toEqual([KEY_A, KEY_B]);
     expect(await keysOf("project STARTSWITH str('%')")).toEqual([]);
-    expect(await keysOf("NOT project = str('demo')")).toEqual([KEY_C, KEY_F]);
+    expect(await keysOf("NOT project = str('demo')")).toEqual([KEY_F, KEY_C]);
     expect(await keysOf("project = str('demo') AND rank = i32(7)")).toEqual([KEY_A]);
-    expect(await keysOf("project = str('other') OR name = str('bob')")).toEqual([KEY_C, KEY_B]);
+    expect(await keysOf("project = str('other') OR name = str('bob')")).toEqual([KEY_B, KEY_C]);
     expect(await keysOf("NOT (project = str('demo') OR project = str('other'))")).toEqual([KEY_F]);
   });
 
@@ -501,18 +512,29 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(await keysOf(`$owner = '${CAROL}'`)).toEqual([]);
     expect(await keysOf(`$creator = addr(${CAROL})`)).toEqual([KEY_C]);
     expect(await keysOf("$createdAt >= u64(101)")).toEqual([KEY_C]);
-    expect(await keysOf("$createdAt = u64(100)")).toEqual([KEY_F, KEY_B, KEY_A]);
-    expect(await keysOf("$expiresAt < u64(200)")).toEqual([KEY_F, KEY_A]);
-    expect(await keysOf("$expiresAt <= u64(300)")).toEqual([KEY_F, KEY_B, KEY_A]);
+    expect(await keysOf("$createdAt = u64(100)")).toEqual([KEY_A, KEY_B, KEY_F]);
+    expect(await keysOf("$expiresAt < u64(200)")).toEqual([KEY_A, KEY_F]);
+    expect(await keysOf("$expiresAt <= u64(300)")).toEqual([KEY_A, KEY_B, KEY_F]);
     expect(await keysOf(`$key = key(${KEY_A})`)).toEqual([KEY_A]);
     expect(await keysOf(`$key = '${KEY_D}'`)).toEqual([]);
-    // UDC entities carry no content type.
-    expect(await keysOf("$contentType = ''")).toEqual([KEY_C, KEY_F, KEY_B, KEY_A]);
+    // UDC entities have no payload or content type: the node's own refusals.
+    expect(await errorOf("arkiv_query", ["$contentType = 'text/plain'"])).toEqual({
+      code: -32002,
+      message:
+        "query rejected (type): unknown system attribute $contentType — entities have no content type; store one in an indexed str attribute",
+      data: { position: 0, got: "$contentType" },
+    });
+    expect(await errorOf("arkiv_query", ['$payload = str("a")'])).toEqual({
+      code: -32002,
+      message:
+        "query rejected (type): unknown system attribute $payload — entities have no payload; store data in a bytes attribute, which is never indexed",
+      data: { position: 0, got: "$payload" },
+    });
   });
 
   test("atBlock evaluates the state as of that block", async () => {
-    expect(await keysOf("*", { atBlock: "0x64" })).toEqual([KEY_F, KEY_E, KEY_B, KEY_A]);
-    expect(await keysOf("*", { atBlock: "0x66" })).toEqual([KEY_D, KEY_C, KEY_F, KEY_E, KEY_B, KEY_A]);
+    expect(await keysOf("*", { atBlock: "0x64" })).toEqual([KEY_A, KEY_B, KEY_E, KEY_F]);
+    expect(await keysOf("*", { atBlock: "0x66" })).toEqual([KEY_A, KEY_B, KEY_E, KEY_F, KEY_C, KEY_D]);
     // E expires at 103: live at 102, gone at 103.
     expect(await keysOf("project = str('short')", { atBlock: "0x66" })).toEqual([KEY_E]);
     expect(await keysOf("project = str('short')", { atBlock: "0x67" })).toEqual([]);
@@ -524,58 +546,65 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(await keysOf("rank = u64(5)", { atBlock: "0x65" })).toEqual([KEY_A]);
     expect(await keysOf("rank = u64(5)", { atBlock: "0x66" })).toEqual([]);
     // Ownership and expiry history.
-    expect(await keysOf(`$owner = addr(${CAROL})`, { atBlock: "0x66" })).toEqual([KEY_D, KEY_C]);
+    expect(await keysOf(`$owner = addr(${CAROL})`, { atBlock: "0x66" })).toEqual([KEY_C, KEY_D]);
     expect(await keysOf("$expiresAt = u64(200)", { atBlock: "0x66" })).toEqual([KEY_B]);
     expect(await keysOf("$expiresAt = u64(300)", { atBlock: "0x67" })).toEqual([KEY_B]);
 
-    const page = await result<{ blockNumber: string }>("arkiv_query", ["*", { atBlock: "latest" }]);
-    expect(page.blockNumber).toBe("0x69");
+    // Without atBlock the read is at the projection head; "latest" is not a quantity, as on the node.
+    expect((await result<{ blockNumber: string }>("arkiv_query", ["*"])).blockNumber).toBe("0x69");
+    expect(await errorOf("arkiv_query", ["*", { atBlock: "latest" }])).toEqual({ code: -32602, message: "InvalidParams" });
+    expect((await result<{ blockNumber: string }>("arkiv_query", ["*", { atBlock: 101 }])).blockNumber).toBe("0x65");
     const historical = await result<{ blockNumber: string }>("arkiv_query", ["*", { atBlock: "0x65" }]);
     expect(historical.blockNumber).toBe("0x65");
   });
 
-  test("blocks outside the projection are unavailable, tags other than latest rejected", async () => {
-    const ahead = await errorOf("arkiv_query", ["*", { atBlock: "0x6a" }]);
-    expect(ahead.code).toBe(-32006);
-    expect(ahead.data).toEqual({ requested: 106, latest: 105, message: ahead.message });
-    expect(ahead.message).toContain("ahead of the entity index head");
-    const below = await errorOf("arkiv_query", ["*", { atBlock: "0x63" }]);
-    expect(below.code).toBe(-32006);
-    expect(below.message).toContain("floor");
-    expect((await errorOf("arkiv_query", ["*", { atBlock: "earliest" }])).message).toBe(
-      "atBlock tag earliest not supported; use a hex block number or 'latest'",
-    );
-    expect((await errorOf("arkiv_query", ["*", { atBlock: 101 }])).code).toBe(-32602);
+  test("blocks outside the projection are unavailable; atBlock is a quantity", async () => {
+    expect(await errorOf("arkiv_query", ["*", { atBlock: "0x6a" }])).toEqual({
+      code: -32006,
+      message: "query rejected (block): block 106 is above the entity index head 105",
+    });
+    expect(await errorOf("arkiv_query", ["*", { atBlock: "0x63" }])).toEqual({
+      code: -32006,
+      message: "query rejected (block): block 99 is below the entity index floor 100",
+    });
+    // The node's quantities: a JSON integer or 0x hex without leading zeros.
+    for (const atBlock of ["earliest", "pending", "0x065", "65", "0x", -1, 1.5]) {
+      expect(await errorOf("arkiv_query", ["*", { atBlock }])).toEqual({ code: -32602, message: "InvalidParams" });
+    }
   });
 
   test("pages are bound to their query, block and select through the cursor", async () => {
+    const CURSOR = {
+      code: -32005,
+      message: "query rejected (cursor): the cursor expired, is malformed, or belongs to another query, block or selection",
+    };
     const first = await result<{ data: Array<{ key: string }>; cursor?: string }>("arkiv_query", ["*", { limit: "0x1" }]);
-    expect(first.data.map((entity) => entity.key)).toEqual([KEY_C]);
-    expect(first.cursor).toMatch(/^b64:[A-Za-z0-9_-]+$/);
+    expect(first.data.map((entity) => entity.key)).toEqual([KEY_A]);
+    // The node's cursor shape: 0x and 64 hex digits.
+    expect(first.cursor).toMatch(/^0x[0-9a-f]{64}$/);
 
     const second = await result<{ data: Array<{ key: string }>; cursor?: string }>("arkiv_query", [
       "*",
       { limit: 1, cursor: first.cursor, atBlock: "0x69" },
     ]);
-    expect(second.data.map((entity) => entity.key)).toEqual([KEY_F]);
+    expect(second.data.map((entity) => entity.key)).toEqual([KEY_B]);
 
     const rest = await result<{ data: Array<{ key: string }>; cursor?: string }>("arkiv_query", [
       "*",
       { limit: 5, cursor: second.cursor, atBlock: "0x69" },
     ]);
     // A different limit is not part of the binding.
-    expect(rest.data.map((entity) => entity.key)).toEqual([KEY_B, KEY_A]);
+    expect(rest.data.map((entity) => entity.key)).toEqual([KEY_F, KEY_C]);
     expect(rest.cursor).toBeUndefined();
 
-    const mismatched = await errorOf("arkiv_query", ["project = str('demo')", { limit: 1, cursor: first.cursor }]);
-    expect(mismatched.code).toBe(-32005);
-    expect(mismatched.message).toContain("different query, block or select");
-    const otherSelect = await errorOf("arkiv_query", ["*", { limit: 1, cursor: first.cursor, select: { owner: true } }]);
-    expect(otherSelect.code).toBe(-32005);
-    const malformed = await errorOf("arkiv_query", ["*", { limit: 1, cursor: "junk" }]);
-    expect(malformed).toEqual({ code: -32005, message: malformed.message, data: { message: malformed.message } });
-    expect(malformed.message).toContain("malformed");
-    expect((await errorOf("arkiv_query", ["*", { cursor: "b64:AAAA" }])).message).toContain("malformed");
+    // A cursor pins its block, so the node refuses one without atBlock.
+    expect(await errorOf("arkiv_query", ["*", { limit: 1, cursor: first.cursor }])).toEqual(CURSOR);
+    expect(await errorOf("arkiv_query", ["project = str('demo')", { limit: 1, cursor: first.cursor, atBlock: "0x69" }])).toEqual(CURSOR);
+    expect(await errorOf("arkiv_query", ["*", { limit: 1, cursor: first.cursor, atBlock: "0x68" }])).toEqual(CURSOR);
+    expect(await errorOf("arkiv_query", ["*", { limit: 1, cursor: first.cursor, atBlock: "0x69", select: { owner: true } }])).toEqual(CURSOR);
+    for (const cursor of ["junk", 5, null, `0x${"00".repeat(32)}`, `0x${"0".repeat(63)}`]) {
+      expect(await errorOf("arkiv_query", ["*", { cursor, atBlock: "0x69" }])).toEqual(CURSOR);
+    }
   });
 
   test("the projection follows select, with the node's value encodings", async () => {
@@ -591,7 +620,6 @@ describeWithPostgres("entity index (Postgres)", () => {
             updatedAt: true,
             expiresAt: true,
             creationFlags: true,
-            contentType: true,
             attributeSchema: true,
             attributes: true,
           },
@@ -606,11 +634,10 @@ describeWithPostgres("entity index (Postgres)", () => {
       updatedAt: "0x67",
       expiresAt: "0x12c",
       creationFlags: { readonly: true, permissionlessExtension: true, raw: 3 },
-      contentType: "",
       attributeSchema: [
-        { name: "name", type: "str" },
-        { name: "project", type: "str" },
-        { name: "rank", type: "u64" },
+        { name: "name", type: "str", indexed: true },
+        { name: "project", type: "str", indexed: true },
+        { name: "rank", type: "u64", indexed: true },
       ],
       attributes: [
         { name: "name", type: "str", value: "bob" },
@@ -619,6 +646,7 @@ describeWithPostgres("entity index (Postgres)", () => {
       ],
     });
 
+    // key is selected unless the selection turns it off, as on the node.
     const [a] = (
       await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [
         `$key = key(${KEY_A})`,
@@ -626,6 +654,7 @@ describeWithPostgres("entity index (Postgres)", () => {
       ])
     ).data;
     expect(a).toEqual({
+      key: KEY_A,
       attributes: [
         { name: "level", type: "i32", value: -3 },
         { name: "rank", type: "i32", value: 7 },
@@ -636,65 +665,61 @@ describeWithPostgres("entity index (Postgres)", () => {
 
     const [defaults] = (await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_A})`])).data;
     expect(defaults).toEqual({ key: KEY_A });
-    const [nothing] = (await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_A})`, { select: {} }])).data;
+    const [empty] = (await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_A})`, { select: {} }])).data;
+    expect(empty).toEqual({ key: KEY_A });
+    const [nothing] = (
+      await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_A})`, { select: { key: false } }])
+    ).data;
     expect(nothing).toEqual({});
     // Without a stored EntityCreated log the flags come from the calldata.
     const [calldataFlags] = (
-      await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_F})`, { select: { creationFlags: true } }])
+      await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${KEY_F})`, { select: { key: false, creationFlags: true } }])
     ).data;
-    expect(calldataFlags).toEqual({ creationFlags: { readonly: false, permissionlessExtension: false, raw: 0 } });
+    expect(calldataFlags).toEqual({ creationFlags: { raw: 0, readonly: false, permissionlessExtension: false } });
   });
 
-  test("malformed options and queries answer the node's codes", async () => {
-    expect(await errorOf("arkiv_query", ["*", { limit: 0 }])).toEqual({ code: -32602, message: "limit must be at least 1" });
-    expect(await errorOf("arkiv_query", ["*", { limit: "0x12c" }])).toEqual({
-      code: -32602,
-      message: "limit 300 exceeds the node maximum of 200",
-    });
-    expect((await errorOf("arkiv_query", ["*", { bogus: 1 }])).message).toContain("unknown field `bogus`, expected one of `atBlock`");
-    expect((await errorOf("arkiv_query", ["*", { select: { bogus: true } }])).message).toContain("unknown field `bogus`, expected one of `key`");
-    expect((await errorOf("arkiv_query", ["*", { select: ["key"] }])).code).toBe(-32602);
-    expect((await errorOf("arkiv_query", [5])).message).toContain("invalid query param");
+  test("malformed options and queries answer the node's codes and messages", async () => {
+    const INVALID = { code: -32602, message: "InvalidParams" };
+    // select takes exactly the SDK's RpcSelect keys: the removed payload and contentType are invalid params.
+    for (const select of [{ payload: true }, { contentType: true }, { bogus: true }, { key: "yes" }, { attributes: 3 }, { attributes: { a: 1 } }, { attributes: { "1bad": true } }, 5, ["key"], null]) {
+      expect(await errorOf("arkiv_query", ["*", { select }])).toEqual(INVALID);
+    }
+    for (const options of [{ limit: 0 }, { limit: 201 }, { limit: "0x12c" }, { limit: "abc" }, { limit: "0x05" }, { bogus: 1 }, 5, null]) {
+      expect(await errorOf("arkiv_query", ["*", options])).toEqual(INVALID);
+    }
+    expect(await errorOf("arkiv_query", [5])).toEqual(INVALID);
+    expect(await errorOf("arkiv_query", [])).toEqual(INVALID);
+    expect(await errorOf("arkiv_query", ["*", {}, {}])).toEqual(INVALID);
     expect(await errorOf("arkiv_query", ["* AND a = true"])).toEqual({
       code: -32001,
-      message: "* matches every entity and cannot be combined with other predicates",
-      data: { position: 2, message: "* matches every entity and cannot be combined with other predicates" },
+      message: "query rejected (parse): * matches every entity and cannot be combined with other predicates",
+      data: { position: 2, got: "AND", expected: "* matches every entity and cannot be combined with other predicates" },
     });
     expect((await errorOf("arkiv_query", ["a != true"])).code).toBe(-32002);
     expect((await errorOf("arkiv_query", ["a = i32(99999999999)"])).code).toBe(-32003);
     expect((await errorOf("arkiv_query", ["(".repeat(40)])).code).toBe(-32004);
-    const payload = await errorOf("arkiv_query", ["*", { select: { payload: true } }]);
-    expect(payload.code).toBe(-32000);
-    expect(payload.message).toContain("payload");
-
-    // Cursors: garbage, a well-formed cursor from another request, and a
-    // node's cursor (8-byte entity id) for this very request.
-    expect(await errorOf("arkiv_query", ["*", { cursor: "nope" }])).toMatchObject({
-      code: -32005,
-      message: "cursor is malformed — pass back the cursor from the previous page",
-    });
-    expect((await errorOf("arkiv_query", ["*", { cursor: `b64:${Buffer.alloc(52).toString("base64url")}` }])).message).toContain(
-      "belongs to a different query",
-    );
-    expect((await errorOf("arkiv_query", ["*", { cursor: `b64:${Buffer.alloc(16).toString("base64url")}` }])).message).toContain(
-      "belongs to a different query",
-    );
-    const binding = cursorBinding("*", 105n, projectionFingerprint(defaultProjection()));
-    const nodeCursor = `b64:${Buffer.concat([binding, Buffer.alloc(8)]).toString("base64url")}`;
-    expect((await errorOf("arkiv_query", ["*", { cursor: nodeCursor }])).message).toContain("issued by a node");
+    // The query is checked before the options, as on the node.
+    expect((await errorOf("arkiv_query", ["x ==", { bogus: 1 }])).code).toBe(-32001);
+    expect((await errorOf("arkiv_getBlockTiming", [1])).message).toBe("InvalidParams");
+    for (const params of [[{ block: "0x66" }], [{ block: -1 }], [{ query: 5 }], [5], [{}, {}]]) {
+      expect(await errorOf("arkiv_getEntityCount", params)).toEqual(INVALID);
+    }
   });
 
   test("values the bigint columns cannot hold are answered, not leaked as driver errors", async () => {
     // A forged cursor whose createdAt is past 2^63 - 1.
     const binding = cursorBinding("*", 105n, projectionFingerprint(defaultProjection()));
-    const forged = encodeCursor({ createdAt: 1n << 63n, position: 0, entityKey: `0x${"00".repeat(32)}` }, binding);
-    expect((await errorOf("arkiv_query", ["*", { cursor: forged, atBlock: "0x69" }])).message).toContain("cursor is malformed");
+    const forged = encodeCursor({ createdAt: 1n << 63n, position: 0, opIndex: 0 }, binding);
+    expect((await errorOf("arkiv_query", ["*", { cursor: forged, atBlock: "0x69" }])).code).toBe(-32005);
+    // A cursor this index issued resumes; the same position bound elsewhere does not.
+    const genuine = encodeCursor({ createdAt: 100n, position: 0, opIndex: 0 }, binding);
+    expect(await keysOf("*", { cursor: genuine, atBlock: "0x69" })).toEqual([KEY_B, KEY_F, KEY_C]);
     // $createdAt against a u64 the column cannot hold.
     expect(await keysOf("$createdAt >= u64(9223372036854775808)")).toEqual([]);
     expect(await result<number>("arkiv_getEntityCount", [{ query: "$createdAt < u64(18446744073709551615)" }])).toBe(4);
     // A NUL byte in a str literal.
-    expect(await keysOf("$contentType = str('text/plain\0')")).toEqual([]);
-    expect(await result<number>("arkiv_getEntityCount", [{ query: "$contentType = str('a\0')" }])).toBe(0);
+    expect(await keysOf("project = str('demo\0')")).toEqual([]);
+    expect(await result<number>("arkiv_getEntityCount", [{ query: "project STARTSWITH str('a\0')" }])).toBe(0);
   });
 
   test("arkiv_getEntityCount counts what matches at a block", async () => {
@@ -706,18 +731,14 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect((await errorOf("arkiv_getEntityCount", [{ query: "a != true" }])).code).toBe(-32002);
   });
 
-  test("arkiv_getEntity reads one entity, in full, as of a block", async () => {
-    const a = await result<Record<string, unknown>>("arkiv_getEntity", [KEY_A]);
-    expect(a).toMatchObject({ key: KEY_A, owner: ALICE, createdAt: "0x64", updatedAt: "0x66", expiresAt: "0x96", contentType: "" });
-    expect(a).not.toHaveProperty("payload");
-    expect(a).not.toHaveProperty("attributeSchema");
-    expect((a.attributes as unknown[]).length).toBe(5);
-    expect(await result("arkiv_getEntity", [KEY_D])).toBeNull();
-    expect(await result<Record<string, unknown>>("arkiv_getEntity", [KEY_D, 104])).toMatchObject({ key: KEY_D, owner: CAROL });
-    expect(await result("arkiv_getEntity", [KEY_E])).toBeNull();
-    expect(await result<Record<string, unknown>>("arkiv_getEntity", [KEY_E.toUpperCase().replace("0X", "0x"), 102])).toMatchObject({ key: KEY_E });
-    expect((await errorOf("arkiv_getEntity", ["0x1234"])).code).toBe(-32602);
-    expect((await errorOf("arkiv_getEntity", [KEY_A, 200])).code).toBe(-32006);
+  test("arkiv_getEntity is not served: the UDC node has none", async () => {
+    expect((await errorOf("arkiv_getEntity", [KEY_A])).code).toBe(-32601);
+    // Its old answers come from arkiv_query on $key, at the head or at a block.
+    expect(await getEntity(KEY_A)).toMatchObject({ key: KEY_A, owner: ALICE, createdAt: "0x64", updatedAt: "0x66", expiresAt: "0x96" });
+    expect(await getEntity(KEY_D)).toBeNull();
+    expect(await getEntity(KEY_D, 104)).toMatchObject({ key: KEY_D, owner: CAROL });
+    expect(await getEntity(KEY_E)).toBeNull();
+    expect(await getEntity(KEY_E, 102)).toMatchObject({ key: KEY_E });
   });
 
   test("arkiv_getBlockTiming describes the projection head", async () => {
@@ -744,13 +765,13 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(await keysOf("tag = str('demo-x')", { atBlock: "0x68" })).toEqual([KEY_D]);
   });
 
-  test("new blocks extend the projection, and one transaction's creates order by key", async () => {
+  test("new blocks extend the projection; one transaction's creates follow operation order; unindexed attributes are kept, never matched", async () => {
     // Two creates in one transaction: 0x77… is operation 0, 0x66… operation 1.
-    // The node hands out entity ids when the transaction commits, walking its
-    // staged deltas in ascending key order, so newest-first puts 0x77… before
-    // 0x66… — the opposite of operation order.
+    // The UDC node hands out entity ids in creation order, operations in
+    // calldata order, so oldest-first puts 0x77… before 0x66… whatever the keys.
     const high = `0x${"77".repeat(32)}`;
     const low = `0x${"66".repeat(32)}`;
+    const blobHash = `0x${"b0".repeat(32)}`;
     const logs = [createdLog(0, high, BOB, 500), createdLog(1, low, BOB, 500)];
     await storage.saveBlockMetrics(
       metrics(106, 1),
@@ -762,7 +783,18 @@ describeWithPostgres("entity index (Postgres)", () => {
           position: 0,
           hash: registryTx(106, 0, BOB).hash,
           operations: [
-            operation({ opIndex: 0, operationType: 1, entityKey: high, ...lifetime(394), attributes: [str("project", "new")] }),
+            operation({
+              opIndex: 0,
+              operationType: 1,
+              entityKey: high,
+              ...lifetime(394),
+              bytesSize: 11,
+              attributes: [
+                udcAttribute("blob", "bytes", null, { size: 11, keccak256: blobHash }),
+                udcAttribute("note", "str", "hidden", { indexed: false }),
+                str("project", "new"),
+              ],
+            }),
             operation({ opIndex: 1, operationType: 1, entityKey: low, ...lifetime(394), attributes: [str("project", "new")] }),
           ],
         },
@@ -776,16 +808,48 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(tick.projectedThroughBlock).toBe(106n);
     expect((await result<{ current_block: number }>("arkiv_getBlockTiming")).current_block).toBe(106);
     expect(await keysOf("project = str('new')")).toEqual([high, low]);
-    expect((await keysOf("*")).slice(0, 2)).toEqual([high, low]);
-    // A cursor between the two resumes at the lower key.
-    const firstPage = await result<{ data: { key: string }[]; cursor?: string }>("arkiv_query", ["*", { limit: 1 }]);
+    expect((await keysOf("*")).slice(-2)).toEqual([high, low]);
+    // A cursor between the two resumes at the second operation's entity.
+    const firstPage = await result<{ data: { key: string }[]; cursor?: string }>("arkiv_query", ["project = str('new')", { limit: 1, atBlock: "0x6a" }]);
     expect(firstPage.data.map((entity) => entity.key)).toEqual([high]);
-    const secondPage = await result<{ data: { key: string }[] }>("arkiv_query", ["*", { limit: 1, cursor: firstPage.cursor }]);
+    const secondPage = await result<{ data: { key: string }[] }>("arkiv_query", ["project = str('new')", { limit: 1, cursor: firstPage.cursor, atBlock: "0x6a" }]);
     expect(secondPage.data.map((entity) => entity.key)).toEqual([low]);
     expect((await result<{ blockNumber: string }>("arkiv_query", ["*"])).blockNumber).toBe("0x6a");
     expect(await result<number>("arkiv_getEntityCount")).toBe(6);
     const stats = await index.getStats();
     expect(stats.liveEntities).toBe(6);
+
+    // The unindexed str and the bytes are stored and returned (bytes as null),
+    // and listed in the schema with their flag — but no predicate matches them.
+    expect(await keysOf("note = str('hidden')")).toEqual([]);
+    expect(await result<number>("arkiv_getEntityCount", [{ query: "note STARTSWITH str('hid')" }])).toBe(0);
+    const [entity] = (
+      await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [`$key = key(${high})`, { select: { attributeSchema: true, attributes: true } }])
+    ).data;
+    expect(entity).toEqual({
+      key: high,
+      attributeSchema: [
+        { name: "blob", type: "bytes", indexed: false },
+        { name: "note", type: "str", indexed: false },
+        { name: "project", type: "str", indexed: true },
+      ],
+      attributes: [
+        { name: "blob", type: "bytes", value: null },
+        { name: "note", type: "str", value: "hidden" },
+        { name: "project", type: "str", value: "new" },
+      ],
+    });
+    const [version] = await index.getEntityVersions(high);
+    expect(version).toMatchObject({ bytesSize: 11, schemaName: null });
+    const rows = await indexDb.query<{ name: string; type_id: number; indexed: boolean; value_text: string; value_num: string | null }>(
+      `SELECT name, type_id, indexed, value_text, value_num::text AS value_num FROM "${indexSchema}".entity_version_attributes WHERE entity_key = $1 ORDER BY name`,
+      [high],
+    );
+    expect(rows.rows).toEqual([
+      { name: "blob", type_id: 7, indexed: false, value_text: blobHash, value_num: "11" },
+      { name: "note", type_id: 8, indexed: false, value_text: "hidden", value_num: null },
+      { name: "project", type_id: 8, indexed: true, value_text: "new", value_num: null },
+    ]);
   });
 
   test("the HTTP path answers only when the index is configured and shows up in /health", async () => {
@@ -865,7 +929,7 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(await keysOf("project = str('backfilled')")).toEqual([key]);
     // Block 99 is now inside the index, and the entity is the oldest of all.
     expect(await keysOf("project = str('backfilled')", { atBlock: "0x63" })).toEqual([key]);
-    expect((await keysOf("*")).at(-1)).toBe(key);
+    expect((await keysOf("*"))[0]).toBe(key);
     expect((await index.getProgress()).projectedThroughBlock).toBe(106n);
     expect(await result<number>("arkiv_getEntityCount")).toBe(7);
   });
@@ -895,6 +959,16 @@ describeWithPostgres("genesis import (Postgres)", () => {
   };
   const keysOf = async (query: string, options: Record<string, unknown> = {}) =>
     (await result<{ data: Array<{ key: string }> }>("arkiv_query", [query, { limit: 50, ...options }])).data.map((entity) => entity.key);
+
+  /** What `arkiv_getEntity` used to answer, through `arkiv_query` (the UDC node has no getEntity). */
+  const getEntity = async (key: string, block?: number): Promise<Record<string, unknown> | null> => {
+    const select = { key: true, owner: true, creator: true, createdAt: true, updatedAt: true, expiresAt: true, creationFlags: true, attributes: true };
+    const page = await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [
+      `$key = key(${key.toLowerCase()})`,
+      { select, ...(block === undefined ? {} : { atBlock: `0x${block.toString(16)}` }) },
+    ]);
+    return page.data[0] ?? null;
+  };
 
   beforeAll(async () => {
     const isolated = await createIsolatedStorage("entity_genesis");
@@ -944,14 +1018,14 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(logs.some((line) => line.includes("floor set to block 0"))).toBe(true);
     expect(logs.some((line) => line.includes("genesis import done"))).toBe(true);
 
-    // Newest first is descending entity id, at block 0 and at the head alike.
-    const ids = [6, 5, 4, 3, 2, 1, 0].map(keyOf);
+    // Oldest first is ascending entity id, at block 0 and at the head alike.
+    const ids = [0, 1, 2, 3, 4, 5, 6].map(keyOf);
     expect(await keysOf("*", { atBlock: "0x0" })).toEqual(ids);
     expect(await keysOf("*")).toEqual(ids);
     expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(7);
     expect(await result<number>("arkiv_getEntityCount")).toBe(7);
-    expect(await keysOf("n >= u64(5)")).toEqual([keyOf(6), keyOf(5)]);
-    expect(await keysOf(`$owner = addr(${OWNER}) AND kind = str('seed')`, { limit: 2 })).toEqual([keyOf(6), keyOf(5)]);
+    expect(await keysOf("n >= u64(5)")).toEqual([keyOf(5), keyOf(6)]);
+    expect(await keysOf(`$owner = addr(${OWNER}) AND kind = str('seed')`, { limit: 2 })).toEqual([keyOf(0), keyOf(1)]);
 
     // The index's own cursor walks the set once, without a repeat.
     const seen: string[] = [];
@@ -966,8 +1040,8 @@ describeWithPostgres("genesis import (Postgres)", () => {
     } while (cursor);
     expect(seen).toEqual(ids);
 
-    // Everything the node says about a genesis entity, except the payload.
-    expect(await result<Record<string, unknown>>("arkiv_getEntity", [keyOf(5), 0])).toEqual({
+    // Everything the node says about a genesis entity.
+    expect(await getEntity(keyOf(5), 0)).toEqual({
       key: keyOf(5),
       owner: OWNER,
       creator: OWNER,
@@ -975,7 +1049,6 @@ describeWithPostgres("genesis import (Postgres)", () => {
       updatedAt: "0x0",
       expiresAt: "0xffffffffffffffff",
       creationFlags: { readonly: false, permissionlessExtension: false, raw: 0 },
-      contentType: "application/json",
       attributes: [
         { name: "kind", type: "str", value: "seed" },
         { name: "n", type: "u64", value: "0x5" },
@@ -1004,13 +1077,25 @@ describeWithPostgres("genesis import (Postgres)", () => {
           owner: OWNER,
           creator: OWNER,
           expiresAt: "18446744073709551615",
-          contentType: "application/json",
           creationFlags: 0,
-          payloadSize: 0,
+          bytesSize: 0,
+          schemaName: null,
           attributes: [
-            { name: "kind", type: "str", value: "seed" },
-            { name: "n", type: "u64", value: "0x5" },
+            { name: "kind", type: "str", indexed: true, value: "seed" },
+            { name: "n", type: "u64", indexed: true, value: "0x5" },
           ],
+        },
+        // The index's newest state, served fresh beside the cached history.
+        state: {
+          asOfBlock: "1",
+          status: "live",
+          version: 0,
+          createdAt: "0",
+          updatedAt: "0",
+          expiresAt: "18446744073709551615",
+          permanent: true,
+          bytesSize: 0,
+          schemaName: null,
         },
       });
       const unknown = await fetch(`http://${server.hostname}:${server.port}/entity/0x${"ab".repeat(32)}`);
@@ -1033,7 +1118,7 @@ describeWithPostgres("genesis import (Postgres)", () => {
     const projector = new EntityProjector(index, { genesis: { source, batchEntities: 3, pageSize: 3 }, log: () => {} });
     await expect(projector.runOnce()).rejects.toThrow("boom");
     expect(await index.getGenesisImport()).toMatchObject({ status: "running", phase: "walk", imported: 3, cursor: "c:3" });
-    expect(await index.getEntityVersions(keyOf(6))).toHaveLength(1);
+    expect(await index.getEntityVersions(keyOf(0))).toHaveLength(1);
     expect(await index.getEntityVersions(keyOf(3))).toHaveLength(0);
     // Nothing is served while the import owns the index.
     expect((await call("arkiv_getEntityCount")).error?.message).toMatch(/entity index is incomplete/);
@@ -1046,7 +1131,38 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(rows.rows[0]!.count).toBe("7");
     const positions = await Promise.all([6, 5, 4, 3, 2, 1, 0].map(async (id) => (await index.getEntityVersions(keyOf(id)))[0]!.createdPosition));
     expect(positions).toEqual([6, 5, 4, 3, 2, 1, 0]);
-    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([6, 5, 4, 3, 2, 1, 0].map(keyOf));
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([0, 1, 2, 3, 4, 5, 6].map(keyOf));
+  });
+
+  test("a node restart mid-walk (-32005, the cursor is gone) starts the walk over without duplicating rows", async () => {
+    await index.reset();
+    const source = createFakeGenesisSource(SEVEN);
+    // UDC node cursors are process-local: after a restart a stored cursor is refused.
+    source.failPage(
+      3,
+      new GenesisRpcError(
+        "arkiv_query",
+        -32005,
+        "query rejected (cursor): the cursor expired, is malformed, or belongs to another query, block or selection",
+      ),
+    );
+    const logs: string[] = [];
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 3, pageSize: 3 }, log: (line) => logs.push(line) });
+    const first = await projector.runOnce();
+    expect(first.genesisStatus).toBe("running");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "running", phase: "walk", imported: 0, cursor: null, error: null });
+    expect(logs.some((line) => line.includes("restarting the walk from the first page"))).toBe(true);
+    const partial = await db.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM "${schema}".entity_versions`);
+    expect(partial.rows[0]!.count).toBe("6");
+
+    const second = await projector.runOnce();
+    expect(second.genesisStatus).toBe("done");
+    const rows = await db.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM "${schema}".entity_versions`);
+    expect(rows.rows[0]!.count).toBe("7");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "done", imported: 7, total: 7 });
+    const positions = await Promise.all([0, 1, 2, 3, 4, 5, 6].map(async (id) => (await index.getEntityVersions(keyOf(id)))[0]!.createdPosition));
+    expect(positions).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([0, 1, 2, 3, 4, 5, 6].map(keyOf));
   });
 
   test("stop() ends the walk after the batch in flight, and the next start resumes it", async () => {
@@ -1066,7 +1182,7 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(source.pages).toBe(4);
     const rows = await db.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM "${schema}".entity_versions`);
     expect(rows.rows[0]!.count).toBe("7");
-    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([6, 5, 4, 3, 2, 1, 0].map(keyOf));
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([0, 1, 2, 3, 4, 5, 6].map(keyOf));
   });
 
   test("operations on genesis entities fold on top of their genesis state", async () => {
@@ -1118,14 +1234,14 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(attributesOf(g2[0]!)).toEqual(["kind:8=seed", "n:3=2"]);
     expect(attributesOf(g2[1]!)).toEqual(["n:3=2", "rank:2=7"]);
     expect(g2[1]).toMatchObject({ createdAt: 0, createdPosition: 2, updatedAt: 2, owner: OWNER, creator: OWNER, expiresAt: 2n ** 64n - 1n });
-    expect(await result<{ attributes: unknown }>("arkiv_getEntity", [keyOf(2), 0])).toMatchObject({
+    expect(await getEntity(keyOf(2), 0)).toMatchObject({
       updatedAt: "0x0",
       attributes: [
         { name: "kind", type: "str", value: "seed" },
         { name: "n", type: "u64", value: "0x2" },
       ],
     });
-    expect(await result<{ attributes: unknown }>("arkiv_getEntity", [keyOf(2)])).toMatchObject({
+    expect(await getEntity(keyOf(2))).toMatchObject({
       updatedAt: "0x2",
       attributes: [
         { name: "n", type: "u64", value: "0x2" },
@@ -1139,16 +1255,16 @@ describeWithPostgres("genesis import (Postgres)", () => {
       [1, 500n, false],
       [2, 500n, true],
     ]);
-    expect(await result("arkiv_getEntity", [keyOf(1)])).toBeNull();
-    expect(await result("arkiv_getEntity", [keyOf(1), 2])).toMatchObject({ expiresAt: "0x1f4" });
+    expect(await getEntity(keyOf(1))).toBeNull();
+    expect(await getEntity(keyOf(1), 2)).toMatchObject({ expiresAt: "0x1f4" });
     // G0: a new owner, the same creator.
-    expect(await result("arkiv_getEntity", [keyOf(0)])).toMatchObject({ owner: BOB, creator: OWNER });
+    expect(await getEntity(keyOf(0))).toMatchObject({ owner: BOB, creator: OWNER });
     // G3 lapsed at block 1: counted at block 0, gone at the head.
     expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(4);
     expect(await result<number>("arkiv_getEntityCount")).toBe(2);
-    expect(await keysOf("*")).toEqual([keyOf(2), keyOf(0)]);
-    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(3), keyOf(2), keyOf(1), keyOf(0)]);
-    expect(await keysOf("*", { atBlock: "0x1" })).toEqual([keyOf(2), keyOf(1), keyOf(0)]);
+    expect(await keysOf("*")).toEqual([keyOf(0), keyOf(2)]);
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(0), keyOf(1), keyOf(2), keyOf(3)]);
+    expect(await keysOf("*", { atBlock: "0x1" })).toEqual([keyOf(0), keyOf(1), keyOf(2)]);
 
     // A refold of G0 for a later block rebuilds it from the base again.
     await storeBlock(storage, {
@@ -1216,10 +1332,10 @@ describeWithPostgres("genesis import (Postgres)", () => {
       [2, 6],
     ]);
     expect(attributesOf(g2[2]!)).toEqual(["late:8=yes", "n:3=2", "rank:2=7"]);
-    expect(await keysOf("*")).toEqual([KEY_A, keyOf(2), keyOf(0)]);
+    expect(await keysOf("*")).toEqual([keyOf(0), keyOf(2), KEY_A]);
     expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(4);
     expect(await keysOf("project = str('onchain')", { atBlock: "0x4" })).toEqual([]);
-    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(3), keyOf(2), keyOf(1), keyOf(0)]);
+    expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(0), keyOf(1), keyOf(2), keyOf(3)]);
   });
 
   test("a probe that finds no genesis entities leaves the floor to the first keyed create", async () => {
@@ -1325,6 +1441,14 @@ describeWithPostgres("offline genesis import (Postgres)", () => {
     const response = await call(method, params);
     if (response.error) throw new Error(`${method} failed: ${JSON.stringify(response.error)}`);
     return response.result as T;
+  };
+  const getEntity = async (key: string, block?: number): Promise<Record<string, unknown>> => {
+    const select = { key: true, owner: true, creator: true, createdAt: true, updatedAt: true, expiresAt: true, creationFlags: true, attributes: true };
+    const page = await result<{ data: Array<Record<string, unknown>> }>("arkiv_query", [
+      `$key = key(${key})`,
+      { select, ...(block === undefined ? {} : { atBlock: `0x${block.toString(16)}` }) },
+    ]);
+    return page.data[0]!;
   };
 
   // Five entities in seed order; G3 carries the attributes a patch will touch.
@@ -1434,12 +1558,12 @@ describeWithPostgres("offline genesis import (Postgres)", () => {
     expect(tick.projectedThroughBlock).toBe(2n);
     expect((await index.getProgress()).floorBlock).toBe(0n);
     const keys = (await result<{ data: Array<{ key: string }> }>("arkiv_query", ["*", { atBlock: "0x0", limit: 10 }])).data.map((e) => e.key);
-    expect(keys).toEqual([keyOf(4), keyOf(3), keyOf(2), keyOf(1), keyOf(0)]);
+    expect(keys).toEqual([keyOf(0), keyOf(1), keyOf(2), keyOf(3), keyOf(4)]);
     expect(await result<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(5);
-    const atGenesis = await result<Record<string, unknown>>("arkiv_getEntity", [keyOf(3), 0]);
+    const atGenesis = await getEntity(keyOf(3), 0);
     expect(atGenesis).toMatchObject({ key: keyOf(3), owner: DUMP_OWNER, createdAt: "0x0", expiresAt: "0x138b" });
     expect((atGenesis.attributes as Array<{ name: string }>).map((a) => a.name)).toEqual(["kind", "n"]);
-    const atHead = await result<Record<string, unknown>>("arkiv_getEntity", [keyOf(3)]);
+    const atHead = await getEntity(keyOf(3));
     expect((atHead.attributes as Array<{ name: string; value: unknown }>).map((a) => [a.name, a.value])).toEqual([
       ["n", "0x3"],
       ["rank", 7],

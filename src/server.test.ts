@@ -58,6 +58,7 @@ import {
   hasPostgresForTests,
 } from "./testPostgres";
 import type { BlockMetrics } from "./types";
+import type { EntityVersion } from "./entityIndex";
 import type { ScanSample } from "./syncStatus";
 
 const RANGE_SIZE = DEFAULT_RANGE_SIZE;
@@ -1614,6 +1615,84 @@ describe("GET /entity/:entityKey", () => {
     const thirdBody = (await (await request()).json()) as EntityByKeyResponseBody;
     expect(storageCalls).toBe(2);
     expect(entityOperationValue(thirdBody.operations[0], "bytesSize")).toBe(2);
+  });
+
+  test("adds the entity index's newest state fresh on every request, beside the cached history", async () => {
+    let storageCalls = 0;
+    const storage = {
+      getEntityOperationHistory: async () => {
+        storageCalls += 1;
+        return { operations: [entityOperationFixture()], totalOperations: 1, firstOperation: null };
+      },
+    } as unknown as ScannerStorage;
+    let head = 50n;
+    let latest: EntityVersion = {
+      entityKey,
+      version: 0,
+      fromBlock: 42,
+      fromPosition: 0,
+      fromOpIndex: 0,
+      toBlock: null,
+      deleted: false,
+      owner: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      creator: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      createdAt: 42,
+      createdPosition: 0,
+      createdOpIndex: 0,
+      updatedAt: 42,
+      expiresAt: 100n,
+      creationFlags: 0,
+      bytesSize: 3,
+      schemaName: "posts",
+      attributes: [
+        { name: "arkiv.schema", typeId: 8, indexed: true, valueText: "posts", valueNum: null },
+        { name: "body", typeId: 7, indexed: false, valueText: `0x${"ab".repeat(32)}`, valueNum: 3n },
+        { name: "n", typeId: 3, indexed: false, valueText: "9", valueNum: 9n },
+      ],
+    };
+    const entityIndex = {
+      getProgress: async () => ({ floorBlock: 0n, projectedThroughBlock: head, lateScanWatermark: undefined, lastFoldAt: undefined }),
+      getEntity: async () => undefined,
+      getLatestVersion: async () => latest,
+      queryEntities: async () => ({ entities: [], hasMore: false }),
+      countEntities: async () => 0,
+      getStats: async () => ({ versionRowsEstimate: 0, liveEntities: null, liveEntitiesAtUtc: null, liveEntitiesBlock: null, genesis: undefined }),
+    };
+    const options = { entityHistoryCache: new ResponseCache(), entityIndex };
+    const request = async () =>
+      (await (await handleRequest(new Request(`http://example.test/entity/${entityKey}`), storage, options)).json()) as EntityByKeyResponseBody;
+
+    const first = await request();
+    expect(first.state).toEqual({
+      asOfBlock: "50",
+      status: "live",
+      version: 0,
+      owner: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      creator: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      createdAt: "42",
+      updatedAt: "42",
+      expiresAt: "100",
+      permanent: false,
+      creationFlags: 0,
+      bytesSize: 3,
+      schemaName: "posts",
+      attributes: [
+        { name: "arkiv.schema", type: "str", indexed: true, value: "posts" },
+        { name: "body", type: "bytes", indexed: false, value: null, size: 3, keccak256: `0x${"ab".repeat(32)}` },
+        { name: "n", type: "u64", indexed: false, value: "0x9" },
+      ],
+    });
+    // The projector folds a permanent extension; the history stays cached.
+    head = 120n;
+    latest = { ...latest, version: 1, expiresAt: 18446744073709551615n, updatedAt: 110 };
+    const second = await request();
+    expect(storageCalls).toBe(1);
+    expect(second.state).toMatchObject({ asOfBlock: "120", status: "live", version: 1, permanent: true, updatedAt: "110" });
+    expect(second.operations).toEqual(first.operations);
+    latest = { ...latest, version: 2, deleted: true };
+    expect((await request()).state?.status).toBe("deleted");
+    latest = { ...latest, deleted: false, expiresAt: 120n };
+    expect((await request()).state?.status).toBe("expired");
   });
 
   test("caches not-found responses", async () => {

@@ -1,7 +1,8 @@
 /**
  * An in-memory {@link GenesisSource} for tests: a list of entities in id
- * order (oldest first), paged newest-first the way a node pages `arkiv_query`
- * at block 0, with opaque cursors and a failure that can be scheduled.
+ * order (oldest first), paged oldest-first the way the UDC node pages
+ * `arkiv_query` at block 0, with opaque cursors and a failure that can be
+ * scheduled.
  */
 import type { GenesisChain, GenesisPage, GenesisSource } from "./entityGenesis";
 
@@ -28,7 +29,7 @@ export function createFakeGenesisSource(
   entities: ReadonlyArray<Record<string, unknown>>,
   options: FakeGenesisSourceOptions = {},
 ): FakeGenesisSource {
-  const newestFirst = [...entities].reverse();
+  const oldestFirst = [...entities];
   const failures = new Map<number, Error>();
   let pages = 0;
   return {
@@ -62,15 +63,33 @@ export function createFakeGenesisSource(
         throw failure;
       }
       const start = cursor === undefined ? 0 : Number(cursor.slice("c:".length));
-      const data = newestFirst.slice(start, start + limit);
+      const data = oldestFirst.slice(start, start + limit);
       const end = start + data.length;
-      return { data, blockNumber: "0x0", ...(end < newestFirst.length ? { cursor: `c:${end}` } : {}) };
+      return { data, blockNumber: "0x0", ...(end < oldestFirst.length ? { cursor: `c:${end}` } : {}) };
     },
   };
 }
 
-/** An entity as a node describes a genesis entity, keyed by its id. */
+/**
+ * An entity as the UDC node describes a genesis entity, keyed by its id. Its
+ * `attributeSchema` is derived from `attributes` (all indexed but `bytes`)
+ * unless an override gives one.
+ */
 export function fakeWireEntity(id: number, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const attributes =
+    "attributes" in overrides
+      ? overrides.attributes
+      : [
+          { name: "kind", type: "str", value: "seed" },
+          { name: "n", type: "u64", value: `0x${id.toString(16)}` },
+        ];
+  const schema = Array.isArray(attributes)
+    ? (attributes as Array<{ name?: unknown; type?: unknown }>).map((attribute) => ({
+        name: attribute.name,
+        type: attribute.type,
+        indexed: attribute.type !== "bytes",
+      }))
+    : [];
   return {
     key: `0x${id.toString(16).padStart(64, "0")}`,
     owner: FAKE_GENESIS_OWNER,
@@ -79,11 +98,8 @@ export function fakeWireEntity(id: number, overrides: Record<string, unknown> = 
     updatedAt: "0x0",
     expiresAt: "0xffffffffffffffff",
     creationFlags: { readonly: false, permissionlessExtension: false, raw: 0 },
-    contentType: "application/json",
-    attributes: [
-      { name: "kind", type: "str", value: "seed" },
-      { name: "n", type: "u64", value: `0x${id.toString(16)}` },
-    ],
+    attributeSchema: schema,
     ...overrides,
+    attributes,
   };
 }

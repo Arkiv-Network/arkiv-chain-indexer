@@ -24,7 +24,7 @@ import { normalizeBaseloadConfig } from "./baseloadConfig";
 import { readBuildInfo, type BuildInfo } from "./buildInfo";
 import { handleJsonRpcText, type JsonRpcForwarder, type JsonRpcMethodHandler } from "./jsonRpc";
 import { ARKIV_INDEX_METHODS, createArkivIndexMethods } from "./arkivJsonRpc";
-import type { EntityVersion } from "./entityIndex";
+import { PERMANENT_EXPIRY, type EntityVersion } from "./entityIndex";
 import type { EntityIndexReader, EntityIndexStats, GenesisImportStatus } from "./entityIndexStorage";
 import { TYPE_TAGS_BY_ID, wireAttributeValue } from "./entityValues";
 import { computeSyncStatus, type SyncStatus } from "./syncStatus";
@@ -186,18 +186,64 @@ export interface TransactionByHashResponseBody {
  * transaction created it, so this is what the entity index knows from the
  * genesis import (see README, "Genesis entities").
  */
+/**
+ * One attribute of an entity state: name, type tag, indexed flag and the value
+ * in the node's `arkiv_query` encoding — `null` for `bytes`, whose content the
+ * index never holds (its `size` and `keccak256` are given instead; fetch the
+ * content from a node).
+ */
+export interface EntityAttributeBody {
+  name: string;
+  type: string;
+  /** Queryable; an unindexed attribute is stored and returned but never matched. */
+  indexed: boolean;
+  value: unknown;
+  /** bytes only. */
+  size?: number;
+  /** bytes only. */
+  keccak256?: string;
+}
+
 export interface EntityGenesisRecordBody {
   owner: string;
   creator: string;
   /** Absolute expiry block as a decimal string; 18446744073709551615 means never. */
   expiresAt: string;
-  contentType: string;
   /** Raw creation flag bits (1 readonly, 2 permissionless extension); null when the import did not learn them. */
   creationFlags: number | null;
-  /** Bytes of payload at genesis; 0 when imported over RPC, which never fetches the payload. */
-  payloadSize: number;
-  /** Typed attributes in the node's wire encoding, sorted by name. */
-  attributes: Array<{ name: string; type: string; value: unknown }>;
+  /** Bytes held by the bytes attributes at genesis. */
+  bytesSize: number;
+  /** The indexed str `arkiv.schema`, when set. */
+  schemaName: string | null;
+  /** Every attribute, sorted by name. */
+  attributes: EntityAttributeBody[];
+}
+
+/**
+ * The entity's newest state in the entity index, whatever it is — live,
+ * expired or deleted — as of the projection head. Served fresh on every
+ * request (never from the history cache): the projector folds after the
+ * scanner writes.
+ */
+export interface EntityStateBody {
+  /** The projection head the state is as of. */
+  asOfBlock: string;
+  /** `deleted` by a delete; `expired` once `expiresAt <= asOfBlock`; `live` otherwise. */
+  status: "live" | "expired" | "deleted";
+  /** 0 for the create (or the genesis state), one more per applied operation. */
+  version: number;
+  owner: string;
+  creator: string;
+  /** Block numbers as decimal strings. */
+  createdAt: string;
+  updatedAt: string;
+  /** Absolute expiry block, exact decimal; 18446744073709551615 means permanent. */
+  expiresAt: string;
+  permanent: boolean;
+  creationFlags: number | null;
+  bytesSize: number;
+  schemaName: string | null;
+  attributes: EntityAttributeBody[];
 }
 
 export interface EntityByKeyResponseBody {
@@ -216,6 +262,8 @@ export interface EntityByKeyResponseBody {
   firstOperation?: EntityOperationResponseRow;
   /** Present when the entity was created in the genesis state (block 0); `operations` may then be empty. */
   genesis?: EntityGenesisRecordBody;
+  /** The entity index's newest state for the key; absent without an index or when it does not know the key. */
+  state?: EntityStateBody;
 }
 
 export interface TransactionRecordsResponseBody {
@@ -1513,7 +1561,48 @@ async function handleGetEntityByKey(
   const cached = options.entityHistoryCache
     ? await options.entityHistoryCache.load(normalized, loader)
     : await loader();
-  return responseFromCached(cached);
+  // The index state is never cached with the history: the scanner's NOTIFY
+  // evicts the history when operations land, but the projector folds them a
+  // moment later, so a cached state would trail the fold until the TTL.
+  const head = progress?.projectedThroughBlock;
+  if (cached.status !== 200 || !options.entityIndex || head === undefined || typeof cached.body !== "string") {
+    return responseFromCached(cached);
+  }
+  const latest = await options.entityIndex.getLatestVersion(normalized);
+  if (!latest) return responseFromCached(cached);
+  const body = JSON.parse(cached.body) as EntityByKeyResponseBody;
+  return jsonResponse({ ...body, state: entityStateBody(latest, head) } satisfies EntityByKeyResponseBody);
+}
+
+function entityAttributeBody(attribute: EntityVersion["attributes"][number]): EntityAttributeBody {
+  const type = TYPE_TAGS_BY_ID.get(attribute.typeId) ?? "unknown";
+  if (type === "bytes") {
+    return { name: attribute.name, type, indexed: attribute.indexed, value: null, size: Number(attribute.valueNum ?? 0n), keccak256: attribute.valueText };
+  }
+  return {
+    name: attribute.name,
+    type,
+    indexed: attribute.indexed,
+    value: type === "unknown" ? null : wireAttributeValue(type, attribute),
+  };
+}
+
+function entityStateBody(version: EntityVersion, head: bigint): EntityStateBody {
+  return {
+    asOfBlock: head.toString(),
+    status: version.deleted ? "deleted" : version.expiresAt <= head ? "expired" : "live",
+    version: version.version,
+    owner: version.owner,
+    creator: version.creator,
+    createdAt: version.createdAt.toString(),
+    updatedAt: version.updatedAt.toString(),
+    expiresAt: version.expiresAt.toString(),
+    permanent: version.expiresAt === PERMANENT_EXPIRY,
+    creationFlags: version.creationFlags,
+    bytesSize: version.bytesSize,
+    schemaName: version.schemaName,
+    attributes: version.attributes.map(entityAttributeBody),
+  };
 }
 
 const entityCacheGenerations = new WeakMap<ResponseCache, string>();
@@ -1558,13 +1647,10 @@ function genesisRecordBody(version: EntityVersion): EntityGenesisRecordBody {
     owner: version.owner,
     creator: version.creator,
     expiresAt: version.expiresAt.toString(),
-    contentType: version.contentType,
     creationFlags: version.creationFlags,
-    payloadSize: version.payloadSize,
-    attributes: version.attributes.flatMap((attribute) => {
-      const type = TYPE_TAGS_BY_ID.get(attribute.typeId);
-      return type ? [{ name: attribute.name, type, value: wireAttributeValue(type, attribute) }] : [];
-    }),
+    bytesSize: version.bytesSize,
+    schemaName: version.schemaName,
+    attributes: version.attributes.map(entityAttributeBody),
   };
 }
 

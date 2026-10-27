@@ -17,7 +17,7 @@ const ENTITY_SOURCE = "entity_versions, evaluated at entity_index_state.projecte
 const VERSION_SCOPE = "Choose the version with from_block ≤ projection block and to_block > projection block, or no to_block. Each known entity contributes once; superseded and future versions do not contribute.";
 const ACTIVE_SCOPE = "Use the version valid at the projection block, require deleted = false and expires_at > that block. An entity expiring exactly at that block is already inactive.";
 const ENTITY_LIMITS = "Unavailable means the projection is missing, has no head, or is importing genesis. Missing creates, an incomplete genesis import, pending historical refolds and inferred pre-log expiries can limit accuracy. This is not a live-node census. Entity, payload and attribute state always uses the current projection block, independent of the activity period.";
-const PAYLOAD_LIMITS = "The projection carries recorded size metadata, not payload contents. A reference receipt's size can differ from the referenced entity bytes. Totals do not prove provider availability, current provider storage usage or deduplication.";
+const BYTES_LIMITS = "The projection carries bytes attribute sizes (and keccak256 hashes) decoded from calldata, never their contents. Totals are not deduplicated and say nothing about node storage beyond the entities' own size.";
 const OP_SOURCE = "The selected period filters transaction_operations.block_date, even for operations without a transaction row. transaction_operations joined to transactions by (block_number, position); operation_type selects the operation and the stored receipt status selects its outcome.";
 const SUCCESS_SCOPE = "Only operations whose transaction has receipt status 1. Reverted, unknown-status and missing-transaction rows are excluded. Every operation counts separately, including multiple operations in one transaction or repeated writes to one entity. " + ACTIVITY_SCOPE;
 const OP_LIMITS = "Only stored, decoded operations are covered. Disabled transaction storage or missing decoder history leaves gaps. Imported genesis entities have no create transaction. These are operation counts, not counts of distinct entities.";
@@ -37,7 +37,7 @@ export const STATISTICS_HELP = {
     "The windows object in the precomputed snapshot. Finite periods share gatheredAtUtc as their UTC cutoff; no query or new sweep is triggered by selection.",
     "1, 2, 6, 12, 24, 48 or 72 hours, or exactly 7 × 24 hours, ending at the collection cutoff. A block timestamp equal to the start is included; one equal to the cutoff is excluded. All time includes every stored row, including future-dated rows.",
     "The period filters each table's stored block_date, not scan/import time. All time is the default and your selection is remembered in this browser. Older snapshots without windows support only All time.",
-    "Chain coverage and current projected entity, active payload and attribute state do not change with this selection. Zero is no matching stored activity, not proof the period was fully indexed. Future-dated rows are excluded from finite periods.",
+    "Chain coverage and current projected entity, bytes and attribute state do not change with this selection. Zero is no matching stored activity, not proof the period was fully indexed. Future-dated rows are excluded from finite periods.",
   ),
   "Indexed activity": explain(
     "Stored block and transaction counts in the selected activity period.",
@@ -46,12 +46,12 @@ export const STATISTICS_HELP = {
     ACTIVITY_SCOPE,
     "The tables can have different historical coverage. These totals do not estimate unindexed history and do not count scan or backfill jobs.",
   ),
-  "Current active payload state": explain(
-    "Recorded payload sizes of entities active at the current projection block.",
+  "Current active bytes state": explain(
+    "Bytes held by the bytes attributes of entities active at the current projection block, and permanent entities.",
     ENTITY_SOURCE,
-    "Select one version per active entity, then count nonzero sizes and calculate the sum and maximum recorded size.",
+    "Select one version per active entity, then count entities with bytes, sum and maximise their bytes_size, and count expires_at = 2^64 − 1.",
     ACTIVE_SCOPE + " These state gauges are independent of the activity period.",
-    PAYLOAD_LIMITS,
+    BYTES_LIMITS,
   ),
   "Byte units": explain(
     "Controls the display of all byte sizes on this page, including means and content-type totals.",
@@ -217,7 +217,7 @@ export const STATISTICS_HELP = {
   "Transaction input and payloads": explain(
     "Activity data volume in the selected period: transaction calldata and payload writes in successful operations.",
     "Stored block/transaction input-size fields and decoded transaction_operations payload metadata, filtered by stored block_date.",
-    "Sum input and successful-operation metadata within the selected period. Current active payload state is shown separately and does not use the selected period.",
+    "Sum input and successful-operation metadata within the selected period. Current active bytes state is shown separately and does not use the selected period.",
     "Input totals include reverted transactions. Successful operation totals require receipt status 1. " + ACTIVITY_SCOPE,
     "These categories overlap and must not be added into one storage total. Calldata can contain operation metadata or reference receipts rather than entity bytes, and repeated writes are not deduplicated.",
   ),
@@ -305,26 +305,33 @@ export const STATISTICS_HELP = {
     SUCCESS_SCOPE,
     "Writes through an unnamed schema, or without one, carry no tag.",
   ),
-  "Active entities with recorded payload": explain(
-    "Active projected entities whose selected state has a nonzero recorded payload size.",
-    ENTITY_SOURCE + " Uses payload_size on the selected version.",
-    "COUNT of active states where payload_size > 0. Each entity contributes at most once.",
+  "Active permanent entities": explain(
+    "Active entities that never expire (expiresAt is 2^64 − 1).",
+    ENTITY_SOURCE + " Uses expires_at on the selected version.",
+    "COUNT of active states where expires_at = 18446744073709551615.",
     ACTIVE_SCOPE,
-    PAYLOAD_LIMITS + " A zero recorded size cannot establish whether external payload bytes exist.",
+    "Rent for a permanent entity is charged at most one rent cap ahead; this counts the state, not what was paid.",
   ),
-  "Active recorded payload bytes": explain(
-    "The sum of recorded payload-size metadata for entities active at the projection block.",
-    ENTITY_SOURCE + " Uses payload_size, seeded from imported state or carried forward from decoded create/update operations.",
-    "SUM(payload_size) over active selected versions. Old overwritten versions and inactive entities do not contribute; an empty active set yields zero.",
+  "Active entities with bytes": explain(
+    "Active projected entities holding at least one bytes attribute.",
+    ENTITY_SOURCE + " Uses bytes_size on the selected version.",
+    "COUNT of active states where bytes_size > 0. Each entity contributes at most once.",
     ACTIVE_SCOPE,
-    PAYLOAD_LIMITS + " The current projector retains the previous size when an update's decoded payload size is zero, so this is explicitly a metadata total.",
+    BYTES_LIMITS,
   ),
-  "Largest active recorded payload": explain(
-    "The greatest recorded payload size among currently active projected entities.",
-    ENTITY_SOURCE + " Uses the selected version's payload_size.",
-    "MAX(payload_size) over active states; return zero if no active states exist.",
+  "Active bytes": explain(
+    "The bytes held by the bytes attributes of entities active at the projection block.",
+    ENTITY_SOURCE + " Uses bytes_size, the sum of the version's bytes attribute sizes.",
+    "SUM(bytes_size) over active selected versions. Old overwritten versions and inactive entities do not contribute.",
     ACTIVE_SCOPE,
-    "This is an observed metadata maximum, not a permitted maximum payload size. " + PAYLOAD_LIMITS,
+    BYTES_LIMITS,
+  ),
+  "Largest active bytes": explain(
+    "The greatest bytes total among currently active projected entities.",
+    ENTITY_SOURCE + " Uses the selected version's bytes_size.",
+    "MAX(bytes_size) over active states; zero if no active states exist.",
+    ACTIVE_SCOPE,
+    "An observed maximum, not the protocol's 128 KiB per-entity limit. " + BYTES_LIMITS,
   ),
   "Attributes on active entities": explain(
     "Describes the attributes present in active entity state, rather than the history of attribute writes.",
@@ -361,33 +368,54 @@ export const STATISTICS_HELP = {
     ACTIVE_SCOPE,
     "This is an observed maximum, not a protocol attribute limit. It excludes larger historical states if the entity changed, expired or was deleted. " + ATTRIBUTE_LIMITS,
   ),
-  "Top content types": explain(
-    "Groups active entities by their recorded content-type string to show the most common data formats.",
-    ENTITY_SOURCE + " Grouping uses content_type; sizes use payload_size.",
-    "Count entities and sum recorded payload sizes within each group. Sort by entity count descending, then content-type string in bytewise order, and return at most 20 groups.",
-    ACTIVE_SCOPE + " Entities with zero recorded payload size still contribute to the entity count. An empty content type appears as Unspecified.",
-    "The list can omit smaller groups, so displayed rows need not sum to the active totals. Content types are declared metadata, not detected from payload contents. " + PAYLOAD_LIMITS,
+  "Indexed attributes": explain(
+    "Attributes on active entities that carry the indexed flag, so queries can match them.",
+    ATTRIBUTE_SOURCE + " Each entry's indexed flag.",
+    "Count active attribute entries with indexed = true.",
+    ACTIVE_SCOPE,
+    ATTRIBUTE_LIMITS,
   ),
-  "Content type": explain(
-    "The exact recorded content-type string shared by entities in this row.",
-    "entity_versions.content_type on the version valid at the projection block.",
-    "Group active entity states by their content_type string. The empty string is displayed as Unspecified; the statistics query does not normalize MIME parameters or detect file types.",
+  "Stored-only attributes": explain(
+    "Attributes on active entities without the indexed flag: stored and returned by queries, but never matched by one. bytes attributes are always stored-only.",
+    ATTRIBUTE_SOURCE + " Each entry's indexed flag.",
+    "Count active attribute entries with indexed = false.",
+    ACTIVE_SCOPE,
+    ATTRIBUTE_LIMITS,
+  ),
+  "Top schemas": explain(
+    "Groups active entities by the SDK's named-schema tag (an indexed str attribute arkiv.schema).",
+    ENTITY_SOURCE + " Grouping uses schema_name; sizes use bytes_size.",
+    "Count entities and sum bytes within each tag. Sort by entity count descending, then the tag in bytewise order, and return at most 20 groups. Untagged entities are counted separately.",
+    ACTIVE_SCOPE,
+    "The list can omit smaller groups, so displayed rows need not sum to the active totals.",
+  ),
+  "Schema": explain(
+    "The arkiv.schema tag shared by entities in this row.",
+    "entity_versions.schema_name on the version valid at the projection block.",
+    "Group active entity states by schema_name.",
     ACTIVE_SCOPE + " Only the 20 groups with the most active entities are displayed.",
-    "A label such as application/json is metadata from decoding or imported state. It does not mean the index inspected or validated JSON payload contents.",
+    "The tag names the schema an entity was written through; the index does not validate it.",
   ),
-  "Content-type active entities": explain(
-    "The number of active projected entities belonging to this particular content-type group.",
-    "COUNT(*) grouped by entity_versions.content_type for active selected versions.",
-    "Each active entity contributes once to its recorded content type, including entities with a zero recorded payload size.",
-    ACTIVE_SCOPE + " Rows are ranked by this count; ties use bytewise content-type order.",
-    "This is a per-group count, not the whole-page Active entities total. Only 20 groups are returned, so adding the visible rows may omit less common content types.",
+  "Schema active entities": explain(
+    "The number of active projected entities carrying this schema tag.",
+    "COUNT(*) grouped by entity_versions.schema_name for active selected versions.",
+    "Each active entity contributes once to its tag.",
+    ACTIVE_SCOPE + " Rows are ranked by this count; ties use bytewise tag order.",
+    "A per-group count, not the whole-page Active entities total.",
   ),
-  "Recorded payload bytes": explain(
-    "The active recorded payload-size total for this content-type group.",
-    "SUM(entity_versions.payload_size) grouped by content_type, using active selected versions.",
-    "Add one recorded payload size per active entity in the group. The byte-unit selector controls display; a zero size contributes zero.",
-    ACTIVE_SCOPE + " Only the 20 groups selected by entity count are displayed; they are not ranked by total bytes.",
-    PAYLOAD_LIMITS + " The visible group totals may not sum to the all-content-types total.",
+  "Schema bytes": explain(
+    "The bytes held by bytes attributes of the active entities in this schema group.",
+    "SUM(entity_versions.bytes_size) grouped by schema_name, using active selected versions.",
+    "Add one bytes_size per active entity in the group.",
+    ACTIVE_SCOPE,
+    BYTES_LIMITS,
+  ),
+  "Untagged entities": explain(
+    "Active entities without an arkiv.schema tag.",
+    ENTITY_SOURCE + " Uses schema_name.",
+    "COUNT of active states where schema_name is null.",
+    ACTIVE_SCOPE,
+    "Writes through an unnamed schema, or without one, carry no tag.",
   ),
   "Coverage and measurement limitations": explain(
     "Explains which conclusions the stored data can support and where coverage or measurement is incomplete.",

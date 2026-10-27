@@ -1,8 +1,8 @@
 /**
  * PostgreSQL persistence for the experimental entity index: the projected
  * entity versions, the fold bookkeeping, and the query execution that
- * `arkiv_query` / `arkiv_getEntityCount` / `arkiv_getEntity` on
- * `POST /shadow-rpc/experimental` run on.
+ * `arkiv_query` / `arkiv_getEntityCount` on `POST /shadow-rpc/experimental`
+ * run on.
  *
  * Two tables carry the projection, both rebuilt per entity key whenever any of
  * that key's operations change (see `entityProjector.ts`):
@@ -12,8 +12,12 @@
  *   entity's latest state, `deleted` marks the tombstone a delete leaves.
  * - `entity_version_attributes`: the same versions' attributes, one row per
  *   `(version, name)`, typed and in two comparable forms (`value_text` for
- *   equality and prefix, `value_num` for ranges). `current` mirrors "latest
- *   and not deleted" so the head-state indexes can stay partial.
+ *   equality and prefix, `value_num` for ranges), with the triple's `indexed`
+ *   flag. Every attribute is stored — the node returns unindexed ones too —
+ *   but only `indexed` rows can match a query, so the value indexes are
+ *   partial on it. A `bytes` attribute's row holds its keccak256 and size,
+ *   never its content. `current` mirrors "latest and not deleted" so the
+ *   head-state indexes can stay partial.
  *
  * Liveness is decided at query time — an entity is live at block `B` while
  * `expires_at > B` — so an entity that lapsed never needs a row of its own to
@@ -60,21 +64,20 @@ export interface EntityIndexProgress {
 }
 
 /**
- * A position in the newest-first result order; a page resumes strictly after
- * it. The order is the node's entity-id order: ids are handed out when a
- * transaction commits, in ascending entity-key order within that transaction
- * (the node stages a transaction's entity deltas in a map keyed by entity
- * key), so newest-first is block, then transaction position, then key — all
- * descending. The operation index plays no part.
+ * A position in the oldest-first result order; a page resumes strictly after
+ * it. The order is the node's entity-id order: the UDC node hands ids out in
+ * creation order — block, then transaction position, then the create's
+ * operation index within its transaction — and answers oldest first. Genesis
+ * entities (block 0, no transaction) take their node id as the position.
  */
 export interface EntityCursorPosition {
   createdAt: bigint;
   position: number;
-  entityKey: string;
+  opIndex: number;
 }
 
-/** The newest-first result order, as an ORDER BY over the versions table alias `v`. */
-const RESULT_ORDER = "v.created_at DESC, v.created_position DESC, v.entity_key DESC";
+/** The oldest-first result order, as an ORDER BY over the versions table alias `v`. */
+const RESULT_ORDER = "v.created_at ASC, v.created_position ASC, v.created_op_index ASC";
 
 export interface EntityQueryOptions {
   /** The block to evaluate at. */
@@ -167,6 +170,7 @@ export interface EntityIndexReader {
   queryEntities(ast: QueryAst, options: EntityQueryOptions): Promise<EntityQueryPage>;
   countEntities(ast: QueryAst, block: bigint, atHead: boolean): Promise<number>;
   getEntity(entityKey: string, block: bigint, atHead: boolean): Promise<EntityVersion | undefined>;
+  getLatestVersion(entityKey: string): Promise<EntityVersion | undefined>;
 }
 
 const STATE_FLOOR = "floor_block";
@@ -198,18 +202,10 @@ export function foldKeyBatches(keys: readonly string[], size: number): string[][
   return batches;
 }
 
-/** Indexes built for earlier result orders and address lookups; dropped on start. */
-const LEGACY_INDEXES = [
-  "entity_versions_live_order_idx",
-  "entity_versions_created_idx",
-  "entity_versions_live_owner_idx",
-  "entity_versions_live_creator_idx",
-];
-
 /**
  * The secondary indexes of the two projection tables. Head-state reads only
  * touch latest, undeleted versions, so half of them are partial: the liveness
- * bound on expires_at, the newest-first result order, and the $owner /
+ * bound on expires_at, the oldest-first result order, and the $owner /
  * $creator point lookups. An address keeps every entity it ever owned, and
  * on a busy chain almost all of them have expired, so a bare owner lookup
  * reads a hundred times more rows than it returns; pairing the address with
@@ -217,7 +213,8 @@ const LEGACY_INDEXES = [
  * at block B". Historical reads bound the candidates by creation block and
  * by expiry over every version, live or not — at a past block B only
  * versions with expires_at > B can be live, a small slice of a table where
- * most rows belong to entities long gone. The attribute indexes use
+ * most rows belong to entities long gone. The attribute indexes cover
+ * indexed attributes only (a predicate never matches another) and use
  * text_pattern_ops so a LIKE 'prefix%' (STARTSWITH) walks the index too;
  * `current` covers the head only, so the same two exist over every row.
  *
@@ -226,20 +223,24 @@ const LEGACY_INDEXES = [
 const SECONDARY_INDEXES: ReadonlyArray<{ name: string; table: "versions" | "attributes"; definition: string }> = [
   { name: "entity_versions_live_expiry_idx", table: "versions", definition: "(expires_at) WHERE to_block IS NULL AND NOT deleted" },
   {
-    name: "entity_versions_live_order_key_idx",
+    name: "entity_versions_live_order_idx",
     table: "versions",
-    definition: "(created_at DESC, created_position DESC, entity_key DESC) WHERE to_block IS NULL AND NOT deleted",
+    definition: "(created_at, created_position, created_op_index) WHERE to_block IS NULL AND NOT deleted",
   },
   { name: "entity_versions_live_owner_expiry_idx", table: "versions", definition: "(owner, expires_at) WHERE to_block IS NULL AND NOT deleted" },
   { name: "entity_versions_live_creator_expiry_idx", table: "versions", definition: "(creator, expires_at) WHERE to_block IS NULL AND NOT deleted" },
-  { name: "entity_versions_created_key_idx", table: "versions", definition: "(created_at DESC, created_position DESC, entity_key DESC)" },
+  { name: "entity_versions_created_idx", table: "versions", definition: "(created_at, created_position, created_op_index)" },
   { name: "entity_versions_expiry_idx", table: "versions", definition: "(expires_at)" },
   { name: "entity_versions_owner_expiry_idx", table: "versions", definition: "(owner, expires_at)" },
   { name: "entity_versions_creator_expiry_idx", table: "versions", definition: "(creator, expires_at)" },
-  { name: "entity_version_attributes_live_text_idx", table: "attributes", definition: "(name, type_id, value_text text_pattern_ops) WHERE current" },
-  { name: "entity_version_attributes_live_num_idx", table: "attributes", definition: "(name, type_id, value_num) WHERE current" },
-  { name: "entity_version_attributes_text_idx", table: "attributes", definition: "(name, type_id, value_text text_pattern_ops)" },
-  { name: "entity_version_attributes_num_idx", table: "attributes", definition: "(name, type_id, value_num)" },
+  {
+    name: "entity_version_attributes_live_text_idx",
+    table: "attributes",
+    definition: "(name, type_id, value_text text_pattern_ops) WHERE current AND indexed",
+  },
+  { name: "entity_version_attributes_live_num_idx", table: "attributes", definition: "(name, type_id, value_num) WHERE current AND indexed" },
+  { name: "entity_version_attributes_text_idx", table: "attributes", definition: "(name, type_id, value_text text_pattern_ops) WHERE indexed" },
+  { name: "entity_version_attributes_num_idx", table: "attributes", definition: "(name, type_id, value_num) WHERE indexed" },
 ];
 
 function quoteIdent(identifier: string): string {
@@ -295,14 +296,15 @@ interface VersionRow {
   updated_at: string;
   expires_at: string;
   creation_flags: number | null;
-  content_type: string;
-  payload_size: number;
-  attributes: StoredAttributeJson[] | string;
+  bytes_size: number;
+  schema_name: string | null;
+  attributes: StoredAttributeJson[];
 }
 
 interface StoredAttributeJson {
   name: string;
   typeId: number;
+  indexed: boolean;
   valueText: string;
   valueNum: string | null;
 }
@@ -311,13 +313,14 @@ const VERSION_COLUMNS =
   "v.entity_key, v.version, v.from_block::text AS from_block, v.from_position, v.from_op_index, " +
   "v.to_block::text AS to_block, v.deleted, v.owner, v.creator, v.created_at::text AS created_at, " +
   "v.created_position, v.created_op_index, v.updated_at::text AS updated_at, v.expires_at::text AS expires_at, " +
-  "v.creation_flags, v.content_type, v.payload_size, v.attributes";
+  "v.creation_flags, v.bytes_size, v.schema_name, v.attributes";
 
 function mapVersionRow(row: VersionRow): EntityVersion {
-  const attributes = (typeof row.attributes === "string" ? (JSON.parse(row.attributes) as StoredAttributeJson[]) : row.attributes).map(
+  const attributes = row.attributes.map(
     (attribute): StoredEntityAttribute => ({
       name: attribute.name,
       typeId: attribute.typeId,
+      indexed: attribute.indexed,
       valueText: attribute.valueText,
       valueNum: attribute.valueNum === null ? null : BigInt(attribute.valueNum),
     }),
@@ -338,8 +341,8 @@ function mapVersionRow(row: VersionRow): EntityVersion {
     updatedAt: Number(row.updated_at),
     expiresAt: BigInt(row.expires_at),
     creationFlags: row.creation_flags,
-    contentType: row.content_type,
-    payloadSize: row.payload_size,
+    bytesSize: row.bytes_size,
+    schemaName: row.schema_name,
     attributes,
   };
 }
@@ -362,12 +365,13 @@ function versionRows(versions: readonly EntityVersion[]) {
     updated_at: version.updatedAt,
     expires_at: version.expiresAt,
     creation_flags: version.creationFlags,
-    content_type: version.contentType,
-    payload_size: version.payloadSize,
+    bytes_size: version.bytesSize,
+    schema_name: version.schemaName,
     attributes: version.attributes.map(
       (attribute): StoredAttributeJson => ({
         name: attribute.name,
         typeId: attribute.typeId,
+        indexed: attribute.indexed,
         valueText: attribute.valueText,
         valueNum: attribute.valueNum === null ? null : attribute.valueNum.toString(),
       }),
@@ -383,6 +387,7 @@ function attributeRows(versions: readonly EntityVersion[]) {
       version: version.version,
       name: attribute.name,
       type_id: attribute.typeId,
+      indexed: attribute.indexed,
       value_text: attribute.valueText,
       value_num: attribute.valueNum,
       current: version.toBlock === null && !version.deleted,
@@ -451,8 +456,10 @@ export class EntityIndexStorage implements EntityIndexReader {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    // expires_at is NUMERIC(20,0): a "never expires" entity carries 2^64-1,
-    // which BIGINT cannot hold. Block heights are BIGINT like the scanner's.
+    // expires_at is NUMERIC(20,0): a permanent entity carries 2^64-1, which
+    // BIGINT cannot hold. Block heights are BIGINT like the scanner's. The
+    // tables are created in their final shape (see ScannerStorage's data-model
+    // guard); nothing here migrates an older layout.
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qVersions} (
         entity_key TEXT NOT NULL,
@@ -470,24 +477,19 @@ export class EntityIndexStorage implements EntityIndexReader {
         updated_at BIGINT NOT NULL,
         expires_at NUMERIC(20, 0) NOT NULL,
         creation_flags SMALLINT,
-        content_type TEXT NOT NULL DEFAULT '',
-        payload_size INTEGER NOT NULL DEFAULT 0,
-        attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        bytes_size INTEGER NOT NULL,
+        schema_name TEXT,
+        attributes JSONB NOT NULL,
         PRIMARY KEY (entity_key, version)
       )
     `);
-    // The result order changed from operation index to entity key as the
-    // in-transaction tie-break, and the address indexes gained the expiry
-    // bound; the indexes built for the old shapes go.
-    for (const name of LEGACY_INDEXES) {
-      await this.db.query(`DROP INDEX IF EXISTS ${quoteIdent(this.schema)}.${quoteIdent(name)}`);
-    }
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qAttributes} (
         entity_key TEXT NOT NULL,
         version INTEGER NOT NULL,
         name TEXT NOT NULL,
         type_id SMALLINT NOT NULL,
+        indexed BOOLEAN NOT NULL,
         value_text TEXT NOT NULL,
         value_num NUMERIC,
         current BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1014,8 +1016,8 @@ export class EntityIndexStorage implements EntityIndexReader {
     let cursor = "";
     if (options.after) {
       const base = params.length;
-      cursor = ` AND (v.created_at, v.created_position, v.entity_key) < ($${base + 1}::bigint, $${base + 2}::int, $${base + 3}::text)`;
-      params.push(options.after.createdAt.toString(), options.after.position, options.after.entityKey);
+      cursor = ` AND (v.created_at, v.created_position, v.created_op_index) > ($${base + 1}::bigint, $${base + 2}::int, $${base + 3}::int)`;
+      params.push(options.after.createdAt.toString(), options.after.position, options.after.opIndex);
     }
     params.push(options.limit + 1);
     const result = await this.db.query<VersionRow>(
@@ -1045,6 +1047,20 @@ export class EntityIndexStorage implements EntityIndexReader {
       `SELECT ${VERSION_COLUMNS} FROM ${this.qVersions} v
        WHERE ${this.liveFilter(atHead)} AND v.entity_key = $2 LIMIT 1`,
       [block.toString(), entityKey.toLowerCase()],
+    );
+    const row = result.rows[0];
+    return row ? mapVersionRow(row) : undefined;
+  }
+
+  /**
+   * The newest version of one entity whatever its state — live, expired or
+   * deleted — or undefined when the index does not know the key.
+   */
+  async getLatestVersion(entityKey: string): Promise<EntityVersion | undefined> {
+    const result = await this.db.query<VersionRow>(
+      `SELECT ${VERSION_COLUMNS} FROM ${this.qVersions} v
+       WHERE v.entity_key = $1 ORDER BY v.version DESC LIMIT 1`,
+      [entityKey.toLowerCase()],
     );
     const row = result.rows[0];
     return row ? mapVersionRow(row) : undefined;

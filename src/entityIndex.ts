@@ -3,58 +3,61 @@
  * experimental entity index behind `POST /shadow-rpc/experimental`.
  *
  * The scanner stores what each registry transaction *asked for* (one
- * `transaction_operations` row per operation: attributes, expiry request, new
- * owner) and what the engine *announced* (the `EntityCreated`, `ExpiryExtended`,
- * … receipt logs). A node keeps the resulting entity state; the index does
- * not, so this module replays an entity's operations, in chain order, into the
- * sequence of states it went through — one {@link EntityVersion} per applied
- * operation, each valid from its own block until the next one's.
+ * `transaction_operations` row per operation: attribute triples, the expiry
+ * pair, the new owner) and what the engine *announced* (the `EntityCreated`,
+ * `ExpiryExtended`, … receipt logs). A node keeps the resulting entity state;
+ * the index does not, so this module replays an entity's operations, in chain
+ * order, into the sequence of states it went through — one
+ * {@link EntityVersion} per applied operation, each valid from its own block
+ * until the next one's.
  *
- * The rules are the engine's (`arkiv-reth-executor`, `arkiv.rs`):
+ * The rules are the UDC engine's (arkiv-state-db-experiment, entity rules
+ * `arkiv-entity-v3`):
  *
- * - **create** sets creator = owner = sender, `createdAt` = `updatedAt` = block,
- *   the absolute expiry, the creation flags, the content type, the payload and
- *   the attributes (which the engine keeps sorted by name bytes);
- * - **patch** merges: a mutation with a real type sets (or retypes) that
- *   attribute, a tombstone (`typeId` 0) unsets it, and the `$payload` /
- *   `$contentType` cells route to the entity's own fields;
+ * - **create** sets creator = owner = sender, `createdAt` = `updatedAt` =
+ *   block, the expiry, the creation flags and the attributes (kept sorted by
+ *   name bytes);
+ * - **patch** applies its mutations in calldata order: an entry with a type
+ *   sets that attribute — adding it, or replacing its value, its type *and*
+ *   its indexed flag with the new triple's (a patch can index or unindex) —
+ *   and a tombstone (`typeId` 0) unsets it; attributes it does not name stay;
  * - **extend** replaces the expiry (the engine has already refused shortening);
  * - **transfer** replaces the owner;
  * - **delete** ends the entity;
  * - every mutation sets `updatedAt` to its block, an equal-expiry extend
  *   included.
  *
+ * Every attribute is kept, indexed or not — the node returns both — and the
+ * flag rides along, because only indexed attributes match a query. A `bytes`
+ * attribute is kept as its keccak256 and size: its content is never stored.
+ *
  * Only *applied* operations are replayed — the caller filters out reverted
  * transactions — so this never re-checks authorization, liveness or flags: the
  * chain already did, and an operation that made it into a successful
  * transaction took effect.
  *
- * Expiry is the one field the calldata does not carry outright: the engine
- * resolves `max(expiresAt, block + minLifetime)` and announces the result in
- * the receipt log. Where that log was stored it is authoritative; otherwise the
- * single block count the decoder kept is read as a lifetime when it could be
- * one (it does not reach past the current block) and as a deadline when it
- * could not — see {@link resolveRequestedExpiry}.
+ * Expiry: the event's value where the receipt log was stored, otherwise the
+ * engine's `max(expiresAt, block + minLifetime)` on the exact calldata pair
+ * (capped at 2^64 − 1, the permanent expiry) — see {@link resolveRequestedExpiry}.
  */
-import type { ArkivOperationAttribute } from "./arkivOperations";
+import { SCHEMA_ATTRIBUTE_NAME, type ArkivOperationAttribute } from "./arkivOperations";
 import {
+  INDEXED_FLAG,
   TOMBSTONE_TYPE_ID,
   TYPE_IDS,
-  TYPE_TAGS_BY_ID,
   U64_MAX,
   compareUtf8,
   fromWireAttributeValue,
-  type AttributeTypeTag,
+  storedBytesValue,
+  typeTagOfRawId,
   type StoredAttributeValue,
 } from "./entityValues";
 
 export const OPERATION_CREATE = 1;
-export const OPERATION_UPDATE = 2;
+export const OPERATION_PATCH = 2;
 export const OPERATION_EXTEND = 3;
 export const OPERATION_TRANSFER = 4;
 export const OPERATION_DELETE = 5;
-/** The engine's prune of an already-expired entity; state-wise a delete. */
-export const OPERATION_EXPIRE = 6;
 
 /** What the engine announced for an operation, read from the receipt logs. */
 export interface EntityOpEvent {
@@ -88,9 +91,15 @@ export interface EntityOpRecord {
   event?: EntityOpEvent;
 }
 
+/**
+ * One attribute of one version. `typeId` is the type alone (1–10, flag
+ * stripped); `indexed` is the flag. A `bytes` attribute (typeId 7, never
+ * indexed) stores its keccak256 as `valueText` and its length as `valueNum`.
+ */
 export interface StoredEntityAttribute extends StoredAttributeValue {
   name: string;
   typeId: number;
+  indexed: boolean;
 }
 
 /** One state an entity was in, valid for blocks `[fromBlock, toBlock)`. */
@@ -114,11 +123,16 @@ export interface EntityVersion {
   expiresAt: bigint;
   /** Null when neither the receipt log nor the operation row carried the flags. */
   creationFlags: number | null;
-  contentType: string;
-  payloadSize: number;
-  /** Sorted by name bytes, the engine's canonical order. */
+  /** Bytes held by the version's `bytes` attributes together. */
+  bytesSize: number;
+  /** The value of the indexed str `arkiv.schema` (the SDK's named-schema tag), or null. */
+  schemaName: string | null;
+  /** Sorted by name bytes, the engine's canonical order; indexed and stored-only alike. */
   attributes: StoredEntityAttribute[];
 }
+
+/** `expiresAt` of an entity that never expires. */
+export const PERMANENT_EXPIRY = U64_MAX;
 
 /**
  * The engine's `max(expiresAt, block + minLifetime)`, exactly, capped at
@@ -135,10 +149,6 @@ function resolveExpiry(op: EntityOpRecord): bigint {
   return op.event?.expiresAt ?? resolveRequestedExpiry(op.blockNumber, op.expiresAt ?? 0n, op.minLifetime ?? 0n);
 }
 
-function typeTagOf(attribute: ArkivOperationAttribute): AttributeTypeTag | undefined {
-  return TYPE_TAGS_BY_ID.get(attribute.typeId & 0x7f);
-}
-
 function compareOps(a: EntityOpRecord, b: EntityOpRecord): number {
   return a.blockNumber - b.blockNumber || a.position - b.position || a.opIndex - b.opIndex;
 }
@@ -147,11 +157,44 @@ function sortedAttributes(byName: Map<string, StoredEntityAttribute>): StoredEnt
   return [...byName.values()].sort((a, b) => compareUtf8(a.name, b.name));
 }
 
+/** The derived columns of an attribute set: bytes held and the schema tag. */
+export function summarizeAttributes(attributes: readonly StoredEntityAttribute[]): { bytesSize: number; schemaName: string | null } {
+  let bytesSize = 0;
+  let schemaName: string | null = null;
+  for (const attribute of attributes) {
+    if (attribute.typeId === TYPE_IDS.bytes) bytesSize += Number(attribute.valueNum ?? 0n);
+    if (attribute.name === SCHEMA_ATTRIBUTE_NAME && attribute.typeId === TYPE_IDS.str && attribute.indexed) {
+      schemaName = attribute.valueText;
+    }
+  }
+  return { bytesSize, schemaName };
+}
+
 /**
- * Apply a create's or patch's attribute cells to the working set. A tombstone
- * unsets; a typed cell sets, replacing the value *and* its type; a cell of a
- * type the index cannot store (`bytes`, a legacy type name, corrupt text) is
- * skipped rather than stored as something it is not.
+ * One decoded triple as a stored attribute, or undefined when it cannot be
+ * one: a tombstone, a malformed triple (the node refuses those before a
+ * transaction is mined, so a chain transaction never has one) or a value that
+ * is not of its type.
+ */
+export function storedAttributeOf(cell: ArkivOperationAttribute): StoredEntityAttribute | undefined {
+  if (cell.error !== undefined || cell.typeId === TOMBSTONE_TYPE_ID) return undefined;
+  const tag = typeTagOfRawId(cell.typeId);
+  if (!tag) return undefined;
+  const indexed = (cell.typeId & INDEXED_FLAG) !== 0;
+  if (tag === "bytes") {
+    if (indexed || cell.keccak256 === undefined) return undefined;
+    const stored = storedBytesValue(cell.keccak256, cell.size);
+    return stored ? { name: cell.name, typeId: TYPE_IDS.bytes, indexed: false, ...stored } : undefined;
+  }
+  const stored = fromWireAttributeValue(tag, cell.value);
+  return stored ? { name: cell.name, typeId: TYPE_IDS[tag], indexed, ...stored } : undefined;
+}
+
+/**
+ * Apply a create's or patch's triples, in order, to the working set: a
+ * tombstone unsets; a typed triple sets, replacing value, type and indexed
+ * flag; a triple that cannot be stored is skipped rather than stored as
+ * something it is not.
  */
 function applyAttributes(byName: Map<string, StoredEntityAttribute>, cells: ArkivOperationAttribute[]): void {
   for (const cell of cells) {
@@ -160,12 +203,13 @@ function applyAttributes(byName: Map<string, StoredEntityAttribute>, cells: Arki
       byName.delete(cell.name);
       continue;
     }
-    const tag = typeTagOf(cell);
-    if (!tag) continue;
-    const stored = fromWireAttributeValue(tag, cell.value);
-    if (!stored) continue;
-    byName.set(cell.name, { name: cell.name, typeId: TYPE_IDS[tag], ...stored });
+    const stored = storedAttributeOf(cell);
+    if (stored) byName.set(cell.name, stored);
   }
+}
+
+function withAttributes(version: Omit<EntityVersion, "attributes" | "bytesSize" | "schemaName">, attributes: StoredEntityAttribute[]): EntityVersion {
+  return { ...version, ...summarizeAttributes(attributes), attributes };
 }
 
 /**
@@ -197,7 +241,7 @@ export function foldEntityVersions(
 
   if (base) {
     for (const attribute of base.attributes) attributes.set(attribute.name, { ...attribute });
-    push({ ...base, toBlock: null, deleted: false, attributes: sortedAttributes(attributes) });
+    push(withAttributes({ ...base, toBlock: null, deleted: false }, sortedAttributes(attributes)));
   }
 
   for (const op of ops) {
@@ -205,26 +249,28 @@ export function foldEntityVersions(
       if (op.operationType !== OPERATION_CREATE) continue;
       attributes.clear();
       applyAttributes(attributes, op.attributes);
-      push({
-        entityKey,
-        version: 0,
-        fromBlock: op.blockNumber,
-        fromPosition: op.position,
-        fromOpIndex: op.opIndex,
-        toBlock: null,
-        deleted: false,
-        owner: op.sender,
-        creator: op.sender,
-        createdAt: op.blockNumber,
-        createdPosition: op.position,
-        createdOpIndex: op.opIndex,
-        updatedAt: op.blockNumber,
-        expiresAt: resolveExpiry(op),
-        creationFlags: op.event?.creationFlags ?? op.creationFlags,
-        contentType: "",
-        payloadSize: 0,
-        attributes: sortedAttributes(attributes),
-      });
+      push(
+        withAttributes(
+          {
+            entityKey,
+            version: 0,
+            fromBlock: op.blockNumber,
+            fromPosition: op.position,
+            fromOpIndex: op.opIndex,
+            toBlock: null,
+            deleted: false,
+            owner: op.sender,
+            creator: op.sender,
+            createdAt: op.blockNumber,
+            createdPosition: op.position,
+            createdOpIndex: op.opIndex,
+            updatedAt: op.blockNumber,
+            expiresAt: resolveExpiry(op),
+            creationFlags: op.event?.creationFlags ?? op.creationFlags,
+          },
+          sortedAttributes(attributes),
+        ),
+      );
       continue;
     }
     if (current.deleted) continue;
@@ -239,9 +285,9 @@ export function foldEntityVersions(
       updatedAt: op.blockNumber,
     };
     switch (op.operationType) {
-      case OPERATION_UPDATE: {
+      case OPERATION_PATCH: {
         applyAttributes(attributes, op.attributes);
-        push({ ...base, attributes: sortedAttributes(attributes) });
+        push(withAttributes(base, sortedAttributes(attributes)));
         break;
       }
       case OPERATION_EXTEND:
@@ -254,7 +300,6 @@ export function foldEntityVersions(
         break;
       }
       case OPERATION_DELETE:
-      case OPERATION_EXPIRE:
         push({ ...base, deleted: true });
         break;
       default:
@@ -280,7 +325,7 @@ export const ENTITY_EVENT_TOPICS = {
 
 const EVENT_TOPIC_FOR_OPERATION: Record<number, string> = {
   [OPERATION_CREATE]: ENTITY_EVENT_TOPICS.created,
-  [OPERATION_UPDATE]: ENTITY_EVENT_TOPICS.patched,
+  [OPERATION_PATCH]: ENTITY_EVENT_TOPICS.patched,
   [OPERATION_EXTEND]: ENTITY_EVENT_TOPICS.expiryExtended,
   [OPERATION_TRANSFER]: ENTITY_EVENT_TOPICS.ownershipTransferred,
   [OPERATION_DELETE]: ENTITY_EVENT_TOPICS.deleted,

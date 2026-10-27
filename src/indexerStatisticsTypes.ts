@@ -98,14 +98,25 @@ export interface IndexerStatistics {
     active: string | null;
     expired: string | null;
     deleted: string | null;
-    activeWithPayload: string | null;
-    activeRecordedPayloadBytes: string | null;
-    maxActiveRecordedPayloadBytes: string | null;
+    /** Active entities whose expiry is 2^64 − 1. */
+    activePermanent: string | null;
+    /** Active entities holding at least one bytes attribute. */
+    activeWithBytes: string | null;
+    /** Bytes held by active entities' bytes attributes (contents are never stored, only sizes). */
+    activeBytes: string | null;
+    maxActiveBytes: string | null;
     activeAttributes: string | null;
+    /** Of those, indexed (queryable) and stored-only. */
+    activeIndexedAttributes: string | null;
+    activeStoredAttributes: string | null;
     activeWithAttributes: string | null;
     maxAttributesPerActiveEntity: string | null;
-    attributeTypes: Array<{ typeId: number; name: string; count: string }>;
-    topContentTypes: Array<{ contentType: string; entities: string; recordedPayloadBytes: string }>;
+    /** Per type: every active attribute of it, and how many of those are indexed. */
+    attributeTypes: Array<{ typeId: number; name: string; count: string; indexed: string }>;
+    /** Up to 20 `arkiv.schema` tags by active entity count. */
+    topSchemas: Array<{ schemaName: string; entities: string; bytes: string }>;
+    /** Active entities without an `arkiv.schema` tag. */
+    activeUntagged: string | null;
   };
   /** Optional so readers can continue to serve snapshots from older workers. */
   windows?: Record<StatisticsPeriod, StatisticsWindow>;

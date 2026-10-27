@@ -64,9 +64,13 @@ describe("decodeEntityRecord", () => {
       creator: full.creator,
       expiresAt: 2_903_242n,
       creationFlags: 3,
-      contentType: "application/json",
+      // The payload-era record's payload is measured; its content type has no place in the UDC model.
       payloadSize: 8,
+      bytesSize: 0,
+      schemaName: null,
     });
+    expect(version).not.toHaveProperty("contentType");
+    expect(version.attributes.every((attribute) => attribute.indexed)).toBe(true);
     expect(version.attributes.map((a) => [a.name, a.typeId, a.valueText, a.valueNum])).toEqual([
       ["big", 3, "18446744073709551615", (1n << 64n) - 1n],
       ["flag", 1, "true", null],

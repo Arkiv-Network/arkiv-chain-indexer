@@ -216,7 +216,7 @@ const SPEC: CliSpec = {
     {
       flags: "--entity-query-index <bool>",
       description:
-        "Answer arkiv_query, arkiv_getEntity, arkiv_getEntityCount and arkiv_getBlockTiming from the indexer's own entity index at POST /shadow-rpc/experimental, and run the projector that builds it. Defaults to true (or ENTITY_QUERY_INDEX); false switches the index off. /shadow-rpc keeps forwarding those methods to the upstream node.",
+        "Answer arkiv_query, arkiv_getEntityCount and arkiv_getBlockTiming from the indexer's own entity index at POST /shadow-rpc/experimental, and run the projector that builds it. Defaults to true (or ENTITY_QUERY_INDEX); false switches the index off. /shadow-rpc keeps forwarding those methods to the upstream node.",
       env: ["ENTITY_QUERY_INDEX"],
       default: "true",
     },

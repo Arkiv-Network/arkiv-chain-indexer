@@ -14,7 +14,7 @@ describe("compileEntityQuery", () => {
   test("a user attribute predicate is a correlated EXISTS on the same version", () => {
     const { text, params } = compile("level >= i32(10)");
     expect(text).toBe(
-      `(EXISTS (SELECT 1 FROM ${ATTRS} a WHERE a.entity_key = v.entity_key AND a.version = v.version` +
+      `(EXISTS (SELECT 1 FROM ${ATTRS} a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed` +
         " AND a.name = $1 AND a.type_id = $2::smallint AND a.value_num >= $3::numeric))",
     );
     expect(params).toEqual(["level", 2, "10"]);
@@ -48,11 +48,6 @@ describe("compileEntityQuery", () => {
     expect(compile(`$key = key(0x${"cd".repeat(32)})`)).toEqual({ text: "(v.entity_key = $1)", params: [`0x${"cd".repeat(32)}`] });
     expect(compile("$expiresAt < u64(1200000)")).toEqual({ text: "(v.expires_at < $1::numeric)", params: ["1200000"] });
     expect(compile("$createdAt >= u64(0x10)")).toEqual({ text: "(v.created_at >= $1::bigint)", params: ["16"] });
-    expect(compile("$contentType = str('text/plain')")).toEqual({ text: "(v.content_type = $1)", params: ["text/plain"] });
-    expect(compile("$contentType STARTSWITH str('image/')")).toEqual({
-      text: "(v.content_type LIKE $1 ESCAPE '\\')",
-      params: ["image/%"],
-    });
   });
 
   test("boolean structure and parameter numbering survive nesting and an offset", () => {
@@ -60,18 +55,17 @@ describe("compileEntityQuery", () => {
     expect(text).toBe(
       "((NOT ((EXISTS (SELECT 1 FROM " +
         ATTRS +
-        " a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.name = $4 AND a.type_id = $5::smallint AND a.value_text = $6))" +
+        " a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed AND a.name = $4 AND a.type_id = $5::smallint AND a.value_text = $6))" +
         " OR (EXISTS (SELECT 1 FROM " +
         ATTRS +
-        " a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.name = $7 AND a.type_id = $8::smallint AND a.value_num = $9::numeric)))) AND (v.owner = $10))",
+        " a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed AND a.name = $7 AND a.type_id = $8::smallint AND a.value_num = $9::numeric)))) AND (v.owner = $10))",
     );
     expect(params).toEqual(["a", 1, "true", "b", 2, "2", `0x${"ab".repeat(20)}`]);
   });
 
   test("a str literal with NUL can match nothing", () => {
     // Postgres text cannot hold NUL, so the driver would reject it as a parameter.
-    expect(compile("$contentType = str('a\0b')")).toEqual({ text: "FALSE", params: [] });
-    expect(compile("$contentType STARTSWITH str('a\0')")).toEqual({ text: "FALSE", params: [] });
+    expect(compile("name STARTSWITH str('a\0')")).toEqual({ text: "FALSE", params: [] });
     expect(compile("name = str('a\0b')")).toEqual({ text: "FALSE", params: [] });
     expect(compile("NOT (name = str('a\0b'))")).toEqual({ text: "(NOT FALSE)", params: [] });
   });

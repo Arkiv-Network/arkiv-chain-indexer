@@ -63,7 +63,7 @@ function fileFixture(): IndexerStatistics {
     blocks: { indexed: "9007199254740993", first: "0", last: null, missingWithinStoredRange: "0", transactions: "0", inputBytes: "0", compressedInputBytes: "0", gasFeeWei: "0", rentFeeWei: "0", burnedWei: "0" },
     transactions: { indexed: "0", withInput: "0", inputBytes: "0", compressedInputBytes: "0", maxInputBytes: "0" },
     operations: { byType: [], successfulCreatesWithoutKey: "0", successfulBytesWrites: "0", successfulBytesWritten: "0", successfulIndexedAttributeWrites: "0", successfulStoredAttributeWrites: "0", successfulAttributeUnsets: "0", successfulSchemaTaggedWrites: "0" },
-    entities: { status: "unavailable", floorBlock: null, asOfBlock: null, lagBehindObservedHead: null, lastFoldAtUtc: null, genesisStatus: null, known: null, active: null, expired: null, deleted: null, activeWithPayload: null, activeRecordedPayloadBytes: null, maxActiveRecordedPayloadBytes: null, activeAttributes: null, activeWithAttributes: null, maxAttributesPerActiveEntity: null, attributeTypes: [], topContentTypes: [] },
+    entities: { status: "unavailable", floorBlock: null, asOfBlock: null, lagBehindObservedHead: null, lastFoldAtUtc: null, genesisStatus: null, known: null, active: null, expired: null, deleted: null, activePermanent: null, activeWithBytes: null, activeBytes: null, maxActiveBytes: null, activeAttributes: null, activeIndexedAttributes: null, activeStoredAttributes: null, activeWithAttributes: null, maxAttributesPerActiveEntity: null, attributeTypes: [], topSchemas: [], activeUntagged: null },
     limitations: [],
   };
 }
@@ -230,8 +230,11 @@ describe.skipIf(!hasPostgresForTests())("statistics PostgreSQL snapshot", () => 
     const baseVersion: EntityVersion = {
       entityKey: "a", version: 0, fromBlock: 0, fromPosition: 0, fromOpIndex: 0, toBlock: null,
       deleted: false, owner: "alice", creator: "alice", createdAt: 0, createdPosition: 0, createdOpIndex: 0,
-      updatedAt: 0, expiresAt: 100n, creationFlags: null, contentType: "text/plain", payloadSize: 10,
-      attributes: [{ name: "name", typeId: 8, valueText: "a", valueNum: null }],
+      updatedAt: 0, expiresAt: 100n, creationFlags: null, bytesSize: 10, schemaName: "posts",
+      attributes: [
+        { name: "arkiv.schema", typeId: 8, indexed: true, valueText: "posts", valueNum: null },
+        { name: "body", typeId: 7, indexed: false, valueText: `0x${"ab".repeat(32)}`, valueNum: 10n },
+      ],
     };
     try {
       for (const height of [0, 2, 19, 25]) {
@@ -258,12 +261,12 @@ describe.skipIf(!hasPostgresForTests())("statistics PostgreSQL snapshot", () => 
       await storage.saveChainProgress(20n, 20n, new Date(Date.now() - 120_000));
       await storage.saveChainId(123n);
       await index.insertGenesisVersions([
-        { ...baseVersion, toBlock: 10, payloadSize: 9999 },
-        { ...baseVersion, version: 1, fromBlock: 10, toBlock: 30, payloadSize: 20 },
-        { ...baseVersion, version: 2, fromBlock: 30, payloadSize: 8888 },
+        { ...baseVersion, toBlock: 10, bytesSize: 9999 },
+        { ...baseVersion, version: 1, fromBlock: 10, toBlock: 30, bytesSize: 20 },
+        { ...baseVersion, version: 2, fromBlock: 30, bytesSize: 8888 },
         { ...baseVersion, entityKey: "b", expiresAt: 20n },
         { ...baseVersion, entityKey: "c", deleted: true },
-        { ...baseVersion, entityKey: "d", expiresAt: 18446744073709551615n, payloadSize: 0, attributes: [] },
+        { ...baseVersion, entityKey: "d", expiresAt: 18446744073709551615n, bytesSize: 0, schemaName: null, attributes: [] },
         { ...baseVersion, entityKey: "future", fromBlock: 30 },
       ]);
       await index.setProgress({ floorBlock: 0n, projectedThroughBlock: 20n });
@@ -275,9 +278,17 @@ describe.skipIf(!hasPostgresForTests())("statistics PostgreSQL snapshot", () => 
       expect(stats.operations).toMatchObject({ successfulCreatesWithoutKey: "1", successfulBytesWrites: "2", successfulBytesWritten: "14", successfulIndexedAttributeWrites: "1", successfulSchemaTaggedWrites: "1" });
       // Rent is summed from the blocks, beside the gas fees; burned is the base-fee burn plus rent.
       expect(stats.blocks).toMatchObject({ rentFeeWei: "9007199254740993", gasFeeWei: "0", burnedWei: "9007199254740993" });
-      expect(stats.entities).toMatchObject({ status: "available", known: "4", active: "2", expired: "1", deleted: "1", activeRecordedPayloadBytes: "20", activeAttributes: "1", maxAttributesPerActiveEntity: "1", activeWithAttributes: "1" });
-      expect(stats.entities.attributeTypes).toEqual([{ typeId: 8, name: "str", count: "1" }]);
-      expect(stats.entities.topContentTypes).toEqual([{ contentType: "text/plain", entities: "2", recordedPayloadBytes: "20" }]);
+      expect(stats.entities).toMatchObject({
+        status: "available", known: "4", active: "2", expired: "1", deleted: "1",
+        activePermanent: "1", activeWithBytes: "1", activeBytes: "20", maxActiveBytes: "20",
+        activeAttributes: "2", activeIndexedAttributes: "1", activeStoredAttributes: "1",
+        maxAttributesPerActiveEntity: "2", activeWithAttributes: "1", activeUntagged: "1",
+      });
+      expect(stats.entities.attributeTypes).toEqual([
+        { typeId: 7, name: "bytes", count: "1", indexed: "0" },
+        { typeId: 8, name: "str", count: "1", indexed: "1" },
+      ]);
+      expect(stats.entities.topSchemas).toEqual([{ schemaName: "posts", entities: "1", bytes: "20" }]);
       // Filling the older gaps reaches 100% even though nine of the newest ten blocks are absent.
       for (const height of [1, 3, 4, 5, 6, 7, 8, 9, 10]) {
         const block: RpcBlock = { number: `0x${height.toString(16)}`, timestamp: "0x1", gasUsed: "0x0", gasLimit: "0x100000", transactions: [] };

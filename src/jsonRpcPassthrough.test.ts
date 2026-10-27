@@ -64,7 +64,6 @@ describe("JsonRpcPassthrough", () => {
     expect([...DEFAULT_PASSTHROUGH_METHODS]).toEqual([
       "eth_sendRawTransaction",
       "arkiv_query",
-      "arkiv_getEntity",
       "arkiv_getEntityCount",
       "arkiv_getBlockTiming",
     ]);

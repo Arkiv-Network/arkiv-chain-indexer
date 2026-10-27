@@ -223,13 +223,6 @@ describe("system attributes", () => {
     });
     expect(parseEntityQuery(`$creator = addr(${addrHex("cd")})`)).toMatchObject({ key: { field: "creator" } });
     expect(parseEntityQuery(`$key = key(${wordHex("ab")})`)).toMatchObject({ key: { field: "key" } });
-    expect(parseEntityQuery("$contentType = str('text/plain')")).toEqual({
-      kind: "compare",
-      op: "eq",
-      key: { kind: "builtin", field: "contentType" },
-      value: { type: "str", value: "text/plain" },
-    });
-    expect(parseEntityQuery("$contentType STARTSWITH str('application')")).toMatchObject({ kind: "startsWith" });
   });
 
   test("block heights need the u64 tag and range freely", () => {
@@ -248,14 +241,12 @@ describe("system attributes", () => {
   test("accept their quoted hex forms", () => {
     expect(parseEntityQuery(`$owner = '${addrHex("ab")}'`)).toEqual(parseEntityQuery(`$owner = addr(${addrHex("ab")})`));
     expect(parseEntityQuery(`$key = '${wordHex("ab")}'`)).toEqual(parseEntityQuery(`$key = key(${wordHex("ab")})`));
-    expect(parseEntityQuery("$contentType = 'text/plain'")).toEqual(parseEntityQuery("$contentType = str('text/plain')"));
     expect(kindOf("$expiresAt = '5'")).toBe("type");
   });
 
   test("reject the wrong type", () => {
     expect(kindOf("$owner = i32(5)")).toBe("type");
     expect(kindOf("$expiresAt = str('soon')")).toBe("type");
-    expect(kindOf("$contentType = i32(1)")).toBe("type");
     expect(kindOf("$key = true")).toBe("type");
     expectNodeVerdict("$owner = str('x')", -32002, "this system attribute holds addr, but the value is str", 9);
     expectNodeVerdict(
@@ -279,7 +270,8 @@ describe("system attributes", () => {
     for (const [query, hint] of [
       ["$updatedAt > 1", "projections only"],
       ["$creationFlags = true", "projections only"],
-      ["$payload = str('x')", "no index"],
+      ["$payload = str('x')", "entities have no payload"],
+      ["$contentType = str('x')", "entities have no content type"],
       ["$expiration > 1", "$expiresAt"],
       ["$createdAtBlock > 1", "$createdAt"],
       ["$nope = true", "unknown system attribute"],
@@ -291,11 +283,23 @@ describe("system attributes", () => {
     expectNodeVerdict(
       "$all",
       -32002,
-      "unknown system attribute $all — expected $key, $owner, $creator, $expiresAt, $createdAt or $contentType",
+      "unknown system attribute $all — expected $key, $owner, $creator, $expiresAt or $createdAt",
       0,
     );
     expectNodeVerdict("$updatedAt >= u64(1)", -32002, "$updatedAt is not queryable — it is returned by projections only", 0);
-    expectNodeVerdict("$payload = str('x')", -32002, "$payload is not queryable — bytes values carry no index", 0);
+    // The UDC node's exact messages (arkiv-state-db-experiment query_language/parse.rs).
+    expectNodeVerdict(
+      "$payload = str('x')",
+      -32002,
+      "unknown system attribute $payload — entities have no payload; store data in a bytes attribute, which is never indexed",
+      0,
+    );
+    expectNodeVerdict(
+      "$contentType = 'text/plain'",
+      -32002,
+      "unknown system attribute $contentType — entities have no content type; store one in an indexed str attribute",
+      0,
+    );
   });
 });
 
@@ -501,13 +505,31 @@ describe("limits", () => {
 });
 
 describe("queryErrorBody", () => {
-  test("carries the code, message and position the way the node does", () => {
-    expect(queryErrorBody(fail("$createdAt >= 1"))).toEqual({
+  test("wraps the message and reports position and the text found there the way the node does", () => {
+    expect(queryErrorBody(fail("$createdAt >= 1"), "$createdAt >= 1")).toEqual({
       code: -32002,
-      message: "this system attribute holds u64 — write u64(1)",
-      data: { position: 14, message: "this system attribute holds u64 — write u64(1)" },
+      message: "query rejected (type): this system attribute holds u64 — write u64(1)",
+      data: { position: 14, got: "1" },
     });
-    expect(queryErrorBody(fail("(".repeat(200)))).toMatchObject({ code: -32004, data: { message: "query is nested too deeply" } });
-    expect(queryErrorBody(fail(`a = str('${"a".repeat(MAX_QUERY_BYTES)}')`)).data).toEqual({ message: "query is too long" });
+    // What the live node answers for these two, byte for byte.
+    const payload = "$payload = str(\"a\")";
+    expect(queryErrorBody(fail(payload), payload)).toEqual({
+      code: -32002,
+      message:
+        "query rejected (type): unknown system attribute $payload — entities have no payload; store data in a bytes attribute, which is never indexed",
+      data: { got: "$payload", position: 0 },
+    });
+    const nope = "$nope = 1";
+    expect(queryErrorBody(fail(nope), nope)).toEqual({
+      code: -32002,
+      message: "query rejected (type): unknown system attribute $nope — expected $key, $owner, $creator, $expiresAt or $createdAt",
+      data: { got: "$nope", position: 0 },
+    });
+    // A parse error names what was expected too; at the end of the text, got is "end of query".
+    expect(queryErrorBody(fail("x = 1 AND"), "x = 1 AND").data).toMatchObject({ position: 9, got: "end of query" });
+    expect(queryErrorBody(fail("x = 1 AND"), "x = 1 AND").data).toHaveProperty("expected");
+    expect(queryErrorBody(fail("(".repeat(200)), "(".repeat(200))).toMatchObject({ code: -32004 });
+    const long = `a = str('${"a".repeat(MAX_QUERY_BYTES)}')`;
+    expect(queryErrorBody(fail(long), long)).toEqual({ code: -32004, message: "query rejected (limits): query is too long" });
   });
 });

@@ -13,8 +13,9 @@ export function statisticsFixture(): StatisticsResponse {
       successfulCreatesWithoutKey: "0", successfulBytesWrites: "99", successfulBytesWritten: "9900",
       successfulIndexedAttributeWrites: "99", successfulStoredAttributeWrites: "0", successfulAttributeUnsets: "0", successfulSchemaTaggedWrites: "0" },
     entities: { status: "available", floorBlock: "0", asOfBlock: "100", lagBehindObservedHead: "0", lastFoldAtUtc: null, genesisStatus: null,
-      known: "456", active: "456", expired: "0", deleted: "0", activeWithPayload: "456", activeRecordedPayloadBytes: "45600",
-      maxActiveRecordedPayloadBytes: "100", activeAttributes: "456", activeWithAttributes: "456", maxAttributesPerActiveEntity: "1", attributeTypes: [], topContentTypes: [] },
+      known: "456", active: "456", expired: "0", deleted: "0", activePermanent: "1", activeWithBytes: "456", activeBytes: "45600",
+      maxActiveBytes: "100", activeAttributes: "456", activeIndexedAttributes: "400", activeStoredAttributes: "56", activeWithAttributes: "456",
+      maxAttributesPerActiveEntity: "1", attributeTypes: [], topSchemas: [{ schemaName: "posts", entities: "400", bytes: "40000" }], activeUntagged: "56" },
     limitations: [],
   };
   const windows = {} as NonNullable<StatisticsResponse["windows"]>;

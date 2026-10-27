@@ -218,13 +218,21 @@ export function isEntityRecordCode(code: string | Uint8Array): boolean {
   return code.length >= 2 && code[0] === ENTITY_CODE_MARKER && (code[1] === RECORD_VERSION_V0 || code[1] === RECORD_VERSION_V1);
 }
 
+/** A decoded dump record: its genesis version plus the payload length the record measured. */
+export type DumpEntityVersion = EntityVersion & { payloadSize: number };
+
 /**
  * Decode one entity account's code into the index's genesis version at
  * `position` (the entity id). The payload is measured and dropped; the record
  * is refused — never guessed at — when it is not a block-0 entity or any
  * field is malformed.
+ *
+ * This reads the payload-era arkiv-reth record format (prefill codecs 0/1),
+ * whose attributes were all indexed and whose payload and content type have
+ * no place in the UDC model: they are dropped. A reader for the UDC prefill
+ * codec is not written yet.
  */
-export function decodeEntityRecord(code: Uint8Array, position: number): EntityVersion {
+export function decodeEntityRecord(code: Uint8Array, position: number): DumpEntityVersion {
   let key: string | undefined;
   const refuse = (message: string): Error => new GenesisEntityError(key, message);
   if (code.length < 3 || code[0] !== ENTITY_CODE_MARKER) throw refuse("code does not start with the 0xFE entity marker");
@@ -242,7 +250,8 @@ export function decodeEntityRecord(code: Uint8Array, position: number): EntityVe
   const createdAtBlock = unsignedField(code, fields[2]!, 8, "created_at_block", refuse);
   const owner = bytesToHex(fixedBytes(code, fields[3]!, 20, "owner", refuse));
   const expiresAt = unsignedField(code, fields[4]!, 8, "expires_at", refuse);
-  const contentType = utf8Field(byteVector(code, fields[5]!, refuse), "content_type", refuse);
+  // Validated for a well-formed record, then dropped: UDC entities carry no content type.
+  utf8Field(byteVector(code, fields[5]!, refuse), "content_type", refuse);
   const lastModifiedAtBlock = unsignedField(code, fields[8]!, 8, "last_modified_at_block", refuse);
   const creationFlags = version === RECORD_VERSION_V1 ? Number(unsignedField(code, fields[9]!, 1, "creation_flags", refuse)) : 0;
   if (createdAtBlock !== 0n) throw refuse(`created_at_block is ${createdAtBlock}; not a genesis record`);
@@ -264,7 +273,7 @@ export function decodeEntityRecord(code: Uint8Array, position: number): EntityVe
     updatedAt: "0x0",
     expiresAt: hexQuantity(expiresAt),
     creationFlags: { raw: creationFlags },
-    contentType,
+    attributeSchema: attributes.map((attribute) => ({ name: attribute.name, type: attribute.type, indexed: true })),
     attributes,
   };
   return { ...genesisEntityToVersion(wire, position), payloadSize };

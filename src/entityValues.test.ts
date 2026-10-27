@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fromWireAttributeValue, toStoredAttributeValue, wireAttributeValue, type AttributeTypeTag } from "./entityValues";
+import { fromWireAttributeValue, storedBytesValue, toStoredAttributeValue, wireAttributeValue, type AttributeTypeTag } from "./entityValues";
 
 describe("fromWireAttributeValue", () => {
   test("round-trips every wire encoding back to the stored form", () => {
@@ -48,6 +48,22 @@ describe("fromWireAttributeValue", () => {
     expect(fromWireAttributeValue("str", 7)).toBeNull();
     expect(fromWireAttributeValue("addr", "0x1234")).toBeNull();
     expect(fromWireAttributeValue("key", `0x${"cd".repeat(31)}`)).toBeNull();
-    expect(fromWireAttributeValue("bytes", "0x00")).toBeNull();
+    expect(fromWireAttributeValue("bytes", "0x0")).toBeNull();
+    expect(fromWireAttributeValue("bytes", 5)).toBeNull();
+  });
+
+  test("a node's bytes value is kept as its keccak256 and length, never its content", () => {
+    expect(fromWireAttributeValue("bytes", "0x010203")).toEqual({
+      valueText: "0xf1885eda54b7a053318cd41e2093220dab15d65381b1157a3633a83bfd5c9239",
+      valueNum: 3n,
+    });
+    expect(fromWireAttributeValue("bytes", "0x")).toEqual({
+      valueText: "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      valueNum: 0n,
+    });
+    expect(storedBytesValue(`0x${"AB".repeat(32)}`, 7)).toEqual({ valueText: `0x${"ab".repeat(32)}`, valueNum: 7n });
+    expect(storedBytesValue("0x12", 7)).toBeNull();
+    // The index answers bytes as null on the wire.
+    expect(wireAttributeValue("bytes", { valueText: `0x${"ab".repeat(32)}`, valueNum: 7n })).toBeNull();
   });
 });

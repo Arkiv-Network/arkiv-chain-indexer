@@ -527,6 +527,7 @@ export class ScannerStorage {
       "block_ranges",
       "sender_stats",
       "entity_versions",
+      "entity_version_attributes",
     ];
     const present = await this.db.query<{ name: string; present: boolean }>(
       `SELECT name, to_regclass(format('%I.%I', $1::text, name)) IS NOT NULL AS present
@@ -575,6 +576,8 @@ export class ScannerStorage {
       transaction_records: "rent_fee_wei",
       block_ranges: "total_rent_fee_wei",
       sender_stats: "total_rent_fee_wei",
+      entity_versions: "bytes_size",
+      entity_version_attributes: "indexed",
     };
     const expected = existing.filter((table) => sentinels[table] !== undefined);
     if (expected.length > 0) {
@@ -1721,8 +1724,8 @@ export class ScannerStorage {
 
   /**
    * Replace decoded Arkiv operation rows for one block. Always deletes first so
-   * re-scans never leave stale rows; only operation metadata is written — no
-   * payload bytes or calldata.
+   * re-scans never leave stale rows; only operation metadata is written — never
+   * calldata or the content of a bytes attribute.
    */
   private async replaceOperationsForBlock(
     client: DbQueryable,

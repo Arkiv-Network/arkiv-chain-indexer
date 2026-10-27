@@ -174,30 +174,34 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
           <ExplainedStat label="Schema-tagged writes">{integer(activity.operations.successfulSchemaTaggedWrites)}</ExplainedStat>
         </StatGrid>
       </Section>
-      <Section title="Current active payload state" note="Current projection at the block shown above, independent of the activity period. Recorded metadata is not verified storage usage.">
+      <Section title="Current active bytes state" note="Current projection at the block shown above, independent of the activity period. bytes contents are never stored; these are their sizes.">
         <StatGrid>
-          <ExplainedStat label="Active entities with recorded payload">{integer(entity.activeWithPayload)}</ExplainedStat>
-          <ExplainedStat label="Active recorded payload bytes">{bytes(entity.activeRecordedPayloadBytes)}</ExplainedStat>
-          <ExplainedStat label="Largest active recorded payload">{bytes(entity.maxActiveRecordedPayloadBytes)}</ExplainedStat>
+          <ExplainedStat label="Active permanent entities">{integer(entity.activePermanent)}</ExplainedStat>
+          <ExplainedStat label="Active entities with bytes">{integer(entity.activeWithBytes)}</ExplainedStat>
+          <ExplainedStat label="Active bytes">{bytes(entity.activeBytes)}</ExplainedStat>
+          <ExplainedStat label="Largest active bytes">{bytes(entity.maxActiveBytes)}</ExplainedStat>
         </StatGrid>
       </Section>
       <Section title="Attributes on active entities" note="Current state, independent of the activity period. Describes the projected active state, so expired entities and superseded attribute values are excluded.">
         <StatGrid>
           <ExplainedStat label="Total attributes">{integer(entity.activeAttributes)}</ExplainedStat>
+          <ExplainedStat label="Indexed attributes">{integer(entity.activeIndexedAttributes)}</ExplainedStat>
+          <ExplainedStat label="Stored-only attributes">{integer(entity.activeStoredAttributes)}</ExplainedStat>
           <ExplainedStat label="Entities with attributes">{integer(entity.activeWithAttributes)}</ExplainedStat>
           <ExplainedStat label="Mean attributes per active entity">{average(entity.activeAttributes, entity.active)}</ExplainedStat>
           <ExplainedStat label="Maximum attributes per entity">{integer(entity.maxAttributesPerActiveEntity)}</ExplainedStat>
           {entity.attributeTypes.map((row) => <Stat key={row.typeId} label={<StatisticsLabel label={`${row.name} attributes`} explanation={attributeExplanation(row.typeId, row.name)} />}>{integer(row.count)}</Stat>)}
         </StatGrid>
       </Section>
-      {entity.topContentTypes.length > 0 && <Section title="Top content types" note="Current state, independent of the activity period. Up to 20 content types by active entity count. Payload sizes are recorded metadata, not verified storage usage.">
-        <div className="overflow-x-auto border border-border"><table className="w-full text-left text-xs">
-          <thead className="bg-muted"><tr>{(["Content type", "Content-type active entities", "Recorded payload bytes"] as const).map((h) => <th key={h} className="px-3 py-2 font-medium"><HelpLabel name={h} label={h === "Content-type active entities" ? "Active entities" : h} /></th>)}</tr></thead>
-          <tbody>{entity.topContentTypes.map((row) => <tr key={row.contentType} className="border-t border-border">
-            <td className="px-3 py-2 break-all">{row.contentType || "Unspecified"}</td>
-            <td className="px-3 py-2 font-mono">{integer(row.entities)}</td><td className="px-3 py-2 font-mono">{bytes(row.recordedPayloadBytes)}</td>
+      {(entity.topSchemas.length > 0 || entity.activeUntagged !== null) && <Section title="Top schemas" note="Current state, independent of the activity period. Up to 20 arkiv.schema tags by active entity count.">
+        <p className="text-xs text-muted-foreground"><HelpLabel name="Untagged entities" />: {integer(entity.activeUntagged)}</p>
+        {entity.topSchemas.length > 0 && <div className="overflow-x-auto border border-border"><table className="w-full text-left text-xs">
+          <thead className="bg-muted"><tr>{(["Schema", "Schema active entities", "Schema bytes"] as const).map((h) => <th key={h} className="px-3 py-2 font-medium"><HelpLabel name={h} label={h === "Schema active entities" ? "Active entities" : h === "Schema bytes" ? "Bytes" : h} /></th>)}</tr></thead>
+          <tbody>{entity.topSchemas.map((row) => <tr key={row.schemaName} className="border-t border-border">
+            <td className="px-3 py-2 break-all">{row.schemaName}</td>
+            <td className="px-3 py-2 font-mono">{integer(row.entities)}</td><td className="px-3 py-2 font-mono">{bytes(row.bytes)}</td>
           </tr>)}</tbody>
-        </table></div>
+        </table></div>}
       </Section>}
       <details className="border border-border p-3 text-xs text-muted-foreground">
         <summary className="cursor-pointer font-medium text-foreground"><HelpLabel name="Coverage and measurement limitations" /></summary>

@@ -27,16 +27,16 @@ import { JSON_RPC_SERVER_ERROR, JsonRpcError, type JsonRpcForwarder } from "./js
 export const JSON_RPC_LIMIT_EXCEEDED = -32005;
 
 /**
- * The Arkiv entity read methods. The index stores operation metadata, never the
- * entity state a node keeps (current attributes, owner, absolute expiry,
- * payload), so on `/shadow-rpc` these are answered upstream. They are read-only
- * and cheap, and the frontend's Data tab queries entities through them. The
- * experimental entity index (`ENTITY_QUERY_INDEX`) answers the same four on
- * `/shadow-rpc/experimental` from a projection of that metadata instead.
+ * The Arkiv entity read methods of the UDC node. The scanner stores operation
+ * metadata, never the entity state a node keeps (and never bytes contents), so
+ * on `/shadow-rpc` these are answered upstream. They are read-only and cheap,
+ * and the frontend's Data tab queries entities through them. The experimental
+ * entity index (`ENTITY_QUERY_INDEX`) answers the same three on
+ * `/shadow-rpc/experimental` from a projection of that metadata instead. (The
+ * UDC node has no `arkiv_getEntity`; it answers `-32601`.)
  */
 export const ARKIV_READ_METHODS: readonly string[] = [
   "arkiv_query",
-  "arkiv_getEntity",
   "arkiv_getEntityCount",
   "arkiv_getBlockTiming",
 ];

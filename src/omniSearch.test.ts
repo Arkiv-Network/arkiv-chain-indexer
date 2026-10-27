@@ -133,12 +133,12 @@ describe.skipIf(!hasPostgresForTests())("omni search (Postgres)", () => {
     await db.query(`UPDATE "${schema}".transaction_operations SET attributes='[{"name":"ancient","typeId":136,"type":"str","indexed":true,"value":"historicalOnly","size":14}]'::jsonb WHERE block_number=1`);
     await db.query(`INSERT INTO "${schema}".account_balances VALUES (12000,'2026-09-09',$1,'42')`, [address("dddddd")]);
     await db.query(`INSERT INTO "${schema}".entity_versions
-      (entity_key,version,from_block,from_position,from_op_index,owner,creator,created_at,created_position,created_op_index,updated_at,expires_at)
-      VALUES ($1,0,1,0,0,$2,$3,1,0,0,1,10)`, [hash("ededed"), address("ededed"), address("fafafa")]);
+      (entity_key,version,from_block,from_position,from_op_index,owner,creator,created_at,created_position,created_op_index,updated_at,expires_at,bytes_size,attributes)
+      VALUES ($1,0,1,0,0,$2,$3,1,0,0,1,10,0,'[]'::jsonb)`, [hash("ededed"), address("ededed"), address("fafafa")]);
     await db.query(`INSERT INTO "${schema}".transaction_logs (block_number,position,log_index,hash,address,topic0,data) VALUES (12000,0,0,$1,$2,$3,'0x')`, [hash("eeeeee"), address("bbbbbb"), hash("ffffff")]);
     // Identifier-shaped attribute content must not become an identifier hit.
-    await db.query(`INSERT INTO "${schema}".entity_version_attributes (entity_key,version,name,type_id,value_text,current)
-      VALUES ($1,0,'name',8,$2,true)`, [hash("cccccc"), hash("999999")]);
+    await db.query(`INSERT INTO "${schema}".entity_version_attributes (entity_key,version,name,type_id,indexed,value_text,current)
+      VALUES ($1,0,'name',8,true,$2,true)`, [hash("cccccc"), hash("999999")]);
     for (const table of ["transactions", "transaction_operations"]) await db.query(`ANALYZE "${schema}".${table}`);
   });
   afterAll(async () => { await entity?.close(); await db?.close(); await cleanup?.(); await closeTestPools(); });

@@ -302,17 +302,49 @@ export interface StoredEntityOperation extends StoredArkivOperation {
  * seeded devnet): no transaction created it, so the backend reports what its
  * entity index imported from block 0.
  */
+/**
+ * One attribute of an entity state. `value` is in the node's arkiv_query
+ * encoding; null for bytes, whose content the index never holds (size and
+ * keccak256 are given instead; read the content from a node).
+ */
+export interface EntityAttribute {
+  name: string;
+  type: string;
+  /** Queryable; an unindexed attribute is stored and returned but never matched. */
+  indexed: boolean;
+  value: unknown;
+  size?: number;
+  keccak256?: string;
+}
+
 export interface EntityGenesisRecord {
   owner: string;
   creator: string;
   /** Absolute expiry block as a decimal string; 18446744073709551615 means never. */
   expiresAt: string;
-  contentType: string;
   /** Raw creation flag bits (1 readonly, 2 permissionless extension); null when unknown. */
   creationFlags: number | null;
-  /** Payload bytes at genesis; 0 when the import never fetched the payload. */
-  payloadSize: number;
-  attributes: Array<{ name: string; type: string; value: unknown }>;
+  bytesSize: number;
+  schemaName: string | null;
+  attributes: EntityAttribute[];
+}
+
+/** The entity index's newest state for an entity, as of its projection head. */
+export interface EntityState {
+  asOfBlock: string;
+  status: "live" | "expired" | "deleted";
+  version: number;
+  owner: string;
+  creator: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Exact decimal; "18446744073709551615" is permanent. */
+  expiresAt: string;
+  permanent: boolean;
+  creationFlags: number | null;
+  bytesSize: number;
+  schemaName: string | null;
+  attributes: EntityAttribute[];
 }
 
 export interface EntityByKeyResponse {
@@ -329,6 +361,8 @@ export interface EntityByKeyResponse {
   firstOperation?: StoredEntityOperation;
   /** Present for an entity created in the genesis state; `operations` may then be empty. */
   genesis?: EntityGenesisRecord;
+  /** The entity index's newest state (when the backend runs one and knows the key). */
+  state?: EntityState;
 }
 
 export const ENTITY_OPERATION_RESPONSE_NAMES = [
@@ -368,6 +402,7 @@ interface CompactEntityByKeyResponse {
   operations: EntityOperationResponseRow[];
   firstOperation?: EntityOperationResponseRow;
   genesis?: EntityGenesisRecord;
+  state?: EntityState;
 }
 
 export interface ArkivOperationSummaryEntry {
@@ -1131,6 +1166,7 @@ function expandEntityByKeyResponse(response: CompactEntityByKeyResponse): Entity
       ? { firstOperation: decodeEntityOperationResponseRow(response.firstOperation, names) }
       : {}),
     ...(response.genesis ? { genesis: response.genesis } : {}),
+    ...(response.state ? { state: response.state } : {}),
   };
 }
 

@@ -2,24 +2,29 @@
  * The Arkiv attribute type vocabulary and the value encodings this repo needs
  * to answer entity queries from its own index.
  *
- * Three encodings of one value meet here:
+ * Two encodings of one value meet here:
  *
- * - the **decoder's text** (`transaction_operations.attributes[].value`, written
- *   by arkiv-transaction-decoder: decimal digits for the integer types, a
- *   trimmed decimal string for `dec`, EIP-55 hex for `addr`, lowercase hex for
- *   the 32-byte types, `true`/`false` for `bool`, raw text for `str`);
- * - the **stored form** in `entity_version_attributes` (`value_text` for
- *   equality/prefix, `value_num` for ordering — see {@link toStoredAttributeValue});
  * - the **wire form** a node puts in `arkiv_query` responses (`u64`/`u256` as
  *   `0x` quantities, `i32` as a JSON number, `bool` as a JSON bool, `dec` as a
- *   trimmed decimal string, `addr`/`key`/`bytes32` as lowercase hex) — see
- *   {@link wireAttributeValue}.
+ *   trimmed decimal string, `str` as text, `addr`/`key`/`bytes32` as lowercase
+ *   hex) — which arkiv-transaction-decoder v0.3 also uses for
+ *   `transaction_operations.attributes[].value`, so a decoded value and the
+ *   node's compare with plain equality (see {@link fromWireAttributeValue} and
+ *   {@link wireAttributeValue});
+ * - the **stored form** in `entity_version_attributes` (`value_text` for
+ *   equality/prefix, `value_num` for ordering — see {@link toStoredAttributeValue}).
  *
- * The typeIds are the protocol's (`arkiv-interfaces` `AttributeType`): they are
- * written into entity records by the node, so they are consensus-fixed.
+ * `bytes` is the exception: its content is never stored. Its stored form is
+ * the keccak256 (`value_text`) and the byte length (`value_num`), and the
+ * index answers its wire value as `null`; the content stays on the node.
+ *
+ * The typeIds are the protocol's: the low seven bits of a triple's `typeId`
+ * (bit 7 asks the node to index the attribute). They are consensus-fixed.
  */
 
-/** The nine tags a query can spell, plus the system-only `bytes`. */
+import { keccak256 } from "viem";
+
+/** The nine tags a query can spell, plus `bytes` (stored, never indexed). */
 export type AttributeTypeTag =
   | "bool"
   | "i32"
@@ -47,6 +52,14 @@ export const TYPE_IDS: Record<AttributeTypeTag, number> = {
 
 /** `typeId` 0 marks an attribute being unset in a patch; it is not a type. */
 export const TOMBSTONE_TYPE_ID = 0;
+
+/** Bit 7 of a triple's raw `typeId`: index this attribute. */
+export const INDEXED_FLAG = 0x80;
+
+/** The type tag of a raw `typeId` (indexed flag stripped), or undefined for 0 or an unknown type. */
+export function typeTagOfRawId(typeId: number): AttributeTypeTag | undefined {
+  return TYPE_TAGS_BY_ID.get(typeId & ~INDEXED_FLAG);
+}
 
 export const TYPE_TAGS_BY_ID: ReadonlyMap<number, AttributeTypeTag> = new Map(
   (Object.entries(TYPE_IDS) as Array<[AttributeTypeTag, number]>).map(([tag, id]) => [id, tag]),
@@ -114,9 +127,11 @@ export interface StoredAttributeValue {
 }
 
 /**
- * Convert the decoder's text rendering of a value into the stored form. Returns
- * null when the text is not a value of that type — a legacy row, a corrupt
- * cell — so the caller can skip the attribute instead of storing a lie.
+ * Convert a canonical text rendering of a value (decimal digits for the
+ * integer types, a decimal for `dec`, hex for the byte types) into the stored
+ * form. Returns null when the text is not a value of that type, so the caller
+ * can skip the attribute instead of storing a lie. `bytes` has no text form:
+ * see {@link storedBytesValue}.
  */
 export function toStoredAttributeValue(tag: AttributeTypeTag, text: string): StoredAttributeValue | null {
   switch (tag) {
@@ -150,12 +165,20 @@ export function toStoredAttributeValue(tag: AttributeTypeTag, text: string): Sto
     case "bytes32":
       return isHexOfLength(text, 64) ? { valueText: text.toLowerCase(), valueNum: null } : null;
     case "bytes":
-      // System-only (`$payload`); never a user attribute and never indexed.
       return null;
   }
 }
 
-/** A stored value in the JSON encoding the node uses on the wire. */
+/** The stored form of a `bytes` value: its keccak256 and its length, never the content. */
+export function storedBytesValue(keccak256: string, size: number): StoredAttributeValue | null {
+  if (!isHexOfLength(keccak256, 64) || !Number.isSafeInteger(size) || size < 0) return null;
+  return { valueText: keccak256.toLowerCase(), valueNum: BigInt(size) };
+}
+
+/**
+ * A stored value in the JSON encoding the node uses on the wire, except that
+ * `bytes` answers `null`: the index holds its hash and size, not its content.
+ */
 export function wireAttributeValue(tag: AttributeTypeTag, stored: StoredAttributeValue): unknown {
   switch (tag) {
     case "bool":
@@ -171,16 +194,19 @@ export function wireAttributeValue(tag: AttributeTypeTag, stored: StoredAttribut
     case "addr":
     case "key":
     case "bytes32":
-    case "bytes":
       return stored.valueText;
+    case "bytes":
+      return null;
   }
 }
 
 /**
- * The inverse of {@link wireAttributeValue}: a value as a node puts it in an
- * `arkiv_query` response (this index uses the same encodings) back into the
- * stored form. Returns null when the JSON value is not a value of that type —
- * a caller importing entities refuses the entity rather than storing a lie.
+ * A value in the node's `arkiv_query` encoding — as the node answers it, and
+ * as arkiv-transaction-decoder v0.3 reports it — in the stored form. Returns
+ * null when the JSON value is not a value of that type, so a caller refuses
+ * (or skips) it rather than storing a lie. A node's `bytes` value (`0x` hex)
+ * is hashed and measured here and the content dropped; the decoder never
+ * sends one (it reports size and hash instead, see {@link storedBytesValue}).
  */
 export function fromWireAttributeValue(tag: AttributeTypeTag, wire: unknown): StoredAttributeValue | null {
   switch (tag) {
@@ -199,8 +225,10 @@ export function fromWireAttributeValue(tag: AttributeTypeTag, wire: unknown): St
     case "key":
     case "bytes32":
       return typeof wire === "string" ? toStoredAttributeValue(tag, wire) : null;
-    case "bytes":
-      return null;
+    case "bytes": {
+      if (typeof wire !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/.test(wire)) return null;
+      return storedBytesValue(keccak256(wire as `0x${string}`), (wire.length - 2) / 2);
+    }
   }
 }
 

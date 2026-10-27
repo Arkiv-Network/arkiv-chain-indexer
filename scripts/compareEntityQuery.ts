@@ -8,21 +8,30 @@
  * `/shadow-rpc`, which relays those methods — and the indexer's
  * `/shadow-rpc/experimental`. This script asks both the same questions at the
  * same block and reports every difference: result order, every selected
- * field, page boundaries, counts, `arkiv_getEntity`, and the error
- * code/message/position for invalid input.
+ * field, page boundaries, counts, single-entity reads (`$key` queries with
+ * the full selection — the UDC node has no `arkiv_getEntity`), and the error
+ * code/message/data for invalid input.
  *
  * What the index cannot see is kept out of the comparison rather than papered
  * over. Entities created before the index floor are unknown to it, and
- * results come newest-first on both sides, so a node page walk is cut at the
- * first entity older than the floor and the index must match that prefix
- * exactly. Counts are compared inside a `$createdAt >= u64(<floor>)` window
- * (slow on the node — a range scan — so only the first few generic queries
- * get one; fixture queries need no window). The payload is never selected,
- * and a `creationFlags` the index reports as `null` (a creation it knows from
- * calldata only) is counted, not flagged.
+ * results come oldest-first on both sides (the node's entity-id order), so
+ * the node walk's entities older than the floor — its first ones — are left
+ * out and the index must match the rest exactly (page boundaries are then not
+ * comparable). Counts are compared inside a `$createdAt >= u64(<floor>)`
+ * window (slow on the node — a range scan — so only the first few generic
+ * queries get one; fixture queries need no window). Two documented index
+ * answers are counted, not flagged: a `bytes` attribute's `value` is `null`
+ * (the index keeps its hash and size, never its content), and a
+ * `creationFlags` of `null` (a creation it knows from neither log nor
+ * calldata).
  *
- * Cursors are opaque and differ by construction — the node resumes below an
- * internal entity id, the index below a creation position — so only their
+ * Query-language error *messages* are WP2c territory (the index's language
+ * port predates the UDC node's): for parse/type/literal/limits errors only the
+ * code is compared unless `--strict-language` is given — except the removed
+ * `$payload` / `$contentType`, whose messages must match.
+ *
+ * Cursors are opaque and differ by construction — the node's are
+ * process-local tokens, the index's carry a creation position — so only their
  * presence (does a next page exist) is compared, never their bytes.
  *
  * The query set is discovered from the data — owners, attribute values and
@@ -78,6 +87,7 @@ const { values: args } = parseArgs({
     "bench-seconds": { type: "string", default: "10" },
     report: { type: "string" },
     verbose: { type: "boolean", default: false },
+    "strict-language": { type: "boolean", default: false },
     help: { type: "boolean", default: false },
   },
 });
@@ -98,6 +108,7 @@ const BENCH_ROUNDS = Number(args.bench);
 const CONCURRENCY = Number(args.concurrency);
 const BENCH_SECONDS = Number(args["bench-seconds"]);
 const VERBOSE = args.verbose;
+const STRICT_LANGUAGE = args["strict-language"];
 
 // ---------------------------------------------------------------------------
 // JSON-RPC plumbing
@@ -205,6 +216,8 @@ interface Finding {
 const findings: Finding[] = [];
 let checks = 0;
 let creationFlagsUnknown = 0;
+let bytesValuesWithheld = 0;
+let languageMessagesSkipped = 0;
 
 function diff(scope: string, detail: string): void {
   findings.push({ scope, detail });
@@ -216,9 +229,21 @@ function short(value: unknown, max = 160): string {
   return text === undefined ? "undefined" : text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-/** Deep JSON equality with the one tolerance the index documents: `creationFlags: null` on its side. */
+/**
+ * Deep JSON equality with the tolerances the index documents: `creationFlags:
+ * null` on its side, and `value: null` for a `bytes` attribute.
+ */
 function sameJson(a: unknown, b: unknown, path: string, out: string[]): void {
   if (a === b) return;
+  if (
+    a && b && typeof a === "object" && typeof b === "object" &&
+    (a as Record<string, unknown>).type === "bytes" && (b as Record<string, unknown>).type === "bytes" &&
+    "value" in (a as object) && (b as Record<string, unknown>).value === null && typeof (a as Record<string, unknown>).value === "string"
+  ) {
+    bytesValuesWithheld += 1;
+    sameJson({ ...(a as object), value: null }, b, path, out);
+    return;
+  }
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) {
       out.push(`${path}: length ${a.length} vs ${b.length}`);
@@ -253,6 +278,7 @@ function hex(value: bigint): string {
   return `0x${value.toString(16)}`;
 }
 
+/** Every `RpcSelect` key. */
 const FULL_SELECT = {
   key: true,
   owner: true,
@@ -261,7 +287,6 @@ const FULL_SELECT = {
   updatedAt: true,
   expiresAt: true,
   creationFlags: true,
-  contentType: true,
   attributeSchema: true,
   attributes: true,
 };
@@ -289,7 +314,7 @@ interface WireEntity {
   createdAt?: string;
   updatedAt?: string;
   expiresAt?: string;
-  contentType?: string;
+  attributeSchema?: Array<{ name: string; type: string; indexed: boolean }>;
   attributes?: WireAttribute[];
   [field: string]: unknown;
 }
@@ -345,12 +370,12 @@ interface Walk {
   error?: RpcError;
   /** Stopped by --max-pages. */
   truncated: boolean;
-  /** Cut at the first entity older than the floor. */
+  /** Entities older than the floor were left out (the first ones, oldest-first). */
   cutAtFloor: boolean;
   blockNumbers: Set<string>;
 }
 
-async function walk(source: RpcSource, query: string, block: bigint, limit: number, maxPages: number, stopBelow?: bigint): Promise<Walk> {
+async function walk(source: RpcSource, query: string, block: bigint, limit: number, maxPages: number, skipBelow?: bigint): Promise<Walk> {
   const out: Walk = { entities: [], hasMore: [], pageMs: [], truncated: false, cutAtFloor: false, blockNumbers: new Set() };
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page++) {
@@ -365,15 +390,13 @@ async function walk(source: RpcSource, query: string, block: bigint, limit: numb
     const result = outcome.result as { data: WireEntity[]; blockNumber: string; cursor?: string };
     out.blockNumbers.add(result.blockNumber);
     out.hasMore.push(result.cursor !== undefined);
-    if (stopBelow !== undefined) {
-      const cut = result.data.findIndex((entity) => entity.createdAt !== undefined && BigInt(entity.createdAt) < stopBelow);
-      if (cut >= 0) {
-        out.entities.push(...result.data.slice(0, cut));
-        out.cutAtFloor = true;
-        return out;
-      }
+    if (skipBelow !== undefined) {
+      const kept = result.data.filter((entity) => entity.createdAt === undefined || BigInt(entity.createdAt) >= skipBelow);
+      if (kept.length !== result.data.length) out.cutAtFloor = true;
+      out.entities.push(...kept);
+    } else {
+      out.entities.push(...result.data);
     }
-    out.entities.push(...result.data);
     cursor = result.cursor;
     if (!cursor) return out;
   }
@@ -475,9 +498,9 @@ async function compareQuery(label: string, query: string, block: bigint, options
   }
 
   // Page boundaries: the same pages must exist on both sides. When the node
-  // walk was cut at the floor its later pages hold entities the index never
-  // had, so only the pages before the cut are comparable.
-  const comparablePages = node!.cutAtFloor ? node!.hasMore.length - 1 : node!.hasMore.length;
+  // walk held entities older than the floor, its pages are shifted by them,
+  // so no page boundary is comparable.
+  const comparablePages = node!.cutAtFloor ? 0 : node!.hasMore.length;
   for (let i = 0; i < comparablePages; i++) {
     if (index!.hasMore[i] === undefined) {
       diff(label, `page ${i + 1}: the node has it, the index walk ended after ${index!.hasMore.length} page(s)`);
@@ -506,7 +529,7 @@ async function compareQuery(label: string, query: string, block: bigint, options
     }
   }
 
-  // getEntity spot checks: first, middle and last of the walk.
+  // Single-entity spot checks: first, middle and last of the walk.
   const sample = [...new Set([node!.entities[0], node!.entities[Math.floor(node!.entities.length / 2)], node!.entities.at(-1)])].filter(
     (entity): entity is WireEntity => entity !== undefined,
   );
@@ -524,27 +547,26 @@ async function compareQuery(label: string, query: string, block: bigint, options
   return node!.entities;
 }
 
+/** One entity, read the way an SDK reads it now: `$key` with the full selection, at a block. */
 async function compareGetEntity(label: string, key: string, block: bigint | undefined): Promise<void> {
   checks += 1;
-  const params: unknown[] = block === undefined ? [key] : [key, Number(block)];
-  const [node, index] = await Promise.all(SOURCES.map((source) => rpc(source, "arkiv_getEntity", params)));
+  const params: unknown[] = [`$key = key(${key})`, { select: FULL_SELECT, ...(block === undefined ? {} : { atBlock: hex(block) }) }];
+  const [node, index] = await Promise.all(SOURCES.map((source) => rpc(source, "arkiv_query", params)));
   if (node!.error || index!.error) {
     if (!node!.error || !index!.error || node!.error.code !== index!.error.code) {
-      diff(`${label} getEntity ${key}`, `node ${short(node!.error ?? "ok")}, index ${short(index!.error ?? "ok")}`);
+      diff(`${label} entity ${key}`, `node ${short(node!.error ?? "ok")}, index ${short(index!.error ?? "ok")}`);
     }
     return;
   }
-  const nodeEntity = node!.result as Record<string, unknown> | null;
-  const indexEntity = index!.result as Record<string, unknown> | null;
+  const nodeEntity = (node!.result as { data: unknown[] }).data[0] ?? null;
+  const indexEntity = (index!.result as { data: unknown[] }).data[0] ?? null;
   if (nodeEntity === null || indexEntity === null) {
-    if (nodeEntity !== indexEntity) diff(`${label} getEntity ${key}`, `node ${short(nodeEntity)}, index ${short(indexEntity)}`);
+    if (nodeEntity !== indexEntity) diff(`${label} entity ${key}`, `node ${short(nodeEntity)}, index ${short(indexEntity)}`);
     return;
   }
-  // The index never holds payload bytes and leaves the field out.
-  const { payload: _payload, ...nodeWithoutPayload } = nodeEntity;
   const problems: string[] = [];
-  sameJson(nodeWithoutPayload, indexEntity, "", problems);
-  for (const problem of problems.slice(0, 5)) diff(`${label} getEntity ${key}`, problem);
+  sameJson(nodeEntity, indexEntity, "", problems);
+  for (const problem of problems.slice(0, 5)) diff(`${label} entity ${key}`, problem);
 }
 
 // ---------------------------------------------------------------------------
@@ -554,8 +576,10 @@ interface ErrorCase {
   label: string;
   query: string;
   options?: Record<string, unknown>;
-  /** -32006 carries each side's own `latest`; only the code is comparable. */
+  /** -32006 names each side's own head; only the code is comparable. */
   codeOnly?: boolean;
+  /** The message must match even without --strict-language. */
+  exact?: boolean;
 }
 
 function errorCases(head: bigint): ErrorCase[] {
@@ -568,7 +592,8 @@ function errorCases(head: bigint): ErrorCase[] {
     { label: "double equals", query: "x == 1" },
     { label: "not-equals", query: "x != 1" },
     { label: "updatedAt not queryable", query: "$updatedAt > u64(1)" },
-    { label: "payload not queryable", query: "$payload = str('a')" },
+    { label: "payload not queryable", query: "$payload = str('a')", exact: true },
+    { label: "contentType not queryable", query: "$contentType = str('a')", exact: true },
     { label: "stray paren", query: "x = str('a'))" },
     { label: "unclosed paren", query: "(x = 1" },
     { label: "dangling AND", query: "x = 1 AND" },
@@ -594,17 +619,23 @@ function errorCases(head: bigint): ErrorCase[] {
     { label: "limit 0", query: "*", options: { limit: 0 } },
     { label: "limit 201", query: "*", options: { limit: 201 } },
     { label: "limit as string", query: "*", options: { limit: "abc" } },
+    { label: "limit with a leading zero", query: "*", options: { limit: "0x05" } },
     { label: "unknown option", query: "*", options: { bogus: 1 } },
     { label: "unknown select field", query: "*", options: { select: { bogus: true } } },
+    { label: "select payload", query: "*", options: { select: { payload: true } } },
+    { label: "select contentType", query: "*", options: { select: { contentType: true } } },
+    { label: "select value not a boolean", query: "*", options: { select: { key: "yes" } } },
+    { label: "select attributes not a map", query: "*", options: { select: { attributes: 3 } } },
+    { label: "select attribute name invalid", query: "*", options: { select: { attributes: { "1x": true } } } },
     { label: "select not an object", query: "*", options: { select: 5 } },
+    { label: "options not an object", query: "*", options: 5 as unknown as Record<string, unknown> },
     { label: "atBlock pending", query: "*", options: { atBlock: "pending" } },
-    { label: "atBlock number", query: "*", options: { atBlock: 5 } },
+    { label: "atBlock latest", query: "*", options: { atBlock: "latest" } },
     { label: "atBlock far ahead", query: "*", options: { atBlock: hex(head + 100_000_000n) }, codeOnly: true },
-    { label: "cursor not a string", query: "*", options: { cursor: 5 } },
-    { label: "cursor malformed", query: "*", options: { cursor: "b64:not-base64!" } },
-    { label: "cursor garbage", query: "*", options: { cursor: "nope" } },
-    { label: "cursor wrong length", query: "*", options: { cursor: "b64:AAAA" } },
-    { label: "cursor from another query", query: "*", options: { cursor: "b64:AAAAAAAAAAAAAAAAAAAAAA" } },
+    { label: "cursor without atBlock", query: "*", options: { cursor: `0x${"ab".repeat(32)}` } },
+    { label: "cursor not a string", query: "*", options: { cursor: 5, atBlock: hex(head) } },
+    { label: "cursor garbage", query: "*", options: { cursor: "nope", atBlock: hex(head) } },
+    { label: "cursor unknown", query: "*", options: { cursor: `0x${"ab".repeat(32)}`, atBlock: hex(head) } },
   ];
 }
 
@@ -626,17 +657,14 @@ async function compareErrors(head: bigint): Promise<void> {
       continue;
     }
     if (testCase.codeOnly) continue;
+    // Query-language messages are deferred parity (WP2c) unless asked for.
+    const languageError = node!.error.code >= -32004 && node!.error.code <= -32001;
+    if (languageError && !STRICT_LANGUAGE && !testCase.exact) {
+      languageMessagesSkipped += 1;
+      continue;
+    }
     if (node!.error.message !== index!.error.message) {
-      // The node wraps serde's option-parsing errors in a Debug dump of its
-      // own error object (`ErrorObject { code: InvalidParams, … data:
-      // Some(RawValue("<the message> at line 1 column 7")) }`); the index
-      // answers the message itself. Parity there means the index says what
-      // serde said, minus the byte position in the request.
-      const wrapped = /RawValue\("(.*)"\)\)/.exec(node!.error.message);
-      const inner = wrapped ? wrapped[1]!.replace(/\\"/g, '"').replace(/ at line \d+ column \d+$/, "") : undefined;
-      if (inner === undefined || !index!.error.message.includes(inner)) {
-        diff(label, `message ${JSON.stringify(node!.error.message)} vs ${JSON.stringify(index!.error.message)}`);
-      }
+      diff(label, `message ${JSON.stringify(node!.error.message)} vs ${JSON.stringify(index!.error.message)}`);
       continue;
     }
     const problems: string[] = [];
@@ -654,11 +682,9 @@ function discoverQueries(entities: WireEntity[], head: bigint, since: bigint | u
   const queries: string[] = [];
   const owners = [...new Set(entities.map((entity) => entity.owner).filter((owner): owner is string => typeof owner === "string"))];
   const creators = [...new Set(entities.map((entity) => entity.creator).filter((c): c is string => typeof c === "string"))];
-  const contentTypes = [...new Set(entities.map((entity) => entity.contentType).filter((c): c is string => typeof c === "string"))];
   for (const owner of owners.slice(0, 3)) queries.push(`$owner = addr(${owner})`);
   if (owners[0]) queries.push(`$owner = '${owners[0]}'`);
   for (const creator of creators.slice(0, 2)) queries.push(`$creator = addr(${creator})`);
-  for (const contentType of contentTypes.slice(0, 2)) queries.push(`$contentType = ${quoteStr(contentType)}`);
   if (entities[0]) queries.push(`$key = key(${entities[0].key})`);
   queries.push(`$expiresAt > u64(${head + 10_000n})`, `$expiresAt <= u64(${head + 10_000n})`);
   if (since !== undefined) queries.push(`$createdAt < u64(${since + 1_000n})`);
@@ -767,7 +793,7 @@ function formatStats(s: Stats): string {
 
 interface BenchCase {
   label: string;
-  method: "arkiv_query" | "arkiv_getEntityCount" | "arkiv_getEntity";
+  method: "arkiv_query" | "arkiv_getEntityCount";
   params: (block: bigint | "latest") => unknown[];
 }
 
@@ -802,7 +828,11 @@ function benchCases(queries: string[], since: bigint | undefined, sampleKey: str
     cases.push({ label: `count ${short(query, 50)}`, method: "arkiv_getEntityCount", params: (block) => [block === "latest" ? { query } : { query, block: Number(block) }] });
   }
   if (sampleKey) {
-    cases.push({ label: "getEntity", method: "arkiv_getEntity", params: (block) => (block === "latest" ? [sampleKey] : [sampleKey, Number(block)]) });
+    cases.push({
+      label: "one entity by $key",
+      method: "arkiv_query",
+      params: (block) => [`$key = key(${sampleKey})`, { ...(block === "latest" ? {} : { atBlock: hex(block) }), select: FULL_SELECT }],
+    });
   }
   return cases;
 }
@@ -942,7 +972,9 @@ async function main(): Promise<void> {
 
   console.log(
     `\n${checks} checks, ${findings.length} difference(s)` +
-      (creationFlagsUnknown ? `, creationFlags unknown on the index for ${creationFlagsUnknown} entity read(s)` : ""),
+      (creationFlagsUnknown ? `, creationFlags unknown on the index for ${creationFlagsUnknown} entity read(s)` : "") +
+      (bytesValuesWithheld ? `, ${bytesValuesWithheld} bytes value(s) withheld by the index (by design)` : "") +
+      (languageMessagesSkipped ? `, ${languageMessagesSkipped} query-language message(s) not compared (WP2c; --strict-language compares them)` : ""),
   );
   for (const finding of findings.slice(0, 50)) console.log(`  ${finding.scope}: ${finding.detail}`);
   if (findings.length > 50) console.log(`  …and ${findings.length - 50} more`);
@@ -959,6 +991,8 @@ async function main(): Promise<void> {
           since: since?.toString() ?? null,
           checks,
           creationFlagsUnknown,
+          bytesValuesWithheld,
+          languageMessagesSkipped,
           rateLimitPauses,
           rateLimitedCalls,
           findings,
