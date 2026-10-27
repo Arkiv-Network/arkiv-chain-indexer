@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EthereumRpcClient, MAX_RPC_BATCH_SIZE } from "./rpc";
+import { EthereumRpcClient, MAX_RPC_BATCH_SIZE, readGenesisHashWithRetry } from "./rpc";
 import { attachRpcKeyRing } from "./rpcKeyRing";
 
 const originalFetch = globalThis.fetch;
@@ -201,5 +201,50 @@ describe("EthereumRpcClient getBalances", () => {
     await expect(rpc.getBalances([ADDRESS_A, ADDRESS_B], 1n)).rejects.toThrow(
       "was missing from the batch response",
     );
+  });
+});
+
+describe("readGenesisHashWithRetry", () => {
+  test("waits for a node that is down, then answers block 0's hash", async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const logs: string[] = [];
+    const rpc = {
+      rpcUrl: "http://node.test",
+      async getBlockHash(blockNumber: bigint) {
+        expect(blockNumber).toBe(0n);
+        calls += 1;
+        if (calls < 3) throw new Error("connection refused");
+        return `0x${"37".repeat(32)}`;
+      },
+    };
+    const hash = await readGenesisHashWithRetry(rpc, 250, {
+      sleep: async (ms) => void sleeps.push(ms),
+      log: (message) => void logs.push(message),
+    });
+    expect(hash).toBe(`0x${"37".repeat(32)}`);
+    expect(sleeps).toEqual([250, 250]);
+    expect(logs).toEqual([
+      "Failed to read block 0's hash via RPC endpoint http://node.test; retrying after 250ms",
+      "Failed to read block 0's hash via RPC endpoint http://node.test; retrying after 250ms",
+    ]);
+  });
+
+  test("a stop request ends the wait without a hash", async () => {
+    let stop = false;
+    const rpc = {
+      rpcUrl: "http://node.test",
+      async getBlockHash(): Promise<string> {
+        throw new Error("connection refused");
+      },
+    };
+    const hash = await readGenesisHashWithRetry(rpc, 10, {
+      shouldStop: () => stop,
+      sleep: async () => {
+        stop = true;
+      },
+      log: () => {},
+    });
+    expect(hash).toBeUndefined();
   });
 });

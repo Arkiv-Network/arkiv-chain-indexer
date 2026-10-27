@@ -69,7 +69,12 @@ docker compose up --build
   operation carrying every field (`null` where it does not apply), attributes as
   `{name, typeId, type, indexed, value, size, keccak256?, error?}` with values in the node's `arkiv_query`
   encoding — and anything else throws a `DecoderContractError` naming the decoder version (`GET /version`), so the
-  block retries instead of storing a guess. Decoded operation metadata (exact `expires_at` / `min_lifetime` /
+  block retries instead of storing a guess. "Anything else" is strict: an ABI word wider than its type (`salt` over
+  uint128, `expiresAt` / `minLifetime` over uint64), an unflagged triple whose value is not exactly the node's
+  encoding of its typeId's type, a bytes typeId (`typeId & 0x7f == 7`) with a value, and — on a *successful*
+  transaction only — any decoder `error` on an operation or a triple (the node refuses those before mining; on a
+  reverted transaction they are kept). The fold likewise stops (`EntityFoldError`) on an applied triple it cannot
+  store or an event word wider than the engine's, instead of dropping it. Decoded operation metadata (exact `expires_at` / `min_lifetime` /
   `salt` as NUMERIC, `creation_flags`, `new_owner`, `bytes_size`, `schema_name` = the indexed str `arkiv.schema`,
   attributes JSONB) is stored in `transaction_operations` in the same transaction as the block's transaction rows.
   A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes the whole block

@@ -44,6 +44,12 @@ export interface Db extends DbQueryable {
 
 export interface OpenDbOptions {
   max?: number;
+  /**
+   * Postgres `statement_timeout` for every connection of the pool, in
+   * milliseconds (a startup parameter, so no statement escapes it); unset or
+   * 0 leaves the server's default.
+   */
+  statementTimeoutMs?: number;
 }
 
 type UnsafeCapable = { unsafe(text: string, params?: unknown[]): Promise<unknown> };
@@ -74,7 +80,8 @@ export function openDb(connectionString: string, options: OpenDbOptions = {}): D
   const sql = new SQL({
     url: connectionString,
     ...(options.max !== undefined ? { max: options.max } : {}),
-  });
+    ...(options.statementTimeoutMs ? { connection: { statement_timeout: String(Math.trunc(options.statementTimeoutMs)) } } : {}),
+  } as ConstructorParameters<typeof SQL>[0]);
   const base = queryableFrom(sql);
   return {
     query: base.query,

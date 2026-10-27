@@ -3,6 +3,7 @@ import { defaultProjection, projectEntity, type Projection } from "./arkivJsonRp
 import { fillCreateEntityKeys, parseDecoderResponse, type ArkivOperationAttribute } from "./arkivOperations";
 import {
   ENTITY_EVENT_TOPICS,
+  EntityFoldError,
   OPERATION_CREATE,
   OPERATION_DELETE,
   OPERATION_EXTEND,
@@ -225,17 +226,18 @@ describe("foldEntityVersions", () => {
     expect(versions[1]!.attributes.map((attribute) => attribute.name)).toEqual(["late", "project", "rank"]);
   });
 
-  test("triples the node refuses, and values that are not of their type, are skipped, not stored", () => {
-    const [v0] = foldEntityVersions(KEY, [
-      create(1000, {
-        attributes: [
-          { name: "invalid", typeId: 0x87, type: "invalid(0x87)", indexed: true, value: null, size: 0, error: "bytes cannot be indexed" },
-          { name: "nohash", typeId: 7, type: "bytes", indexed: false, value: null, size: 9 },
-          udcAttribute("broken", "u64", "not a number"),
-          udcAttribute("ok", "addr", "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa"),
-        ],
-      }),
-    ]);
+  test("an applied triple the node would refuse, or a value not of its type, stops the fold instead of vanishing", () => {
+    const fold = (attribute: ArkivOperationAttribute) => () => foldEntityVersions(KEY, [create(1000, { attributes: [attribute] })]);
+    const flagged = { name: "invalid", typeId: 0x87, type: "invalid(0x87)", indexed: true, value: null, size: 0, error: "bytes cannot be indexed" };
+    expect(fold(flagged)).toThrow(EntityFoldError);
+    expect(fold(flagged)).toThrow(`operation 0 of transaction 0 in block 1000 (entity ${KEY}): attribute "invalid" carries the decoder error "bytes cannot be indexed"`);
+    expect(fold({ name: "nohash", typeId: 7, type: "bytes", indexed: false, value: null, size: 9 })).toThrow('attribute "nohash" (typeId 7) does not read as its type');
+    expect(fold(udcAttribute("broken", "u64", "not a number"))).toThrow('attribute "broken" (typeId 131) does not read as its type');
+    const patched = () =>
+      foldEntityVersions(KEY, [create(1000), op({ blockNumber: 1001, operationType: OPERATION_PATCH, attributes: [udcAttribute("broken", "i32", "1")] })]);
+    expect(patched).toThrow("in block 1001");
+    // The node's addresses are lowercase; the fold stores them so.
+    const [v0] = foldEntityVersions(KEY, [create(1000, { attributes: [udcAttribute("ok", "addr", "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa")] })]);
     expect(v0!.attributes).toEqual([{ name: "ok", typeId: 9, indexed: true, valueText: ALICE, valueNum: null }]);
   });
 
@@ -390,11 +392,17 @@ describe("attachEventsToOps", () => {
     expect(foldEntityVersions(KEY, ops)[0]!.expiresAt).toBe(u64Max);
   });
 
-  test("an expiry word wider than u64 is kept unclipped rather than wrapped", () => {
+  test("an event word wider than the engine's uint64 expiry or uint8 flags stops the fold, not the database", () => {
+    const attach = (topic0: string, data: string) => () =>
+      attachEventsToOps([op({ blockNumber: 5, operationType: topic0 === ENTITY_EVENT_TOPICS.created ? OPERATION_CREATE : OPERATION_EXTEND })], [log({ logIndex: 3, topic0, data })]);
+    expect(attach(ENTITY_EVENT_TOPICS.created, `0x${word(1n << 64n)}${word(0n)}`)).toThrow(EntityFoldError);
+    expect(attach(ENTITY_EVENT_TOPICS.created, `0x${word(1n << 64n)}${word(0n)}`)).toThrow("log 3: its EntityCreated expiresAt word 18446744073709551616 exceeds 18446744073709551615");
+    expect(attach(ENTITY_EVENT_TOPICS.created, `0x${word(9n)}${word(256n)}`)).toThrow("EntityCreated creationFlags word 256 exceeds 255");
+    expect(attach(ENTITY_EVENT_TOPICS.expiryExtended, `0x${"f".repeat(64)}`)).toThrow("ExpiryExtended expiresAt word");
+    // 2^64 - 1 itself is the permanent expiry, kept exactly.
     const ops = [op({ blockNumber: 5, operationType: OPERATION_CREATE })];
-    attachEventsToOps(ops, [log({ logIndex: 0, topic0: ENTITY_EVENT_TOPICS.created, data: `0x${"f".repeat(64)}${word(0n)}` })]);
-    expect(ops[0]!.event?.expiresAt).toBe((1n << 256n) - 1n);
-    expect(foldEntityVersions(KEY, ops)[0]!.expiresAt).toBe((1n << 256n) - 1n);
+    attachEventsToOps(ops, [log({ logIndex: 0, topic0: ENTITY_EVENT_TOPICS.created, data: `0x${word((1n << 64n) - 1n)}${word(3n)}` })]);
+    expect(ops[0]!.event).toEqual({ expiresAt: (1n << 64n) - 1n, creationFlags: 3 });
   });
 });
 

@@ -38,6 +38,7 @@ import {
   type StoredEntityAttribute,
 } from "./entityIndex";
 import type { QueryAst } from "./entityQueryLanguage";
+import { assertDataModel } from "./storage";
 import { compileEntityQuery } from "./entityQuerySql";
 
 export interface EntityIndexStorageOptions {
@@ -48,6 +49,12 @@ export interface EntityIndexStorageOptions {
   max?: number;
   /** Entity keys refolded per pass; see {@link DEFAULT_FOLD_KEY_BATCH}. */
   foldKeyBatch?: number;
+  /**
+   * `statement_timeout` for this store's own pool, in milliseconds. For a
+   * store that only serves reads (the API's): the projector's folds and
+   * counts must not be cut short, so its store leaves this unset.
+   */
+  statementTimeoutMs?: number;
 }
 
 /** Where the fold stands. */
@@ -404,6 +411,7 @@ export class EntityIndexStorage implements EntityIndexReader {
   private readonly qTransactions: string;
   private readonly qLogs: string;
   private readonly qScannerState: string;
+  private readonly qBlocks: string;
   private readonly foldKeyBatch: number;
   private readonly managedGenesis: boolean;
 
@@ -423,10 +431,14 @@ export class EntityIndexStorage implements EntityIndexReader {
     this.qTransactions = `${prefix}.transactions`;
     this.qLogs = `${prefix}.transaction_logs`;
     this.qScannerState = `${prefix}.scanner_state`;
+    this.qBlocks = `${prefix}.blocks`;
   }
 
   static async open(connectionString: string, options: EntityIndexStorageOptions = {}): Promise<EntityIndexStorage> {
-    const db = openDb(connectionString, options.max !== undefined ? { max: options.max } : {});
+    const db = openDb(connectionString, {
+      ...(options.max !== undefined ? { max: options.max } : {}),
+      ...(options.statementTimeoutMs ? { statementTimeoutMs: options.statementTimeoutMs } : {}),
+    });
     const storage = new EntityIndexStorage(db, true, options);
     try { await storage.initSchema(); return storage; } catch (error) { await db.close(); throw error; }
   }
@@ -449,6 +461,9 @@ export class EntityIndexStorage implements EntityIndexReader {
     if (this.schema !== "public") {
       await this.db.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(this.schema)}`);
     }
+    // The scanner's guard, before any DDL: the genesis scripts open only the
+    // index, and must not build its tables in another data model's database.
+    await assertDataModel(this.db, this.schema);
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qState} (
         key TEXT PRIMARY KEY,
@@ -686,12 +701,35 @@ export class EntityIndexStorage implements EntityIndexReader {
 
   /** Create operations below `block` whose entity key is unknown: entities the index can never attribute. */
   async countKeylessCreatesBelow(block: bigint): Promise<number> {
+    // A reverted create has no key either (no event), but it created nothing.
     const result = await this.db.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM ${this.qOperations}
-       WHERE operation_type = 1 AND entity_key IS NULL AND block_number < $1::bigint`,
+      `SELECT COUNT(*)::text AS count FROM ${this.qOperations} o
+       WHERE o.operation_type = 1 AND o.entity_key IS NULL AND o.block_number < $1::bigint
+         AND NOT EXISTS (
+           SELECT 1 FROM ${this.qTransactions} t
+           WHERE t.block_number = o.block_number AND t.position = o.position AND t.status = '0'
+         )`,
       [block.toString()],
     );
     return Number(result.rows[0]?.count ?? 0);
+  }
+
+  /**
+   * Whether the scanner stored every block below `end`, block 0 included —
+   * the history the index would vouch for with a floor of 0. Block 0 is the
+   * backfill's last block, so the count only runs once it is there.
+   */
+  async storedEveryBlockBelow(end: bigint): Promise<boolean> {
+    if (end <= 0n) return true;
+    const first = await this.db.query<{ present: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM ${this.qBlocks} WHERE block_number = 0) AS present`,
+    );
+    if (!first.rows[0]?.present) return false;
+    const result = await this.db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM ${this.qBlocks} WHERE block_number < $1::bigint`,
+      [end.toString()],
+    );
+    return BigInt(result.rows[0]?.count ?? "0") === end;
   }
 
   /** The database clock, so watermarks never depend on this host's clock. */
@@ -1004,8 +1042,10 @@ export class EntityIndexStorage implements EntityIndexReader {
     // $1 is always the block. At the head only latest versions can be live,
     // which is what the partial indexes cover; in the past the version valid
     // at that block is the one whose validity range contains it.
+    // `from_block <= $1` at the head too: a fold that commits between the head
+    // read and this query must not leak a newer version into the answer.
     return atHead
-      ? "v.to_block IS NULL AND NOT v.deleted AND v.expires_at > $1::numeric"
+      ? "v.to_block IS NULL AND v.from_block <= $1::bigint AND NOT v.deleted AND v.expires_at > $1::numeric"
       : "v.from_block <= $1::bigint AND (v.to_block IS NULL OR v.to_block > $1::bigint) AND NOT v.deleted AND v.expires_at > $1::numeric";
   }
 

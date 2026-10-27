@@ -47,6 +47,104 @@ export class IncompatibleDatabaseError extends Error {
   }
 }
 
+/**
+ * Refuse a schema written by another data model before touching it.
+ *
+ * Every chain gets a fresh database: the tables are created in their final
+ * shape and never migrated, so a schema left by an older indexer (payloads,
+ * references, the pre-UDC attribute model) keeps its old columns, and the
+ * failure would otherwise surface much later as a confusing SQL error — or,
+ * worse, as old rows read through the new model. The chain id cannot tell
+ * two databases apart (a restarted chain reuses it), so the schema carries
+ * its own marker: `scanner_state.data_model`. A schema without it is
+ * accepted only while it holds no data; `ScannerStorage` then writes it.
+ * The entity index runs it too, before its own DDL, so a script opening only
+ * the index cannot create tables in another model's database either.
+ */
+export async function assertDataModel(db: DbQueryable, schema: string): Promise<void> {
+  const qScannerState = `${quoteIdent(schema)}.scanner_state`;
+  const tables = [
+    "scanner_state",
+    "blocks",
+    "transactions",
+    "transaction_operations",
+    "transaction_logs",
+    "transaction_records",
+    "account_balances",
+    "block_ranges",
+    "sender_stats",
+    "entity_versions",
+    "entity_version_attributes",
+  ];
+  const present = await db.query<{ name: string; present: boolean }>(
+    `SELECT name, to_regclass(format('%I.%I', $1::text, name)) IS NOT NULL AS present
+     FROM unnest($2::text[]) AS name`,
+    [schema, textArrayLiteral(tables)],
+  );
+  const existing = present.rows.filter((row) => row.present).map((row) => row.name);
+  let marker: string | undefined;
+  if (existing.includes("scanner_state")) {
+    const result = await db.query<{ value: string }>(
+      `SELECT value FROM ${qScannerState} WHERE key = $1`,
+      [DATA_MODEL_KEY],
+    );
+    marker = result.rows[0]?.value;
+  }
+  if (marker === DATA_MODEL) return;
+  if (marker !== undefined) {
+    throw new IncompatibleDatabaseError(
+      `database schema "${schema}" was written by data model "${marker}"; this indexer writes ` +
+        `"${DATA_MODEL}" and needs a fresh database per chain. Point DATABASE_URL at an empty database.`,
+    );
+  }
+  const holdingData: string[] = [];
+  for (const table of existing) {
+    const qualified = `${quoteIdent(schema)}.${quoteIdent(table)}`;
+    const where =
+      table === "scanner_state" ? ` WHERE key IN ('last_successful_block', 'backfill_next_block')` : "";
+    const result = await db.query<{ any: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM ${qualified}${where}) AS any`,
+    );
+    if (result.rows[0]?.any) holdingData.push(table);
+  }
+  if (holdingData.length > 0) {
+    throw new IncompatibleDatabaseError(
+      `database schema "${schema}" holds data (${holdingData.join(", ")}) but no data model marker: ` +
+        `it was written by an indexer older than "${DATA_MODEL}". Each chain needs a fresh database; ` +
+        `point DATABASE_URL at an empty database.`,
+    );
+  }
+  // Empty but old-shaped tables would survive CREATE TABLE IF NOT EXISTS and
+  // fail at the first write; a column only this model has tells them apart.
+  const sentinels: Record<string, string> = {
+    blocks: "total_rent_fee_wei",
+    transactions: "rent_fee_wei",
+    transaction_operations: "schema_name",
+    transaction_records: "rent_fee_wei",
+    block_ranges: "total_rent_fee_wei",
+    sender_stats: "total_rent_fee_wei",
+    entity_versions: "bytes_size",
+    entity_version_attributes: "indexed",
+  };
+  const expected = existing.filter((table) => sentinels[table] !== undefined);
+  if (expected.length > 0) {
+    const columns = await db.query<{ table_name: string; column_name: string }>(
+      `SELECT table_name, column_name FROM information_schema.columns
+       WHERE table_schema = $1 AND table_name = ANY($2::text[])`,
+      [schema, textArrayLiteral(expected)],
+    );
+    const present = new Set(columns.rows.map((row) => `${row.table_name}.${row.column_name}`));
+    const outdated = expected.filter((table) => !present.has(`${table}.${sentinels[table]}`));
+    if (outdated.length > 0) {
+      throw new IncompatibleDatabaseError(
+        `database schema "${schema}" has tables of an older layout (${outdated.join(", ")}) and no data ` +
+          `model marker; this indexer (${DATA_MODEL}) never migrates them. Drop them or point DATABASE_URL at ` +
+          `an empty database.`,
+      );
+    }
+  }
+}
+
 /** Upper bound on blocks one eth_feeHistory call may cover (the JSON-RPC spec's own cap). */
 export const MAX_FEE_HISTORY_BLOCKS = 1024;
 
@@ -503,99 +601,9 @@ export class ScannerStorage {
     return storage;
   }
 
-  /**
-   * Refuse a schema written by another data model before touching it.
-   *
-   * Every chain gets a fresh database: the tables are created in their final
-   * shape and never migrated, so a schema left by an older indexer (payloads,
-   * references, the pre-UDC attribute model) keeps its old columns, and the
-   * failure would otherwise surface much later as a confusing SQL error — or,
-   * worse, as old rows read through the new model. The chain id cannot tell
-   * two databases apart (a restarted chain reuses it), so the schema carries
-   * its own marker: `scanner_state.data_model`. A schema without it is
-   * accepted only while it holds no data; {@link initSchema} then writes it.
-   */
+  /** See {@link assertDataModel}. */
   private async assertDataModel(): Promise<void> {
-    const tables = [
-      "scanner_state",
-      "blocks",
-      "transactions",
-      "transaction_operations",
-      "transaction_logs",
-      "transaction_records",
-      "account_balances",
-      "block_ranges",
-      "sender_stats",
-      "entity_versions",
-      "entity_version_attributes",
-    ];
-    const present = await this.db.query<{ name: string; present: boolean }>(
-      `SELECT name, to_regclass(format('%I.%I', $1::text, name)) IS NOT NULL AS present
-       FROM unnest($2::text[]) AS name`,
-      [this.schema, textArrayLiteral(tables)],
-    );
-    const existing = present.rows.filter((row) => row.present).map((row) => row.name);
-    let marker: string | undefined;
-    if (existing.includes("scanner_state")) {
-      const result = await this.db.query<{ value: string }>(
-        `SELECT value FROM ${this.qScannerState} WHERE key = $1`,
-        [DATA_MODEL_KEY],
-      );
-      marker = result.rows[0]?.value;
-    }
-    if (marker === DATA_MODEL) return;
-    if (marker !== undefined) {
-      throw new IncompatibleDatabaseError(
-        `database schema "${this.schema}" was written by data model "${marker}"; this indexer writes ` +
-          `"${DATA_MODEL}" and needs a fresh database per chain. Point DATABASE_URL at an empty database.`,
-      );
-    }
-    const holdingData: string[] = [];
-    for (const table of existing) {
-      const qualified = `${quoteIdent(this.schema)}.${quoteIdent(table)}`;
-      const where =
-        table === "scanner_state" ? ` WHERE key IN ('last_successful_block', 'backfill_next_block')` : "";
-      const result = await this.db.query<{ any: boolean }>(
-        `SELECT EXISTS (SELECT 1 FROM ${qualified}${where}) AS any`,
-      );
-      if (result.rows[0]?.any) holdingData.push(table);
-    }
-    if (holdingData.length > 0) {
-      throw new IncompatibleDatabaseError(
-        `database schema "${this.schema}" holds data (${holdingData.join(", ")}) but no data model marker: ` +
-          `it was written by an indexer older than "${DATA_MODEL}". Each chain needs a fresh database; ` +
-          `point DATABASE_URL at an empty database.`,
-      );
-    }
-    // Empty but old-shaped tables would survive CREATE TABLE IF NOT EXISTS and
-    // fail at the first write; a column only this model has tells them apart.
-    const sentinels: Record<string, string> = {
-      blocks: "total_rent_fee_wei",
-      transactions: "rent_fee_wei",
-      transaction_operations: "schema_name",
-      transaction_records: "rent_fee_wei",
-      block_ranges: "total_rent_fee_wei",
-      sender_stats: "total_rent_fee_wei",
-      entity_versions: "bytes_size",
-      entity_version_attributes: "indexed",
-    };
-    const expected = existing.filter((table) => sentinels[table] !== undefined);
-    if (expected.length > 0) {
-      const columns = await this.db.query<{ table_name: string; column_name: string }>(
-        `SELECT table_name, column_name FROM information_schema.columns
-         WHERE table_schema = $1 AND table_name = ANY($2::text[])`,
-        [this.schema, textArrayLiteral(expected)],
-      );
-      const present = new Set(columns.rows.map((row) => `${row.table_name}.${row.column_name}`));
-      const outdated = expected.filter((table) => !present.has(`${table}.${sentinels[table]}`));
-      if (outdated.length > 0) {
-        throw new IncompatibleDatabaseError(
-          `database schema "${this.schema}" has tables of an older layout (${outdated.join(", ")}) and no data ` +
-            `model marker; this indexer (${DATA_MODEL}) never migrates them. Drop them or point DATABASE_URL at ` +
-            `an empty database.`,
-        );
-      }
-    }
+    await assertDataModel(this.db, this.schema);
   }
 
   private async initSchema(): Promise<void> {

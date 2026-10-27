@@ -1,5 +1,6 @@
 import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { Hex, RpcBlock, RpcReceipt } from "./types";
+import { TOMBSTONE_TYPE_ID, fromWireAttributeValue, typeTagOfRawId, wireAttributeValue } from "./entityValues";
 
 export const ARKIV_REGISTRY_ADDRESS = "0x4400000000000000000000000000000000000044";
 
@@ -98,6 +99,12 @@ export interface ArkivOperation {
   schemaName: string | null;
   /** create: the attributes; patch: the mutations in calldata order, tombstones included. */
   attributes: ArkivOperationAttribute[];
+  /**
+   * The decoder's reason the node would refuse the operation as a whole.
+   * The node refuses such a transaction before it is mined, so a mined one
+   * never has it: on a successful transaction it fails the block. Not stored.
+   */
+  error?: string;
 }
 
 /**
@@ -258,13 +265,18 @@ export class ArkivDecoderClient {
       return parseDecoderResponse(body);
     } catch (error) {
       if (!(error instanceof DecoderContractError)) throw error;
-      const version = await this.decoderVersion();
-      throw new DecoderContractError(
-        `Arkiv decoder at ${this.baseUrl} (version ${version}) answered outside the UDC contract: ` +
-          `${error.message}. This indexer reads the "${DECODER_FORMAT}" format of ` +
-          `arkiv-transaction-decoder v0.3; upgrade the decoder. The block is retried until then.`,
-      );
+      throw await this.contractBreak(error.message);
     }
+  }
+
+  /** The error for an answer outside the contract, naming the decoder and its version. */
+  async contractBreak(detail: string): Promise<DecoderContractError> {
+    const version = await this.decoderVersion();
+    return new DecoderContractError(
+      `Arkiv decoder at ${this.baseUrl} (version ${version}) answered outside the UDC contract: ` +
+        `${detail}. This indexer reads the "${DECODER_FORMAT}" format of ` +
+        `arkiv-transaction-decoder v0.3; upgrade the decoder. The block is retried until then.`,
+    );
   }
 }
 
@@ -301,15 +313,32 @@ export async function decodeBlockArkivOperations(
     }
     const operations = await client.decodeCalldata(transaction.input);
     if (operations !== null && operations.length > 0) {
-      fillCreateEntityKeys(
-        transaction.hash,
-        operations,
-        receiptsByHash.get(transaction.hash.toLowerCase()),
-      );
+      const receipt = receiptsByHash.get(transaction.hash.toLowerCase());
+      // The node refuses before mining whatever the decoder flags, so a flag
+      // on a successful transaction means the decoder reads the chain wrong.
+      const fault = receipt?.status === "0x1" ? minedOperationFault(operations) : undefined;
+      if (fault !== undefined) throw await client.contractBreak(`successful transaction ${transaction.hash}: ${fault}`);
+      fillCreateEntityKeys(transaction.hash, operations, receipt);
       results.push({ position, hash: transaction.hash, operations });
     }
   }
   return results;
+}
+
+/**
+ * What makes decoded operations impossible for a successful transaction: a
+ * decoder `error` on an operation or a triple (the node refuses those before
+ * a transaction is mined). Undefined when there is none.
+ */
+export function minedOperationFault(operations: readonly ArkivOperation[]): string | undefined {
+  for (const operation of operations) {
+    const where = `operation ${operation.opIndex} (${operation.operation})`;
+    if (operation.error !== undefined) return `${where} is flagged: ${operation.error}`;
+    for (const attribute of operation.attributes) {
+      if (attribute.error !== undefined) return `${where} attribute ${JSON.stringify(attribute.name)} is flagged: ${attribute.error}`;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -366,6 +395,9 @@ export function fillCreateEntityKeys(
 // does not speak to, and fails the block loudly rather than storing guesses.
 
 const DECIMAL = /^\d+$/;
+const U128_MAX = (1n << 128n) - 1n;
+/** `transaction_operations.bytes_size` is a Postgres INTEGER. */
+const INT32_MAX = 2 ** 31 - 1;
 const HEX = /^0x[0-9a-f]*$/;
 
 /** Parse a v0.3 `/decode` body. Throws {@link DecoderContractError} on any other shape. */
@@ -397,16 +429,20 @@ function parseDecoderOperation(operation: unknown, opIndex: number): ArkivOperat
   const operationType = field("operationType", isNonNegativeInteger, "an integer tag");
   const name = field("operation", isString, "a string");
   const entityKey = field("entityKey", nullable(isHexOfBytes(32)), "lowercase 32-byte hex or null");
-  const salt = field("salt", nullable(isDecimal), "a decimal string or null");
+  // The ABI widths (uint128 salt, uint64 expiry pair): the node refuses wider
+  // words, so a wider value is a decoder fault, not a number to store.
+  const salt = field("salt", nullable(isDecimalUpTo(U128_MAX)), "a uint128 decimal string or null");
   const creationFlags = field("creationFlags", nullable(isByte), "a flag byte or null");
-  const expiresAt = field("expiresAt", nullable(isDecimal), "a decimal string or null");
-  const minLifetime = field("minLifetime", nullable(isDecimal), "a decimal string or null");
+  const expiresAt = field("expiresAt", nullable(isDecimalUpTo(U64_MAX)), "a uint64 decimal string or null");
+  const minLifetime = field("minLifetime", nullable(isDecimalUpTo(U64_MAX)), "a uint64 decimal string or null");
   // Checked as part of the contract but not kept: permanence is derived from
   // the resolved expiry (see StoredArkivOperation).
   field("permanent", nullable(isBoolean), "a boolean or null");
   const newOwner = field("newOwner", nullable(isHexOfBytes(20)), "a lowercase address or null");
-  const bytesSize = field("bytesSize", isNonNegativeInteger, "a byte count");
+  const bytesSize = field("bytesSize", (value: unknown): value is number => isNonNegativeInteger(value) && value <= INT32_MAX, "a byte count");
   const rawAttributes = field("attributes", Array.isArray, "an array");
+  const error = operation.error;
+  if (error !== undefined && !isString(error)) throw new DecoderContractError(`${where}.error is ${describe(error)}`);
   const attributes = rawAttributes.map((attribute, index) =>
     parseDecoderAttribute(attribute, `${where}.attributes[${index}]`),
   );
@@ -423,6 +459,7 @@ function parseDecoderOperation(operation: unknown, opIndex: number): ArkivOperat
     bytesSize,
     schemaName: schemaNameOf(attributes),
     attributes,
+    ...(error !== undefined ? { error } : {}),
   };
 }
 
@@ -441,10 +478,21 @@ function parseDecoderAttribute(attribute: unknown, where: string): ArkivOperatio
     throw new DecoderContractError(`${where}.keccak256 is ${describe(keccak256)}`);
   }
   if (error !== undefined && !isString(error)) throw new DecoderContractError(`${where}.error is ${describe(error)}`);
+  if (indexed !== ((typeId & INDEXED_TYPE_FLAG) !== 0)) {
+    throw new DecoderContractError(`${where}.indexed is ${indexed}, but typeId ${typeId} says otherwise`);
+  }
   // bytes content never reaches this process from a v0.3 decoder; refuse one
-  // that sends it rather than store it.
-  if (type === "bytes" && value !== null) {
+  // that sends it rather than store it. Keyed on the typeId, which is what the
+  // chain carries, not on the tag the decoder names it with.
+  const isBytes = (typeId & ~INDEXED_TYPE_FLAG) === BYTES_TYPE_ID;
+  if (isBytes && value !== null) {
     throw new DecoderContractError(`${where} is a bytes attribute with a value; bytes content is never stored`);
+  }
+  // An unflagged triple is one the node accepts, so it must read as its type:
+  // the tag of its typeId, a value in the node's encoding (bytes: its hash).
+  if (error === undefined) {
+    const fault = unflaggedTripleFault(typeId, type, value, isBytes, keccak256);
+    if (fault !== undefined) throw new DecoderContractError(`${where} ${fault}`);
   }
   return {
     name,
@@ -456,6 +504,34 @@ function parseDecoderAttribute(attribute: unknown, where: string): ArkivOperatio
     ...(keccak256 !== undefined ? { keccak256 } : {}),
     ...(error !== undefined ? { error } : {}),
   };
+}
+
+const BYTES_TYPE_ID = 7;
+
+function unflaggedTripleFault(
+  typeId: number,
+  type: string,
+  value: unknown,
+  isBytes: boolean,
+  keccak256: unknown,
+): string | undefined {
+  if (typeId === TOMBSTONE_TYPE_ID) {
+    return type === "tombstone" && value === null ? undefined : `is a tombstone named ${JSON.stringify(type)} with value ${describe(value)}`;
+  }
+  const tag = typeTagOfRawId(typeId);
+  if (tag === undefined) return `has typeId ${typeId}, which the node refuses, and no error`;
+  if (type !== tag) return `has typeId ${typeId} (${tag}) but type ${JSON.stringify(type)}`;
+  if (isBytes) {
+    if ((typeId & INDEXED_TYPE_FLAG) !== 0) return "is an indexed bytes attribute, which the node refuses, and has no error";
+    return keccak256 === undefined ? "is a bytes attribute without its keccak256" : undefined;
+  }
+  const stored = fromWireAttributeValue(tag, value);
+  if (stored === null) return `has value ${describe(value)}, which does not read as ${tag}`;
+  // The node's own encoding, exactly: what the index answers must be what it read.
+  if (JSON.stringify(wireAttributeValue(tag, stored)) !== JSON.stringify(value)) {
+    return `has value ${describe(value)}, which is not the node's encoding of a ${tag}`;
+  }
+  return undefined;
 }
 
 function describe(value: unknown): string {
@@ -489,6 +565,10 @@ function isByte(value: unknown): value is number {
 
 function isDecimal(value: unknown): value is string {
   return typeof value === "string" && DECIMAL.test(value);
+}
+
+function isDecimalUpTo(max: bigint): (value: unknown) => value is string {
+  return (value: unknown): value is string => isDecimal(value) && value.length <= 80 && BigInt(value) <= max;
 }
 
 function isHexOfBytes(bytes: number): (value: unknown) => value is string {

@@ -125,6 +125,12 @@ const LIVE_COUNT_DUTY_FACTOR = 20;
 export const DEFAULT_GENESIS_RPC_LIMIT = 1_000_000;
 const DEFAULT_GENESIS_BATCH_ENTITIES = 5_000;
 const DEFAULT_GENESIS_PROBE_RETRY_MS = 60_000;
+/**
+ * Walk restarts after a cursor expiry (-32005) allowed in a row before the
+ * import fails: a node restart costs one, a node whose cursors never last
+ * from one page to the next would cost one per tick forever.
+ */
+export const GENESIS_CURSOR_RESTART_LIMIT = 3;
 
 interface GenesisStageOutcome {
   status: GenesisImportStatus | undefined;
@@ -169,6 +175,12 @@ export class EntityProjector {
   /** `startedAt` of the import the tracker describes; a new import gets a new tracker. */
   private progressTrackedImport: string | undefined;
   private progressPages = 0;
+  /**
+   * Cursor expiries (-32005) since a page was last fetched with a cursor. A
+   * node restart costs one; a node that refuses every cursor would otherwise
+   * restart the walk forever.
+   */
+  private genesisCursorRestarts = 0;
   private progressAttributes = 0;
   private progressRepairBatches = 0;
   private progressRepaired = 0;
@@ -284,20 +296,32 @@ export class EntityProjector {
 
     let progress = await this.storage.getProgress();
     if (progress.floorBlock === undefined) {
-      const floor = this.floorOverride ?? (await this.storage.detectFloorBlock());
+      const detected = this.floorOverride ?? (await this.storage.detectFloorBlock());
+      // A chain born empty and stored from block 0 is known from block 0, creates or not.
+      const floor = (await this.knownFromBlockZero(detected ?? head + 1n)) ? 0n : detected;
       if (floor === undefined) return result; // no keyed create stored yet
       await this.storage.setProgress({
         floorBlock: floor,
         projectedThroughBlock: floor - 1n,
         lateScanWatermark: await this.storage.now(),
       });
-      this.log(`entity index: starting at block ${floor} (first create with an entity key)`);
+      this.log(
+        floor === detected
+          ? `entity index: starting at block ${floor} (first create with an entity key)`
+          : "entity index: starting at block 0 (no genesis entities, every block stored from block 0)",
+      );
       progress = await this.storage.getProgress();
     }
     let through = progress.projectedThroughBlock ?? progress.floorBlock! - 1n;
     result.projectedThroughBlock = through;
 
     if (Date.now() - this.lastLateScanAt >= this.lateScanIntervalMs) {
+      if (progress.floorBlock !== undefined && progress.floorBlock > 0n && (await this.knownFromBlockZero(progress.floorBlock))) {
+        // The backfill (or the gap filler) completed the history below the floor.
+        await this.storage.setProgress({ floorBlock: 0n });
+        this.log(`entity index: floor lowered to block 0 from ${progress.floorBlock} (no genesis entities, every block stored from block 0)`);
+        progress = await this.storage.getProgress();
+      }
       const outcome = await this.refoldLateArrivals(progress.lateScanWatermark, through, progress.floorBlock);
       if (outcome === undefined) {
         result.lockHeldElsewhere = true;
@@ -407,6 +431,21 @@ export class EntityProjector {
     }
     await this.storage.setProgress({ lateScanWatermark: now });
     return keys.length;
+  }
+
+  /**
+   * Whether the index knows every entity from block 0 although its first
+   * keyed create is at `floor`: the node found no genesis entities (status
+   * `none`), the floor is not pinned, every block below `floor` is stored,
+   * and none of them holds a successful create without a key. The node then
+   * answers `[]` and `0` below the first create, and so can the index.
+   */
+  private async knownFromBlockZero(floor: bigint): Promise<boolean> {
+    if (this.floorOverride !== undefined || floor <= 0n) return false;
+    const genesis = await this.storage.getGenesisImport();
+    if (genesis?.status !== "none") return false;
+    if (!(await this.storage.storedEveryBlockBelow(floor))) return false;
+    return (await this.storage.countKeylessCreatesBelow(floor)) === 0;
   }
 
   /**
@@ -636,6 +675,9 @@ export class EntityProjector {
       return outcome;
     };
 
+    // The cursor the next page is requested with: a page that arrives for a
+    // cursor proves the node keeps its cursors, which ends a run of restarts.
+    let requestCursor = state.cursor;
     const walk = walkGenesisEntities(source, {
       cursor: state.cursor,
       imported: state.imported,
@@ -644,6 +686,8 @@ export class EntityProjector {
     });
     try {
       for await (const page of walk) {
+        if (requestCursor !== null) this.genesisCursorRestarts = 0;
+        requestCursor = page.cursor;
         this.progressPages += 1;
         for (const version of page.versions) this.progressAttributes += version.attributes.length;
         pending.push(...page.versions);
@@ -681,7 +725,18 @@ export class EntityProjector {
         // The node restarted and forgot the walk's cursor (UDC cursors are
         // process-local). Start over from the first page: positions are the
         // node's order and every row is written idempotently, so the rows
-        // already in are rewritten as they are.
+        // already in are rewritten as they are. A node that refuses cursor
+        // after cursor is not restarting, and the walk would never end.
+        this.genesisCursorRestarts += 1;
+        if (this.genesisCursorRestarts > GENESIS_CURSOR_RESTART_LIMIT) {
+          this.genesisCursorRestarts = 0;
+          await this.failGenesis(
+            `the node refused the genesis walk's cursor ${GENESIS_CURSOR_RESTART_LIMIT + 1} times in a row, ` +
+              `${GENESIS_CURSOR_RESTART_LIMIT} restarts from the first page included, so its cursors do not last from one page ` +
+              `to the next (${error.message}); import the genesis offline or fix the node, then reset the import`,
+          );
+          return { ...GENESIS_IDLE, status: "failed", imported: importedNow };
+        }
         await this.restartGenesisWalk(error.message);
         return { ...blocked, imported: importedNow };
       }

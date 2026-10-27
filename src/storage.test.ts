@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { openDb } from "./db";
+import { EntityIndexStorage } from "./entityIndexStorage";
 import {
   DATA_MODEL,
   IncompatibleDatabaseError,
@@ -1620,6 +1621,26 @@ if (!hasPostgresForTests()) {
         [schema],
       );
       expect(tables.rows.map((row) => row.table_name)).toEqual(["scanner_state", "transaction_operations"]);
+    });
+
+    test("the entity index applies the same guard before its own DDL", async () => {
+      const { schema, db } = await freshSchema();
+      // A main-era database: scanner progress, the payload-era operation columns, no marker.
+      await db.query(`CREATE TABLE "${schema}".scanner_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      await db.query(`INSERT INTO "${schema}".scanner_state (key, value) VALUES ('last_successful_block', '100')`);
+      await db.query(`CREATE TABLE "${schema}".transaction_operations (block_number BIGINT, content_type TEXT, payload_size_bytes INTEGER)`);
+      const failure = EntityIndexStorage.open(TEST_DATABASE_URL!, { schema, max: 1 });
+      expect(failure).rejects.toThrow(IncompatibleDatabaseError);
+      expect(failure).rejects.toThrow("holds data (scanner_state) but no data model marker");
+      await failure.catch(() => {});
+      const tables = await db.query<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`,
+        [schema],
+      );
+      expect(tables.rows.map((row) => row.table_name)).toEqual(["scanner_state", "transaction_operations"]);
+      // Another model's marker is refused as well.
+      await db.query(`INSERT INTO "${schema}".scanner_state (key, value) VALUES ('data_model', 'arkiv-legacy-0')`);
+      expect(EntityIndexStorage.open(TEST_DATABASE_URL!, { schema, max: 1 })).rejects.toThrow('was written by data model "arkiv-legacy-0"');
     });
 
     test("refuses a database written by another data model", async () => {

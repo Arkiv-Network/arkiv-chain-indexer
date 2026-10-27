@@ -7,7 +7,7 @@ import {
   type CliSpec,
 } from "./cli";
 import { ArkivDecoderClient } from "./arkivOperations";
-import { EthereumRpcClient } from "./rpc";
+import { EthereumRpcClient, readGenesisHashWithRetry } from "./rpc";
 import { attachRpcKeyRing } from "./rpcKeyRing";
 import { scanOneBlock } from "./scanner";
 import { ScannerStorage, type BlockGap } from "./storage";
@@ -275,8 +275,11 @@ async function main(): Promise<void> {
     await attachRpcKeyRing(rpc, "gap-filler");
     const decoderClient = config.decoderUrl ? new ArkivDecoderClient(config.decoderUrl) : undefined;
     storage = await ScannerStorage.open(config.databaseUrl);
-    // A writer like the scanner: never fill one chain's gaps into another's database.
-    await storage.bindGenesisHash(await rpc.getBlockHash(0n));
+    // A writer like the scanner: never fill one chain's gaps into another's
+    // database. A node that is briefly down is waited for, as the scanner does.
+    const genesisHash = await readGenesisHashWithRetry(rpc, config.retryMs, { shouldStop: () => stopping });
+    if (genesisHash === undefined) return;
+    await storage.bindGenesisHash(genesisHash);
 
     console.log(
       `Gap filler starting (interval=${config.intervalMs}ms, ` +

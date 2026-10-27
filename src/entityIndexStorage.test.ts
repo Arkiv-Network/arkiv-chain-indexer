@@ -1165,6 +1165,47 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(await keysOf("*", { atBlock: "0x0" })).toEqual([0, 1, 2, 3, 4, 5, 6].map(keyOf));
   });
 
+  test("a node that refuses every cursor fails the import after three restarts instead of walking forever", async () => {
+    await index.reset();
+    const expired = new GenesisRpcError(
+      "arkiv_query",
+      -32005,
+      "query rejected (cursor): the cursor expired, is malformed, or belongs to another query, block or selection",
+    );
+    const source = createFakeGenesisSource(SEVEN, { cursorError: expired });
+    const logs: string[] = [];
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 3, pageSize: 3 }, log: (line) => logs.push(line) });
+    const statuses: Array<string | undefined> = [];
+    for (let tick = 0; tick < 8; tick++) statuses.push((await projector.runOnce()).genesisStatus);
+    // Each tick reads the first page and is refused the second: three restarts, then the fourth refusal fails it.
+    expect(statuses.slice(0, 4)).toEqual(["running", "running", "running", "failed"]);
+    expect(statuses.slice(4).every((status) => status === "failed")).toBe(true);
+    expect(source.pages).toBe(8);
+    expect(logs.filter((line) => line.includes("restarting the walk from the first page"))).toHaveLength(3);
+    const failed = await index.getGenesisImport();
+    expect(failed).toMatchObject({ status: "failed", phase: null });
+    expect(failed?.error).toMatch(/refused the genesis walk's cursor 4 times in a row/);
+    // Failed closed: nothing is served from a partial genesis.
+    expect((await call("arkiv_getEntityCount")).error?.message).toMatch(/entity index/);
+  });
+
+  test("a restart run ends once a cursor works again, so later node restarts each get their own restarts", async () => {
+    await index.reset();
+    const expired = () =>
+      new GenesisRpcError("arkiv_query", -32005, "query rejected (cursor): the cursor expired, is malformed, or belongs to another query, block or selection");
+    const source = createFakeGenesisSource(SEVEN);
+    // Each tick reads the first page and is refused the second (pages 2, 4, 6): three restarts.
+    for (const n of [2, 4, 6]) source.failPage(n, expired());
+    const projector = new EntityProjector(index, { genesis: { source, batchEntities: 1, pageSize: 3 }, log: () => {} });
+    for (let tick = 0; tick < 3; tick++) expect((await projector.runOnce()).genesisStatus).toBe("running");
+    // The fourth tick's cursor works (page 8), so the expiry on page 9 starts a new run instead of failing.
+    source.failPage(9, expired());
+    expect((await projector.runOnce()).genesisStatus).toBe("running");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "running", cursor: null, imported: 0 });
+    expect((await projector.runOnce()).genesisStatus).toBe("done");
+    expect(await index.getGenesisImport()).toMatchObject({ status: "done", imported: 7, total: 7 });
+  });
+
   test("stop() ends the walk after the batch in flight, and the next start resumes it", async () => {
     await index.reset();
     const source = createFakeGenesisSource(SEVEN);
@@ -1338,7 +1379,7 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect(await keysOf("*", { atBlock: "0x0" })).toEqual([keyOf(0), keyOf(1), keyOf(2), keyOf(3)]);
   });
 
-  test("a probe that finds no genesis entities leaves the floor to the first keyed create", async () => {
+  test("a probe that finds no genesis entities leaves the floor to the first keyed create while blocks below it are missing", async () => {
     await index.reset();
     const source = createFakeGenesisSource([]);
     const logs: string[] = [];
@@ -1348,6 +1389,118 @@ describeWithPostgres("genesis import (Postgres)", () => {
     expect((await index.getProgress()).floorBlock).toBe(5n);
     expect(logs.some((line) => line.includes("holds no genesis entities"))).toBe(true);
     expect(source.pages).toBe(0);
+  });
+
+  test("a chain born empty and stored from block 0 is answered from block 0, as the node does", async () => {
+    const isolated = await createIsolatedStorage("entity_floor_zero");
+    const pool = openDb(TEST_DATABASE_URL!, { max: 2 });
+    try {
+      const own = isolated.storage;
+      const ownIndex = await EntityIndexStorage.fromDb(pool, { schema: isolated.schema });
+      const ownMethods = createArkivIndexMethods(ownIndex, own);
+      const ownResult = async <T = unknown>(method: string, params: unknown[] = []): Promise<T> => {
+        const response = (await handleJsonRpcBody({ jsonrpc: "2.0", id: 1, method, params }, own, { localOverrides: ownMethods })) as JsonRpcResponse;
+        if (response.error) throw new Error(`${method} failed: ${JSON.stringify(response.error)}`);
+        return response.result as T;
+      };
+      await own.saveChainId(7733102n);
+      // Blocks 1 and 2 first (the backfill has not reached block 0), the first keyed create at 3.
+      // Block 1 also holds a reverted create, which has no key and created nothing.
+      await storeBlock(own, {
+        blockNumber: 1,
+        transactions: [registryTx(1, 0, ALICE, { status: "0" })],
+        operations: [{ position: 0, hash: registryTx(1, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, ...deadline(900) })] }],
+      });
+      await storeBlock(own, { blockNumber: 2, transactions: [], operations: [] });
+      await storeBlock(own, {
+        blockNumber: 3,
+        transactions: [registryTx(3, 0, ALICE, { logs: [createdLog(0, KEY_A, ALICE, 900)] })],
+        operations: [
+          { position: 0, hash: registryTx(3, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, entityKey: KEY_A, ...deadline(900), attributes: [str("project", "onchain")] })] },
+        ],
+      });
+      const logs: string[] = [];
+      const projector = new EntityProjector(ownIndex, { genesis: { source: createFakeGenesisSource([]) }, lateScanIntervalMs: 0, log: (line) => logs.push(line) });
+      expect((await projector.runOnce()).genesisStatus).toBe("none");
+      expect((await ownIndex.getProgress()).floorBlock).toBe(3n); // block 0 is not stored yet
+      await expect(ownResult("arkiv_getEntityCount", [{ block: 0 }])).rejects.toThrow("-32006");
+
+      // The backfill stores block 0: the history below the first create is complete.
+      await storeBlock(own, { blockNumber: 0, transactions: [], operations: [] });
+      await projector.runOnce();
+      expect((await ownIndex.getProgress()).floorBlock).toBe(0n);
+      expect(logs.some((line) => line.includes("floor lowered to block 0 from 3"))).toBe(true);
+      expect(await ownResult<number>("arkiv_getEntityCount", [{ block: 0 }])).toBe(0);
+      expect((await ownResult<{ data: unknown[] }>("arkiv_query", ["*", { atBlock: 2 }])).data).toEqual([]);
+      expect((await ownResult<{ data: Array<{ key: string }> }>("arkiv_query", ["*", { atBlock: 3 }])).data.map((e) => e.key)).toEqual([KEY_A]);
+
+      // A fresh index over the same complete history starts at block 0 straight away.
+      await ownIndex.reset();
+      const fresh = new EntityProjector(ownIndex, { genesis: { source: createFakeGenesisSource([]) }, log: () => {} });
+      await fresh.runOnce();
+      expect((await ownIndex.getProgress()).floorBlock).toBe(0n);
+
+      // A successful create without a key below the first keyed one leaves an entity the index cannot know.
+      await ownIndex.reset();
+      await storeBlock(own, {
+        blockNumber: 2,
+        transactions: [registryTx(2, 0, ALICE)],
+        operations: [{ position: 0, hash: registryTx(2, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, ...deadline(900) })] }],
+      });
+      expect(await ownIndex.countKeylessCreatesBelow(3n)).toBe(1);
+      await new EntityProjector(ownIndex, { genesis: { source: createFakeGenesisSource([]) }, log: () => {} }).runOnce();
+      expect((await ownIndex.getProgress()).floorBlock).toBe(3n);
+    } finally {
+      await pool.close();
+      await isolated.cleanup();
+    }
+  });
+
+  test("a read at the head never shows a version newer than the head, and a cancelled read says so", async () => {
+    const isolated = await createIsolatedStorage("entity_head_filter");
+    const pool = openDb(TEST_DATABASE_URL!, { max: 2 });
+    try {
+      const own = isolated.storage;
+      const ownIndex = await EntityIndexStorage.fromDb(pool, { schema: isolated.schema });
+      await own.saveChainId(7733102n);
+      await storeBlock(own, {
+        blockNumber: 3,
+        transactions: [registryTx(3, 0, ALICE, { logs: [createdLog(0, KEY_A, ALICE, 900)] })],
+        operations: [
+          { position: 0, hash: registryTx(3, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 1, entityKey: KEY_A, ...deadline(900), attributes: [str("v", "one")] })] },
+        ],
+      });
+      await storeBlock(own, {
+        blockNumber: 4,
+        transactions: [registryTx(4, 0, ALICE, { logs: [patchedLog(0, KEY_A, ALICE)] })],
+        operations: [{ position: 0, hash: registryTx(4, 0, ALICE).hash, operations: [operation({ opIndex: 0, operationType: 2, entityKey: KEY_A, attributes: [str("v", "two")] })] }],
+      });
+      await new EntityProjector(ownIndex, { genesis: { mode: "off" }, log: () => {} }).runOnce();
+      expect((await ownIndex.getProgress()).projectedThroughBlock).toBe(4n);
+      // A read that saw head 3 before a fold through 4 committed: block 4's version must not leak into it.
+      const atThree = await ownIndex.queryEntities({ kind: "all" }, { block: 3n, atHead: true, limit: 10 });
+      expect(atThree.entities.map((entity) => entity.attributes.map((attribute) => attribute.valueText))).not.toContainEqual(["two"]);
+      expect((await ownIndex.queryEntities({ kind: "all" }, { block: 4n, atHead: true, limit: 10 })).entities.map((e) => e.attributes[0]!.valueText)).toEqual(["two"]);
+
+      const cancelled = createArkivIndexMethods(
+        {
+          ...ownIndex,
+          getProgress: () => ownIndex.getProgress(),
+          queryEntities: async () => {
+            throw Object.assign(new Error("canceling statement due to statement timeout"), { errno: "57014" });
+          },
+        } as unknown as EntityIndexStorage,
+        own,
+      );
+      const response = (await handleJsonRpcBody({ jsonrpc: "2.0", id: 1, method: "arkiv_query", params: ["*"] }, own, { localOverrides: cancelled })) as JsonRpcResponse;
+      expect(response.error).toEqual({
+        code: -32000,
+        message: "the entity index cancelled this query at its statement timeout; narrow the query or ask for a smaller limit",
+      });
+    } finally {
+      await pool.close();
+      await isolated.cleanup();
+    }
   });
 
   test("a node that cannot answer, a genesis too big for RPC, a different chain, or a pinned floor", async () => {
