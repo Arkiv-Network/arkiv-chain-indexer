@@ -47,14 +47,16 @@ describe("AttributeTable", () => {
     expect(render({ attributes: STATE })).not.toContain("Query by");
   });
 
-  test("bytes the index holds no content for say so without a node configured", () => {
-    const html = render({ attributes: [STATE[3]!], bytes: { entityKey: `0x${"11".repeat(32)}` } });
-    expect(html).toContain("content not held by the index");
-    expect(html).not.toContain("Load from node");
+  test("bytes the index holds no content for say so when there is no entity to read", () => {
+    for (const bytes of [undefined, null, { entityKey: null }]) {
+      const html = render({ attributes: [STATE[3]!], bytes });
+      expect(html).toContain("content not held by the index");
+      expect(html).not.toContain("Load from node");
+    }
   });
 
-  test("bytes load from a node when one is given", () => {
-    const html = render({ attributes: [STATE[3]!], bytes: { entityKey: `0x${"11".repeat(32)}`, atBlock: 65, rpc: { kind: "custom", customUrl: "http://n" } } });
+  test("bytes load from the node for an entity, at the shown version's block", () => {
+    const html = render({ attributes: [STATE[3]!], bytes: { entityKey: `0x${"11".repeat(32)}`, atBlock: 65 } });
     expect(html).toContain("Load from node");
     expect(html).toContain("at block 65");
   });

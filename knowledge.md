@@ -41,7 +41,7 @@ Navigation: [discrepancies](#documentation-and-memory-discrepancies) ·
   `scanner_state.data_model` / `genesis_hash`.
 - Account balances are node readings for touched addresses, not reconstructed
   sums. Missing coverage must not become an invented zero balance.
-- The public JSON-RPC path is `/api/shadow-rpc`; the backend sees `/shadow-rpc`. Since v0.5.4 it requires the admin bearer token (`503` without one configured); `/api/shadow-rpc/experimental` is the open path, and the Data tab defaults to it.
+- The public JSON-RPC path is `/api/shadow-rpc`; the backend sees `/shadow-rpc`. Since v0.5.4 it requires the admin bearer token (`503` without one configured); `/api/shadow-rpc/experimental` is the open path (the old Data tab defaulted to it; the v0.6.0 entity explorer reads the node instead).
   The old `/rpc` was renamed, not retained as an alias. The user chose “shadow”
   to communicate incomplete indexed coverage. WebSockets/subscriptions/filters
   were explicitly outside the requested scope.
@@ -859,18 +859,16 @@ chain reset, not a suggested current action.
 
 ## Frontend and browser knowledge
 
-- The Data page port shipped routing/source checks, lazy CodeMirror editor,
-  normalized typed results, attribute filter chips, cursor paging, URL state,
-  and Copy link. Entity cards lead to existing `/entity/<key>` history pages.
-- Sources are node, experimental index, and both/compare, with a custom RPC option.
-  `Both` queries at `min(head)` and compares first-page results/timings; cursors
-  are source-specific. Relevant modules:
-  [DataView.tsx](frontend/src/DataView.tsx), [dataRpc.ts](frontend/src/dataRpc.ts),
-  [dataQuery.ts](frontend/src/dataQuery.ts), [entityCompare.ts](frontend/src/entityCompare.ts),
-  [QueryEditor.tsx](frontend/src/QueryEditor.tsx), [EntityResults.tsx](frontend/src/EntityResults.tsx).
-- Persisted Data preferences include `data.rpcSourceKind`, `data.rpcCustomUrl`,
-  and `data.rpcMode`; shared links carry query, page size, expiration and source
-  (`rpc=both` / `rpc=index`). Payload bytes are not selected in result lists.
+- v0.6.0 replaced the Data page (node / index / both-compare / custom sources,
+  `DataView.tsx`, `dataRpc.ts`, `dataQuery.ts`, `entityCompare.ts`,
+  `EntityResults.tsx`) with #120's entity explorer
+  ([frontend/src/entityExplorer/](frontend/src/entityExplorer/)): SDK-based, reading
+  the indexed chain's node through the backend's open `/entity-explorer/rpc` relay,
+  URL state through nuqs (`q`, `pageSize`, `expiration`), `/data` an alias.
+  The browser-side index-vs-node comparison went with it;
+  `scripts/compareEntityQuery.ts` is the remaining one. Entity cards link to the
+  `/entity/<key>` history page, which links back ("On the node"). The frontend's
+  `/node-rpc` passthrough went too: "Load from node" for bytes uses the relay.
 - Payload preview on the entity page was phase 3 of the port and remains
   unestablished as complete. The inspected entity view shows metadata/size and
   operation history; genesis display was added later.

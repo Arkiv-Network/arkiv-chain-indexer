@@ -348,3 +348,8 @@ export function maskKey(key: string): string {
   if (key.length <= 12) return `${key.slice(0, 4)}…`;
   return `${key.slice(0, 12)}…${key.slice(-4)}`;
 }
+
+/** Renders an RPC URL for logs, masking a key carried as the last path segment. */
+export function describeRpcTarget(rpcUrl: string): string {
+  return rpcUrl.replace(/ark_live_[A-Za-z0-9_-]+/g, (key) => maskKey(key));
+}

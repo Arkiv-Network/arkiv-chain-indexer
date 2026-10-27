@@ -140,8 +140,9 @@ docker compose up --build
   data, with an allowlisted node passthrough below. The path demands administrator authentication: a session
   with configured Origin and X-CSRF-Token, or a temporary access token (it spends the upstream's quota).
   `/shadow-rpc/experimental` is open
-  and explicitly receives no passthrough forwarder; the Data tab offers only the
-  index and a custom node outside admin mode. `latest` means the indexed head (`scanner_state.last_successful_block`);
+  and explicitly receives no passthrough forwarder. The entity explorer uses neither: it queries the indexed
+  chain's node through the Arkiv SDK and the `/entity-explorer/rpc` relay (see the entity explorer note below).
+  `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
   calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns
@@ -223,7 +224,35 @@ docker compose up --build
   switched on and the series is sparse (a row exists only where an address was touched). `getBalanceAt` takes
   the newest reading at or before a block; when there is none, `eth_getBalance` and `GET /balances` say so
   rather than answering `0x0` — an unindexed account and an empty one are different facts, and conflating them
-  is the `eth_getLogs`-below-the-floor mistake again.
+  is the `eth_getLogs`-below-the-floor mistake again. Tracking reads each block's state, so it needs a node that
+  serves past state; Jalebi serves only its head, and a failed read retries the block forever. For that case
+  `GET /balances/live?address=` asks the indexed chain's node (the `/shadow-rpc` relay's node and key, allowlisted
+  to `eth_getBalance` at `latest`, same rate limit) what an account holds now, uncached and with no history;
+  the frontend's wallet page shows it.
+- The frontend entity explorer (`/entity-explorer`, code in `frontend/src/entityExplorer/`) speaks the
+  user-defined column format: entities carry typed attributes (indexed or stored only, zero or more `bytes`
+  blobs, an `arkiv.schema` tag) instead of a payload and content type. It queries the node through
+  `@arkiv-network/sdk@next`, by way of the backend's `POST /entity-explorer/rpc` (`/api/entity-explorer/rpc`
+  publicly): a pure relay — `builtInMethods: false`, so nothing is answered from the index — of
+  `ENTITY_EXPLORER_RPC_METHODS` (exactly what the frontend calls there: `arkiv_query`, `arkiv_getBlockTiming`;
+  the transaction and entity pages' "Load from node" for a bytes value, `nodeBytes.ts`, is an `arkiv_query` too),
+  built on `JsonRpcPassthrough`. The relay is open and only rate limited (issue #121 tracks its auth). It reads the indexed chain's own node — the one `/shadow-rpc` relays to
+  (`SHADOW_RPC_UPSTREAM`, else the node the scanner recorded), with that relay's key, timeout and rate limit — so
+  the explorer and the indexer always look at the same chain and there is nothing extra to configure; the
+  frontend pins no chain. A key embedded in the node's URL (Jalebi accepts one as the last path segment, e.g.
+  `…/sdk_test`) stays on the server. The node caps a page at 100 entities, and `select: "*"`
+  leaves out `$attributeSchema`, so the explorer names every field it needs (`EXPLORER_SELECT`). It does not use
+  `/shadow-rpc` or the entity index (query-language parity between the two is deferred, so the node is the
+  reference). An entity's card links to its indexed history (`/entity/<key>`: versions, operations, rent),
+  and that page links back to the explorer. Search sends a bare entity key to the explorer
+  (`fullHashHref`). It fetches with TanStack Query and keeps `q`, `pageSize` and
+  `expiration` in the URL with nuqs; the nuqs adapter wraps the page inside its lazy chunk, since no
+  other page uses it. Layout: `EntityExplorerView.tsx` composes the page, `hooks/` holds the run
+  (`useEntitySearch`) and saved queries, `components/` the UI, `lib/` the framework-free logic the frontend
+  tests cover. `/data`, the page's old path, still resolves to it.
+- Frontend data fetching goes through TanStack Query (`useQuery` / `useInfiniteQuery`), never `fetch` inside a
+  `useEffect`. The one `QueryClient` is `frontend/src/queryClient.ts` (no retries, no refetch on focus), provided
+  app-wide in `frontend/src/main.tsx`. Older views still fetch in effects; move them over when touching them.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator
@@ -255,14 +284,18 @@ docker compose up --build
   through `frontend/src/attributes.ts` (`AttributeView`, canonical text, EIP-55, query conditions only for
   indexed attributes, the `arkiv.schema` badge, patch diffs) and render in `components/attribute-table.tsx`.
   Permanence is `isPermanentExpiry` (exactly 2^64 − 1), never a lifetime estimate. Entity versions and a
-  patch's old values come from folding `/entity/<key>` in `entityHistory.ts`. bytes contents are loaded in the
-  browser from the node (`nodeBytes.ts`, `VITE_NODE_RPC_URL`), never via the backend; `frontend/server.js`
-  can forward `/node-rpc` to `NODE_RPC_UPSTREAM` for a node without CORS. The decoder link is off unless
-  `VITE_TRANSACTION_DECODER_BASE_URL` is set.
+  patch's old values come from folding `/entity/<key>` in `entityHistory.ts`. bytes contents are loaded on
+  demand in the browser from the node (`nodeBytes.ts`, through the `/entity-explorer/rpc` relay, which stores
+  nothing) and checked against the recorded keccak256; the index never holds them. The permanence tooltip names
+  the node's rent cap only when `VITE_NODE_STATUS_URL` points at the node's `/signed/v1/status`. Query
+  conditions (the attribute table's filter menu, the schema badge) open the entity explorer with `q`. The
+  decoder link is off unless `VITE_TRANSACTION_DECODER_BASE_URL` is set.
 - The `decoder` image this repo publishes is built by `.github/workflows/publish-images.yml` from
   arkiv-transaction-decoder's source at a pinned commit, with `--build-arg PORT=28884`. Deployments probe that
-  port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. Compose runs the
-  released upstream image directly and sets `PORT` itself.
+  port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. v0.3.0 (the UDC
+  format) is not tagged upstream, so both pin its commit (896e341): compose builds the `decoder` service from
+  that git ref unless `ARKIV_DECODER_IMAGE` names another image, and sets `PORT` itself. Keep the two refs in
+  lockstep.
 - All required env vars live in `.env.example`.
 
 ## Google login and administrator access

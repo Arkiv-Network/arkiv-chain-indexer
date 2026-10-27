@@ -1,10 +1,19 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
-import { canSuggest, fetchSearch, normalizeSearchQuery, searchHref, type SearchSuggestion } from "./searchApi";
+import {
+  canSuggest, fetchSearch, fullHashHref, fullHashQuery, normalizeSearchQuery, scopedExactHref, searchHref,
+  suggestionsInScope, type SearchKind, type SearchSuggestion,
+} from "./searchApi";
 
-export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }: {
+const DEFAULT_PLACEHOLDER = "Block number, address, hash or entity key…";
+
+export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false, scope, placeholder = DEFAULT_PLACEHOLDER }: {
   onNavigate: (href: string) => void;
   initialQuery?: string;
   autofocus?: boolean;
+  /** Limit suggestions to these kinds, and open a complete identifier of them directly. */
+  scope?: readonly SearchKind[];
+  placeholder?: string;
 }) {
   const [query, setQuery] = useState(() => normalizeSearchQuery(initialQuery));
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
@@ -16,6 +25,21 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
   const input = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const listId = useId();
+  const queryClient = useQueryClient();
+
+  /** A complete 32-byte value may be an entity key: ask the index whether it is a block or transaction first. */
+  const resolveFullHash = async (hash: string): Promise<string> => {
+    try {
+      const indexed = await queryClient.fetchQuery({
+        queryKey: ["search", hash],
+        queryFn: ({ signal }) => fetchSearch(hash, false, signal),
+        staleTime: 30_000,
+      });
+      return fullHashHref(hash, indexed);
+    } catch {
+      return fullHashHref(hash, null);
+    }
+  };
 
   useEffect(() => { setQuery(normalizeSearchQuery(initialQuery)); }, [initialQuery]);
   useEffect(() => {
@@ -30,7 +54,7 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
       setLoading(true);
       fetchSearch(query.trim(), true, abort.signal).then((body) => {
         if (!abort.signal.aborted && generation.current === current) {
-          setSuggestions(body.suggestions);
+          setSuggestions(scope ? suggestionsInScope(body.suggestions, scope) : body.suggestions);
           if (body.partial) setError("Some suggestions timed out. Keep typing to narrow the search.");
         }
       }).catch((reason: unknown) => {
@@ -40,7 +64,7 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
       });
     }, 220);
     return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [query, focused, dismissed]);
+  }, [query, focused, dismissed, scope]);
 
   const choose = (suggestion: SearchSuggestion) => {
     setSuggestions([]);
@@ -58,7 +82,11 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
       if (query.trim()) {
         setDismissed(true);
         input.current?.blur();
-        onNavigate(searchHref(query.trim()));
+        const scoped = scope && scopedExactHref(query, scope);
+        const hash = fullHashQuery(query);
+        if (scoped) onNavigate(scoped);
+        else if (hash && (!scope || scope.includes("entity"))) void resolveFullHash(hash).then(onNavigate);
+        else onNavigate(searchHref(query.trim()));
       }
     }} onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
@@ -68,7 +96,7 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
           aria-autocomplete="list" aria-expanded={open} aria-controls={listId}
           aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
           autoComplete="off" spellCheck={false} maxLength={256} autoFocus={autofocus}
-          placeholder="Block number, address, hash or entity key…" value={query}
+          placeholder={placeholder} value={query}
           onFocus={() => { setFocused(true); setDismissed(false); }}
           onChange={(event) => { setQuery(normalizeSearchQuery(event.target.value)); setDismissed(false); }}
           onKeyDown={(event) => {
@@ -94,5 +122,21 @@ export function OmniSearch({ onNavigate, initialQuery = "", autofocus = false }:
         {error ? <p role="status">{error}</p> : null}
       </div> : null}
     </form>
+  );
+}
+
+/** A page's own search box, scoped to the kinds of identifier that page lists. */
+export function PageSearch({ scope, placeholder, onLocationChange }: {
+  scope: readonly SearchKind[];
+  placeholder: string;
+  onLocationChange: () => void;
+}) {
+  return (
+    <div className="max-w-2xl">
+      <OmniSearch scope={scope} placeholder={placeholder} onNavigate={(href) => {
+        window.history.pushState({}, "", href);
+        onLocationChange();
+      }} />
+    </div>
   );
 }

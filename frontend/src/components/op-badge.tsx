@@ -13,7 +13,7 @@ const TONE_CLASS: Record<Tone, string> = {
   muted: "text-muted-foreground border-border",
 };
 
-// Same hue mapping as the Data Explorer's entity event feed, so an "extend"
+// Same hue mapping as the entity page's event history, so an "extend"
 // Arkiv op and an "ExpiryExtended" entity event read as the same color.
 const OP_TONE: Record<string, Tone> = {
   create: "emerald",

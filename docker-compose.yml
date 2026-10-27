@@ -37,8 +37,16 @@ services:
   # other response format loudly and retries the block, so an older decoder
   # stalls the scan instead of storing gaps. PORT puts it on 28884, matching the
   # DECODER_URL defaults below.
+  #
+  # v0.3.0 is on the decoder's main (896e341) but not tagged, so no upstream
+  # image exists: compose builds it from that pinned commit, the same ref
+  # .github/workflows/publish-images.yml builds this repo's decoder image from
+  # (keep the two in lockstep). ARKIV_DECODER_IMAGE runs another image instead;
+  # note that `up --build` rebuilds whatever name it gives from this ref.
   decoder:
-    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.0}
+    image: ${ARKIV_DECODER_IMAGE:-arkiv-transaction-decoder:git-896e341}
+    build:
+      context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#896e341ff88e1995ed6e55914f4e99f7e30512fb
     environment:
       PORT: 28884
     restart: unless-stopped
@@ -449,19 +457,11 @@ services:
       # Runtime config (/config.js), no rebuild needed. The decoder link is off
       # unless set (`off` also turns it off).
       VITE_TRANSACTION_DECODER_BASE_URL: ${VITE_TRANSACTION_DECODER_BASE_URL:-}
-      # The browser's own node: the Data tab's default endpoint and where bytes
-      # contents load from (never through the backend). An absolute URL must
-      # answer CORS; `/node-rpc` uses NODE_RPC_UPSTREAM below, same-origin.
-      VITE_NODE_RPC_URL: ${VITE_NODE_RPC_URL:-}
-      # The node's /signed/v1/status, for the rent cap. Derived only for
-      # VITE_NODE_RPC_URL=/node-rpc; any other node needs it set (or none is
-      # read). Unreachable is fine: the UI says so.
+      # The node's /signed/v1/status, for the rent cap the permanence tooltip
+      # names: absolute (with CORS) or same-origin; unset, the cap is not shown.
+      # The browser's JSON-RPC to the node goes through the backend's
+      # /entity-explorer/rpc relay, which needs nothing here.
       VITE_NODE_STATUS_URL: ${VITE_NODE_STATUS_URL:-}
-      # Where /node-rpc forwards (JSON-RPC and /signed/v1/status only, without
-      # cookies; at most NODE_RPC_MAX_IN_FLIGHT at once). Empty: 503. Set it
-      # explicitly; it is never derived from SHADOW_RPC_UPSTREAM.
-      NODE_RPC_UPSTREAM: ${NODE_RPC_UPSTREAM:-}
-      NODE_RPC_MAX_IN_FLIGHT: ${NODE_RPC_MAX_IN_FLIGHT:-32}
     ports:
       - "${FRONTEND_HOST:-127.0.0.1}:${FRONTEND_PORT:-23560}:23560"
 

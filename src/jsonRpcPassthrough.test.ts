@@ -151,13 +151,13 @@ describe("JsonRpcPassthrough", () => {
 
   test("an upstream HTTP failure is reported by status, never by body", async () => {
     const { logged, onWarning } = warnings();
-    const { impl } = recordingFetch(() => new Response("quota exhausted for key SUPER_SECRET_KEY", { status: 429 }));
+    const { impl } = recordingFetch(() => new Response("quota exhausted for key SUPER_SECRET_KEY", { status: 503 }));
     const passthrough = new JsonRpcPassthrough({ url: UPSTREAM, fetchImpl: impl, onWarning });
 
     const error = await forwardError(passthrough, "eth_sendRawTransaction", [RAW_TX]);
     expect(error.code).toBe(JSON_RPC_SERVER_ERROR);
     expect(error.message).toBe(
-      "eth_sendRawTransaction was rejected by the upstream node (HTTP 429)",
+      "eth_sendRawTransaction was rejected by the upstream node (HTTP 503)",
     );
     expect(error.message).not.toContain("SUPER_SECRET_KEY");
     expect(logged[0]!.detail).toContain("quota exhausted");
@@ -233,6 +233,17 @@ describe("JsonRpcPassthrough", () => {
     expect(error.toBody().data).toEqual({ reason: "upstream_timeout", httpStatus: 504 });
     expect(error.message).not.toContain("SUPER_SECRET_KEY");
     expect(error.message).not.toContain("node.example.test");
+  });
+
+  test("reports the upstream's own rate limit as a rate limit, under the relay's log label", async () => {
+    const { logged, onWarning } = warnings();
+    const { impl } = recordingFetch(() => new Response("quota exhausted for key SUPER_SECRET_KEY", { status: 429 }));
+    const passthrough = new JsonRpcPassthrough({ url: UPSTREAM, fetchImpl: impl, onWarning, logLabel: "entity-explorer rpc" });
+    const error = await forwardError(passthrough, "arkiv_query", ["*"]);
+    expect(error.code).toBe(JSON_RPC_LIMIT_EXCEEDED);
+    expect(error.message).toBe("arkiv_query is rate limited by the upstream node; retry shortly");
+    expect(error.message).not.toContain("SUPER_SECRET_KEY");
+    expect(logged[0]?.message).toStartWith("entity-explorer rpc: arkiv_query upstream returned HTTP 429");
   });
 
   test("caps forwarded calls per minute and reopens on the next window", async () => {

@@ -6,11 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FilterField } from "@/components/filters-panel";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { fmtMillions, fmtThousands, fmtTokenAmount } from "./format";
 import { buildPermalinkHref, buildRouteHref, filtersEqual, readFiltersFromSearch, writePermalink } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { AddressCell } from "./TransactionsView";
+import { PageSearch } from "./OmniSearch";
+import type { SearchKind } from "./searchApi";
 import { renderTableHeader } from "./tableHeader";
 
 interface SendersViewProps {
@@ -29,6 +32,8 @@ const STORAGE_KEY = "senders.filters";
 const EMPTY: SenderFilters = {
   limit: "100",
 };
+
+const WALLET_SEARCH_SCOPE: readonly SearchKind[] = ["address"];
 
 function loadFilters(locationSearch: string): SenderFilters {
   const stored = readStoredStringRecord(STORAGE_KEY, EMPTY, FILTER_KEYS);
@@ -96,15 +101,19 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-heading text-lg font-black tracking-tight">Sender activity</h2>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular-nums">{filters.limit} rows</span>
-          <Button type="button" variant="outline" size="sm" onClick={copyPermalink}>
-            Copy link
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Wallets"
+        description="Addresses that sent transactions, with their totals across the stored history."
+        actions={
+          <>
+            <span className="text-xs text-muted-foreground tabular-nums">{filters.limit} rows</span>
+            <Button type="button" variant="outline" size="sm" onClick={copyPermalink}>
+              Copy link
+            </Button>
+          </>
+        }
+      />
+      <PageSearch scope={WALLET_SEARCH_SCOPE} placeholder="Search by wallet address…" onLocationChange={onLocationChange} />
 
       <div className="flex flex-col gap-2 border border-border bg-card p-3">
         <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">

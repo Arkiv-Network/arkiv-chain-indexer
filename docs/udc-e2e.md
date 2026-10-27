@@ -10,7 +10,7 @@ plan; the indexer, decoder and frontend work (WP1–WP3) is validated with it.
 export NODE_DIR=/home/ubuntu/arkiv-network/arkiv-state-db-experiment      # read only
 export ARKIV_PROPOSER_BIN=/home/ubuntu/.cache/arkiv-release-target/release/arkiv-proposer
 export ARKIV_SDK_DIR=/path/to/arkiv-sdk-js        # 0.9.0-next, built, test/ installed
-export ARKIV_DECODER_IMAGE=arkiv-transaction-decoder:udc-local   # the default
+# export ARKIV_DECODER_IMAGE=arkiv-transaction-decoder:udc-local   # optional: run this image as is
 scripts/e2e-udc.sh            # [--keep] [--no-chaos] [--screenshots] [--skip-explorer] ...
 ```
 
@@ -28,16 +28,18 @@ State, logs and reports go to `UDC_E2E_DIR` (default `~/.cache/arkiv-udc-e2e`):
 | Verify | `scripts/verifyUdcExplorer.ts` | waits for the index to reach the traffic's last block (`E2E_INDEX_TIMEOUT`, 600 s) |
 | Compare | `scripts/compareEntityQuery.ts` | node vs `/shadow-rpc/experimental` at block 0, mid-run, the first block past the expiry, and the end |
 | Bytes | `pg_dump` grep | no bytes content (traffic markers as text, hex or base64; the prefill's bodies) may be in Postgres |
-| Screens | `scripts/udcE2eScreenshots.ts` | `--screenshots`; needs `bun install` and `bunx playwright install chromium` here |
+| Screens | `scripts/udcE2eScreenshots.ts` | `--screenshots`: home, blocks, block/tx/entity pages, the entity explorer, search, a wallet, statistics; needs `bun install` and `bunx playwright install chromium` here |
 
 The explorer env (`UDC_E2E_DIR/explorer.env`) points both RPC URLs at
-`http://udc-e2e-node:8545`, and so, explicitly, the frontend's same-origin node
-passthrough (`NODE_RPC_UPSTREAM=http://udc-e2e-node:8545`,
-`VITE_NODE_RPC_URL=/node-rpc`: the Data tab and "Load from node" reach the
-devnet node, which answers no CORS), sets `ENTITY_INDEX_GENESIS=auto`,
+`http://udc-e2e-node:8545` (so the backend's `/entity-explorer/rpc` relay, which
+the entity explorer and "Load from node" read through, reaches the devnet
+node, which answers no CORS), sets `ENTITY_INDEX_GENESIS=auto`,
 `SAVE_TRANSACTION_DATA=true`, `ENTITY_QUERY_INDEX=true`, backfill from block 0, a
 dummy `RPC_PROXY_UPSTREAM`, and keeps the genesis progress file inside the
-container (`/tmp`) so nothing root-owned lands in the state dir.
+container (`/tmp`) so nothing root-owned lands in the state dir. The decoder
+is the one `docker-compose.yml` pins (built from its git commit by `up
+--build`) unless `ARKIV_DECODER_IMAGE` names an existing image, which then runs
+as is (the harness builds every other image and starts with `--no-build`).
 
 ## The devnet
 
@@ -112,10 +114,11 @@ the explorer:
   `bun test scripts/udcE2eModel.test.ts` covers that splitting.
 
 `scripts/udcExplorerApi.ts` is the only module that knows the backend's REST
-shapes; update it when WP2/WP3 change them. It already reads `rentFeeWei`
-(transactions) and `totalRentFeeWei` (blocks) and reports them as "not exposed"
-until they exist. `compareEntityQuery.ts` still selects `contentType` and calls
-`arkiv_getEntity`, which the UDC node refuses; it fails until WP2b updates it.
+shapes; update it when the API changes them. It reads `rentFeeWei`
+(transactions) and `totalRentFeeWei` (blocks). `compareEntityQuery.ts` compares
+the UDC reads (`arkiv_query` with the full selection; the node has no
+`arkiv_getEntity`); its known differences are the query-language messages and
+`!=`, which the index's language does not have yet (parity is deferred).
 
 ## Node behaviour the explorer has to model
 
@@ -170,8 +173,8 @@ decoder and the indexer must ship together.
 
 ## Plugging in WP1–WP3
 
-- Decoder: build it as `arkiv-transaction-decoder:udc-local` or point
-  `ARKIV_DECODER_IMAGE` at it.
+- Decoder: the compose pin by default; to test another build, point
+  `ARKIV_DECODER_IMAGE` at an image of it.
 - Indexer and frontend: run the harness from a checkout of the branch under
   test; the compose images build from it.
 - API shape changes: `scripts/udcExplorerApi.ts`.

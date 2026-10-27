@@ -65,6 +65,20 @@ suite("Google login UI and proxy", () => {
       if (path === "/health") return Response.json({ features: { transactionData: true, entityQueryIndex: { projectedThroughBlock: "10", floorBlock: "0", lagBlocks: 0, liveEntities: 0 }, jsonRpcPassthrough: ["arkiv_query", "arkiv_getEntityCount", "arkiv_getBlockTiming"] } });
       if (path === "/blocks") return Response.json({ blocks: [], count: 0, limit: 10000, truncated: false });
       if (path === "/admin/metrics") return new Response("# TYPE process_uptime_seconds gauge\nprocess_uptime_seconds 1\n");
+      if (path === "/entity-explorer/rpc") {
+        // The node, as the relay answers for it: one entity of the node's arkiv_query shape.
+        const body = await request.json();
+        const owner = `0x${"44".repeat(20)}`;
+        const result = body.method === "arkiv_getBlockTiming"
+          ? { current_block: 10, current_block_time: 1_800_000_000, duration: 2 }
+          : { data: [{
+              key: `0x${"01".padStart(64, "0")}`, owner, creator: owner, createdAt: "0x1", updatedAt: "0x1", expiresAt: "0x64",
+              creationFlags: { raw: 0, readonly: false, permissionlessExtension: false },
+              attributes: [{ name: "arkiv.schema", type: "str", value: "arkiv-demo.posts" }, { name: "score", type: "i32", value: 3 }],
+              attributeSchema: [{ name: "arkiv.schema", type: "str", indexed: true }, { name: "score", type: "i32", indexed: true }],
+            }], blockNumber: "0xa", cursor: null };
+        return Response.json({ jsonrpc: "2.0", id: body.id, result });
+      }
       if (path.startsWith("/shadow-rpc")) {
         const body = await request.json();
         const result = body.method === "arkiv_getBlockTiming"
@@ -123,7 +137,7 @@ suite("Google login UI and proxy", () => {
     await page.goto(`${base}/admin`);
     await page.getByRole("link", { name: "Sign in with Google" }).waitFor();
     expect(await page.getByRole("button", {name:"Admin login",exact:true}).count()).toBe(0);
-    expect(await page.getByRole("heading", { name: "Page settings" }).count()).toBe(0);
+    expect(await page.getByRole("heading", { name: "Admin", exact: true }).count()).toBe(0);
     expect(await page.evaluate(() => localStorage.getItem("baseload.adminBearerToken"))).toBeNull();
     expect(calls.some(({ path }) => path.startsWith("/admin/") || path.startsWith("/baseload"))).toBe(false);
     const href = await page.getByRole("link", { name: "Sign in with Google" }).getAttribute("href");
@@ -136,7 +150,7 @@ suite("Google login UI and proxy", () => {
     const context = await browser.newContext(); const page = await openPage(context);
     await page.goto(`${base}/baseload`);
     await page.getByText("Logged In", { exact: true }).waitFor();
-    expect(await page.getByRole("heading", { name: "Baseload workers" }).count()).toBe(0);
+    expect(await page.getByRole("heading", { name: "Baseload", exact: true }).count()).toBe(0);
     expect(await page.getByRole("button", { name: /Disable admin mode/ }).count()).toBe(0);
     await context.close();
   });
@@ -146,12 +160,12 @@ suite("Google login UI and proxy", () => {
     const context = await browser.newContext();
     const page = await openPage(context); const second = await openPage(context);
     await page.goto(`${base}/admin`); await second.goto(`${base}/admin`);
-    await page.getByRole("heading", { name: "Page settings" }).waitFor();
-    await second.getByRole("heading", { name: "Page settings" }).waitFor();
+    await page.getByRole("heading", { name: "Admin", exact: true }).waitFor();
+    await second.getByRole("heading", { name: "Admin", exact: true }).waitFor();
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await page.getByRole("link", { name: "Sign in with Google" }).waitFor();
     await second.getByRole("link", { name: "Sign in with Google" }).waitFor();
-    expect(await second.getByRole("heading", { name: "Page settings" }).count()).toBe(0);
+    expect(await second.getByRole("heading", { name: "Admin", exact: true }).count()).toBe(0);
     expect(calls.find(({ path }) => path === "/auth/logout")?.csrf).toBe("browser-test-csrf");
     await context.close();
   });
@@ -160,29 +174,20 @@ suite("Google login UI and proxy", () => {
     session = signedIn("admin"); session.expiresAt = new Date(Date.now() + 1500).toISOString();
     const context = await browser.newContext(); const page = await openPage(context);
     await page.goto(`${base}/admin`);
-    await page.getByRole("heading", { name: "Page settings" }).waitFor();
+    await page.getByRole("heading", { name: "Admin", exact: true }).waitFor();
     session = anonymous();
     await page.getByRole("link", { name: "Sign in with Google" }).waitFor();
-    expect(await page.getByRole("heading", { name: "Page settings" }).count()).toBe(0);
+    expect(await page.getByRole("heading", { name: "Admin", exact: true }).count()).toBe(0);
     await context.close();
   });
 
-  test("regular users opening comparison links query only the public index", async () => {
-    session = signedIn("user"); calls.length = 0;
-    const context = await browser.newContext(); const page = await openPage(context);
-    const queried = page.waitForResponse((response) => response.url().endsWith("/api/shadow-rpc/experimental"));
-    await page.goto(`${base}/data?rpc=both&q=*`); await queried;
-    await page.getByText("Logged In", { exact: true }).waitFor();
-    expect(calls.some(({ path }) => path === "/shadow-rpc")).toBe(false);
-    await context.close();
-  });
-
-  test("administrator comparison queries use the current session's CSRF token", async () => {
+  test("the entity explorer reads the node through its relay, never /shadow-rpc or the index, even for administrators", async () => {
     session = signedIn("admin"); calls.length = 0;
     const context = await browser.newContext(); const page = await openPage(context);
-    const queried = page.waitForResponse((response) => response.url().endsWith("/api/shadow-rpc") && response.request().postDataJSON()?.method === "arkiv_query");
-    await page.goto(`${base}/data?rpc=both&q=*`); await queried;
-    expect(calls.filter(({ path }) => path === "/shadow-rpc").every(({ csrf }) => csrf === "browser-test-csrf")).toBe(true);
+    await page.goto(`${base}/entity-explorer?q=${encodeURIComponent("arkiv.schema = str('arkiv-demo.posts')")}`);
+    await page.getByText(/^\d+ entit/).waitFor();
+    expect(calls.some(({ path }) => path === "/entity-explorer/rpc")).toBe(true);
+    expect(calls.some(({ path }) => path.startsWith("/shadow-rpc"))).toBe(false);
     await context.close();
   });
 
@@ -198,19 +203,12 @@ suite("Google login UI and proxy", () => {
     await context.close();
   });
 
-  test("redesigned Data controls preserve historical counts and query history", async () => {
+  test("entity explorer query history fits a phone and loads an entry into the editor", async () => {
     session = anonymous();
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await openPage(context);
-    await page.goto(`${base}/data?q=*&block=7`);
-    const countButton = page.getByRole("button", { name: "Count query", exact: true });
-    await page.waitForFunction(() => Array.from(document.querySelectorAll("button")).some(button => button.textContent?.trim() === "Count query" && !button.disabled));
-    expect(await page.getByLabel("At block", { exact: true }).inputValue()).toBe("7");
-    expect(await page.getByRole("tab", { name: "Default node", exact: true }).count()).toBe(0);
-    const request = page.waitForRequest(request => request.postDataJSON()?.method === "arkiv_getEntityCount");
-    await countButton.click();
-    expect((await request).postDataJSON().params).toEqual([{ query: "*", block: 7 }]);
-    await page.getByText("0 matching entities at block 7", { exact: true }).waitFor();
+    await page.goto(`${base}/entity-explorer?q=${encodeURIComponent("TYPEOF(score) = i32")}`);
+    await page.getByText(/^\d+ entit/).waitFor();
     await page.getByRole("button", { name: /^History/ }).click();
     const dialog = page.getByRole("dialog", { name: "Query history" });
     await dialog.waitFor();
@@ -222,17 +220,18 @@ suite("Google login UI and proxy", () => {
     await context.close();
   });
 
-  test("mobile home charts keep their height and popup navigation closes with Escape", async () => {
+  test("mobile home search fits and display settings close with Escape", async () => {
     session = anonymous();
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await openPage(context);
     await page.goto(base);
-    const chart = page.locator('[data-slot="card"]').filter({ hasText: "Network usage" }).last();
-    await chart.waitFor();
-    // Empty/loading charts need the same reserved area as populated charts.
-    expect((await chart.boundingBox())!.height).toBeGreaterThanOrEqual(260);
+    const search = page.getByRole("combobox", { name: "Search the indexer" });
+    await search.waitFor();
+    const searchBounds = (await search.boundingBox())!;
+    expect(searchBounds.x).toBeGreaterThanOrEqual(0);
+    expect(searchBounds.x + searchBounds.width).toBeLessThanOrEqual(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
+    await page.getByRole("button", { name: "Display settings", exact: true }).click();
     const timeZone = page.getByLabel("Time zone", { exact: true });
     await timeZone.waitFor();
     const bounds = (await timeZone.boundingBox())!;
@@ -244,39 +243,57 @@ suite("Google login UI and proxy", () => {
   });
 
   for (const width of [1440, 390]) {
-    test(`popup navigation keeps pages and display controls together at ${width}px`, async () => {
+    test(`header links and display settings work at ${width}px`, async () => {
       session = anonymous();
       const context = await browser.newContext({ viewport: { width, height: 844 } });
       const page = await openPage(context);
       await page.goto(base);
       await page.getByRole("link", { name: "Sign in with Google" }).waitFor();
-      expect(await page.getByRole("navigation", { name: "Primary navigation" }).count()).toBe(0);
-      await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
-      const popup = page.getByRole("dialog", { name: "Navigation menu" });
+      const nav = page.getByRole("navigation", { name: "Primary navigation" });
+      const labels = (await nav.getByRole("link").allTextContents()).map((label) => label.trim());
+      expect(labels).toEqual(["Home", "Blocks", "Wallets", "Transactions", "Entities"]);
+      expect(await nav.getByRole("link", { name: "Home", exact: true }).getAttribute("aria-current")).toBe("page");
+      expect(await page.getByRole("link", { name: "Admin", exact: true }).count()).toBe(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await page.getByRole("button", { name: "Display settings", exact: true }).click();
+      const popup = page.getByRole("dialog", { name: "Display settings" });
       await popup.waitFor();
       const bounds = (await popup.boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(0);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
-      expect(await popup.getByRole("link", { name: "Home", exact: true }).getAttribute("aria-current")).toBe("page");
-      expect(await popup.getByRole("link", { name: "Admin", exact: true }).count()).toBe(0);
       await popup.getByRole("button", { name: "Full width", exact: true }).click();
       await page.waitForFunction(() => localStorage.getItem("gas-price-tracker:ui.fullWidth") === "true");
       await popup.getByTitle("Switch to dark mode", { exact: true }).click();
       await page.waitForFunction(() => document.documentElement.classList.contains("dark"));
       await popup.getByLabel("Time zone", { exact: true }).selectOption("UTC");
       await page.waitForFunction(() => localStorage.getItem("gas-price-tracker:timeZone") === "UTC");
-      await popup.getByRole("link", { name: "Data", exact: true }).click();
-      await popup.waitFor({ state: "detached" });
-      await page.getByRole("heading", { name: "Data", exact: true }).waitFor();
-      expect(await page.getByRole("button", { name: "Open navigation menu", exact: true }).textContent()).toBe("Data");
-      await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
-      await popup.waitFor();
       await page.mouse.click(1, 843);
       await popup.waitFor({ state: "detached" });
+      await nav.getByRole("link", { name: "Entities", exact: true }).click();
+      await page.getByRole("heading", { name: "Entities", exact: true }).waitFor();
+      expect(await nav.getByRole("link", { name: "Entities", exact: true }).getAttribute("aria-current")).toBe("page");
       await context.close();
     });
   }
+
+  test("transactions and wallets searches open a complete hash or address directly", async () => {
+    session = anonymous();
+    const context = await browser.newContext(); const page = await openPage(context);
+    const hash = `0x${"ab".repeat(32)}`; const address = `0x${"cd".repeat(20)}`;
+    await page.goto(`${base}/transactions`);
+    await page.getByRole("heading", { name: "Transactions", exact: true }).waitFor();
+    await page.getByPlaceholder("Search by transaction hash or address…").fill(hash);
+    await page.keyboard.press("Enter");
+    await page.waitForURL(`${base}/tx/${hash}`);
+    await page.goto(`${base}/senders`);
+    await page.getByRole("heading", { name: "Wallets", exact: true }).waitFor();
+    await page.getByPlaceholder("Search by wallet address…").fill(address);
+    await page.keyboard.press("Enter");
+    await page.waitForURL(`${base}/address/${address}`);
+    await page.getByRole("heading", { name: "Wallet", exact: true }).waitFor();
+    await context.close();
+  });
 
   test("production proxy preserves request cookies and multiple response cookies", async () => {
     const response = await fetch(`${base}/api/auth/proxy-cookie-test`, { headers: { Cookie: "session=example" } });
@@ -299,13 +316,13 @@ suite("Google login UI and proxy", () => {
     expect(await token.inputValue()).toBe("");
     await token.fill("browser-admin-token");await page.getByRole("button",{name:"Sign in",exact:true}).click();
     await page.getByText("Logged In",{exact:true}).waitFor();
-    expect(await page.getByRole("heading",{name:"Page settings"}).count()).toBe(0);
+    expect(await page.getByRole("heading",{name:"Admin",exact:true}).count()).toBe(0);
     await page.getByRole("button",{name:"Sign out",exact:true}).click();
     await page.getByRole("button",{name:"Admin login",exact:true}).click();
     await email.fill("sieciech.czajka@golem.network");await token.fill("browser-admin-token");
     await page.getByRole("button",{name:"Sign in",exact:true}).click();
     await page.getByText("Administrator",{exact:true}).waitFor();
-    await page.goto(`${base}/admin`);await page.getByRole("heading",{name:"Page settings"}).waitFor();
+    await page.goto(`${base}/admin`);await page.getByRole("heading",{name:"Admin",exact:true}).waitFor();
     const stored = await page.evaluate(() => JSON.stringify([localStorage,sessionStorage]));
     expect(stored).not.toContain("browser-admin-token");expect(page.url()).not.toContain("browser-admin-token");
     await context.close();

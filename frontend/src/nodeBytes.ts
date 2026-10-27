@@ -1,9 +1,10 @@
-// Loads one bytes attribute's content from a node, on demand. The index keeps
+// Loads one bytes attribute's content from the node, on demand. The index keeps
 // only a bytes value's size and keccak256; the content is read here, by the
-// browser, from the node (never through the indexer backend), and checked
+// browser, from the indexed chain's node through the backend's entity-explorer
+// relay (which forwards and stores nothing, see nodeRpc.ts), and checked
 // against the hash the index recorded.
 
-import { callRpc, type RpcCallDeps, type RpcSource } from "./dataRpc";
+import { callNodeRelay, type NodeRelayDeps } from "./nodeRpc";
 import { visibleText } from "./attributes";
 import { hexToBytes, keccak256Hex } from "./keccak";
 
@@ -27,27 +28,20 @@ export interface LoadBytesRequest {
   expectedKeccak256?: string;
 }
 
-const NODE_SOURCE: RpcSource = { kind: "node", customUrl: "" };
-
 export class BytesNotFoundError extends Error {}
 
-export async function loadBytesFromNode(
-  request: LoadBytesRequest,
-  source: RpcSource = NODE_SOURCE,
-  deps: RpcCallDeps = {},
-): Promise<LoadedBytes> {
+export async function loadBytesFromNode(request: LoadBytesRequest, deps: NodeRelayDeps = {}): Promise<LoadedBytes> {
   const options: Record<string, unknown> = {
     select: { key: true, attributes: { [request.name]: true } },
     limit: "0x1",
   };
   if (request.atBlock !== undefined) options.atBlock = `0x${request.atBlock.toString(16)}`;
-  const result = await callRpc<{ data?: unknown; blockNumber?: unknown }>(
-    source,
+  const result = await callNodeRelay<{ data?: unknown; blockNumber?: unknown } | null>(
     "arkiv_query",
     [`$key = key(${request.entityKey.toLowerCase()})`, options],
     deps,
   );
-  const entity = Array.isArray(result?.data) ? (result.data[0] as { attributes?: unknown } | undefined) : undefined;
+  const entity = result && Array.isArray(result.data) ? (result.data[0] as { attributes?: unknown } | undefined) : undefined;
   if (!entity) throw new BytesNotFoundError("the node has no such entity at that block");
   const attributes = Array.isArray(entity.attributes) ? (entity.attributes as Array<{ name?: unknown; type?: unknown; value?: unknown }>) : [];
   const attribute = attributes.find((item) => item?.name === request.name);
@@ -57,7 +51,7 @@ export async function loadBytesFromNode(
   }
   const bytes = hexToBytes(attribute.value);
   const keccak256 = keccak256Hex(bytes);
-  const blockNumber = typeof result.blockNumber === "string" && /^0x[0-9a-fA-F]+$/.test(result.blockNumber)
+  const blockNumber = typeof result?.blockNumber === "string" && /^0x[0-9a-fA-F]+$/.test(result.blockNumber)
     ? Number(BigInt(result.blockNumber))
     : null;
   return {

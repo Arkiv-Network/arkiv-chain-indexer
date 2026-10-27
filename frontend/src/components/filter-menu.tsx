@@ -5,25 +5,25 @@ import { copyText } from "@/components/copy-cell";
 import { buildRouteHref, shouldHandleClientNavigation, writePermalink } from "@/permalinks";
 
 /**
- * Where a query condition goes: the Data tab's own handlers (run it alone, or
- * add it to the current query), or — anywhere else — a link that opens the
- * Data tab with it.
+ * Where a query condition goes: a page's own query handlers (run it alone, or
+ * add it to the current query), or — without them — a link that opens the
+ * entity explorer with it.
  */
 export interface ConditionActions {
   onQueryOnly?: (expression: string) => void;
   onAddToQuery?: (expression: string) => void;
-  /** Without handlers: the SPA navigation callback for the Data tab link. */
+  /** Without handlers: the SPA navigation callback for the entity explorer link. */
   onLocationChange?: () => void;
 }
 
-/** The Data tab running `expression`. */
-export function dataQueryHref(expression: string): string {
-  return buildRouteHref("data", { q: expression });
+/** The entity explorer running `expression` (its `q` URL parameter). */
+export function explorerQueryHref(expression: string): string {
+  return buildRouteHref("entity-explorer", { q: expression });
 }
 
-/** Opens the Data tab with a query, as an SPA navigation; false when nothing changed. */
-export function openDataQuery(expression: string, onLocationChange?: () => void): void {
-  if (writePermalink("data", { q: expression })) onLocationChange?.();
+/** Opens the entity explorer with a query, as an SPA navigation. */
+export function openExplorerQuery(expression: string, onLocationChange?: () => void): void {
+  if (writePermalink("entity-explorer", { q: expression })) onLocationChange?.();
 }
 
 /**
@@ -95,12 +95,12 @@ export function FilterMenu({
   };
 
   const itemClass = "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent";
-  const href = dataQueryHref(expression);
+  const href = explorerQueryHref(expression);
   const onLink = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();
     setOpen(false);
-    openDataQuery(expression, actions.onLocationChange);
+    openExplorerQuery(expression, actions.onLocationChange);
   };
 
   return (
@@ -137,7 +137,7 @@ export function FilterMenu({
           ) : (
             <a role="menuitem" className={itemClass} href={href} onClick={onLink}>
               <Search className="size-3 text-muted-foreground" />
-              Query by {label} in Data
+              Query by {label} in Entities
             </a>
           )}
           {actions.onAddToQuery ? (

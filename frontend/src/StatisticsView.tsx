@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchStatistics } from "./api";
 import { STATISTICS_PERIODS, type StatisticsPeriod, type StatisticsResponse } from "../../src/indexerStatisticsTypes";
+import { PageHeader } from "@/components/page-header";
 import { Stat, StatGrid } from "@/components/stat";
 import { Card, CardContent } from "@/components/ui/card";
 import { fmtDate, fmtTokenAmount } from "./format";
 import { schemaCondition } from "./attributes";
-import { dataQueryHref, openDataQuery } from "@/components/filter-menu";
+import { explorerQueryHref, openExplorerQuery } from "@/components/filter-menu";
 import { shouldHandleClientNavigation } from "./permalinks";
 import { selectClass } from "@/components/filters-panel";
 import { readStoredString, writeStoredString } from "./localStorage";
@@ -71,13 +72,11 @@ export function StatisticsView({ timeZone, tokenSymbol, onLocationChange }: { ti
   const activityNote = activity?.fromInclusiveUtc && activity.toExclusiveUtc
     ? `${periodLabel}: ${fmtDate(activity.fromInclusiveUtc, timeZone)} (inclusive) to ${fmtDate(activity.toExclusiveUtc, timeZone)} (exclusive). Based on block timestamps in the stored history.`
     : "All time: all stored activity at collection. Missing indexed history is not estimated.";
-  return <div className="space-y-6">
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 className="text-xl font-semibold"><HelpLabel name="Statistics" /></h1>
-        <p className="mt-1 text-sm text-muted-foreground">Indexed activity for the selected period and current projected entity state.</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+  return <div className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+    <PageHeader
+      title={<HelpLabel name="Statistics" />}
+      description="Indexed activity for the selected period and current projected entity state."
+      actions={<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <div className="inline-flex items-center gap-1.5">
           <label htmlFor="statistics-period">Activity period</label>
           <StatisticsInfo label="Activity period" explanation={STATISTICS_HELP["Activity period"]} />
@@ -104,8 +103,8 @@ export function StatisticsView({ timeZone, tokenSymbol, onLocationChange }: { ti
           <option value="decimal">Kilobytes (kB, base 1000)</option>
           <option value="binary">Kibibytes (KiB, base 1024)</option>
         </select>
-      </div>
-    </div>
+      </div>}
+    />
     {error && <p role="alert" className="text-sm text-amber-600">{error}{data ? " Showing the last loaded snapshot." : ""}</p>}
     {!data && !error && <p role="status" className="text-sm text-muted-foreground">Loading statistics…</p>}
     {data && entity && activity && <>
@@ -209,11 +208,11 @@ export function StatisticsView({ timeZone, tokenSymbol, onLocationChange }: { ti
           <thead className="bg-muted"><tr>{(["Schema", "Schema active entities", "Schema bytes"] as const).map((h) => <th key={h} className="px-3 py-2 font-medium"><HelpLabel name={h} label={h === "Schema active entities" ? "Active entities" : h === "Schema bytes" ? "Bytes" : h} /></th>)}</tr></thead>
           <tbody>{entity.topSchemas.map((row) => <tr key={row.schemaName} className="border-t border-border">
             <td className="px-3 py-2 break-all">
-              <a className="font-mono text-foreground hover:text-accent hover:underline" href={dataQueryHref(schemaCondition(row.schemaName))} title={`Query ${schemaCondition(row.schemaName)}`}
+              <a className="font-mono text-foreground hover:text-accent hover:underline" href={explorerQueryHref(schemaCondition(row.schemaName))} title={`Query ${schemaCondition(row.schemaName)}`}
                 onClick={(event) => {
                   if (!shouldHandleClientNavigation(event)) return;
                   event.preventDefault();
-                  openDataQuery(schemaCondition(row.schemaName), onLocationChange);
+                  openExplorerQuery(schemaCondition(row.schemaName), onLocationChange);
                 }}>{row.schemaName}</a>
             </td>
             <td className="px-3 py-2 font-mono">{integer(row.entities)}</td><td className="px-3 py-2 font-mono">{bytes(row.bytes)}</td>

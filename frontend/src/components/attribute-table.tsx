@@ -43,10 +43,10 @@ export interface AttributeTableProps {
 }
 
 /**
- * The attribute table shared by the transaction page (an operation's triples),
- * the entity page (the current state and each version) and the Data tab's
- * cards: Name | type | indexed or stored | value, with filter actions only
- * where a query can match.
+ * The attribute table shared by the transaction page (an operation's triples)
+ * and the entity page (the current state and each version): Name | type |
+ * indexed or stored | value, with filter actions (opening the entity explorer)
+ * only where a query can match.
  */
 export function AttributeTable({ attributes, changes, actions, bytes, emptyText = "No attributes", onLocationChange, className }: AttributeTableProps) {
   const patch = changes !== undefined;

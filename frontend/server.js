@@ -1,5 +1,4 @@
 import http from "node:http";
-import https from "node:https";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
@@ -18,20 +17,11 @@ const INDEX_FILE = path.join(STATIC_DIR, "index.html");
 const ONE_HOUR_SECONDS = 60 * 60;
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 const ENABLE_BROTLI = process.env.NODE_ENV === "production";
-// Optional same-origin line from the browser to an Arkiv node (frontend/src/nodeRpc.ts):
-// POST /node-rpc goes to the node's JSON-RPC root and GET /node-rpc/signed/v1/status
-// to its status document. Used where the node is not reachable from the browser
-// with CORS (a local devnet); a deployment behind nginx can route /rpc itself.
-// The indexer backend is never involved, and no cookie or credential is forwarded.
-const NODE_RPC_PATH = "/node-rpc";
-const NODE_RPC_UPSTREAM = (process.env.NODE_RPC_UPSTREAM ?? "").trim();
-const NODE_RPC_MAX_BODY_BYTES = 1024 * 1024;
 const RUNTIME_CONFIG_ENV_NAMES = [
   "VITE_CHAIN_NAME",
   "VITE_NETWORK_NAME",
   "VITE_TOKEN_SYMBOL",
   "VITE_TRANSACTION_DECODER_BASE_URL",
-  "VITE_NODE_RPC_URL",
   "VITE_NODE_STATUS_URL",
   "VITE_BLOCK_TIME_MS",
   "VITE_STUB_TICK_MS",
@@ -224,112 +214,6 @@ function proxyApi(req, res) {
   req.pipe(proxyReq);
 }
 
-const NODE_RPC_TIMEOUT_MS = 120_000;
-/** Requests forwarded at once; beyond it /node-rpc answers 503 instead of queueing. */
-const NODE_RPC_MAX_IN_FLIGHT = Math.max(1, Number.parseInt(process.env.NODE_RPC_MAX_IN_FLIGHT ?? "32", 10) || 32);
-// Every /node-rpc answer is JSON whatever the upstream says, so a browser never
-// sniffs node output into something else.
-const NODE_RPC_HEADERS = {
-  "content-type": "application/json",
-  "cache-control": "no-store",
-  "x-content-type-options": "nosniff",
-};
-let nodeRpcInFlight = 0;
-
-function nodeRpcError(res, status, message) {
-  if (res.headersSent) {
-    res.destroy();
-    return;
-  }
-  res.writeHead(status, NODE_RPC_HEADERS);
-  res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message } }));
-}
-
-function proxyNodeRpc(req, res) {
-  const pathname = (req.url ?? "").split("?")[0];
-  const target =
-    pathname === NODE_RPC_PATH && req.method === "POST"
-      ? "/"
-      : pathname === `${NODE_RPC_PATH}/signed/v1/status` && (req.method === "GET" || req.method === "HEAD")
-        ? "/signed/v1/status"
-        : null;
-  if (!target) {
-    nodeRpcError(res, 405, `${NODE_RPC_PATH} accepts POST (JSON-RPC) and GET ${NODE_RPC_PATH}/signed/v1/status only`);
-    return;
-  }
-  if (!NODE_RPC_UPSTREAM) {
-    nodeRpcError(res, 503, `No node is configured behind ${NODE_RPC_PATH} (NODE_RPC_UPSTREAM is unset)`);
-    return;
-  }
-  let upstream;
-  try {
-    // JSON-RPC goes to the upstream URL exactly as configured (it may be a path such as /rpc).
-    upstream = target === "/"
-      ? new URL(NODE_RPC_UPSTREAM)
-      : new URL(target.slice(1), NODE_RPC_UPSTREAM.endsWith("/") ? NODE_RPC_UPSTREAM : `${NODE_RPC_UPSTREAM}/`);
-  } catch {
-    nodeRpcError(res, 503, "NODE_RPC_UPSTREAM is not a URL");
-    return;
-  }
-  const length = Number(req.headers["content-length"] ?? 0);
-  if (length > NODE_RPC_MAX_BODY_BYTES) {
-    nodeRpcError(res, 413, "request body too large");
-    return;
-  }
-  if (nodeRpcInFlight >= NODE_RPC_MAX_IN_FLIGHT) {
-    nodeRpcError(res, 503, "Too many node requests in flight; try again shortly");
-    return;
-  }
-  nodeRpcInFlight += 1;
-  let released = false;
-  const release = () => {
-    if (released) return;
-    released = true;
-    nodeRpcInFlight -= 1;
-  };
-
-  // Only what JSON-RPC needs: the browser's cookies and credentials stay here.
-  const headers = { accept: "application/json" };
-  if (req.headers["content-type"]) headers["content-type"] = req.headers["content-type"];
-  if (req.headers["content-length"]) headers["content-length"] = req.headers["content-length"];
-  const client = upstream.protocol === "https:" ? https : http;
-  // The first outcome wins; later errors from tearing the other side down are ignored.
-  let settled = false;
-  const fail = (status, message) => {
-    if (settled) return;
-    settled = true;
-    proxyReq.destroy();
-    nodeRpcError(res, status, message);
-  };
-  const proxyReq = client.request(upstream, { method: req.method, headers }, (proxyRes) => {
-    if (settled) {
-      proxyRes.resume();
-      return;
-    }
-    settled = true;
-    res.writeHead(proxyRes.statusCode ?? 502, NODE_RPC_HEADERS);
-    proxyRes.pipe(res);
-  });
-  proxyReq.setTimeout(NODE_RPC_TIMEOUT_MS, () => fail(504, "The node did not answer in time"));
-  // A fixed message: the upstream's address stays on this side.
-  proxyReq.on("error", () => fail(502, "The node could not be reached"));
-  // A client that goes away takes its upstream request with it.
-  res.on("close", () => {
-    release();
-    if (!res.writableFinished) proxyReq.destroy();
-  });
-  let received = 0;
-  req.on("data", (chunk) => {
-    received += chunk.length;
-    if (received > NODE_RPC_MAX_BODY_BYTES) {
-      req.unpipe(proxyReq);
-      req.resume();
-      fail(413, "request body too large");
-    }
-  });
-  req.pipe(proxyReq);
-}
-
 function serveRuntimeConfig(res) {
   const config = {};
   for (const name of RUNTIME_CONFIG_ENV_NAMES) {
@@ -392,10 +276,6 @@ const server = http.createServer((req, res) => {
     proxyApi(req, res);
     return;
   }
-  if (url === NODE_RPC_PATH || url.startsWith(`${NODE_RPC_PATH}/`) || url.startsWith(`${NODE_RPC_PATH}?`)) {
-    proxyNodeRpc(req, res);
-    return;
-  }
   serveStatic(req, res).catch((err) => {
     if (!res.headersSent) {
       res.writeHead(500, { "content-type": "text/plain" });
@@ -408,5 +288,4 @@ server.listen(PORT, HOST, () => {
   console.log(`Frontend listening on http://${HOST}:${PORT}`);
   console.log(`Static root: ${STATIC_DIR}`);
   console.log(`Proxying /api/* -> http://${BACKEND_HOST}:${BACKEND_PORT}`);
-  if (NODE_RPC_UPSTREAM) console.log(`Proxying ${NODE_RPC_PATH} -> the configured NODE_RPC_UPSTREAM`);
 });

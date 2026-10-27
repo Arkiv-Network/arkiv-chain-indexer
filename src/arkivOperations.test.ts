@@ -12,6 +12,7 @@ import {
 } from "./arkivOperations";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import { LIVE_BLOCKS, decoderOperationJson, decoderResponseJson, udcAttribute } from "./testUdc";
+import type { ArkivOperationAttribute } from "./arkivOperations";
 import type { Hex, RpcBlock, RpcLog, RpcReceipt, RpcTransaction } from "./types";
 
 const originalFetch = globalThis.fetch;
@@ -352,6 +353,98 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
     const client = new ArkivDecoderClient("http://decoder.test");
 
     expect(client.decodeCalldata("0xabcd")).rejects.toThrow("(version unknown)");
+  });
+});
+
+/** A udc-format operation, as the decoder answered for a Jalebi create in block 73451 (from #120). */
+function jalebiCreateFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    operationType: 1,
+    operation: "create",
+    entityKey: null,
+    salt: "39653799458797120401352573990242243967",
+    creationFlags: 0,
+    expiresAt: "0",
+    minLifetime: "3600",
+    permanent: false,
+    newOwner: null,
+    bytesSize: 96,
+    attributes: [
+      { name: "arkiv.schema", typeId: 136, type: "str", indexed: true, value: "explorer-demo.posts", size: 19 },
+      { name: "author", typeId: 137, type: "addr", indexed: true, value: `0x${"44".repeat(20)}`, size: 32 },
+      {
+        name: "body",
+        typeId: 7,
+        type: "bytes",
+        indexed: false,
+        value: null,
+        size: 96,
+        keccak256: `0x${"45".repeat(32)}`,
+      },
+      { name: "featured", typeId: 129, type: "bool", indexed: true, value: true, size: 32 },
+      { name: "rank", typeId: 130, type: "i32", indexed: true, value: -3, size: 32 },
+      { name: "publishedAt", typeId: 131, type: "u64", indexed: true, value: "0x6ae09504", size: 32 },
+      { name: "score", typeId: 133, type: "dec", indexed: true, value: "4.9", size: 32 },
+    ],
+    ...overrides,
+  };
+}
+
+describe("a Jalebi udc decoder answer", () => {
+  test("reads under the v0.3 contract with values kept in the node's encoding", async () => {
+    stubFetch(() => Response.json({ functionName: "execute", format: "udc", operations: [jalebiCreateFixture()] }));
+    const client = new ArkivDecoderClient("http://decoder.test");
+
+    const [create] = (await client.decodeCalldata("0x1234")) ?? [];
+
+    expect(create).toEqual({
+      opIndex: 0,
+      operationType: 1,
+      operation: "create",
+      entityKey: null,
+      salt: "39653799458797120401352573990242243967",
+      creationFlags: 0,
+      expiresAt: "0",
+      minLifetime: "3600",
+      newOwner: null,
+      bytesSize: 96,
+      schemaName: "explorer-demo.posts",
+      attributes: (jalebiCreateFixture().attributes as unknown[]) as ArkivOperationAttribute[],
+    });
+    // The engine keeps it until max(expiresAt, block + minLifetime).
+    expect(resolveOperationExpiry(73451, create!)).toBe("77051");
+  });
+
+  test("a patch keeps operation type 2 and its tombstones", async () => {
+    const patch = jalebiCreateFixture({
+      operationType: 2,
+      operation: "patch",
+      entityKey: `0x${"9c".repeat(32)}`,
+      salt: null,
+      creationFlags: null,
+      expiresAt: null,
+      minLifetime: null,
+      permanent: null,
+      bytesSize: 0,
+      attributes: [
+        { name: "featured", typeId: 129, type: "bool", indexed: true, value: false, size: 32 },
+        { name: "draft", typeId: 0, type: "tombstone", indexed: false, value: null, size: 0 },
+      ],
+    });
+    const [parsed] = parseDecoderResponse(decoderResponseJson([patch]));
+    expect(parsed!.operationType).toBe(2);
+    expect(parsed!.entityKey).toBe(`0x${"9c".repeat(32)}`);
+    expect(resolveOperationExpiry(73463, parsed!)).toBeNull();
+    expect(parsed!.attributes.map((attribute) => [attribute.name, attribute.typeId, attribute.value])).toEqual([
+      ["featured", 129, false],
+      ["draft", 0, null],
+    ]);
+  });
+
+  test("an operation without its byte count fails the contract", () => {
+    expect(() => parseDecoderResponse(decoderResponseJson([jalebiCreateFixture({ bytesSize: undefined })]))).toThrow(
+      DecoderContractError,
+    );
   });
 });
 

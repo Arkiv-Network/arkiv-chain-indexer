@@ -9,10 +9,8 @@
 .omni-search-dropdown ul { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; }
 .omni-search-dropdown li { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
 .omni-search-dropdown li.active { background: var(--muted); }
-.omni-search-dropdown small, .search-help, .search-coverage { color: var(--muted-foreground); }
+.omni-search-dropdown small, .search-coverage { color: var(--muted-foreground); }
 .omni-search-dropdown p { margin: 8px 10px; font-size: 13px; }
-.search-page { max-width: 1000px; margin: 0 auto; }
-.search-help { max-width: 820px; line-height: 1.6; }
 .search-results { list-style: none; margin: 20px 0; padding: 0; display: grid; gap: 10px; }
 .search-results li { border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .search-results a { display: flex; flex-direction: column; gap: 8px; padding: 16px; text-decoration: none; color: var(--foreground); overflow-wrap: anywhere; }
@@ -1243,7 +1241,7 @@
     @apply min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground;
   }
   .view { @apply flex min-w-0 flex-col gap-4; }
-  :where(.baseload-view, .search-page, .query-history-dialog) h2 { @apply font-heading text-lg font-black; }
+  :where(.baseload-view, .query-history-dialog) h2 { @apply font-heading text-lg font-black; }
   .summary, .muted, .tx-detail-note { @apply text-xs text-muted-foreground; }
   .error { @apply text-destructive; }
   .mono { @apply font-mono; }
@@ -1255,9 +1253,12 @@
   :where(.data-table, .traffic-projection-table table) th { @apply bg-muted text-xs font-medium text-muted-foreground; }
   :where(.data-table, .traffic-projection-table table) .num { @apply text-right tabular-nums; }
   :where(.data-table, .traffic-projection-table table) tbody tr:hover { @apply bg-muted/50; }
-  .header-search .omni-search-field input { @apply px-2 py-1.5 text-xs; }
+  .home-hero .omni-search-field input { @apply rounded-xl px-5 py-4 text-base shadow-sm; }
+  .home-hero .omni-search-field button { @apply rounded-xl px-6 text-sm; }
+  /* Account controls sit in the footer, so open their panels upward and left-aligned. */
+  .site-footer .account-controls { justify-content: flex-start; }
+  .site-footer .access-tokens { top: auto; bottom: calc(100% + 0.5rem); left: 1rem; right: auto; }
   .omni-search { max-width: none; }
-  .search-page { @apply flex flex-col gap-4; }
   .query-history-dialog { margin: auto; }
   .token-login-form { width: min(25rem, 100%); }
   .tx-detail-operations { min-width: 0; }

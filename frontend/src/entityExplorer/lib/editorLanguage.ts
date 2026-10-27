@@ -1,9 +1,9 @@
-// CodeMirror support for the Arkiv 0.8 query grammar: a hand-written stream
-// tokenizer for highlighting and a completion source. Ported from
-// Arkiv-Network/data-explorer's lib/codemirror-arkiv.ts. Loaded lazily with the
-// editor so the rest of the site never pays for CodeMirror.
+// CodeMirror support for the Arkiv query grammar with user-defined columns: a
+// hand-written stream tokenizer for highlighting and a completion source.
+// Ported from Arkiv-Network/data-explorer's lib/codemirror-arkiv.ts. Loaded
+// lazily with the editor so the rest of the site never pays for CodeMirror.
 //
-// Logical operators (uppercase words): AND OR NOT
+// Logical operators (case-insensitive): AND OR NOT
 // Comparison operators: = != < <= > >=
 // Other operators:
 //   <name> STARTSWITH str('prefix')   prefix match on a str attribute
@@ -11,11 +11,12 @@
 //   TYPEOF(<name>) = <tag>            attribute is set with exactly this type
 // Literals are typed constructor calls: str('...') i32(10) u64(1200000)
 //   u256(1000000) dec(3.5) addr(0x...) key(0x...) bytes32(0x...) true / false
-// System attributes (as the UDC node queries them): $key $owner $creator
-//   $createdAt $expiresAt. $updatedAt and $creationFlags are projections only,
-//   and entities have no $payload or $contentType.
-// Attribute names: [A-Za-z][A-Za-z0-9_.-]*, e.g. arkiv.schema. Only indexed
+// Filterable entity fields (as the UDC node queries them): $key $owner $creator
+//   $createdAt $expiresAt. $updatedAt and $creationFlags come back in results
+//   only, and entities have no $payload or $contentType.
+// Attribute names may contain `.` and `-` (arkiv.schema). Only indexed
 //   attributes are ever matched; bytes attributes are never indexed.
+// Comments: `--` to the end of the line
 //
 // Example: level >= i32(10) AND (status = str('open') OR NOT EXISTS(closedAt))
 
@@ -23,18 +24,21 @@ import { autocompletion, type Completion, type CompletionContext } from "@codemi
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 
+// Only these five entity fields can be filtered on. $updatedAt and
+// $creationFlags come back in results but are never indexed.
 export const SYSTEM_ATTRIBUTES: Record<string, string> = {
-  $key: "entity key",
-  $owner: "entity owner address",
-  $creator: "entity creator address",
-  $createdAt: "block the entity was created at",
-  $expiresAt: "block the entity expires at (u64; 18446744073709551615 = permanent)",
+  $key: "key · entity key",
+  $owner: "addr · entity owner",
+  $creator: "addr · entity creator",
+  $createdAt: "u64 · block the entity was created at",
+  $expiresAt: "u64 · block the entity expires at (18446744073709551615 = permanent)",
 };
 
-// The nine tags a user can construct a literal with, or name in TYPEOF(...) = <tag>.
-// The tenth, `bytes`, is never indexed, so no query can match a bytes value.
+// The nine tags a literal can be built with, or named in TYPEOF(...) = <tag>.
+// The tenth, `bytes`, is never indexed, so no filter can use it. Booleans are
+// written bare (the node rejects bool(true)), so `bool` is only a TYPEOF tag.
 const TYPE_TAGS: Record<string, string> = {
-  bool: "boolean literal constructor",
+  bool: "boolean type tag",
   i32: "32-bit signed integer literal constructor",
   u64: "64-bit unsigned integer literal constructor",
   u256: "256-bit unsigned integer literal constructor",
@@ -45,20 +49,30 @@ const TYPE_TAGS: Record<string, string> = {
   key: "entity key literal constructor",
 };
 
+/** A column seen in the loaded results, offered as a completion. */
+export interface AttributeHint {
+  name: string;
+  types: readonly { type: string }[];
+  indexedCount: number;
+}
+
 export const completions: Completion[] = [
   ...Object.entries(SYSTEM_ATTRIBUTES).map(([label, detail]) => ({ label, type: "variable", detail })),
-  ...Object.entries(TYPE_TAGS).map(([label, detail]) => ({
-    label: `${label}()`,
-    apply: `${label}()`,
-    type: "function",
-    detail,
-  })),
+  ...Object.entries(TYPE_TAGS)
+    .filter(([label]) => label !== "bool")
+    .map(([label, detail]) => ({ label: `${label}()`, apply: `${label}()`, type: "function", detail })),
+  ...["true", "false"].map((label) => ({ label, type: "constant", detail: "bool literal" })),
+  {
+    label: "arkiv.schema",
+    apply: "arkiv.schema = str('')",
+    type: "variable",
+    detail: "str · the tag a named schema writes on every entity",
+  },
   ...["AND", "OR", "NOT"].map((label) => ({ label, type: "keyword", detail: "logical operator" })),
   ...["=", "!=", "<", "<=", ">", ">="].map((label) => ({ label, type: "keyword", detail: "comparison operator" })),
   { label: "STARTSWITH", apply: "STARTSWITH str('')", type: "keyword", detail: "prefix match on a str attribute" },
   { label: "EXISTS", apply: "EXISTS()", type: "keyword", detail: "attribute is set, any type" },
   { label: "TYPEOF", apply: "TYPEOF() = ", type: "keyword", detail: "attribute is set with exactly this type" },
-  { label: "arkiv.schema", apply: "arkiv.schema = str('')", type: "variable", detail: "the SDK's schema tag (an indexed str)" },
 ];
 
 const ADDRESS_LENGTH = 42;
@@ -79,16 +93,36 @@ function rawHexCompletions(input: string): Completion[] {
   return options;
 }
 
-function arkivCompletions(context: CompletionContext) {
-  const rawHex = context.matchBefore(/0x[0-9a-fA-F]*/);
-  if (rawHex && /^\s*$/.test(context.state.doc.sliceString(0, rawHex.from))) {
-    return { from: rawHex.from, options: rawHexCompletions(rawHex.text), filter: false };
-  }
-  const word = context.matchBefore(/[\w$.-]*/);
-  if (!word || (word.from === word.to && !context.explicit)) return null;
-  return { from: word.from, options: completions };
+/** Column names from the results on screen, indexed ones first since only those can be filtered on. */
+function attributeCompletions(hints: readonly AttributeHint[]): Completion[] {
+  return hints
+    .filter((hint) => hint.name !== "arkiv.schema")
+    .map((hint) => {
+      const types = hint.types.map(({ type }) => type).join(" | ");
+      const indexed = hint.indexedCount > 0;
+      return {
+        label: hint.name,
+        type: "property",
+        detail: indexed ? `${types} · indexed` : `${types} · not indexed`,
+        info: indexed ? undefined : "Stored only, so a filter on it never matches. Only indexed columns can be queried.",
+        boost: indexed ? 1 : -1,
+      };
+    });
 }
 
+function arkivCompletions(getHints: () => readonly AttributeHint[]) {
+  return (context: CompletionContext) => {
+    const rawHex = context.matchBefore(/0x[0-9a-fA-F]*/);
+    if (rawHex && /^\s*$/.test(context.state.doc.sliceString(0, rawHex.from))) {
+      return { from: rawHex.from, options: rawHexCompletions(rawHex.text), filter: false };
+    }
+    const word = context.matchBefore(/[\w$.-]*/);
+    if (!word || (word.from === word.to && !context.explicit)) return null;
+    return { from: word.from, options: [...completions, ...attributeCompletions(getHints())] };
+  };
+}
+
+// Keywords are case-insensitive; whole-word matching keeps `android` from reading as AND.
 const LOGICAL_KEYWORDS = new Set(["AND", "OR", "NOT"]);
 const OPERATOR_WORDS = new Set(["STARTSWITH", "EXISTS", "TYPEOF"]);
 const TYPE_TAG_SET = new Set(Object.keys(TYPE_TAGS));
@@ -97,9 +131,14 @@ const arkivStreamParser = StreamLanguage.define({
   token(stream) {
     if (stream.eatSpace()) return null;
 
+    if (stream.match("--")) {
+      stream.skipToEnd();
+      return "comment";
+    }
+
     if (stream.eat("(") || stream.eat(")")) return "paren";
 
-    // Single-quoted strings, e.g. str('text'). Double quotes are not valid 0.8
+    // Single-quoted strings, e.g. str('text'). Double quotes are not valid
     // syntax but keep highlighting so an old pasted query still reads.
     for (const quote of ["'", '"']) {
       if (stream.eat(quote)) {
@@ -121,16 +160,14 @@ const arkivStreamParser = StreamLanguage.define({
     // Hex, or a decimal with an optional fraction (dec(3.5)).
     if (stream.match(/^0x[0-9a-fA-F]+/) || stream.match(/^\d+(\.\d+)?/)) return "number";
 
-    // Matched case-sensitively so an attribute named `android` is not half-highlighted as `AND`.
-    // Names may carry `.`, `_` and `-` after the first letter (arkiv.schema).
-    if (stream.match(/^[a-zA-Z_][\w.-]*/)) {
+    // Names may contain `.` and `-` but never `--`, which starts a comment.
+    if (stream.match(/^[a-zA-Z_](?:[\w.]|-(?!-))*/)) {
       const word = stream.current();
-      if (LOGICAL_KEYWORDS.has(word) || OPERATOR_WORDS.has(word)) return "keyword";
+      const upper = word.toUpperCase();
+      if (LOGICAL_KEYWORDS.has(upper) || OPERATOR_WORDS.has(upper)) return "keyword";
       if (TYPE_TAG_SET.has(word)) return "typeName";
       return "variableName.special";
     }
-
-    if (stream.eat("*")) return "operator";
 
     stream.next();
     return null;
@@ -147,8 +184,9 @@ const arkivHighlight = HighlightStyle.define([
   { tag: t.special(t.variableName), color: "var(--q-attribute)" },
   { tag: t.typeName, color: "var(--q-type)" },
   { tag: t.paren, color: "var(--q-paren)" },
+  { tag: t.comment, color: "var(--q-paren)", fontStyle: "italic" },
 ]);
 
-export function arkivQueryLanguage() {
-  return [arkivStreamParser, syntaxHighlighting(arkivHighlight), autocompletion({ override: [arkivCompletions] })];
+export function arkivQueryLanguage(getHints: () => readonly AttributeHint[] = () => []) {
+  return [arkivStreamParser, syntaxHighlighting(arkivHighlight), autocompletion({ override: [arkivCompletions(getHints)] })];
 }

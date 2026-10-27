@@ -2,21 +2,18 @@ import { Check, Download, Loader2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { CopyButton } from "@/components/copy-cell";
 import type { AttributeView } from "@/attributes";
-import type { RpcSource } from "@/dataRpc";
-import { NODE_RPC_URL } from "@/nodeRpc";
 import { bytesAsText, loadBytesFromNode, type LoadedBytes } from "@/nodeBytes";
 import { cn } from "@/lib/utils";
 
 /** How much of a loaded value is shown inline; the copy button always copies all of it. */
 const PREVIEW_BYTES = 256;
 
-/** Where the "load from node" action reads from, and at which block. */
+/** Which entity the "load from node" action reads, and at which block. */
 export interface BytesSource {
+  /** null hides the action (no entity to read, such as a create that did not apply). */
   entityKey: string | null;
   /** The block the shown version is from; the node's head when omitted. */
   atBlock?: number;
-  /** Defaults to the deployment's node; null hides the action. */
-  rpc?: RpcSource | null;
 }
 
 function shortHash(hash: string): string {
@@ -25,8 +22,8 @@ function shortHash(hash: string): string {
 
 /**
  * A bytes attribute: its size and keccak256 (all the index keeps), and an
- * action that loads the content from the node — in the browser, never through
- * the indexer backend — and checks it against that hash.
+ * action that loads the content from the node — through the backend's
+ * entity-explorer relay, which stores nothing — and checks it against that hash.
  */
 export function BytesValue({ attribute, source }: { attribute: AttributeView; source?: BytesSource | null }) {
   const [loaded, setLoaded] = useState<LoadedBytes | null>(() =>
@@ -38,19 +35,17 @@ export function BytesValue({ attribute, source }: { attribute: AttributeView; so
   const [error, setError] = useState<string | null>(null);
   const [asText, setAsText] = useState(false);
 
-  const rpc = source?.rpc === undefined ? (NODE_RPC_URL ? { kind: "node" as const, customUrl: "" } : null) : source.rpc;
-  const canLoad = !loaded && rpc !== null && Boolean(source?.entityKey);
+  const canLoad = !loaded && Boolean(source?.entityKey);
   const size = attribute.size ?? loaded?.size;
 
   const load = async () => {
-    if (!source?.entityKey || !rpc) return;
+    if (!source?.entityKey) return;
     setLoading(true);
     setError(null);
     try {
       setLoaded(
         await loadBytesFromNode(
           { entityKey: source.entityKey, name: attribute.name, atBlock: source.atBlock, expectedKeccak256: attribute.keccak256 },
-          rpc,
         ),
       );
     } catch (failure) {
@@ -87,8 +82,8 @@ export function BytesValue({ attribute, source }: { attribute: AttributeView; so
             {loading ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
             Load from node
           </button>
-        ) : !loaded && rpc === null ? (
-          <span className="text-[11px] text-muted-foreground" title="Set VITE_NODE_RPC_URL to load bytes contents from a node">
+        ) : !loaded ? (
+          <span className="text-[11px] text-muted-foreground" title="The index keeps a bytes value's size and keccak256 only">
             content not held by the index
           </span>
         ) : null}

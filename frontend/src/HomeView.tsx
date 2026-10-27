@@ -1,46 +1,38 @@
-import { AlertTriangle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import createPlotlyComponent from "react-plotly.js/factory";
-import Plotly from "plotly.js-basic-dist-min";
-import { AddressFace } from "./AddressFace";
+import { AlertTriangle, ArrowRightLeft } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Cedric } from "./Cedric";
 import {
   fetchBlockByNumber,
   fetchBlocks,
-  fetchGuzzlers,
+  fetchTransactions,
   type BlockRequestDebugSample,
   type BlocksResponse,
-  type GuzzlerStat,
   type StoredBlock,
+  type StoredTransaction,
 } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { BlockNumberLink } from "./blockLinks";
+import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
+import { OmniSearch } from "./OmniSearch";
 import {
-  fmtBytes,
-  fmtDate,
-  fmtGasPrice,
-  fmtInteger,
-  fmtTokenAmount,
-  weiToGasPriceNumber,
-} from "./format";
-import { InfoTooltip } from "./InfoTooltip";
-import { buildPermalinkHref, shouldHandleClientNavigation, writePermalink } from "./permalinks";
+  buildPermalinkHref,
+  shouldHandleClientNavigation,
+  transactionDetailHref,
+  writePermalink,
+  writeTransactionPermalink,
+} from "./permalinks";
 import { BlockEmpty, BlockFilled, BlockList } from "./icons";
 import type { PageSettings } from "./pageSettings";
 import {
   HOME_LATEST_BLOCK_LIMIT,
-  buildHomeMinAvgMaxSeries,
-  homeHistogramMinuteRange,
   normalizeHomeBlocksResponse,
   recentHomeBlocksParams,
 } from "./homeBlocks";
+import { addressSearchHref } from "./transactionLinks";
+import { OpBadgeList } from "@/components/op-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { ChartCard } from "@/components/chart-card";
 import { cn } from "@/lib/utils";
-import { chartTimeAxis, chartTimeLabels } from "./chartTime";
-
-const Plot = createPlotlyComponent(Plotly);
 
 type BlockSlot =
   | { kind: "real"; block: StoredBlock }
@@ -48,17 +40,22 @@ type BlockSlot =
 
 interface HomeViewProps {
   onLocationChange: () => void;
+  onNavigate: (href: string) => void;
   settings: PageSettings;
   timeZone: string;
   adminModeActive: boolean;
+  transactionDataEnabled: boolean | null;
 }
 
-const MINUTE_MS = 60_000;
 const REFRESH_INTERVAL_MS = 12_000;
 
-/** How many top wallets to preview on the home page, and over which window. */
-const HOME_GUZZLER_LIMIT = 10;
-const HOME_GUZZLER_WINDOW = "1h";
+/**
+ * How many of the newest transactions to preview on the home page. The query is
+ * bounded to the last HOME_TRANSACTION_BLOCK_WINDOW blocks so its page total is
+ * an index range count rather than a COUNT(*) over every stored transaction.
+ */
+const HOME_TRANSACTION_LIMIT = 10;
+const HOME_TRANSACTION_BLOCK_WINDOW = 1_000;
 
 type HomeDebugRequestKind = "range" | "block";
 
@@ -89,13 +86,20 @@ const EMPTY_HOME_DEBUG_STATS: HomeDebugStats = {
   },
 };
 
-export function HomeView({ onLocationChange, settings, timeZone, adminModeActive }: HomeViewProps) {
+export function HomeView({
+  onLocationChange,
+  onNavigate,
+  settings,
+  timeZone,
+  adminModeActive,
+  transactionDataEnabled,
+}: HomeViewProps) {
   const [blocksData, setBlocksData] = useState<BlocksResponse | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const [blocksLoading, setBlocksLoading] = useState(true);
   const [debugStats, setDebugStats] = useState<HomeDebugStats>(EMPTY_HOME_DEBUG_STATS);
-  const [topGuzzlers, setTopGuzzlers] = useState<GuzzlerStat[] | null>(null);
-  const [guzzlersUnavailable, setGuzzlersUnavailable] = useState(false);
+  const [latestTransactions, setLatestTransactions] = useState<StoredTransaction[] | null>(null);
+  const [transactionsError, setTransactionsError] = useState<string | null>(null);
 
   const recordDebugRequest = useCallback(
     (kind: HomeDebugRequestKind, sample: BlockRequestDebugSample) => {
@@ -148,51 +152,43 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
     };
   }, [settings, recordDebugRequest]);
 
-  // Most-active-wallets preview (top guzzlers over the last hour). Independent of
-  // the blocks feed — if the guzzlers feature is disabled the section just hides.
+  const blocks = blocksData?.blocks ?? [];
+  const latestBlock = blocks[0] ?? null;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // The transaction preview follows the block feed's head, read through a ref
+  // so a new block does not restart the polling interval.
+  const latestBlockNumberRef = useRef<number | null>(null);
+  latestBlockNumberRef.current = latestBlock?.blockNumber ?? null;
+  const hasLatestBlock = latestBlock !== null;
+
   useEffect(() => {
+    if (transactionDataEnabled !== true || !hasLatestBlock) return;
     let cancelled = false;
-    const loadGuzzlers = async () => {
+    const loadTransactions = async () => {
+      const head = latestBlockNumberRef.current;
+      if (head === null) return;
+      const params = new URLSearchParams({
+        blockGt: String(Math.max(0, head - HOME_TRANSACTION_BLOCK_WINDOW)),
+        limit: String(HOME_TRANSACTION_LIMIT),
+      });
       try {
-        const board = await fetchGuzzlers(HOME_GUZZLER_LIMIT, HOME_GUZZLER_WINDOW);
+        const body = await fetchTransactions(params);
         if (cancelled) return;
-        const hourly = board.windows.find((w) => w.label === HOME_GUZZLER_WINDOW);
-        setTopGuzzlers((hourly?.guzzlers ?? []).slice(0, HOME_GUZZLER_LIMIT));
-        setGuzzlersUnavailable(false);
-      } catch {
+        setLatestTransactions(body.transactions);
+        setTransactionsError(null);
+      } catch (error) {
         if (cancelled) return;
-        setTopGuzzlers([]);
-        setGuzzlersUnavailable(true);
+        setTransactionsError(error instanceof Error ? error.message : String(error));
       }
     };
-    void loadGuzzlers();
-    const interval = window.setInterval(loadGuzzlers, REFRESH_INTERVAL_MS);
+    void loadTransactions();
+    const interval = window.setInterval(loadTransactions, REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
-
-  const blocks = blocksData?.blocks ?? [];
-  const latestBlock = blocks[0] ?? null;
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const lastMinuteAvgGas = useMemo(() => {
-    const cutoffMs = nowMs - MINUTE_MS;
-    let total = 0n;
-    let count = 0;
-    for (const block of blocks) {
-      const ts = Date.parse(block.blockDate);
-      if (!Number.isFinite(ts) || ts < cutoffMs) continue;
-      try {
-        total += BigInt(block.totalGasUsed);
-      } catch {
-        continue;
-      }
-      count += 1;
-    }
-    if (count === 0) return null;
-    return (total / BigInt(count)).toString();
-  }, [blocks, nowMs]);
+  }, [transactionDataEnabled, hasLatestBlock]);
 
   useEffect(() => {
     if (!latestBlock) return;
@@ -322,8 +318,8 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
     return () => window.clearInterval(interval);
   }, [settings]);
 
-  const guzzlersHref = buildPermalinkHref("guzzlers", {});
   const blocksHref = buildPermalinkHref("blocks", {});
+  const transactionsHref = buildPermalinkHref("transactions", {});
   const latestBlockBehindLabel = useMemo(() => {
     if (!latestBlock) return null;
     const latestTimeMs = new Date(latestBlock.blockDate).getTime();
@@ -331,32 +327,28 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
     return `${formatBehind(Math.max(0, nowMs - latestTimeMs))} behind`;
   }, [latestBlock, nowMs]);
 
-  const openGuzzlersView = (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const openView = (event: React.MouseEvent<HTMLAnchorElement>, view: "blocks" | "transactions") => {
     if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();
-    if (writePermalink("guzzlers", {})) {
-      onLocationChange();
-    }
-  };
-
-  const openBlocksView = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!shouldHandleClientNavigation(event)) return;
-    event.preventDefault();
-    if (writePermalink("blocks", {})) {
-      onLocationChange();
-    }
-  };
-
-  const openGuzzler = (event: React.MouseEvent<HTMLAnchorElement>, address: string) => {
-    if (!shouldHandleClientNavigation(event)) return;
-    event.preventDefault();
-    if (writePermalink("guzzlers", { address })) {
+    if (writePermalink(view, {})) {
       onLocationChange();
     }
   };
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-8 px-3 md:px-6">
+      <div className="home-hero flex flex-col items-center gap-3 pt-8 pb-8 text-center md:pt-14 md:pb-14">
+        <h1 className="font-heading text-3xl font-black tracking-tight md:text-5xl">
+          Explore [ ARKIV ]
+        </h1>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Search for a block number, address, transaction or block hash, or entity key.
+        </p>
+        <div className="mt-3 w-full max-w-3xl text-left">
+          <OmniSearch onNavigate={onNavigate} />
+        </div>
+      </div>
+
       {blocksError ? (
         <div
           role="alert"
@@ -373,169 +365,211 @@ export function HomeView({ onLocationChange, settings, timeZone, adminModeActive
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3">
-        <h3 className="font-heading text-lg font-black tracking-tight">
-          {settings.networkName || settings.chainName} network overview
-        </h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <MetricCard
-            label="Current base fee"
-            value={latestBlock ? fmtGasPrice(latestBlock.baseBlockFeeWei) : "—"}
-          />
-          <MetricCard
-            label="Average gas / block · last minute"
-            value={lastMinuteAvgGas !== null ? fmtGasBillions(lastMinuteAvgGas) : "—"}
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3">
-        <h3 className="font-heading text-lg font-black tracking-tight">
-          Latest blocks &amp; most active wallets
-        </h3>
-        <div className="grid items-stretch gap-3 lg:grid-cols-2">
-          <div className="relative flex min-w-0">
-            <Cedric progress={latestBlock?.blockNumber ?? null} />
-            <Card
-              className="relative z-10 flex min-w-0 flex-1 flex-col gap-0 overflow-hidden py-0"
-              aria-labelledby="home-latest-blocks"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-                <h3 id="home-latest-blocks" className="flex items-center gap-2 font-heading text-sm">
-                  <BlockList size={18} className="text-primary" />
-                  Latest blocks
-                </h3>
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                  {latestBlockBehindLabel ? <span>{latestBlockBehindLabel}</span> : null}
-                  <span>
-                    {blocksData ? `${blockSlots.length} shown` : blocksLoading ? "Loading" : "No data"}
-                  </span>
-                  <a className="text-primary hover:underline" href={blocksHref} onClick={openBlocksView}>
-                    All blocks
-                  </a>
-                </div>
+      <div className="grid items-stretch gap-3 lg:grid-cols-2">
+        <div className="relative flex min-w-0">
+          <Cedric progress={latestBlock?.blockNumber ?? null} />
+          <Card
+            className="relative z-10 flex min-w-0 flex-1 flex-col gap-0 overflow-hidden py-0"
+            aria-labelledby="home-latest-blocks"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+              <h3 id="home-latest-blocks" className="flex items-center gap-2 font-heading text-sm">
+                <BlockList size={18} className="text-primary" />
+                Latest blocks
+              </h3>
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                {latestBlockBehindLabel ? <span>{latestBlockBehindLabel}</span> : null}
+                <span>
+                  {blocksData ? `${blockSlots.length} shown` : blocksLoading ? "Loading" : "No data"}
+                </span>
+                <a className="text-primary hover:underline" href={blocksHref} onClick={(event) => openView(event, "blocks")}>
+                  All blocks
+                </a>
               </div>
-              {blocksError && blocks.length === 0 ? (
-                <div className="flex flex-col gap-1 px-4 py-6 text-xs">
-                  <strong className="font-medium text-foreground">Unable to load blocks right now.</strong>
-                  <span className="text-muted-foreground">
-                    We can't reach the scanner. The page will refresh automatically once the connection
-                    is restored.
-                  </span>
-                </div>
-              ) : (
-                <div className="max-h-[26rem] overflow-y-auto">
-                  {blockSlots.map((slot, idx) => (
-                    <BlockFeedItem
-                      key={`slot-${idx}`}
-                      slot={slot}
-                      onLocationChange={onLocationChange}
-                      timeZone={timeZone}
-                      tokenSymbol={settings.tokenSymbol}
-                    />
-                  ))}
-                  {!blocksLoading && blocks.length === 0 ? (
-                    <p className="px-4 py-4 text-xs text-muted-foreground">No stored blocks yet.</p>
-                  ) : null}
-                </div>
-              )}
-            </Card>
-          </div>
-
-          <HomeWalletActivityPanel
-            topGuzzlers={topGuzzlers}
-            guzzlersUnavailable={guzzlersUnavailable}
-            guzzlersHref={guzzlersHref}
-            onOpenGuzzlersView={openGuzzlersView}
-            onOpenGuzzler={openGuzzler}
-            tokenSymbol={settings.tokenSymbol}
-          />
+            </div>
+            {blocksError && blocks.length === 0 ? (
+              <div className="flex flex-col gap-1 px-4 py-6 text-xs">
+                <strong className="font-medium text-foreground">Unable to load blocks right now.</strong>
+                <span className="text-muted-foreground">
+                  We can't reach the scanner. The page will refresh automatically once the connection
+                  is restored.
+                </span>
+              </div>
+            ) : (
+              <div className="max-h-[26rem] overflow-y-auto">
+                {blockSlots.map((slot, idx) => (
+                  <BlockFeedItem
+                    key={`slot-${idx}`}
+                    slot={slot}
+                    onLocationChange={onLocationChange}
+                    timeZone={timeZone}
+                    tokenSymbol={settings.tokenSymbol}
+                  />
+                ))}
+                {!blocksLoading && blocks.length === 0 ? (
+                  <p className="px-4 py-4 text-xs text-muted-foreground">No stored blocks yet.</p>
+                ) : null}
+              </div>
+            )}
+          </Card>
         </div>
-      </div>
 
-      <LiveHistograms timeZone={timeZone} blocks={blocks} error={blocksError} loaded={blocksData !== null} settings={settings} />
+        <HomeLatestTransactionsPanel
+          transactions={latestTransactions}
+          error={transactionsError}
+          transactionDataEnabled={transactionDataEnabled}
+          transactionsHref={transactionsHref}
+          onOpenTransactionsView={(event) => openView(event, "transactions")}
+          onLocationChange={onLocationChange}
+          timeZone={timeZone}
+          tokenSymbol={settings.tokenSymbol}
+        />
+      </div>
 
       {adminModeActive ? <HomeDebugSummary localBlockCount={blocks.length} stats={debugStats} /> : null}
     </section>
   );
 }
 
-function HomeWalletActivityPanel({
-  topGuzzlers,
-  guzzlersUnavailable,
-  guzzlersHref,
-  onOpenGuzzlersView,
-  onOpenGuzzler,
+function HomeLatestTransactionsPanel({
+  transactions,
+  error,
+  transactionDataEnabled,
+  transactionsHref,
+  onOpenTransactionsView,
+  onLocationChange,
+  timeZone,
   tokenSymbol,
 }: {
-  topGuzzlers: GuzzlerStat[] | null;
-  guzzlersUnavailable: boolean;
-  guzzlersHref: string;
-  onOpenGuzzlersView: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  onOpenGuzzler: (event: React.MouseEvent<HTMLAnchorElement>, address: string) => void;
+  transactions: StoredTransaction[] | null;
+  error: string | null;
+  transactionDataEnabled: boolean | null;
+  transactionsHref: string;
+  onOpenTransactionsView: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onLocationChange: () => void;
+  timeZone: string;
   tokenSymbol: string;
 }) {
   return (
     <Card
       className="flex min-w-0 flex-col gap-0 overflow-hidden py-0"
-      aria-labelledby="home-active-wallets"
+      aria-labelledby="home-latest-transactions"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-        <div>
-          <h3 id="home-active-wallets" className="font-heading text-sm">
-            Most active wallets
-          </h3>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">Last hour, ranked by total gas used.</p>
-        </div>
-        <a className="text-[10px] text-primary hover:underline" href={guzzlersHref} onClick={onOpenGuzzlersView}>
-          Explore activity
-        </a>
+        <h3 id="home-latest-transactions" className="flex items-center gap-2 font-heading text-sm">
+          <ArrowRightLeft className="size-4 text-primary" aria-hidden="true" />
+          Latest transactions
+        </h3>
+        {transactionDataEnabled === true ? (
+          <a className="text-[10px] text-primary hover:underline" href={transactionsHref} onClick={onOpenTransactionsView}>
+            All transactions
+          </a>
+        ) : null}
       </div>
-      {guzzlersUnavailable ? (
-        <p className="px-4 py-6 text-xs text-muted-foreground">Wallet activity tracking is not enabled.</p>
-      ) : topGuzzlers === null ? (
-        <p className="px-4 py-6 text-xs text-muted-foreground">Loading most active wallets…</p>
-      ) : topGuzzlers.length === 0 ? (
-        <p className="px-4 py-6 text-xs text-muted-foreground">No wallet activity in the last hour.</p>
+      {transactionDataEnabled === false ? (
+        <p className="px-4 py-6 text-xs text-muted-foreground">This indexer does not store transactions.</p>
+      ) : error && transactions === null ? (
+        <p className="px-4 py-6 text-xs text-muted-foreground">Unable to load transactions right now.</p>
+      ) : transactions === null ? (
+        <p className="px-4 py-6 text-xs text-muted-foreground">Loading latest transactions…</p>
+      ) : transactions.length === 0 ? (
+        <p className="px-4 py-6 text-xs text-muted-foreground">
+          No transactions in the last {fmtInteger(HOME_TRANSACTION_BLOCK_WINDOW)} blocks.
+        </p>
       ) : (
         <div className="max-h-[26rem] overflow-y-auto">
-          {topGuzzlers.map((guzzler, index) => {
-            const display = addressDisplay(guzzler.address);
-            return (
-              <a
-                key={guzzler.address}
-                className="flex items-center gap-3 border-b border-border px-4 py-2 text-left transition-colors last:border-b-0 hover:bg-accent"
-                href={buildPermalinkHref("guzzlers", { address: guzzler.address })}
-                onClick={(event) => onOpenGuzzler(event, guzzler.address)}
-                title={`View activity for ${display.title ?? guzzler.address}`}
-              >
-                <AddressFace address={guzzler.address} loading="lazy" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-xs">
-                    {index + 1}. {display.label}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
-                    <span>
-                      <b className="font-medium text-foreground">{fmtInteger(guzzler.transactionCount)}</b> txns
-                    </span>
-                    <span>
-                      <b className="font-medium text-foreground">{fmtGasBillions(guzzler.totalGasUsed)}</b> gas
-                    </span>
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-0.5 font-mono text-[11px] tabular-nums">
-                  <strong className="text-xs font-medium text-foreground">#{index + 1}</strong>
-                  <span className="text-muted-foreground">
-                    {fmtTokenAmount(guzzler.totalFeeWei, tokenSymbol)} fees
-                  </span>
-                </div>
-              </a>
-            );
-          })}
+          {transactions.map((transaction) => (
+            <TransactionFeedItem
+              key={transaction.hash}
+              transaction={transaction}
+              onLocationChange={onLocationChange}
+              timeZone={timeZone}
+              tokenSymbol={tokenSymbol}
+            />
+          ))}
         </div>
       )}
     </Card>
   );
+}
+
+function TransactionFeedItem({
+  transaction,
+  onLocationChange,
+  timeZone,
+  tokenSymbol,
+}: {
+  transaction: StoredTransaction;
+  onLocationChange: () => void;
+  timeZone: string;
+  tokenSymbol: string;
+}) {
+  const openTransaction = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!shouldHandleClientNavigation(event)) return;
+    event.preventDefault();
+    if (writeTransactionPermalink(transaction.hash)) onLocationChange();
+  };
+
+  return (
+    <article className="flex items-center gap-3 border-b border-border px-4 py-2 transition-colors last:border-b-0 hover:bg-accent">
+      <div className="flex size-8 shrink-0 items-center justify-center text-primary" aria-hidden="true">
+        <ArrowRightLeft className="size-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 font-mono text-xs">
+          <a
+            className="truncate hover:underline"
+            href={transactionDetailHref(transaction.hash)}
+            onClick={openTransaction}
+            title={transaction.hash}
+          >
+            {shortHash(transaction.hash)}
+          </a>
+          <span className="shrink-0 text-[11px] text-muted-foreground">{fmtDate(transaction.blockDate, timeZone)}</span>
+        </div>
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+          <AddressLink address={transaction.from} />
+          <span aria-hidden="true">→</span>
+          {transaction.to ? <AddressLink address={transaction.to} /> : <span>Contract creation</span>}
+        </div>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1 font-mono text-[11px] tabular-nums">
+        {transaction.operationsSummary?.length ? <OpBadgeList operations={transaction.operationsSummary} /> : null}
+        <span className="text-muted-foreground">
+          <BlockNumberLink blockNumber={transaction.blockNumberDecimal} onLocationChange={onLocationChange} /> ·{" "}
+          {fmtTokenAmount(transaction.transactionFeeWei, tokenSymbol)} fee
+          {hasRent(transaction.rentFeeWei) ? (
+            <span title="Storage rent, burned outside gas"> + {fmtTokenAmount(transaction.rentFeeWei, tokenSymbol)} rent</span>
+          ) : null}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function hasRent(rentFeeWei: string | null | undefined): boolean {
+  try {
+    return BigInt(rentFeeWei ?? "0") > 0n;
+  } catch {
+    return false;
+  }
+}
+
+function AddressLink({ address }: { address: string | null }) {
+  const display = addressDisplay(address);
+  const href = addressSearchHref(address);
+  return href ? (
+    <a className="truncate font-mono hover:text-foreground hover:underline" href={href} title={display.title ?? address ?? undefined}>
+      {display.label}
+    </a>
+  ) : (
+    <span className="truncate font-mono">{display.label}</span>
+  );
+}
+
+function shortHash(value: string): string {
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 10)}…${value.slice(-8)}`;
 }
 
 function HomeDebugSummary({
@@ -591,34 +625,6 @@ function HomeDebugRequestSummary({
         </dd>
       </dl>
     </section>
-  );
-}
-
-function fmtGasBillions(gasStr: string): string {
-  try {
-    const billions = Number(BigInt(gasStr)) / 1e9;
-    if (!Number.isFinite(billions)) return "—";
-    let decimals: number;
-    if (billions >= 100) decimals = 1;
-    else if (billions >= 10) decimals = 2;
-    else if (billions >= 1) decimals = 3;
-    else if (billions >= 0.1) decimals = 4;
-    else if (billions >= 0.01) decimals = 5;
-    else decimals = 6;
-    return `${billions.toFixed(decimals)} B`;
-  } catch {
-    return "—";
-  }
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <Card className="gap-1 py-3">
-      <CardContent className="flex flex-col gap-1 px-4">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <strong className="font-mono text-2xl font-medium tabular-nums text-foreground">{value}</strong>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -718,339 +724,3 @@ function formatBehind(ms: number): string {
   return `${hours} ${hours === 1 ? "hour" : "hours"}`;
 }
 
-function LiveHistograms({
-  timeZone,
-  blocks,
-  error,
-  loaded,
-  settings,
-}: {
-  timeZone: string;
-  blocks: StoredBlock[];
-  error: string | null;
-  loaded: boolean;
-  settings: PageSettings;
-}) {
-  const [currentMinuteMs, setCurrentMinuteMs] = useState(
-    () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS,
-  );
-
-  const baseFeeUnit = "gwei";
-
-  // Re-render every second so the window shifts when the wall clock crosses
-  // into a new minute.
-  useEffect(() => {
-    const tick = () => {
-      const next = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS;
-      setCurrentMinuteMs((prev) => (prev !== next ? next : prev));
-    };
-    const interval = window.setInterval(tick, settings.histogramClockTickMs);
-    return () => window.clearInterval(interval);
-  }, [settings.histogramClockTickMs]);
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <MinAvgMaxPanel
-        timeZone={timeZone}
-        title="Network usage"
-        unitLabel="gas"
-        blocks={blocks}
-        currentMinuteMs={currentMinuteMs}
-        histogramWindowMinutes={settings.histogramWindowMinutes}
-        colorVar="--chart-1"
-        colorFallback="#181ea9"
-        extractValue={(block) => {
-          const gas = Number(block.totalGasUsed);
-          return Number.isFinite(gas) ? gas : null;
-        }}
-        hoverLabel="Block gas"
-        yTickformat=".2s"
-        yTicksuffix=""
-        hoverFormat=".3s"
-        infoLabel="What is network usage?"
-        infoTitle="Network usage"
-        infoBody={
-          <>
-            <p>
-              How much gas the network is consuming per block. Each value is the
-              total gas used in a single block; the solid line is the per‑minute
-              average across blocks, and the band shows the per‑minute min/max
-              range.
-            </p>
-            <p>
-              Higher values mean blocks are fuller and the network is more
-              congested, which in turn pushes the base block fee up.
-            </p>
-          </>
-        }
-        error={error}
-        loaded={loaded}
-      />
-      <MinAvgMaxPanel
-        title="Base block fee"
-        timeZone={timeZone}
-        unitLabel={baseFeeUnit}
-        blocks={blocks}
-        currentMinuteMs={currentMinuteMs}
-        histogramWindowMinutes={settings.histogramWindowMinutes}
-        colorVar="--chart-2"
-        colorFallback="#fe7446"
-        extractValue={(block) => weiToGasPriceNumber(block.baseBlockFeeWei, baseFeeUnit)}
-        hoverLabel="Base fee"
-        yTicksuffix={` ${baseFeeUnit}`}
-        hoverFormat=".9~f"
-        infoLabel="What is base block fee?"
-        infoTitle="Base block fee (EIP‑1559)"
-        infoBody={
-          <>
-            <p>
-              The minimum gas price required for a transaction to be included in
-              a block. Set algorithmically by the protocol — it rises when blocks
-              are full and falls when they are empty, targeting ~50% utilization.
-              The base fee is burnt rather than paid to miners.
-            </p>
-            <p>
-              Shown in Gwei (1 Gwei = 10^-9 {settings.tokenSymbol}). The solid
-              line is the per-minute average; the band shows the per‑minute min/max
-              range.
-            </p>
-          </>
-        }
-        error={error}
-        loaded={loaded}
-      />
-    </div>
-  );
-}
-
-interface MinAvgMaxPanelProps {
-  timeZone: string;
-  title: string;
-  unitLabel: string;
-  blocks: StoredBlock[];
-  currentMinuteMs: number;
-  histogramWindowMinutes: number;
-  colorVar: string;
-  colorFallback: string;
-  extractValue: (block: StoredBlock) => number | null;
-  hoverLabel: string;
-  hoverFormat: string;
-  yTickformat?: string;
-  yTicksuffix?: string;
-  infoLabel: string;
-  infoTitle: string;
-  infoBody: React.ReactNode;
-  emptyLabel?: string;
-  error: string | null;
-  loaded: boolean;
-}
-
-function MinAvgMaxPanel({
-  timeZone,
-  title,
-  unitLabel,
-  blocks,
-  currentMinuteMs,
-  histogramWindowMinutes,
-  colorVar,
-  colorFallback,
-  extractValue,
-  hoverLabel,
-  hoverFormat,
-  yTickformat,
-  yTicksuffix,
-  infoLabel,
-  infoTitle,
-  infoBody,
-  emptyLabel,
-  error,
-  loaded,
-}: MinAvgMaxPanelProps) {
-  const baseColor = getCssColor(colorVar, colorFallback);
-  const gridColor = getCssColor("--border", "#e5e7eb");
-  const textColor = getCssColor("--muted-foreground", "#5e6b80");
-
-  const { traces, layout, hasData } = useMemo<{
-    traces: Partial<Plotly.PlotData>[];
-    layout: Partial<Plotly.Layout>;
-    hasData: boolean;
-  }>(() => {
-    const { minMs, maxMs } = homeHistogramMinuteRange(currentMinuteMs, {
-      histogramWindowMinutes,
-    });
-    const xMaxMs = maxMs + MINUTE_MS;
-
-    const series = buildHomeMinAvgMaxSeries(
-      blocks,
-      currentMinuteMs,
-      { histogramWindowMinutes },
-      extractValue,
-    );
-    const hasData = series.some((p) => p.avg !== null);
-
-    const xs = series.map((p) => new Date(p.ts).toISOString());
-    const timeLabels = chartTimeLabels(series.map((p) => p.ts), timeZone);
-    const ysAvg = series.map((p) => p.avg);
-    const ysMin = series.map((p) => p.min);
-    const ysMax = series.map((p) => p.max);
-    const bandFill = withAlpha(baseColor, 0.18);
-    const bandLine = withAlpha(baseColor, 0.5);
-    const valueSuffix = yTicksuffix?.trim() ? yTicksuffix : ` ${unitLabel}`;
-
-    const maxTrace: Partial<Plotly.PlotData> = {
-      type: "scatter",
-      mode: "lines+markers",
-      x: xs,
-      y: ysMax as unknown as Plotly.Datum[],
-      connectgaps: false,
-      line: { color: bandLine, width: 1, shape: "linear" },
-      marker: { color: bandLine, size: 3, line: { width: 0 } },
-      text: timeLabels,
-      hovertemplate: `%{text}<br>max %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
-      showlegend: false,
-    };
-    const minTrace: Partial<Plotly.PlotData> = {
-      type: "scatter",
-      mode: "lines+markers",
-      x: xs,
-      y: ysMin as unknown as Plotly.Datum[],
-      connectgaps: false,
-      fill: "tonexty",
-      fillcolor: bandFill,
-      line: { color: bandLine, width: 1, shape: "linear" },
-      marker: { color: bandLine, size: 3, line: { width: 0 } },
-      text: timeLabels,
-      hovertemplate: `%{text}<br>min %{y:${hoverFormat}}${valueSuffix}<extra></extra>`,
-      showlegend: false,
-    };
-    const avgTrace: Partial<Plotly.PlotData> = {
-      type: "scatter",
-      mode: "lines+markers",
-      x: xs,
-      y: ysAvg as unknown as Plotly.Datum[],
-      connectgaps: false,
-      line: { color: baseColor, width: 1.5, shape: "linear" },
-      marker: { color: baseColor, size: 4, line: { width: 0 } },
-      text: timeLabels,
-      hovertemplate: `<b>${hoverLabel}</b><br>%{text}<br>%{y:${hoverFormat}}${valueSuffix} avg<extra></extra>`,
-    };
-
-    const layout: Partial<Plotly.Layout> = {
-      autosize: true,
-      margin: { l: 64, r: 24, t: 8, b: 52 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(0,0,0,0)",
-      font: { color: textColor, size: 11 },
-      showlegend: false,
-      hovermode: "closest",
-      hoverlabel: {
-        bgcolor: getCssColor("--card", "#ffffff"),
-        bordercolor: gridColor,
-        font: { color: getCssColor("--foreground", "#111111"), size: 12 },
-      },
-      xaxis: {
-        ...chartTimeAxis(minMs, xMaxMs, timeZone),
-        type: "date",
-        range: [new Date(minMs).toISOString(), new Date(xMaxMs).toISOString()],
-        gridcolor: "rgba(0,0,0,0)",
-        zerolinecolor: "rgba(0,0,0,0)",
-        tickfont: { size: 10, color: textColor },
-        nticks: 6,
-        fixedrange: true,
-      },
-      yaxis: {
-        gridcolor: gridColor,
-        zerolinecolor: gridColor,
-        tickfont: { size: 10, color: textColor },
-        rangemode: "normal",
-        fixedrange: true,
-        ...(yTickformat ? { tickformat: yTickformat } : {}),
-        ...(yTicksuffix !== undefined ? { ticksuffix: yTicksuffix } : {}),
-      },
-    };
-
-    return { traces: [maxTrace, minTrace, avgTrace], layout, hasData };
-  }, [
-    blocks,
-    currentMinuteMs,
-    histogramWindowMinutes,
-    baseColor,
-    gridColor,
-    textColor,
-    extractValue,
-    hoverFormat,
-    hoverLabel,
-    unitLabel,
-    yTickformat,
-    yTicksuffix,
-    timeZone,
-  ]);
-
-  return (
-    <ChartCard
-      title={
-        <>
-          <span className="size-2.5 shrink-0 rounded-sm" aria-hidden="true" style={{ background: baseColor }} />
-          {title}
-          <InfoTooltip label={infoLabel}>
-            <strong>{infoTitle}</strong>
-            {infoBody}
-          </InfoTooltip>
-        </>
-      }
-      meta={`${unitLabel} · last ${histogramWindowMinutes} min`}
-      contentClassName="h-[260px] flex-none"
-    >
-      {error && !loaded ? (
-        <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-xs">
-          <strong className="font-medium text-foreground">Unable to load chart.</strong>
-          <span className="text-muted-foreground">{error}</span>
-        </div>
-      ) : loaded && !hasData ? (
-        <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-xs">
-          <strong className="font-medium text-foreground">No chart data.</strong>
-          <span className="text-muted-foreground">{emptyLabel ?? "No values are available in this window."}</span>
-        </div>
-      ) : (
-        <Plot
-          data={traces}
-          layout={layout}
-          useResizeHandler
-          style={{ width: "100%", height: "100%" }}
-          config={{ displayModeBar: false, responsive: true, staticPlot: false }}
-        />
-      )}
-    </ChartCard>
-  );
-}
-
-function withAlpha(color: string, alpha: number): string {
-  if (color.startsWith("#")) {
-    let hex = color.slice(1);
-    if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
-    if (hex.length !== 6) return color;
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    if ([r, g, b].some((c) => Number.isNaN(c))) return color;
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-  const rgbMatch = color.match(/^rgba?\(([^)]+)\)$/i);
-  if (rgbMatch) {
-    const parts = rgbMatch[1].split(",").map((s) => s.trim());
-    if (parts.length >= 3) {
-      return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`;
-    }
-  }
-  return color;
-}
-
-function getCssColor(varName: string, fallback: string): string {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-    return v || fallback;
-  } catch {
-    return fallback;
-  }
-}

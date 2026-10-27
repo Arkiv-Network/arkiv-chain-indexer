@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { BlockNumberLink } from "./blockLinks";
 import { BlockCell } from "@/components/block-cell";
@@ -23,8 +23,9 @@ import {
 } from "./attributes";
 import { eventLabel, foldEntityHistory, operationRentShare, type EntityHistoryEvent } from "./entityHistory";
 import { fmtBytes, fmtDurationSeconds, fmtInteger, fmtTokenAmount } from "./format";
-import { PageBreadcrumbs } from "./PageBreadcrumbs";
-import { writeEntityPermalink } from "./permalinks";
+import { PageHeader } from "@/components/page-header";
+import { shouldHandleClientNavigation, writeEntityPermalink } from "./permalinks";
+import { explorerQueryHref, openExplorerQuery } from "@/components/filter-menu";
 import { AddressCell } from "./TransactionsView";
 import { TransactionHashLink } from "./TransactionView";
 
@@ -100,17 +101,8 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs,
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
-      <div className="flex flex-col gap-1.5">
-        <PageBreadcrumbs
-          items={[
-            { view: "home", label: "Home" },
-            { view: "entity", label: "Entity details" },
-          ]}
-          onLocationChange={onLocationChange}
-        />
-        <h2 className="font-heading text-lg font-black tracking-tight">Entity</h2>
-      </div>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+      <PageHeader title="Entity" />
 
       <form onSubmit={onSubmit} className="flex flex-wrap items-center gap-2">
         <Input
@@ -270,6 +262,19 @@ function EntityDetail({
         {current.schemaName ? <SchemaBadge name={current.schemaName} actions={actions} /> : null}
         {current.permanent ? <PermanentBadge /> : null}
         <CopyButton value={entityKey} label="entity key" />
+        <a
+          className="inline-flex items-center gap-1 border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+          href={explorerQueryHref(`$key = key(${entityKey.toLowerCase()})`)}
+          title="The entity as the node holds it now, in the entity explorer"
+          onClick={(event) => {
+            if (!shouldHandleClientNavigation(event)) return;
+            event.preventDefault();
+            openExplorerQuery(`$key = key(${entityKey.toLowerCase()})`, onLocationChange);
+          }}
+        >
+          <Search className="size-3" />
+          On the node
+        </a>
       </div>
 
       <div className="grid gap-6 border-t border-border pt-4 sm:grid-cols-3">

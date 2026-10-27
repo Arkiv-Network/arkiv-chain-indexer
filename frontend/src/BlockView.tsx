@@ -7,7 +7,7 @@ import {
   type InspectedTransaction,
 } from "./api";
 import { fmtBytes, fmtDate, fmtExactTokenAmount, fmtGasPrice, fmtInteger, fmtRatio, fmtTokenAmount } from "./format";
-import { PageBreadcrumbs } from "./PageBreadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import { buildPermalinkHref, writePermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
 import { TransactionHashLink } from "./TransactionView";
@@ -130,15 +130,7 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <PageBreadcrumbs
-        items={[
-          { view: "home", label: "Home" },
-          { view: "blocks", label: "Block list" },
-          { view: "block", label: "Block details" },
-        ]}
-        onLocationChange={onLocationChange}
-      />
-      <h2 className="font-heading text-lg font-black tracking-tight">Block info</h2>
+      <PageHeader title="Block" />
 
       <div className="flex flex-col gap-3 border border-border bg-card p-3">
         <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">

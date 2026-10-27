@@ -116,6 +116,12 @@ export interface JsonRpcOptions {
    * path keeps forwarding them to a node.
    */
   localOverrides?: Record<string, JsonRpcMethodHandler>;
+  /**
+   * Whether methods outside the overrides and the passthrough are answered
+   * from stored data. Defaults to true; false makes the endpoint a pure relay
+   * (`/entity-explorer/rpc`), where any unlisted method is "not found".
+   */
+  builtInMethods?: boolean;
 }
 
 export type JsonRpcId = string | number | null;
@@ -335,7 +341,9 @@ async function handleSingle(request: unknown, context: MethodContext): Promise<J
     ? (overrideParams) => override(overrideParams)
     : forwarder
       ? (forwardedParams) => forwarder.forward(method, forwardedParams)
-      : (METHODS[method] as MethodHandler | undefined);
+      : context.options.builtInMethods
+        ? (METHODS[method] as MethodHandler | undefined)
+        : undefined;
   const source: CallSource = override ? "override" : forwarder ? "upstream" : handler ? "stored" : "none";
   if (!handler) {
     // Unknown method names are client input: label them "unknown" so a
@@ -409,6 +417,7 @@ function resolveOptions(options: JsonRpcOptions): Required<JsonRpcOptions> {
     path: options.path ?? "/shadow-rpc",
     passthrough: options.passthrough ?? null,
     localOverrides: options.localOverrides ?? {},
+    builtInMethods: options.builtInMethods ?? true,
   };
 }
 

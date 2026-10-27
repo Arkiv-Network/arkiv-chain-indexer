@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { schemaCondition } from "@/attributes";
 import { describeRentCap, fetchNodeRentCap, NODE_STATUS_URL, type NodeRentCap } from "@/nodeRpc";
 import { shouldHandleClientNavigation } from "@/permalinks";
-import { dataQueryHref, openDataQuery, type ConditionActions } from "./filter-menu";
+import { explorerQueryHref, openExplorerQuery, type ConditionActions } from "./filter-menu";
 
 const pill = "inline-flex items-center rounded-none border px-1.5 py-0.5 text-[10px] font-medium tracking-wide whitespace-nowrap";
 
@@ -82,10 +82,10 @@ export function SchemaBadge({ name, actions, className }: { name: string; action
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();
-    openDataQuery(expression, actions?.onLocationChange);
+    openExplorerQuery(expression, actions?.onLocationChange);
   };
   return (
-    <a className={classes} href={dataQueryHref(expression)} title={title} onClick={onClick}>
+    <a className={classes} href={explorerQueryHref(expression)} title={title} onClick={onClick}>
       schema: {name}
     </a>
   );

@@ -7,6 +7,7 @@ import {
   type CliSpec,
 } from "./cli";
 import { ArkivDecoderClient } from "./arkivOperations";
+import { describeRpcTarget } from "./baseloadRpcKeys";
 import { EthereumRpcClient, readGenesisHashWithRetry } from "./rpc";
 import { attachRpcKeyRing } from "./rpcKeyRing";
 import { scanOneBlock } from "./scanner";
@@ -283,7 +284,7 @@ async function main(): Promise<void> {
 
     console.log(
       `Gap filler starting (interval=${config.intervalMs}ms, ` +
-        `max_blocks_per_cycle=${config.maxBlocksPerCycle}, rpc=${rpc.rpcUrl})`,
+        `max_blocks_per_cycle=${config.maxBlocksPerCycle}, rpc=${describeRpcTarget(rpc.rpcUrl)})`,
     );
 
     while (!stopping) {

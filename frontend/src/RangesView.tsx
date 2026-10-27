@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchRanges, type RangesResponse, type StoredBlockRange } from "./api";
 import { fmtBytes, fmtDate, fmtGasPrice, fmtInteger, fmtRatio, fmtTokenAmount } from "./format";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -494,7 +495,7 @@ export function RangesView({ locationSearch, onLocationChange, timeZone, tokenSy
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <h2 className="font-heading text-lg font-black tracking-tight">Aggregated ranges</h2>
+      <PageHeader title="Ranges" description="Block metrics aggregated over fixed-size block ranges." />
 
       <FiltersPanel
         open={filtersOpen}

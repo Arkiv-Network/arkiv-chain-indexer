@@ -57,10 +57,12 @@ describe("frontend permalink helpers", () => {
   });
 
   test("reads the data route", () => {
-    expect(readViewFromLocation({ pathname: "/data", search: "" })).toBe("data");
-    expect(readViewFromLocation({ pathname: "/data/", search: "?q=%2A" })).toBe("data");
-    expect(readViewFromLocation({ pathname: "/", search: "?view=data" })).toBe("data");
-    expect(buildRouteHref("data", { q: "$owner = addr(0xabc)" })).toBe("/data?q=%24owner+%3D+addr%280xabc%29");
+    expect(readViewFromLocation({ pathname: "/entity-explorer", search: "" })).toBe("entity-explorer");
+    expect(readViewFromLocation({ pathname: "/entity-explorer/", search: "?q=%2A" })).toBe("entity-explorer");
+    // The explorer's old name keeps old shared links working.
+    expect(readViewFromLocation({ pathname: "/data", search: "?q=%2A" })).toBe("entity-explorer");
+    expect(readViewFromLocation({ pathname: "/", search: "?view=data" })).toBe("entity-explorer");
+    expect(buildRouteHref("entity-explorer", { q: "$owner = addr(0xabc)" })).toBe("/entity-explorer?q=%24owner+%3D+addr%280xabc%29");
   });
 
   test("reads the baseload route", () => {

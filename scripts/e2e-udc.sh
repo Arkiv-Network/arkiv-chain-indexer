@@ -25,7 +25,8 @@
 #   ARKIV_PROPOSER_BIN   arkiv-proposer release binary
 #   ARKIV_SDK_DIR        built arkiv-sdk-js 0.9.0-next checkout, with test/ installed
 #   UDC_E2E_DIR          state, logs and reports (default ~/.cache/arkiv-udc-e2e)
-#   ARKIV_DECODER_IMAGE  decoder image (default arkiv-transaction-decoder:udc-local)
+#   ARKIV_DECODER_IMAGE  an existing decoder image to run as is (default: compose builds
+#                        the decoder from the commit docker-compose.yml pins)
 #   E2E_INDEX_TIMEOUT    seconds to wait for the index to reach the traffic's end (default 600)
 #
 # Secrets (account keys, the private-control token) stay in the devnet's
@@ -37,7 +38,7 @@ export NODE_DIR="${NODE_DIR:-$(dirname "$IDX")/arkiv-state-db-experiment}"
 export ARKIV_PROPOSER_BIN="${ARKIV_PROPOSER_BIN:-$NODE_DIR/target/release/arkiv-proposer}"
 ARKIV_SDK_DIR="${ARKIV_SDK_DIR:-$(dirname "$IDX")/arkiv-sdk-js}"
 export UDC_E2E_DIR="${UDC_E2E_DIR:-$HOME/.cache/arkiv-udc-e2e}"
-DECODER_IMAGE="${ARKIV_DECODER_IMAGE:-arkiv-transaction-decoder:udc-local}"
+DECODER_IMAGE="${ARKIV_DECODER_IMAGE:-}"
 INDEX_TIMEOUT="${E2E_INDEX_TIMEOUT:-600}"
 PROJECT=arkiv-explorer-e2e
 BACKEND=http://127.0.0.1:13101
@@ -108,10 +109,10 @@ say "preflight"
 if [ "$HEALTH" = 1 ] && [ ! -d "$ARKIV_SDK_DIR/test/node_modules" ]; then
   echo "no $ARKIV_SDK_DIR/test/node_modules (cd test && bun install), or pass --skip-health" >&2; exit 1
 fi
-if [ "$EXPLORER" = 1 ] && ! sg docker -c "docker image inspect $(printf %q "$DECODER_IMAGE")" >/dev/null 2>&1; then
-  echo "decoder image $DECODER_IMAGE not found (build it, or set ARKIV_DECODER_IMAGE)" >&2; exit 1
+if [ "$EXPLORER" = 1 ] && [ -n "$DECODER_IMAGE" ] && ! sg docker -c "docker image inspect $(printf %q "$DECODER_IMAGE")" >/dev/null 2>&1; then
+  echo "decoder image $DECODER_IMAGE not found (build it, or unset ARKIV_DECODER_IMAGE for the compose pin)" >&2; exit 1
 fi
-echo "node $NODE_DIR ($(git -C "$NODE_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')), sdk $ARKIV_SDK_DIR, decoder $DECODER_IMAGE"
+echo "node $NODE_DIR ($(git -C "$NODE_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')), sdk $ARKIV_SDK_DIR, decoder ${DECODER_IMAGE:-built from the docker-compose.yml pin}"
 
 # The harness's TypeScript runs from a directory whose node_modules links the
 # UDC SDK and its viem, independent of this checkout's dependencies.
@@ -142,7 +143,6 @@ PREFILL_ARTIFACTS=$STATE/explorer-artifacts
 ENTITY_INDEX_GENESIS_PROGRESS_FILE=/tmp/genesis-import-progress.json
 RPC_PROXY_UPSTREAM=http://unused.invalid
 RPC_KEY_DIR=$STATE/rpc-keys
-ARKIV_DECODER_IMAGE=$DECODER_IMAGE
 SAVE_TRANSACTION_DATA=true
 ENTITY_QUERY_INDEX=true
 ENTITY_INDEX_GENESIS=auto
@@ -160,8 +160,6 @@ VITE_NETWORK_NAME=UDC e2e devnet
 VITE_TOKEN_SYMBOL=GLM
 VITE_BLOCK_TIME_MS=500
 VITE_NO_BATCHER=true
-VITE_NODE_RPC_URL=/node-rpc
-NODE_RPC_UPSTREAM=http://udc-e2e-node:8545
 BUILD_COMMIT=$(git -C "$IDX" rev-parse --short HEAD)
 AUTH_PUBLIC_ORIGIN=$BACKEND
 AUTH_INSECURE_LOCALHOST=true
@@ -169,7 +167,20 @@ AUTH_TOKEN_LOGIN_ENABLED=true
 AUTH_ADMIN_EMAILS=$ADMIN_EMAIL
 EOF
   printf 'AUTH_TOKEN_LOGIN_TOKEN=%s\n' "$(cat "$ADMIN_TOKEN_FILE")" >>"$ENV_FILE"
-  if [ "$BUILD" = 1 ]; then up_args=(up -d --build); else up_args=(up -d); fi
+  if [ -n "$DECODER_IMAGE" ]; then printf 'ARKIV_DECODER_IMAGE=%s\n' "$DECODER_IMAGE" >>"$ENV_FILE"; fi
+  up_args=(up -d)
+  if [ "$BUILD" = 1 ] && [ -n "$DECODER_IMAGE" ]; then
+    # A given decoder image runs as is: `up --build` would rebuild its name
+    # from the compose pin, so build every other image and start without building.
+    services=$(dc config --services | grep -vx decoder | tr '\n' ' ')
+    # shellcheck disable=SC2086
+    if ! dc build $services >"$LOGS/compose-build.log" 2>&1; then
+      tail -20 "$LOGS/compose-build.log"; note_failure "compose build"; exit 1
+    fi
+    up_args=(up -d --no-build)
+  elif [ "$BUILD" = 1 ]; then
+    up_args=(up -d --build)
+  fi
   if ! dc "${up_args[@]}" >"$LOGS/compose-up.log" 2>&1; then
     tail -20 "$LOGS/compose-up.log"; note_failure "compose up"; exit 1
   fi

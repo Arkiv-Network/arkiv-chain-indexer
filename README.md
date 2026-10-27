@@ -39,9 +39,12 @@ The normal Docker Compose stack defaults `SAVE_TRANSACTION_DATA=false`, so produ
 block metrics but do not persist per-transaction rows or expose transaction inspection UI. Set
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
 
-The `decoder` compose service runs the released
-[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) image, pinned to
-`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.0`; set `ARKIV_DECODER_IMAGE` to run a different build. The
+The `decoder` compose service runs
+[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) v0.3.0. That version
+is the decoder's `main` at commit `896e341` and is not tagged upstream yet, so no released image exists: compose
+builds it from that pinned git commit (`docker compose up --build`, or on first `up`), the same ref
+`.github/workflows/publish-images.yml` builds this repo's `decoder` image from. Set `ARKIV_DECODER_IMAGE` to run a
+different build (such as `ghcr.io/arkiv-network/arkiv-chain-indexer/decoder:<tag>`). The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table. v0.3 reads the UDC entity model of `@arkiv-network/sdk` 0.9 — schema-typed attributes, each with an indexed
@@ -242,7 +245,8 @@ metric columns.
 
 Kalarepa uses a key registered directly with Tiramisu's bouncer. A single key in
 `RPC_KEY_POOL_FILE` is shared by the scanner, gap filler, backfill scanner and Baseload
-workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately.
+workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately (including the
+entity explorer's relay and live balances, which use the same node).
 See [direct key provisioning and rotation](docs/tiramisu-rpc-keys.md). This setup needs
 neither the Hub browser generator nor the optional proxy below.
 
@@ -801,6 +805,25 @@ curl 'http://localhost:3000/balances?block=638598'
 curl 'http://localhost:3000/balances?address=0xaaaa...aaaa&limit=100'
 ```
 
+### `GET /balances/live`
+
+What an account holds now, asked of the indexed chain's node (`eth_getBalance` at `latest`) rather than
+read from the index. It uses the node and key `/shadow-rpc` relays to (`SHADOW_RPC_UPSTREAM` /
+`SHADOW_RPC_UPSTREAM_API_KEY`, or the node the scanner recorded) and shares that relay's per-minute rate
+limit. It works on nodes that serve only their head (such as Jalebi), where `SCANNER_TRACK_BALANCES` cannot,
+but has no history. The wallet page shows it.
+
+| Query param | Description |
+| --- | --- |
+| `address` | Required 20-byte hex address. |
+
+Returns `{ address, balanceWei, blockTag: "latest", fetchedAtUtc }`; `400` for a malformed address, `429`
+when rate limited, `502` when the node fails, `503` when no node is available.
+
+```sh
+curl 'http://localhost:3000/balances/live?address=0xaaaa...aaaa'
+```
+
 ### `GET /ranges`
 
 Returns aggregated fixed-size windows ordered by `range_start` ascending. Each request targets a single
@@ -961,9 +984,8 @@ Worth knowing before pointing a wallet at it:
   and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
   no business relying on. List it explicitly if a deployment's node really does.
 - **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`; the UDC node has no
-  `arkiv_getEntity`) are forwarded by default too.** On this path they read the node's entity state. The Data page defaults
-  to the experimental index on `/shadow-rpc/experimental`; administrators can select the backend relay
-  or compare both sources.
+  `arkiv_getEntity`) are forwarded by default too.** On this path they read the node's entity state. The entity
+  explorer does not use this relay; it reads the same node through `POST /entity-explorer/rpc`.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -1176,8 +1198,10 @@ entities covering every attribute type, every mutation, expiry, flags and revert
 the manifest the comparison reads. Point `--node` at the upstream RPC rather than
 a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
 
-The frontend's `/data` page offers the index as a third RPC source ("Indexer entity index (experimental)",
-`rpc=index` in shared links) when `/health` reports it enabled.
+The frontend's entity explorer (`/entity-explorer`) does not read the index: it queries the node through the
+`/entity-explorer/rpc` relay, since the index's query language does not match the node's yet (`!=` and the
+query-language messages; parity is deferred). The index answers on `/shadow-rpc/experimental` and feeds the
+entity page's current state (`GET /entity/<key>`).
 
 ### `GET /metrics` and `GET /admin/metrics`
 
@@ -1251,12 +1275,11 @@ dependency-free Node HTTP server that:
 1. Serves the Vite build output (`frontend/dist/`) as static files on port `23560`.
 2. Reverse-proxies any request whose path starts with `/api/` to the `backend` service (stripping the `/api`
    prefix). For example a browser request to `/api/blocks?blockGt=1` is forwarded to `http://backend:3000/blocks?blockGt=1`.
-3. Optionally forwards `POST /node-rpc` (JSON-RPC) and `GET /node-rpc/signed/v1/status` to an Arkiv node
-   (`NODE_RPC_UPSTREAM`), for a node the browser cannot reach with CORS. Only those two routes, without cookies or
-   credentials, bodies up to 1 MiB, at most `NODE_RPC_MAX_IN_FLIGHT` at once; answers are always JSON with `nosniff`,
-   a client that disconnects aborts its upstream request, and upstream failures are reported without the node's
-   address. The indexer backend is not involved.
-4. Falls back to `index.html` for any other unknown path (SPA routing).
+3. Serves the runtime config (`/config.js`) and falls back to `index.html` for any other unknown path (SPA
+   routing).
+
+The browser reaches the node's JSON-RPC only through the backend's `/api/entity-explorer/rpc` relay (the entity
+explorer, and "Load from node" for bytes contents); the frontend server proxies nothing else.
 
 The frontend production build also writes `.br` siblings for the files in `frontend/dist/`. The Node static server
 serves those Brotli files only when `NODE_ENV=production` and the browser sends `Accept-Encoding: br`; development
@@ -1266,16 +1289,17 @@ for its runtime stage.
 The UDC chain's model runs through every view: an attribute is typed (bool, i32, u64, u256, dec, bytes32, bytes,
 str, addr, key) and either **indexed** (queryable) or **stored** (returned, never matched by a query); an entity
 whose expiry is 2^64 − 1 is **permanent**; and a successful transaction pays **rent** in GLM beside its gas fee,
-burned outside gas. One attribute table is shared by the transaction page, the entity page and the Data tab's
-cards: Name | type | indexed or stored | value, with values in their canonical text (integers in exact decimal,
-u256 included; addresses in EIP-55; keys linked to their entity) and a query menu (run, add to the current query,
-copy the condition) only on indexed attributes — a stored one says "stored, not queryable". A bytes attribute
-shows its size and keccak256, which is all the index keeps; **Load from node** reads the content from the node in
-the browser (never through the backend) and checks it against that hash. The SDK's schema tag, the indexed str
-`arkiv.schema`, is lifted out of the rows into a `schema: <name>` badge that queries `arkiv.schema = str('<name>')`.
-A permanent entity shows **Permanent ∞** (the test is exactly `expiresAt === "18446744073709551615"`), no lifetime
-bar, and a tooltip saying rent is charged at most one cap ahead, with the cap from the node's
-`/signed/v1/status` when it is reachable, and that only the owner can extend beyond it.
+burned outside gas. One attribute table is shared by the transaction page and the entity page: Name | type |
+indexed or stored | value, with values in their canonical text (integers in exact decimal, u256 included;
+addresses in EIP-55; keys linked to their entity) and a query menu (query in the entity explorer, copy the
+condition) only on indexed attributes — a stored one says "stored, not queryable". A bytes attribute shows its
+size and keccak256, which is all the index keeps; **Load from node** reads the content from the node in the
+browser, through the backend's `/entity-explorer/rpc` relay (which stores nothing), and checks it against that
+hash. The SDK's schema tag, the indexed str `arkiv.schema`, is lifted out of the rows into a `schema: <name>`
+badge that queries `arkiv.schema = str('<name>')` in the entity explorer. A permanent entity shows
+**Permanent ∞** (the test is exactly `expiresAt === "18446744073709551615"`), no lifetime bar, and a tooltip
+saying rent is charged at most one cap ahead, with the cap from the node's `/signed/v1/status` when
+`VITE_NODE_STATUS_URL` points there, and that only the owner can extend beyond it.
 
 - **Transaction** — gas fee, rent ("outside gas") and total cost; a failed transaction says gas was charged and no
   rent, and marks each operation "not applied". Each operation card shows its entity, salt and flags (create),
@@ -1286,12 +1310,15 @@ bar, and a tooltip saying rent is charged at most one cap ahead, with the cap fr
   created / updated blocks, expiry or Permanent ∞, bytes held, the attribute table) and the version history: one row
   per operation with its version, event (created, patched with a change summary, extended, extended to
   permanent, transferred, deleted, or failed and not applied), expiry change and rent (the transaction's
-  `rentFee`, "shared by N ops" for a batch), each expandable to its attribute changes.
+  `rentFee`, "shared by N ops" for a batch), each expandable to its attribute changes. **On the node** opens the
+  entity as the node holds it now in the entity explorer.
 - **Blocks / Block / Ranges / Charts / Senders / Guzzlers** carry rent beside gas: a block's gas burnt, rent
   burned and total burned; per-transaction rent in the block and transaction lists; range totals and averages;
   chart series; and per-sender and per-guzzler rent and total cost.
 - **Statistics** adds gas fees, rent and burned for the period, indexed vs stored attribute counts per type, top
-  schemas (each linked to its Data query) and the untagged count.
+  schemas (each linked to its entity explorer query) and the untagged count.
+- **Home** puts the search at the top, with the latest blocks (base fee, gas plus rent burned) and transactions
+  (gas fee, and rent when charged) beside it; a wallet's page adds its live balance (`GET /balances/live`).
 
 Four views are provided when transaction data is enabled; otherwise the Transactions view and inspection links
 are hidden:
@@ -1300,31 +1327,25 @@ are hidden:
 - **Transactions** — stored transaction query table for exact block, block range, and date range inspection.
 - **Ranges** — table of aggregated windows with a `rangeSize` selector plus the same date / start filters.
 - **Charts** — interactive historical chart view with links from selected block points into Transactions.
-- **Data** (`/data`) — live entity state read from an Arkiv node. A CodeMirror editor (loaded as its own chunk
-  only on this page) takes a query with highlighting and completions for the node's grammar (system attributes
-  `$key $owner $creator $createdAt $expiresAt`; names such as `arkiv.schema`); a pasted bare entity key or
-  address is rewritten to `$key = key(..)` / `$owner = addr(..)`. Ctrl+Enter or **Run query** sends
-  `arkiv_query` selecting exactly the SDK's RpcSelect keys (`key owner creator createdAt updatedAt expiresAt
-  creationFlags attributeSchema attributes`; `attributeSchema` carries each attribute's `indexed` flag), and
-  the run is recorded in the URL as `/data?q=...&pageSize=...&expiration=...&rpc=...` so it can be shared and
-  reached by back/forward. Results are cards: key linked to its indexed history, schema badge, owner/creator,
-  creation flags, created/updated/expires blocks with dates estimated from `arkiv_getBlockTiming`, a lifetime
-  bar (none for a permanent entity), and the shared attribute table. "Load next page" resumes the node's cursor
-  at the block the first page was read at; "Expiring within 24h" filters the loaded cards client-side; "Count
-  query" asks the node or the index for `arkiv_getEntityCount`. Syntax errors show the node's message with a
-  caret at the reported position. The endpoint defaults to the deployment's **node** (`VITE_NODE_RPC_URL`,
-  called from the browser) when one is configured, else the **experimental entity index**
-  (`/api/shadow-rpc/experimental`); **Both (compare)** sends the query to the node and to the index at one block
-  and lists every field they disagree on (the index withholds bytes contents, so those are not compared); a
-  **custom RPC URL** can be named; in admin mode the **backend relay** (`/api/shadow-rpc`, which forwards the
-  entity reads to the node the backend is configured with, using the deployment's key and an administrator
-  session) joins the list, and is what Both compares against when there is no node of the deployment's own.
-  The choice is kept in browser local storage; a remembered or linked `backend` is lowered to the default
-  outside admin mode.
-  "Check connection" runs `eth_chainId`, `web3_clientVersion` and the three Arkiv reads against the selected
-  endpoint and reports each call's verdict, latency and result, plus the node's head block, block time, live
-  entity count and a sample entity key linked to its indexed history. The page also reads `/api/health` to warn
-  when the backend's `SHADOW_RPC_UPSTREAM_METHODS` does not cover the entity reads.
+- **Entity explorer** (`/entity-explorer`; `/data` still works) — entity state with user-defined columns, read
+  from the node through the Arkiv SDK rather than from the index. Entities carry typed attributes (bool, i32,
+  u64, u256, dec, str, addr, key, bytes32, bytes), each indexed or stored only, zero or more `bytes` blobs, and
+  an `arkiv.schema` tag when written through a named schema. The page reads the node through
+  `@arkiv-network/sdk@next`, by way of the backend's `POST /entity-explorer/rpc` relay, which forwards only
+  `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's own node (the one `/shadow-rpc` relays to), so
+  the explorer always shows the chain the indexer scans. A CodeMirror
+  editor (loaded as its own chunk) highlights the query language and completes the filterable entity fields,
+  `arkiv.schema` and the column names of the results on screen; a pasted bare entity key or address is
+  rewritten to `$key = key(..)` / `$owner = addr(..)`. The run is recorded in the URL as
+  `/entity-explorer?q=...&pageSize=...&expiration=...` so it can be shared and reached by back/forward. Results are
+  one row per entity — key, schema, owner, a preview of its attributes, expiry — and expand in place to the full
+  entity: owner, creator, flags, a lifetime bar with dates estimated from block timing,
+  every column with its type and whether it is indexed, and a viewer per blob (text/JSON, image, hex, gzip
+  decompression guided by a sibling `<name>Encoding` column). Schema chips narrow a mixed page to one schema.
+  Values open a menu to query by them, add them to the query, or copy them; unindexed ones say why they cannot
+  be filtered on. "Load next page" resumes the cursor at the block the first page was read at, "Expiring within
+  24h" filters loaded rows client-side, and a TypeScript panel shows the query as SDK code. An entity's
+  **History** link opens its indexed history on the entity page; search sends a bare entity key here.
 
 Every page carries a **scanner sync banner** above the content whenever the indexer trails the chain head. It
 polls `GET /sync` every 10 seconds and states how far behind the scanner is (in blocks and in chain time),
@@ -1348,10 +1369,7 @@ The frontend container reads these env vars:
 | `VITE_NETWORK_NAME` | _(empty)_ | Network name (e.g. `Cheesecake`) shown as a badge next to the header brand and in the page title; blank hides it. |
 | `VITE_TOKEN_SYMBOL` | `ETH` | Three-letter token symbol used in frontend native-token labels. |
 | `VITE_TRANSACTION_DECODER_BASE_URL` | _(off)_ | Base URL of an external decoder UI linked from the transaction page (`/?tx=<hash>`). Unset, empty or `off`: no link (the payload-era Atlas decoder cannot read UDC calldata). Build arg and runtime config. |
-| `VITE_NODE_RPC_URL` | _(none)_ | The browser's Arkiv node: the Data tab's default endpoint and where bytes contents load from. Absolute (the node must answer CORS) or same-origin, e.g. `/node-rpc` with `NODE_RPC_UPSTREAM`. Unset or `off`: the Data tab defaults to the experimental index and bytes cannot be loaded. Runtime config. |
-| `VITE_NODE_STATUS_URL` | `/node-rpc/signed/v1/status` with `VITE_NODE_RPC_URL=/node-rpc`, else none | The node's status document, read once for the rent cap shown on permanent entities. Set it for an absolute node URL (behind nginx the RPC path is often an exact `location = /rpc`, so it cannot be derived). Unreachable or not JSON: the tooltip says the cap is not available. `off` skips it. Runtime config. |
-| `NODE_RPC_UPSTREAM` | _(none)_ | Where `/node-rpc` forwards (JSON-RPC and `/signed/v1/status` only). Set it explicitly — it is never derived from `SHADOW_RPC_UPSTREAM`, which may carry an API key; with `docker-compose.prefill.yml` the frontend is on the node's network, so `NODE_RPC_UPSTREAM=http://<node container>:8545` plus `VITE_NODE_RPC_URL=/node-rpc` gives a same-origin line to a node without CORS. |
-| `NODE_RPC_MAX_IN_FLIGHT` | `32` | Requests `/node-rpc` forwards at once; beyond it it answers 503. |
+| `VITE_NODE_STATUS_URL` | _(none)_ | The node's `/signed/v1/status`, read once for the rent cap the permanence tooltip names. Absolute (the node must answer CORS) or same-origin (e.g. an nginx route to the node). Unset, `off`, unreachable or not JSON: the tooltip says the cap is not shown. Runtime config. |
 | `VITE_NO_BATCHER` | `false` | Set to `true` for networks without batcher metrics; hides batcher panels, fields, and chart options. |
 
 ### Developing the frontend locally

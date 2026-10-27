@@ -3,7 +3,8 @@
  * Full-page screenshots of the explorer's key pages after a UDC e2e run
  * (docs/udc-e2e.md): home, blocks, the mixed batch's block and transaction, a
  * mined failure, the 32-attribute create, and the permanent, toggled and wide
- * entities, the Data tab and statistics.
+ * entities, the entity explorer (every live entity, and the permanent one
+ * opened), search and statistics.
  *
  * Needs this checkout's devDependencies (`bun install`) and a browser
  * (`bunx playwright install chromium`).
@@ -24,6 +25,7 @@ const manifest: Manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const tx = (label: string) => manifest.transactions.find((t) => t.label === label);
 const entity = (label: string) => manifest.entities.find((e) => e.label === label)?.key;
 const root = frontend.replace(/\/+$/, "");
+const explorer = (query: string) => `/entity-explorer?q=${encodeURIComponent(query)}`;
 
 const pages: [string, string | undefined][] = [
   ["home", "/"],
@@ -36,7 +38,10 @@ const pages: [string, string | undefined][] = [
   ["entity-permanent", entity("heirloom") && `/entity/${entity("heirloom")}`],
   ["entity-toggle", entity("toggle") && `/entity/${entity("toggle")}`],
   ["entity-wide", entity("wide-32") && `/entity/${entity("wide-32")}`],
-  ["data", "/data"],
+  ["explorer-all", explorer("$expiresAt >= u64(0)")],
+  ["explorer-permanent", entity("heirloom") && explorer(`$key = key(${entity("heirloom")})`)],
+  ["search-entity", entity("heirloom") && `/search?q=${entity("heirloom")}`],
+  ["wallet", tx("batch-mixed") && `/address/${tx("batch-mixed")!.from}`],
   ["statistics", "/statistics"],
 ];
 

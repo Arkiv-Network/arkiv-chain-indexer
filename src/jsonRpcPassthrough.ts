@@ -29,8 +29,9 @@ export const JSON_RPC_LIMIT_EXCEEDED = -32005;
 /**
  * The Arkiv entity read methods of the UDC node. The scanner stores operation
  * metadata, never the entity state a node keeps (and never bytes contents), so
- * on `/shadow-rpc` these are answered upstream. They are read-only and cheap,
- * and the frontend's Data tab queries entities through them. The experimental
+ * on `/shadow-rpc` these are answered upstream. They are read-only and cheap
+ * (the frontend's entity explorer reads the node through its own relay,
+ * {@link ENTITY_EXPLORER_RPC_METHODS}). The experimental
  * entity index (`ENTITY_QUERY_INDEX`) answers the same three on
  * `/shadow-rpc/experimental` from a projection of that metadata instead. (The
  * UDC node has no `arkiv_getEntity`; it answers `-32601`.)
@@ -40,6 +41,17 @@ export const ARKIV_READ_METHODS: readonly string[] = [
   "arkiv_getEntityCount",
   "arkiv_getBlockTiming",
 ];
+
+/**
+ * What `POST /entity-explorer/rpc` relays to the indexed chain's node: exactly
+ * the calls the frontend makes there — the entity explorer's query and the
+ * block timing that dates its results, and the transaction and entity pages'
+ * "load from node" for a bytes value the index keeps only the size and hash of
+ * (an `arkiv_query` too, frontend/src/nodeBytes.ts). Fixed rather than
+ * configurable, because the frontend's code is what decides which methods it
+ * calls; a method it stops calling comes off here.
+ */
+export const ENTITY_EXPLORER_RPC_METHODS: readonly string[] = ["arkiv_query", "arkiv_getBlockTiming"];
 
 /**
  * Forwarded unless the deployment says otherwise. `eth_sendRawTransaction` is
@@ -84,6 +96,8 @@ export interface JsonRpcPassthroughOptions {
   now?: () => number;
   /** Injected in tests; defaults to `console.warn`. */
   onWarning?: (message: string, detail: unknown) => void;
+  /** Prefix for log lines, naming the endpoint this relay serves. Defaults to "shadow-rpc passthrough". */
+  logLabel?: string;
 }
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -98,6 +112,7 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly onWarning: (message: string, detail: unknown) => void;
+  private readonly logLabel: string;
   private nextId = 1;
   private windowStart = 0;
   private windowCount = 0;
@@ -111,6 +126,7 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.now = options.now ?? Date.now;
     this.onWarning = options.onWarning ?? ((message, detail) => console.warn(message, detail));
+    this.logLabel = options.logLabel ?? "shadow-rpc passthrough";
   }
 
   /** Human-readable summary for startup logs; deliberately omits the URL and key. */
@@ -155,7 +171,7 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
     } catch (error) {
       if (signal.aborted) {
         const message = `${method} timed out after ${this.timeoutMs / 1000}s waiting for the upstream node`;
-        this.onWarning(`shadow-rpc passthrough: ${message}:`, error);
+        this.onWarning(`${this.logLabel}: ${message}:`, error);
         throw new JsonRpcError(JSON_RPC_SERVER_ERROR, message, {
           reason: "upstream_timeout",
           timeoutMs: this.timeoutMs,
@@ -163,7 +179,7 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
       }
       // The cause can name the upstream host, and the URL may carry a key, so
       // the caller gets none of it — the operator reads it in the log instead.
-      this.onWarning(`shadow-rpc passthrough: ${method} could not reach the upstream node:`, error);
+      this.onWarning(`${this.logLabel}: ${method} could not reach the upstream node:`, error);
       throw new JsonRpcError(
         JSON_RPC_SERVER_ERROR,
         `${method} could not be forwarded to the upstream node`,
@@ -171,7 +187,15 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
     }
 
     if (!response.ok) {
-      this.onWarning(`shadow-rpc passthrough: ${method} upstream returned HTTP ${response.status}:`, text);
+      this.onWarning(`${this.logLabel}: ${method} upstream returned HTTP ${response.status}:`, text);
+      if (response.status === 429) {
+        // The upstream's own quota, not ours: say so, so a caller backs off
+        // instead of reading it as the node being broken.
+        throw new JsonRpcError(
+          JSON_RPC_LIMIT_EXCEEDED,
+          `${method} is rate limited by the upstream node; retry shortly`,
+        );
+      }
       if (response.status === 504) {
         throw new JsonRpcError(
           JSON_RPC_SERVER_ERROR,
@@ -189,7 +213,7 @@ export class JsonRpcPassthrough implements JsonRpcForwarder {
     try {
       payload = JSON.parse(text);
     } catch {
-      this.onWarning(`shadow-rpc passthrough: ${method} upstream returned unparseable JSON:`, text);
+      this.onWarning(`${this.logLabel}: ${method} upstream returned unparseable JSON:`, text);
       throw new JsonRpcError(
         JSON_RPC_SERVER_ERROR,
         `${method} received a malformed response from the upstream node`,

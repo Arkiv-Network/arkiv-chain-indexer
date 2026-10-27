@@ -1,21 +1,24 @@
-// The browser's own line to an Arkiv node, beside the indexer backend: the
-// Data tab's default endpoint, where bytes contents are loaded from (the index
-// never holds them, and they never pass through the backend), and where the
-// rent cap comes from. Configured at runtime (`/config.js`):
+// The browser's line to the indexed chain's node, beside the index.
 //
-//   VITE_NODE_RPC_URL     JSON-RPC endpoint, absolute or same-origin
-//                         (`/node-rpc` when frontend/server.js proxies
-//                         NODE_RPC_UPSTREAM); unset or `off` for none.
-//   VITE_NODE_STATUS_URL  the node's `/signed/v1/status`. Derived only for the
-//                         same-origin `/node-rpc` form (the passthrough serves
-//                         it); an absolute node URL cannot be extended safely
-//                         (nginx often routes an exact `location = /rpc`), so it
-//                         needs this set. `off` for none.
+// JSON-RPC goes through the backend's entity-explorer relay
+// (`POST /api/entity-explorer/rpc`, `ENTITY_EXPLORER_RPC_METHODS` in
+// src/jsonRpcPassthrough.ts): it forwards `arkiv_query` and
+// `arkiv_getBlockTiming`, nothing else, to the node the indexer scans and stores
+// nothing. The entity explorer reads entities through it with the SDK
+// (entityExplorer/lib/client.ts); the transaction and entity pages load a bytes
+// attribute's content through it (nodeBytes.ts), since the index keeps only a
+// bytes value's size and keccak256.
 //
-// A node called cross-origin must answer CORS; the rent cap is optional and
-// every reader degrades without it.
+// The node's rent cap is not a JSON-RPC method: it comes from the node's
+// `/signed/v1/status`, read only when the deployment says where that is
+// (`VITE_NODE_STATUS_URL` in `/config.js`, absolute with CORS or same-origin,
+// e.g. an nginx route; unset or `off` for none). Every reader degrades
+// without it.
 
 import { envValues, type RuntimeConfig } from "./runtimeConfig";
+
+/** `POST /entity-explorer/rpc` on the backend, behind the frontend's `/api` prefix. */
+export const NODE_RELAY_PATH = "/api/entity-explorer/rpc";
 
 const OFF_VALUES = new Set(["off", "none", "false", "0", "disabled"]);
 
@@ -31,40 +34,68 @@ function configuredUrl(value: string | undefined): string | null {
   }
 }
 
-/** The configured node JSON-RPC URL, or null when there is none. */
-export function readNodeRpcUrl(env: RuntimeConfig = envValues()): string | null {
-  return configuredUrl(env.VITE_NODE_RPC_URL);
-}
-
-/** The same-origin passthrough of frontend/server.js, which also serves the status document. */
-export const NODE_RPC_PASSTHROUGH_PATH = "/node-rpc";
-
-/**
- * The node's status document URL: as configured, or derived for the
- * `/node-rpc` passthrough only; null otherwise.
- */
+/** The node's status document URL, as configured; null when there is none. */
 export function readNodeStatusUrl(env: RuntimeConfig = envValues()): string | null {
-  const explicit = env.VITE_NODE_STATUS_URL?.trim();
-  if (explicit) return configuredUrl(explicit);
-  const rpc = readNodeRpcUrl(env)?.replace(/\/+$/, "");
-  return rpc === NODE_RPC_PASSTHROUGH_PATH ? `${NODE_RPC_PASSTHROUGH_PATH}/signed/v1/status` : null;
+  return configuredUrl(env.VITE_NODE_STATUS_URL);
 }
 
-export const NODE_RPC_URL = readNodeRpcUrl();
 export const NODE_STATUS_URL = readNodeStatusUrl();
 
-/** A credential baked into the node URL is never shown. */
-export function describeNodeUrl(url: string | null): string {
-  if (!url) return "not configured";
-  if (url.startsWith("/")) return url;
-  try {
-    const parsed = new URL(url);
-    parsed.username = "";
-    parsed.password = "";
-    return parsed.toString();
-  } catch {
-    return url;
+// ---------------------------------------------------------------------------
+// JSON-RPC through the relay
+
+/** A JSON-RPC error the node (or the relay, for transport faults and its rate limit) answered with. */
+export class NodeRpcError extends Error {
+  constructor(
+    message: string,
+    readonly code: number | null,
+  ) {
+    super(message);
+    this.name = "NodeRpcError";
   }
+}
+
+export interface NodeRelayDeps {
+  fetchImpl?: typeof fetch;
+  /** Defaults to {@link NODE_RELAY_PATH}. */
+  url?: string;
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+let nextRequestId = 1;
+
+/**
+ * One JSON-RPC call to the node through the relay. Cookies stay home: the
+ * relay is a public read path, and nothing on it needs a session.
+ */
+export async function callNodeRelay<T>(method: string, params: unknown[], deps: NodeRelayDeps = {}): Promise<T> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const id = nextRequestId++;
+  let response: Response;
+  try {
+    response = await fetchImpl(deps.url ?? NODE_RELAY_PATH, {
+      method: "POST",
+      credentials: "omit",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new NodeRpcError(`the node could not be reached (${error instanceof Error ? error.message : String(error)})`, null);
+  }
+  const body: unknown = await response.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    throw new NodeRpcError(`the node relay answered HTTP ${response.status} without JSON-RPC`, null);
+  }
+  const { result, error } = body as { result?: unknown; error?: { code?: unknown; message?: unknown } };
+  if (error && typeof error === "object") {
+    const code = typeof error.code === "number" ? error.code : null;
+    const message = typeof error.message === "string" ? error.message : "the node answered with an error";
+    throw new NodeRpcError(message, code);
+  }
+  if (!response.ok) throw new NodeRpcError(`the node relay answered HTTP ${response.status}`, null);
+  return result as T;
 }
 
 // ---------------------------------------------------------------------------
