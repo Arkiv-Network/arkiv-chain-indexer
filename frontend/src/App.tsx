@@ -9,6 +9,7 @@ import {
   loadBaseloadConfig,
   saveBaseloadConfig,
   updateBaseloadConfig as putBaseloadConfig,
+  type HealthResponse,
   type BaseloadStateResponse,
   type BaseloadTaskStatus,
   type BaseloadWorkerBalance,
@@ -30,6 +31,7 @@ import { ChartsView } from "./ChartsView";
 import { CedricView } from "./CedricView";
 import { GuzzlersView } from "./GuzzlersView";
 import { HealthView } from "./HealthView";
+import { GenesisStatusBanner } from "./GenesisStatusBanner";
 import { SyncStatusBanner } from "./SyncStatusBanner";
 import { HomeView } from "./HomeView";
 import { StatisticsView } from "./StatisticsView";
@@ -76,6 +78,7 @@ type ThemeOverride = "light" | "dark" | "";
 
 export function App() {
   const auth = useAuth();
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [clientLocation, setClientLocation] = useState(getCurrentLocation);
   const [transactionDataEnabled, setTransactionDataEnabled] = useState<boolean | null>(null);
   const [baseloadConfig, setBaseloadConfig] = useState<BaseloadConfig>(EMPTY_BASELOAD_CONFIG);
@@ -151,9 +154,23 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    fetchHealth()
-      .then((body) => setTransactionDataEnabled(body.features.transactionData))
-      .catch(() => setTransactionDataEnabled(true));
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      let interval = 60_000;
+      try {
+        const body = await fetchHealth();
+        if (cancelled) return;
+        setHealth(body);
+        setTransactionDataEnabled(body.features.transactionData);
+        if (body.features.entityQueryIndex && body.features.entityQueryIndex.ready === false) interval = 10_000;
+      } catch {
+        if (!cancelled) setTransactionDataEnabled((enabled) => enabled ?? true);
+      }
+      if (!cancelled) timer = setTimeout(refresh, interval);
+    };
+    void refresh();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   useEffect(() => {
@@ -488,6 +505,7 @@ export function App() {
           </div>
         </div>
       </header>
+      <GenesisStatusBanner index={health?.features.entityQueryIndex} />
       <SyncStatusBanner
         timeZone={timeZone}
         minLagSeconds={pageSettings.scannerDelayWarningAgeMs / 1000}

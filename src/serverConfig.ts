@@ -86,7 +86,7 @@ export interface ServerConfig {
    * born with (a seeded genesis) and imports them. `off` never asks; an
    * import the offline importer started is finished either way.
    */
-  entityIndexGenesis: "auto" | "off";
+  entityIndexGenesis: "auto" | "off" | "managed";
   /** The node the genesis import reads; defaults to the shadow-RPC upstream. */
   entityIndexGenesisRpc?: { url: string; apiKey?: string };
   /** The largest genesis the RPC walk takes on; beyond it the import waits for the offline importer. */
@@ -263,7 +263,7 @@ const SPEC: CliSpec = {
     {
       flags: "--entity-index-genesis <auto|off>",
       description:
-        "Whether the entity index imports the entities the chain was born with (a seeded genesis) from the node: auto asks the node once and imports what block 0 holds; off never asks. Defaults to auto (or ENTITY_INDEX_GENESIS).",
+        "Whether the entity index imports the entities the chain was born with (a seeded genesis) from the node: auto asks the node once and imports what block 0 holds; off never asks; managed waits for the external importer and gates entity reads. Defaults to auto (or ENTITY_INDEX_GENESIS).",
       env: ["ENTITY_INDEX_GENESIS"],
       default: "auto",
     },
@@ -530,10 +530,10 @@ export function parseServerConfig(args: string[], env: NodeJS.ProcessEnv = proce
   };
 
   const genesisModeValue = cli.value("entity-index-genesis")?.trim().toLowerCase() || "auto";
-  if (genesisModeValue !== "auto" && genesisModeValue !== "off") {
-    throw new Error(`--entity-index-genesis must be auto or off, got ${genesisModeValue}`);
+  if (genesisModeValue !== "auto" && genesisModeValue !== "off" && genesisModeValue !== "managed") {
+    throw new Error(`--entity-index-genesis must be auto, off or managed, got ${genesisModeValue}`);
   }
-  const entityIndexGenesis: "auto" | "off" = genesisModeValue;
+  const entityIndexGenesis: "auto" | "off" | "managed" = genesisModeValue;
   const genesisRpcUrl = cli.value("entity-index-genesis-rpc")?.trim() || passthroughUrl;
   let entityIndexGenesisRpc: { url: string; apiKey?: string } | undefined;
   if (genesisRpcUrl) {

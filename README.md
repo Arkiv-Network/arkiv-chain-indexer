@@ -41,7 +41,7 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 
 The `decoder` compose service runs the released
 [arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) image, pinned to
-`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.1`; set `ARKIV_DECODER_IMAGE` to run a different build. The
+`ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.2.2`; set `ARKIV_DECODER_IMAGE` to run a different build. The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table — payloads and calldata are never persisted, only entity keys, attributes, content type, expiry, and the
@@ -1021,6 +1021,15 @@ refold is idempotent), and once a minute it looks for operation rows written *be
 fill, a rescan, the backfill scanner — and refolds those keys too. A first build walks the whole stored
 history in chunks and takes minutes for a few hundred thousand blocks. All writes run under an advisory lock,
 so two backends on one database never fold on top of each other.
+
+For managed post-genesis provisioning, private artifact references, and recovery, see
+[managed explorer genesis import](docs/genesis-index-bootstrap.md).
+
+Entity reads **fail closed** while genesis import is pending, running, unavailable or failed:
+HTTP endpoints return 503 and entity RPC requests report that the index is incomplete,
+rather than serving a partial set of entities. The frontend shows import progress from
+`/api/health` → `features.entityQueryIndex.readiness` and `genesis.imported` / `genesis.total`.
+The banner clears when the index is ready; block scanning and rollout readiness remain independent.
 
 **Genesis entities (seeded chains).** A devnet built with
 [arkiv-prefill](https://github.com/Arkiv-Network/arkiv-prefill) carries its dataset in the block-0 state:

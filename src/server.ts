@@ -356,6 +356,10 @@ export interface HealthResponseBody {
 }
 
 export interface EntityQueryIndexHealth {
+  /** Managed retained-dump/bootstrap contract supported by this app image. */
+  genesisBootstrapVersion: 1;
+  ready: boolean;
+  readiness: string;
   path: string;
   methods: string[];
   /** First block the index can attribute entities from; null until the projector has started. */
@@ -374,6 +378,9 @@ export interface EntityQueryIndexHealth {
 }
 
 export interface EntityGenesisImportHealth {
+  chainId: string | null;
+  genesisHash: string | null;
+  artifactSha256: string | null;
   status: GenesisImportStatus;
   /** `walk` while rows are written, `repair` while genesis entities with later operations are refolded. */
   phase: "walk" | "repair" | null;
@@ -870,7 +877,8 @@ async function routeRequest(
     try {
       const input = parseSearchInput(url.searchParams, url.pathname.endsWith("/suggest"));
       if (!options.search) return jsonError(503, "Search is unavailable");
-      const body = await options.search.search(input, transactionDataEnabled);
+      const readiness = (await options.entityIndex?.getProgress())?.readiness;
+      const body = await options.search.search(input, transactionDataEnabled, readiness?.ready === false ? "incomplete" : readiness?.generation);
       return compressedJsonResponse(request, body);
     } catch (error) {
       if (error instanceof SearchInputError) return jsonError(400, error.message);
@@ -1172,6 +1180,9 @@ async function readEntityIndexHealth(
   const projected = progress.projectedThroughBlock;
   const genesis = stats.genesis;
   return {
+    genesisBootstrapVersion: 1,
+    ready: progress.readiness?.ready !== false && projected !== undefined,
+    readiness: progress.readiness?.ready === false ? progress.readiness.reason : projected === undefined ? "projection-pending" : "ready",
     path: JSON_RPC_EXPERIMENTAL_PATH,
     methods: [...ARKIV_INDEX_METHODS],
     floorBlock: progress.floorBlock?.toString() ?? null,
@@ -1183,6 +1194,9 @@ async function readEntityIndexHealth(
     lastFoldAtUtc: progress.lastFoldAt ?? null,
     genesis: genesis
       ? {
+          chainId: genesis.chainId,
+          genesisHash: genesis.genesisHash,
+          artifactSha256: genesis.artifactSha256 ?? null,
           status: genesis.status,
           phase: genesis.phase,
           source: genesis.source,
@@ -1557,7 +1571,16 @@ async function handleGetEntityByKey(
 ): Promise<Response> {
   // Cache keys must be pre-normalized: the cache stores keys verbatim, and
   // the storage NOTIFY payloads that drive invalidation are lowercase.
+  const progress = await options.entityIndex?.getProgress();
+  if (progress?.readiness?.ready === false) return jsonError(503, `Entity index incomplete: ${progress.readiness.reason}`);
   const normalized = entityKey.toLowerCase();
+  const generation = progress?.readiness?.generation;
+  // Invalidate the same normalized key on a generation change. Scanner NOTIFY
+  // continues to use the original cache key.
+  if (options.entityHistoryCache && generation !== undefined) {
+    const last = entityCacheGenerations.get(options.entityHistoryCache);
+    if (last !== generation) { options.entityHistoryCache.clear(); entityCacheGenerations.set(options.entityHistoryCache, generation); }
+  }
   const limit = options.entityHistoryLimit ?? DEFAULT_ENTITY_HISTORY_LIMIT;
   const loader = () => buildEntityByKeyResponse(normalized, storage, limit, options.entityIndex);
   // Not-found responses are cached too: the create NOTIFY evicts them the
@@ -1567,6 +1590,8 @@ async function handleGetEntityByKey(
     : await loader();
   return responseFromCached(cached);
 }
+
+const entityCacheGenerations = new WeakMap<ResponseCache, string>();
 
 async function buildEntityByKeyResponse(
   normalizedEntityKey: string,

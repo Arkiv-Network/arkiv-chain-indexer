@@ -103,7 +103,7 @@ export async function gatherIndexerStatistics(
       entities.lastFoldAtUtc = progress.get("last_fold_at") ?? null;
       const genesis = progress.get("genesis_import");
       entities.genesisStatus = genesis ? (JSON.parse(genesis) as { status: string }).status : null;
-      entities.status = entities.genesisStatus === "running" ? "importing" : entities.asOfBlock === null ? "not-ready" : "available";
+      entities.status = entities.genesisStatus === "running" ? "importing" : (entities.genesisStatus !== null && entities.genesisStatus !== "done" && entities.genesisStatus !== "none") || entities.asOfBlock === null ? "not-ready" : "available";
       if (entities.status === "available") {
         const at = entities.asOfBlock!;
         if (head !== null) entities.lagBehindObservedHead = (BigInt(head) > BigInt(at) ? BigInt(head) - BigInt(at) : 0n).toString();

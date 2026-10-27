@@ -123,7 +123,7 @@ export class ResponseCache {
     }
 
     const running = this.inflight.get(key);
-    if (running) {
+    if (running && !running.stale) {
       this.coalesced += 1;
       return running.promise;
     }
@@ -138,7 +138,8 @@ export class ResponseCache {
         }
         return result;
       } finally {
-        this.inflight.delete(key);
+        // An invalidation may have started a newer load for this same key.
+        if (this.inflight.get(key) === marker) this.inflight.delete(key);
       }
     })();
     this.inflight.set(key, marker);
