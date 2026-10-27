@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { fetchEntityByKey, type EntityByKeyResponse, type StoredEntityOperation } from "./api";
 import { isPermanentEntity, isPermanentLifetime } from "./entityLifetime";
 import { fmtBytes, fmtDurationSeconds, fmtInteger } from "./format";
-import { PageBreadcrumbs } from "./PageBreadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import { writeEntityPermalink } from "./permalinks";
 import { AddressCell } from "./TransactionsView";
 import { TransactionHashLink } from "./TransactionView";
@@ -84,17 +84,8 @@ export function EntityView({ entityKey, onLocationChange, timeZone, blockTimeMs 
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
-      <div className="flex flex-col gap-1.5">
-        <PageBreadcrumbs
-          items={[
-            { view: "home", label: "Home" },
-            { view: "entity", label: "Entity details" },
-          ]}
-          onLocationChange={onLocationChange}
-        />
-        <h2 className="font-heading text-lg font-black tracking-tight">Entity</h2>
-      </div>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+      <PageHeader title="Entity" />
 
       <form onSubmit={onSubmit} className="flex flex-wrap items-center gap-2">
         <Input

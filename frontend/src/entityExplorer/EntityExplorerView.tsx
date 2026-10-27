@@ -6,7 +6,7 @@
 // fetching), saved queries in useQueryHistory, and the editor's text here.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PageBreadcrumbs } from "@/PageBreadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import { buildPermalinkHref } from "@/permalinks";
 import { EntityResults } from "./components/EntityResults";
 import { QueryHistoryDialog } from "./components/QueryHistoryDialog";
@@ -18,7 +18,6 @@ import { inferSchema } from "./lib/entity";
 import { appendQueryExpression, explorerLinkFilters, normalizeQueryInput } from "./lib/query";
 
 interface EntityExplorerViewProps {
-  onLocationChange: () => void;
   timeZone: string;
 }
 
@@ -30,7 +29,7 @@ export function EntityExplorerView(props: EntityExplorerViewProps) {
   );
 }
 
-function EntityExplorerPage({ onLocationChange, timeZone }: EntityExplorerViewProps) {
+function EntityExplorerPage({ timeZone }: EntityExplorerViewProps) {
   const search = useEntitySearch();
   const { executedQuery, pageSize, expiration } = search;
 
@@ -88,17 +87,8 @@ function EntityExplorerPage({ onLocationChange, timeZone }: EntityExplorerViewPr
   const permalink = executedQuery ? buildPermalinkHref("entity-explorer", explorerLinkFilters(executedQuery, pageSize, expiration)) : null;
 
   return (
-    <section className="mx-auto flex w-full max-w-415 flex-col gap-6 px-3 md:px-6">
-      <div className="flex flex-col gap-1.5">
-        <PageBreadcrumbs
-          items={[
-            { view: "home", label: "Home" },
-            { view: "entity-explorer", label: "Entity explorer" },
-          ]}
-          onLocationChange={onLocationChange}
-        />
-        <h2 className="font-heading text-lg font-black tracking-tight">Entity explorer</h2>
-      </div>
+    <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+      <PageHeader title="Entities" />
 
       <QueryPanel
         query={query}

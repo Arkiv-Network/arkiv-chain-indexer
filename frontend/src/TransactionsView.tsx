@@ -9,8 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FilterField, FilterGroup, FiltersPanel } from "@/components/filters-panel";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { CedricOnTimer } from "./Cedric";
+import { PageSearch } from "./OmniSearch";
+import type { SearchKind } from "./searchApi";
 import { fmtBytes, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
 import {
   buildAddressPermalinkHref,
@@ -122,6 +125,8 @@ const EMPTY: TransactionFilters = {
 // instead of the empty "enter an address…" prompt.
 const BASELINE_BLOCK_GT = "0";
 const CLEARED: TransactionFilters = { ...EMPTY, blockGt: BASELINE_BLOCK_GT };
+
+const TRANSACTION_SEARCH_SCOPE: readonly SearchKind[] = ["transaction", "address"];
 
 function transactionColumns(
   timeZone: string,
@@ -372,7 +377,15 @@ export function TransactionsView({
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <h2 className="font-heading text-lg font-black tracking-tight">Address transactions</h2>
+      <PageHeader
+        title={locked ? "Wallet" : "Transactions"}
+        description={locked ? "Transactions sent from this address." : undefined}
+      />
+      <PageSearch
+        scope={TRANSACTION_SEARCH_SCOPE}
+        placeholder="Search by transaction hash or address…"
+        onLocationChange={onLocationChange}
+      />
       {locked ? (
         <div className="flex items-center gap-2 border border-border bg-card px-3 py-2">
           <AddressFace address={lockedAddr} />
