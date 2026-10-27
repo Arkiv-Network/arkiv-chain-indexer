@@ -69,6 +69,7 @@ describe("summarizeGuzzlerHistory", () => {
         transactionCount: 9,
         totalGasUsed: "250",
         totalFeeWei: "500000000000000000",
+        totalRentFeeWei: "11804100000000000",
         firstSeen: "2026-05-30T10:01:02.000Z",
         lastSeen: "2026-05-30T10:01:59.000Z",
       }),
@@ -86,6 +87,7 @@ describe("summarizeGuzzlerHistory", () => {
     expect(summary.totalTransactions).toBe(16);
     expect(summary.totalGasUsed).toBe("420");
     expect(summary.totalFeeWei).toBe("1750000000000000000");
+    expect(summary.totalRentFeeWei).toBe("11804100000000000");
     expect(summary.peakTransactions).toBe(9);
     expect(summary.peakMinuteStart).toBe(point(11).startTime);
     expect(summary.firstSeen).toBe("2026-05-30T10:00:05.000Z");
@@ -99,6 +101,7 @@ describe("summarizeGuzzlerHistory", () => {
       totalTransactions: 0,
       totalGasUsed: "0",
       totalFeeWei: "0",
+      totalRentFeeWei: "0",
       peakTransactions: 0,
       peakMinuteStart: null,
       firstSeen: null,

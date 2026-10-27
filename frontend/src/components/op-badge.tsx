@@ -17,18 +17,17 @@ const TONE_CLASS: Record<Tone, string> = {
 // Arkiv op and an "ExpiryExtended" entity event read as the same color.
 const OP_TONE: Record<string, Tone> = {
   create: "emerald",
-  update: "sky",
+  patch: "sky",
   extend: "amber",
   transfer: "violet",
   delete: "red",
   expire: "muted",
-  reference: "sky",
 };
 
 const badgeClass =
   "inline-flex items-center rounded-none border px-1.5 py-0.5 text-[10px] font-medium tracking-wide whitespace-nowrap uppercase";
 
-/** Small pill for a single Arkiv operation type (create/update/extend/...). */
+/** Small pill for a single Arkiv operation type (create/patch/extend/transfer/delete). */
 export function OpBadge({ operation, children }: { operation: string; children?: ReactNode }) {
   const tone = OP_TONE[operation] ?? "muted";
   return <span className={cn(badgeClass, TONE_CLASS[tone])}>{children ?? operation}</span>;

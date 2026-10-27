@@ -98,9 +98,15 @@ function blockColumns(
     },
     {
       key: "burntFeesWei",
-      label: "Burnt fees",
+      label: "Gas burnt",
       className: "text-right font-mono tabular-nums",
       render: (row) => fmtTokenAmount(row.burntFeesWei ?? "0", tokenSymbol),
+    },
+    {
+      key: "totalRentFeeWei",
+      label: "Rent",
+      className: "text-right font-mono tabular-nums",
+      render: (row) => fmtTokenAmount(row.totalRentFeeWei ?? "0", tokenSymbol),
     },
     {
       key: "averageFeePriceWei",

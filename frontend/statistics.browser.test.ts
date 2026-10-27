@@ -38,8 +38,8 @@ suite("statistics activity period UI", () => {
       const period = page.getByLabel("Activity period", { exact: true });
       const activity = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Indexed activity/ }) });
       const entities = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Entity state/ }) });
-      const payload = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Current active payload state/ }) });
-      const inputs = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Transaction input and payloads/ }) });
+      const payload = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Current active bytes state/ }) });
+      const inputs = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Transaction input and attribute writes/ }) });
       const operations = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Entity operations/ }) });
       await activity.waitFor();
       expect(await period.inputValue()).toBe("all");

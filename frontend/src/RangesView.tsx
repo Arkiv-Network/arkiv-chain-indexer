@@ -130,10 +130,24 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
     },
     {
       key: "totalBurntFeesWei",
-      label: "Total burnt",
+      label: "Gas burnt",
       group: "Rewards",
       className: num,
       render: (row) => fmtTokenAmount(row.totalBurntFeesWei, tokenSymbol),
+    },
+    {
+      key: "totalRentFeeWei",
+      label: "Total rent",
+      group: "Rewards",
+      className: num,
+      render: (row) => fmtTokenAmount(row.totalRentFeeWei, tokenSymbol),
+    },
+    {
+      key: "totalBurnedWei",
+      label: "Total burned",
+      group: "Rewards",
+      className: num,
+      render: (row) => fmtTokenAmount(row.totalBurnedWei, tokenSymbol),
     },
     {
       key: "averageBlockRewardWei",
@@ -144,10 +158,17 @@ function rangeColumns(timeZone: string, tokenSymbol: string): Column<StoredBlock
     },
     {
       key: "averageBurntFeesWei",
-      label: "Avg burnt/block",
+      label: "Avg gas burnt/block",
       group: "Rewards",
       className: num,
       render: (row) => fmtTokenAmount(row.averageBurntFeesWei, tokenSymbol),
+    },
+    {
+      key: "averageRentFeeWei",
+      label: "Avg rent/block",
+      group: "Rewards",
+      className: num,
+      render: (row) => fmtTokenAmount(row.averageRentFeeWei, tokenSymbol),
     },
     {
       key: "averageFeePriceWei",

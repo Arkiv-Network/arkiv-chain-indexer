@@ -21,6 +21,10 @@ interface PopupPosition {
 
 const VIEWPORT_MARGIN = 8;
 
+// Layout effects only measure an open popup; on the server (static rendering in
+// tests) there is nothing to measure, so a plain effect avoids React's warning.
+const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -66,7 +70,7 @@ export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
     setPosition({ top, left, maxHeight, arrowLeft, placement });
   }, []);
 
-  useLayoutEffect(() => {
+  useBrowserLayoutEffect(() => {
     if (!open) return;
     updatePosition();
     window.addEventListener("scroll", updatePosition, true);
@@ -78,7 +82,7 @@ export function InfoTooltip({ label, children, size = 14 }: InfoTooltipProps) {
   }, [open, updatePosition]);
 
   // After the popup is in the DOM, re-measure so we can clamp using the real width/height.
-  useLayoutEffect(() => {
+  useBrowserLayoutEffect(() => {
     if (!open) return;
     if (!popupRef.current) return;
     updatePosition();

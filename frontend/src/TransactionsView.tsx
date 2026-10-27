@@ -82,6 +82,7 @@ type SortKey =
   | "priorityFeeWei"
   | "maxPriorityFeePerGasWei"
   | "transactionFeeWei"
+  | "rentFeeWei"
   | "arkivOps";
 
 interface Column {
@@ -199,17 +200,24 @@ function transactionColumns(
   };
   const txFee: Column = {
     key: "transactionFeeWei",
-    label: "Tx fee",
+    label: "Gas fee",
     className: "text-right font-mono tabular-nums",
     render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
+  };
+  const rent: Column = {
+    key: "rentFeeWei",
+    label: "Rent",
+    className: "text-right font-mono tabular-nums",
+    render: (row) =>
+      row.status === "0" ? <span className="text-muted-foreground" title="Failed: gas charged, no rent">—</span> : fmtTokenAmount(row.rentFeeWei, tokenSymbol),
   };
 
   // When scoped to a single address every row shares the same sender, so the
   // From column is redundant — lead with the nonce instead.
   if (addressSelected) {
-    return [nonce, block, hash, arkivOps, gas, inputData, inputDataCompressed, effectiveFee, txFee];
+    return [nonce, block, hash, arkivOps, gas, inputData, inputDataCompressed, effectiveFee, txFee, rent];
   }
-  return [block, hash, arkivOps, from, nonce, gas, inputData, inputDataCompressed, effectiveFee, txFee];
+  return [block, hash, arkivOps, from, nonce, gas, inputData, inputDataCompressed, effectiveFee, txFee, rent];
 }
 
 function loadFilters(locationSearch: string, lockedAddress: string | null): TransactionFilters {
@@ -663,7 +671,8 @@ function sortValue(row: StoredTransaction, key: SortKey): string | bigint {
     key === "effectiveGasPriceWei" ||
     key === "priorityFeeWei" ||
     key === "maxPriorityFeePerGasWei" ||
-    key === "transactionFeeWei"
+    key === "transactionFeeWei" ||
+    key === "rentFeeWei"
   ) {
     return toBigInt(row[key]);
   }

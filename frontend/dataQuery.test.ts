@@ -1,14 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   appendQueryExpression,
-  attributeFilterExpression,
   buildQueryParams,
   dataPageFilters,
   decodeQueryResult,
   describeQueryError,
   estimateBlockTimestampMs,
-  formatAttributeValue,
-  formatQueryLiteral,
+  expiryBlockNumber,
   formatRelativeMs,
   isExpiringSoon,
   lifetimeProgress,
@@ -23,7 +21,8 @@ import { RpcCallError, type BlockTiming } from "./src/dataRpc";
 const KEY = "0x325ab0cef69bb69888e120bd3b5e4bd26f02397bf3d6898c6be1d5f361f3a649";
 const OWNER = "0xc5b669e2c8d61aedc97d71f934a3c6d1d8c71e4c";
 
-// As answered by the tiramisu node on 2026-09-02 (payload not selected).
+// The shape the UDC node answers with the full select (attributeSchema
+// carrying `indexed`; bytes as 0x data), as on the live chain 2026-10-27.
 const SAMPLE_RESULT = {
   data: [
     {
@@ -34,12 +33,19 @@ const SAMPLE_RESULT = {
       updatedAt: "0x17906",
       expiresAt: "0x17c8a",
       creationFlags: { readonly: false, permissionlessExtension: false, raw: 0 },
-      contentType: "application/octet-stream",
+      attributeSchema: [
+        { name: "body", type: "bytes", indexed: false },
+        { name: "flag", type: "bool", indexed: false },
+        { name: "level", type: "i32", indexed: true },
+        { name: "project", type: "str", indexed: true },
+        { name: "random_number_0", type: "u64", indexed: true },
+      ],
       attributes: [
-        { name: "project", type: "str", value: "arkiv-chain-indexer-baseload" },
-        { name: "random_number_0", type: "u64", value: "0xa46a036e41c2" },
+        { name: "body", type: "bytes", value: "0x616263" },
         { name: "flag", type: "bool", value: true },
         { name: "level", type: "i32", value: 7 },
+        { name: "project", type: "str", value: "arkiv-chain-indexer-baseload" },
+        { name: "random_number_0", type: "u64", value: "0xa46a036e41c2" },
       ],
     },
   ],
@@ -83,11 +89,14 @@ describe("page settings", () => {
 });
 
 describe("buildQueryParams", () => {
-  test("selects everything but the payload and encodes the limit as hex", () => {
+  test("selects exactly the SDK's RpcSelect keys and encodes the limit as hex", () => {
     const [query, options] = buildQueryParams({ query: "*", pageSize: 25 });
     expect(query).toBe("*");
     expect(options.limit).toBe("0x19");
-    expect(options.select).not.toHaveProperty("payload");
+    // The UDC node answers -32602 to any other key (contentType and payload included).
+    expect(Object.keys(options.select).sort()).toEqual(
+      ["attributeSchema", "attributes", "createdAt", "creationFlags", "creator", "expiresAt", "key", "owner", "updatedAt"],
+    );
     expect(options.select.attributes).toBe(true);
     expect(options).not.toHaveProperty("cursor");
     expect(options).not.toHaveProperty("atBlock");
@@ -110,7 +119,7 @@ describe("buildQueryParams", () => {
 });
 
 describe("decodeQueryResult", () => {
-  test("decodes the node's shape into numbers and display strings", () => {
+  test("decodes the node's shape, with indexed flags from attributeSchema and bytes measured and hashed", () => {
     const page = decodeQueryResult(SAMPLE_RESULT);
     expect(page.blockNumber).toBe(96518);
     expect(page.cursor).toBe("b64:D1OSQseliZQAAAAAAAIoRA");
@@ -119,15 +128,53 @@ describe("decodeQueryResult", () => {
     expect(entity.key).toBe(KEY);
     expect(entity.owner).toBe(OWNER);
     expect(entity.createdAt).toBe(96518);
-    expect(entity.expiresAt).toBe(97418);
+    expect(entity.expiresAt).toBe("97418");
+    expect(entity.permanent).toBe(false);
     expect(entity.creationFlags).toEqual({ readonly: false, permissionlessExtension: false, raw: 0 });
-    expect(entity.contentType).toBe("application/octet-stream");
+    expect(entity).not.toHaveProperty("contentType");
     expect(entity.attributes).toEqual([
-      { name: "project", type: "str", value: "arkiv-chain-indexer-baseload" },
-      { name: "random_number_0", type: "u64", value: "180775231046082" },
-      { name: "flag", type: "bool", value: "true" },
-      { name: "level", type: "i32", value: "7" },
+      {
+        name: "body",
+        type: "bytes",
+        indexed: false,
+        value: null,
+        content: "0x616263",
+        size: 3,
+        keccak256: "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45",
+      },
+      { name: "flag", type: "bool", indexed: false, value: true },
+      { name: "level", type: "i32", indexed: true, value: 7 },
+      { name: "project", type: "str", indexed: true, value: "arkiv-chain-indexer-baseload" },
+      { name: "random_number_0", type: "u64", indexed: true, value: "0xa46a036e41c2" },
     ]);
+  });
+
+  test("keeps 2^64 − 1 exact and calls it permanent; the index's withheld bytes stay withheld", () => {
+    const page = decodeQueryResult({
+      data: [{
+        key: KEY,
+        expiresAt: "0xffffffffffffffff",
+        attributeSchema: [{ name: "body", type: "bytes", indexed: false }],
+        attributes: [{ name: "body", type: "bytes", value: null }],
+      }],
+      blockNumber: "0x1",
+    });
+    const entity = page.entities[0];
+    expect(entity.expiresAt).toBe("18446744073709551615");
+    expect(entity.permanent).toBe(true);
+    expect(expiryBlockNumber(entity)).toBeNull();
+    expect(entity.attributes).toEqual([{ name: "body", type: "bytes", indexed: false, value: null }]);
+  });
+
+  test("a century-long finite expiry is finite: there is no lifetime heuristic", () => {
+    const entity = decodeQueryResult({ data: [{ key: KEY, createdAt: "0x0", expiresAt: "0xfffffffffffffffe" }], blockNumber: "0x1" }).entities[0];
+    expect(entity.permanent).toBe(false);
+    expect(entity.expiresAt).toBe("18446744073709551614");
+  });
+
+  test("an attribute without a schema entry has an unknown indexed flag", () => {
+    const entity = decodeQueryResult({ data: [{ key: KEY, attributes: [{ name: "a", type: "str", value: "x" }] }], blockNumber: "0x1" }).entities[0];
+    expect(entity.attributes).toEqual([{ name: "a", type: "str", indexed: null, value: "x" }]);
   });
 
   test("tolerates fields the query did not select", () => {
@@ -140,8 +187,8 @@ describe("decodeQueryResult", () => {
       createdAt: null,
       updatedAt: null,
       expiresAt: null,
+      permanent: false,
       creationFlags: null,
-      contentType: null,
       attributes: [],
     });
   });
@@ -152,27 +199,9 @@ describe("decodeQueryResult", () => {
   });
 });
 
-describe("attribute formatting", () => {
-  test("formatAttributeValue renders integers in decimal and passes strings through", () => {
-    expect(formatAttributeValue("u256", "0xde0b6b3a7640000")).toBe("1000000000000000000");
-    expect(formatAttributeValue("i32", -5)).toBe("-5");
-    expect(formatAttributeValue("u64", "12")).toBe("12");
-    expect(formatAttributeValue("dec", "3.5")).toBe("3.5");
-    expect(formatAttributeValue("bool", "false")).toBe("false");
-    expect(formatAttributeValue("addr", OWNER)).toBe(OWNER);
-    expect(formatAttributeValue("str", { odd: true })).toBe('{"odd":true}');
-  });
-
-  test("formatQueryLiteral writes the 0.8 typed literal", () => {
-    expect(formatQueryLiteral("str", "it's")).toBe("str('it''s')");
-    expect(formatQueryLiteral("bool", "true")).toBe("true");
-    expect(formatQueryLiteral("u64", "12")).toBe("u64(12)");
-    expect(formatQueryLiteral("addr", OWNER)).toBe(`addr(${OWNER})`);
-  });
-
-  test("attributeFilterExpression and appendQueryExpression build the next query", () => {
-    const expr = attributeFilterExpression({ name: "status", type: "str", value: "open" });
-    expect(expr).toBe("status = str('open')");
+describe("query expressions", () => {
+  test("appendQueryExpression builds the next query", () => {
+    const expr = "status = str('open')";
     expect(appendQueryExpression("", expr)).toBe(expr);
     expect(appendQueryExpression("  ", expr)).toBe(expr);
     expect(appendQueryExpression("*", expr)).toBe(expr);

@@ -224,6 +224,9 @@ function blockToPoint(b: StoredBlock): ChartPoint {
       averageBlockRewardWei: b.blockRewardWei,
       totalBurntFeesWei: b.burntFeesWei,
       averageBurntFeesWei: b.burntFeesWei,
+      totalRentFeeWei: b.totalRentFeeWei,
+      averageRentFeeWei: b.totalRentFeeWei,
+      totalBurnedWei: b.totalBurnedWei,
       transactionCount: b.transactionCount,
       averageTransactionGasUsed: b.averageTransactionGasUsed,
       averageTransactionInputDataSizeBytes: b.averageTransactionInputDataSizeBytes,
@@ -281,6 +284,9 @@ function rangeToPoint(r: StoredBlockRange): ChartPoint {
       averageBlockRewardWei: r.averageBlockRewardWei,
       totalBurntFeesWei: r.totalBurntFeesWei,
       averageBurntFeesWei: r.averageBurntFeesWei,
+      totalRentFeeWei: r.totalRentFeeWei,
+      averageRentFeeWei: r.averageRentFeeWei,
+      totalBurnedWei: r.totalBurnedWei,
       transactionCount: r.transactionCount,
       averageTransactionGasUsed: r.averageTransactionGasUsed,
       averageTransactionInputDataSizeBytes: r.averageTransactionInputDataSizeBytes,
@@ -307,6 +313,7 @@ function parameterGroupLabel(parameter: ParameterDef): string {
   if (parameter.axis === "block-gas-limit" || parameter.axis === "total-gas") return "Block gas";
   if (parameter.axis.includes("input-data")) return "Data size";
   if (parameter.axis.includes("reward") || parameter.axis.includes("burnt")) return "Rewards";
+  if (parameter.axis.includes("rent") || parameter.axis.includes("burned")) return "Rent & burn";
   if (parameter.axis === "tx-count" || parameter.axis.startsWith("avg-tx-")) return "Transactions";
   if (parameter.axis === "batcher") return "Batcher";
   return "Other";

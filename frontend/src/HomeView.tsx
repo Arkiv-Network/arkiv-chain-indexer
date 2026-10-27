@@ -699,7 +699,7 @@ function BlockFeedItem({
       </div>
       <div className="flex shrink-0 flex-col items-end gap-0.5 font-mono text-[11px] tabular-nums">
         <strong className="text-xs font-medium text-foreground">{fmtGasPrice(block.baseBlockFeeWei)}</strong>
-        <span className="text-muted-foreground">{fmtTokenAmount(block.burntFeesWei ?? "0", tokenSymbol)} burnt</span>
+        <span className="text-muted-foreground" title="Gas burnt + rent burned">{fmtTokenAmount(block.totalBurnedWei ?? block.burntFeesWei ?? "0", tokenSymbol)} burnt</span>
       </div>
     </article>
   );

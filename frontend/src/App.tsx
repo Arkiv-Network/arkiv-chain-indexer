@@ -544,7 +544,7 @@ export function App() {
         {activeView === "search" ? (
           <SearchView locationSearch={locationSearch} onNavigate={navigateSearch} onLocationChange={refreshFromLocation} />
         ) : activeView === "statistics" ? (
-          <StatisticsView timeZone={timeZone} />
+          <StatisticsView timeZone={timeZone} tokenSymbol={pageSettings.tokenSymbol} onLocationChange={refreshFromLocation} />
         ) : activeView === "home" ? (
           <HomeView
             onLocationChange={refreshFromLocation}
@@ -581,7 +581,6 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
-            blockTimeMs={pageSettings.blockTimeMs}
           />
         ) : activeView === "entity" ? (
           <EntityView
@@ -589,6 +588,7 @@ export function App() {
             onLocationChange={refreshFromLocation}
             timeZone={timeZone}
             blockTimeMs={pageSettings.blockTimeMs}
+            tokenSymbol={pageSettings.tokenSymbol}
           />
         ) : activeView === "address" ? (
           <TransactionsView

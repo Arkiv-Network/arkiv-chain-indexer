@@ -1,8 +1,10 @@
 // The framework-free half of the Data page's entity query: turning what the
 // user typed into an `arkiv_query` call, decoding what the node sends back, and
-// the small calculations the result cards show (block dates, lifetime, filter
-// expressions). No React here so `bun test` can cover it.
+// the small calculations the result cards show (block dates, lifetime). Filter
+// expressions for attributes live in attributes.ts. No React here so `bun test`
+// can cover it.
 
+import { fromRpcAttributes, isPermanentExpiry, type AttributeView } from "./attributes";
 import { RpcCallError, type BlockTiming } from "./dataRpc";
 
 export const ENTITY_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
@@ -98,9 +100,10 @@ export function dataPageFilters(
 }
 
 /**
- * Every projection except the payload and the values-free schema. Payloads run
- * to ~100 KB on this network, so a list must never ask for them; the attribute
- * list already carries each attribute's type.
+ * Every projection the SDK's RpcSelect has: entities carry no payload, and
+ * `attributeSchema` is what says which attributes are indexed. A node sends
+ * bytes contents with `attributes` (the index sends null); the cards show
+ * their size and hash.
  */
 export const LIST_SELECT = {
   key: true,
@@ -110,7 +113,7 @@ export const LIST_SELECT = {
   updatedAt: true,
   expiresAt: true,
   creationFlags: true,
-  contentType: true,
+  attributeSchema: true,
   attributes: true,
 } as const;
 
@@ -144,14 +147,6 @@ export function buildQueryParams(request: QueryPageRequest): [string, QueryRpcOp
   return [request.query, options];
 }
 
-export interface EntityAttribute {
-  name: string;
-  /** The node's type tag: bool, i32, u64, u256, dec, bytes32, str, addr, key (bytes only backs the payload). */
-  type: string;
-  /** The value rendered for display and for building a filter literal. */
-  value: string;
-}
-
 export interface EntityCreationFlags {
   readonly: boolean;
   permissionlessExtension: boolean;
@@ -164,10 +159,12 @@ export interface EntityRecord {
   creator: string | null;
   createdAt: number | null;
   updatedAt: number | null;
-  expiresAt: number | null;
+  /** Exact decimal: 2^64 − 1 does not fit a JS number. */
+  expiresAt: string | null;
+  /** `expiresAt` is 2^64 − 1. */
+  permanent: boolean;
   creationFlags: EntityCreationFlags | null;
-  contentType: string | null;
-  attributes: EntityAttribute[];
+  attributes: AttributeView[];
 }
 
 export interface QueryPage {
@@ -187,27 +184,22 @@ function optionalBlock(value: unknown, what: string): number | null {
   return value === undefined || value === null ? null : hexToNumber(value, what);
 }
 
+function optionalExactBlock(value: unknown, what: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value);
+  if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) return BigInt(value).toString();
+  throw new Error(`${what} is not a hex quantity: ${JSON.stringify(value)}`);
+}
+
 function optionalString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-/** Renders a node attribute value the way a person would write it in a query. */
-export function formatAttributeValue(type: string, value: unknown): string {
-  switch (type) {
-    case "bool":
-      if (typeof value === "boolean") return value ? "true" : "false";
-      if (value === "true" || value === "false") return value;
-      return JSON.stringify(value);
-    case "i32":
-    case "u64":
-    case "u256":
-      if (typeof value === "number" && Number.isInteger(value)) return String(value);
-      if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) return BigInt(value).toString();
-      if (typeof value === "string" && /^-?\d+$/.test(value)) return value;
-      return JSON.stringify(value);
-    default:
-      return typeof value === "string" ? value : JSON.stringify(value);
-  }
+/** An expiry as a block number for date estimates; null when permanent or beyond a safe integer. */
+export function expiryBlockNumber(entity: Pick<EntityRecord, "expiresAt" | "permanent">): number | null {
+  if (entity.permanent || entity.expiresAt === null) return null;
+  const value = Number(entity.expiresAt);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 export function decodeEntity(raw: unknown): EntityRecord {
@@ -215,8 +207,8 @@ export function decodeEntity(raw: unknown): EntityRecord {
   const entity = raw as Record<string, unknown>;
   if (typeof entity.key !== "string") throw new Error("entity has no key");
 
-  const flags = entity.creationFlags as Record<string, unknown> | undefined;
-  const attributes = Array.isArray(entity.attributes) ? entity.attributes : [];
+  const flags = entity.creationFlags as Record<string, unknown> | number | undefined;
+  const expiresAt = optionalExactBlock(entity.expiresAt, "expiresAt");
 
   return {
     key: entity.key,
@@ -224,24 +216,19 @@ export function decodeEntity(raw: unknown): EntityRecord {
     creator: optionalString(entity.creator),
     createdAt: optionalBlock(entity.createdAt, "createdAt"),
     updatedAt: optionalBlock(entity.updatedAt, "updatedAt"),
-    expiresAt: optionalBlock(entity.expiresAt, "expiresAt"),
+    expiresAt,
+    permanent: isPermanentExpiry(expiresAt),
     creationFlags:
-      flags && typeof flags === "object"
-        ? {
-            readonly: flags.readonly === true,
-            permissionlessExtension: flags.permissionlessExtension === true,
-            raw: typeof flags.raw === "number" ? flags.raw : 0,
-          }
-        : null,
-    contentType: optionalString(entity.contentType),
-    attributes: attributes
-      .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-      .filter((item) => typeof item.name === "string" && typeof item.type === "string")
-      .map((item) => ({
-        name: item.name as string,
-        type: item.type as string,
-        value: formatAttributeValue(item.type as string, item.value),
-      })),
+      typeof flags === "number"
+        ? { readonly: (flags & 1) !== 0, permissionlessExtension: (flags & 2) !== 0, raw: flags }
+        : flags && typeof flags === "object"
+          ? {
+              readonly: flags.readonly === true,
+              permissionlessExtension: flags.permissionlessExtension === true,
+              raw: typeof flags.raw === "number" ? flags.raw : 0,
+            }
+          : null,
+    attributes: fromRpcAttributes(entity.attributes, entity.attributeSchema),
   };
 }
 
@@ -254,21 +241,6 @@ export function decodeQueryResult(raw: unknown): QueryPage {
     blockNumber: hexToNumber(result.blockNumber, "blockNumber"),
     cursor: typeof result.cursor === "string" && result.cursor ? result.cursor : null,
   };
-}
-
-export const NUMERIC_ATTRIBUTE_TYPES: ReadonlySet<string> = new Set(["i32", "u64", "u256", "dec"]);
-
-/** The typed literal the 0.8 grammar expects for an attribute value. */
-export function formatQueryLiteral(type: string, value: string): string {
-  // Single quotes, doubled to escape: str('it''s') parses at the node.
-  if (type === "str") return `str('${value.replace(/'/g, "''")}')`;
-  // Booleans are written bare; the node rejects bool(true).
-  if (type === "bool") return value === "true" ? "true" : "false";
-  return `${type}(${value})`;
-}
-
-export function attributeFilterExpression(attribute: EntityAttribute): string {
-  return `${attribute.name} = ${formatQueryLiteral(attribute.type, attribute.value)}`;
 }
 
 /**
@@ -393,6 +365,7 @@ export const EXAMPLE_QUERIES: readonly ExampleQuery[] = [
   { label: "By owner", query: "$owner = addr(0x)" },
   { label: "By text attribute", query: "status = str('active')" },
   { label: "By numeric attribute", query: "score > i32(100)" },
+  { label: "By schema", query: "arkiv.schema = str('posts')" },
   { label: "Text prefix", query: "name STARTSWITH str('ark')" },
   { label: "Expiring after a block", query: "$expiresAt >= u64(0)" },
 ];

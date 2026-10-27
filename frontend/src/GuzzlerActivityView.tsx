@@ -206,7 +206,8 @@ export function GuzzlerActivityView({
       <StatGrid className="sm:grid-cols-3 lg:grid-cols-6">
         <Stat label="Transactions" size="lg">{fmtInteger(summary.totalTransactions)}</Stat>
         <Stat label="Gas used" size="lg" wide>{fmtMillions(summary.totalGasUsed)}</Stat>
-        <Stat label="Fees" size="lg" wide>{fmtTokenAmount(summary.totalFeeWei, tokenSymbol)}</Stat>
+        <Stat label="Gas fees" size="lg">{fmtTokenAmount(summary.totalFeeWei, tokenSymbol)}</Stat>
+        <Stat label="Rent" size="lg" title="Storage rent, burned outside gas">{fmtTokenAmount(summary.totalRentFeeWei, tokenSymbol)}</Stat>
         <Stat label="Active minutes" size="lg">{fmtInteger(summary.activeMinutes)}</Stat>
         <Stat label="Peak txs / min" size="lg">{fmtInteger(summary.peakTransactions)}</Stat>
         <Stat label="Last seen" size="lg">{summary.lastSeen ? fmtDate(summary.lastSeen, timeZone) : "—"}</Stat>

@@ -1,11 +1,12 @@
-// The Data page's "Both" mode sends one query to the node's relay and the same
-// query to the experimental entity index, then says where the two answers part
+// The Data page's "Both" mode sends one query to a node and the same query to
+// the experimental entity index, then says where the two answers part
 // company. This is the browser-side twin of `scripts/compareEntityQuery.ts`:
 // same order of checks (error, block, key set, key order, then field by field)
 // so a difference reported here reads like a difference reported there. Keep
 // React out of this module so `bun test` can exercise it.
 
-import type { EntityAttribute, EntityRecord, QueryPage } from "./dataQuery";
+import { attributeText, type AttributeView } from "./attributes";
+import type { EntityRecord, QueryPage } from "./dataQuery";
 
 /** One endpoint's answer to the compared query, and what it cost. */
 export interface ComparisonSide {
@@ -62,8 +63,31 @@ function listKeys(keys: string[]): string {
   return keys.length > MAX_KEYS_LISTED ? `${head} (+${keys.length - MAX_KEYS_LISTED})` : head;
 }
 
-function attributeMap(attributes: EntityAttribute[]): Map<string, EntityAttribute> {
+function attributeMap(attributes: AttributeView[]): Map<string, AttributeView> {
   return new Map(attributes.map((attribute) => [attribute.name, attribute]));
+}
+
+function describeAttribute(attribute: AttributeView): string {
+  const flag = attribute.indexed === null ? "" : attribute.indexed ? " indexed" : " stored";
+  if (attribute.type === "bytes") {
+    return attribute.size === undefined ? `bytes${flag} (withheld)` : `bytes${flag}(${attribute.size} bytes, ${attribute.keccak256 ?? "?"})`;
+  }
+  return `${attribute.type}${flag}(${attributeText(attribute)})`;
+}
+
+/**
+ * Whether two renderings of an attribute disagree. The index withholds bytes
+ * contents (value null, no size), so a bytes value it withheld matches any
+ * bytes value the node sent; a flag one side did not report matches either.
+ */
+function attributesDiffer(node: AttributeView, index: AttributeView): boolean {
+  if (node.type !== index.type) return true;
+  if (node.indexed !== null && index.indexed !== null && node.indexed !== index.indexed) return true;
+  if (node.type === "bytes") {
+    if (node.size === undefined || index.size === undefined) return false;
+    return node.size !== index.size || (node.keccak256 ?? null) !== (index.keccak256 ?? null);
+  }
+  return attributeText(node) !== attributeText(index);
 }
 
 /**
@@ -82,7 +106,6 @@ export function entityDifferences(node: EntityRecord, index: EntityRecord): stri
   scalar("createdAt", node.createdAt, index.createdAt);
   scalar("updatedAt", node.updatedAt, index.updatedAt);
   scalar("expiresAt", node.expiresAt, index.expiresAt);
-  scalar("contentType", node.contentType, index.contentType);
 
   if ((node.creationFlags === null) !== (index.creationFlags === null)) {
     scalar("creationFlags", node.creationFlags?.raw ?? null, index.creationFlags?.raw ?? null);
@@ -98,8 +121,8 @@ export function entityDifferences(node: EntityRecord, index: EntityRecord): stri
       out.push(`attribute ${name}: only on the node`);
       continue;
     }
-    if (attribute.type !== other.type || attribute.value !== other.value) {
-      out.push(`attribute ${name}: node ${attribute.type}(${attribute.value}) vs index ${other.type}(${other.value})`);
+    if (attributesDiffer(attribute, other)) {
+      out.push(`attribute ${name}: node ${describeAttribute(attribute)} vs index ${describeAttribute(other)}`);
     }
   }
   for (const name of indexAttributes.keys()) {

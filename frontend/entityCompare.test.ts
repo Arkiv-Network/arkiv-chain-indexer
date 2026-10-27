@@ -16,10 +16,10 @@ function entity(overrides: Partial<EntityRecord> = {}): EntityRecord {
     creator: `0x${"8f".repeat(20)}`,
     createdAt: 100,
     updatedAt: 120,
-    expiresAt: 900,
+    expiresAt: "900",
+    permanent: false,
     creationFlags: { readonly: false, permissionlessExtension: false, raw: 0 },
-    contentType: "application/json",
-    attributes: [{ name: "status", type: "str", value: "active" }],
+    attributes: [{ name: "status", type: "str", indexed: true, value: "active" }],
     ...overrides,
   };
 }
@@ -65,7 +65,7 @@ describe("compareEntityPages", () => {
 
   test("matching keys are compared field by field, under the entity's key", () => {
     const node = entity();
-    const index = entity({ owner: `0x${"11".repeat(20)}`, expiresAt: 901 });
+    const index = entity({ owner: `0x${"11".repeat(20)}`, expiresAt: "901" });
     const report = compareEntityPages(side(page([node])), side(page([index])));
     expect(report.differences.map((difference) => difference.scope)).toEqual([node.key, node.key]);
     expect(report.differences[0]!.detail).toContain("owner: node");
@@ -109,30 +109,58 @@ describe("entityDifferences", () => {
   test("attributes are matched by name, not by position", () => {
     const node = entity({
       attributes: [
-        { name: "status", type: "str", value: "active" },
-        { name: "size", type: "u64", value: "12" },
+        { name: "status", type: "str", indexed: true, value: "active" },
+        { name: "size", type: "u64", indexed: true, value: "0xc" },
       ],
     });
     const index = entity({
       attributes: [
-        { name: "size", type: "u64", value: "12" },
-        { name: "status", type: "str", value: "active" },
+        { name: "size", type: "u64", indexed: true, value: "0xc" },
+        { name: "status", type: "str", indexed: true, value: "active" },
       ],
     });
     expect(entityDifferences(node, index)).toEqual([]);
   });
 
   test("a missing, extra or changed attribute is named", () => {
-    const node = entity({ attributes: [{ name: "status", type: "str", value: "active" }] });
-    const index = entity({ attributes: [{ name: "other", type: "str", value: "active" }] });
+    const node = entity({ attributes: [{ name: "status", type: "str", indexed: true, value: "active" }] });
+    const index = entity({ attributes: [{ name: "other", type: "str", indexed: true, value: "active" }] });
     expect(entityDifferences(node, index)).toEqual([
       "attribute status: only on the node",
       "attribute other: only on the index",
     ]);
 
-    const changed = entity({ attributes: [{ name: "status", type: "str", value: "retired" }] });
+    const changed = entity({ attributes: [{ name: "status", type: "str", indexed: true, value: "retired" }] });
     expect(entityDifferences(node, changed)).toEqual([
-      "attribute status: node str(active) vs index str(retired)",
+      "attribute status: node str indexed(active) vs index str indexed(retired)",
+    ]);
+  });
+
+  test("the indexed flag is compared, and an unreported flag matches either", () => {
+    const node = entity({ attributes: [{ name: "status", type: "str", indexed: true, value: "active" }] });
+    const stored = entity({ attributes: [{ name: "status", type: "str", indexed: false, value: "active" }] });
+    expect(entityDifferences(node, stored)).toEqual([
+      "attribute status: node str indexed(active) vs index str stored(active)",
+    ]);
+    const unknown = entity({ attributes: [{ name: "status", type: "str", indexed: null, value: "active" }] });
+    expect(entityDifferences(node, unknown)).toEqual([]);
+  });
+
+  test("bytes the index withholds match the node's content; known sizes and hashes are compared", () => {
+    const node = entity({
+      attributes: [{ name: "body", type: "bytes", indexed: false, value: null, size: 3, keccak256: "0xaa", content: "0x010203" }],
+    });
+    const withheld = entity({ attributes: [{ name: "body", type: "bytes", indexed: false, value: null }] });
+    expect(entityDifferences(node, withheld)).toEqual([]);
+    const other = entity({ attributes: [{ name: "body", type: "bytes", indexed: false, value: null, size: 3, keccak256: "0xbb" }] });
+    expect(entityDifferences(node, other)).toHaveLength(1);
+  });
+
+  test("the exact expiry is compared, 2^64 − 1 included", () => {
+    const node = entity({ expiresAt: "18446744073709551615", permanent: true });
+    expect(entityDifferences(node, entity({ expiresAt: "18446744073709551615", permanent: true }))).toEqual([]);
+    expect(entityDifferences(node, entity({ expiresAt: "18446744073709551614" }))).toEqual([
+      "expiresAt: node 18446744073709551615 vs index 18446744073709551614",
     ]);
   });
 

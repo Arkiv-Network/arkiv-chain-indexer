@@ -306,8 +306,12 @@ function GuzzlerCard({
           <dd className="order-1 font-mono text-sm font-semibold tabular-nums">{fmtInteger(guzzler.transactionCount)}</dd>
         </div>
         <div className="flex flex-col items-end gap-0.5">
-          <dt className="order-2 text-[10px] tracking-wider text-muted-foreground uppercase">Fees</dt>
+          <dt className="order-2 text-[10px] tracking-wider text-muted-foreground uppercase">Gas fees</dt>
           <dd className="order-1 font-mono text-sm font-semibold tabular-nums">{fmtTokenAmount(guzzler.totalFeeWei, tokenSymbol)}</dd>
+        </div>
+        <div className="flex flex-col items-end gap-0.5" title="Storage rent, burned outside gas">
+          <dt className="order-2 text-[10px] tracking-wider text-muted-foreground uppercase">Rent</dt>
+          <dd className="order-1 font-mono text-sm font-semibold tabular-nums">{fmtTokenAmount(guzzler.totalRentFeeWei ?? "0", tokenSymbol)}</dd>
         </div>
       </dl>
     </li>

@@ -58,7 +58,10 @@ export interface GuzzlerActivitySummary {
   totalTransactions: number;
   /** Decimal-string bigints to avoid precision loss on large gas/fee sums. */
   totalGasUsed: string;
+  /** Gas fees only. */
   totalFeeWei: string;
+  /** Storage rent, outside gas. */
+  totalRentFeeWei: string;
   /** Highest transaction count seen in a single minute. */
   peakTransactions: number;
   /** Start time (ISO) of the minute that hit {@link peakTransactions}, if any. */
@@ -127,6 +130,7 @@ export function summarizeGuzzlerHistory(
   let totalTransactions = 0;
   let totalGas = 0n;
   let totalFee = 0n;
+  let totalRent = 0n;
   let peakTransactions = 0;
   let peakMinuteStart: string | null = null;
   let firstSeenMs = Number.POSITIVE_INFINITY;
@@ -136,6 +140,7 @@ export function summarizeGuzzlerHistory(
     totalTransactions += point.transactionCount;
     totalGas += toBigInt(point.totalGasUsed);
     totalFee += toBigInt(point.totalFeeWei);
+    totalRent += toBigInt(point.totalRentFeeWei);
     if (point.transactionCount > peakTransactions) {
       peakTransactions = point.transactionCount;
       peakMinuteStart = point.startTime;
@@ -151,6 +156,7 @@ export function summarizeGuzzlerHistory(
     totalTransactions,
     totalGasUsed: totalGas.toString(),
     totalFeeWei: totalFee.toString(),
+    totalRentFeeWei: totalRent.toString(),
     peakTransactions,
     peakMinuteStart,
     firstSeen: Number.isFinite(firstSeenMs) ? new Date(firstSeenMs).toISOString() : null,

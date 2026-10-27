@@ -233,8 +233,10 @@ export function BlockView({ locationSearch, onLocationChange, timeZone, tokenSym
             <Stat label="Input data">{fmtBytes(block.totalInputDataSizeBytes)}</Stat>
             <Stat label="Input data zstd">{fmtBytes(block.totalInputDataCompressedSizeBytes)}</Stat>
             <Stat label="Block reward">{fmtTokenAmount(block.blockRewardWei, tokenSymbol)}</Stat>
-            <Stat label="Burnt fees">{fmtTokenAmount(block.burntFeesWei, tokenSymbol)}</Stat>
-            <Stat label="Total tx fees">{fmtTokenAmount(block.totalTransactionFeeWei, tokenSymbol)}</Stat>
+            <Stat label="Gas burnt" title="Base fee × gas used by the block's transactions">{fmtTokenAmount(block.burntFeesWei, tokenSymbol)}</Stat>
+            <Stat label="Rent burned" title="Σ receipt rentFee: storage rent, burned outside gas">{fmtTokenAmount(block.totalRentFeeWei ?? "0", tokenSymbol)}</Stat>
+            <Stat label="Total burned" title="Gas burnt + rent burned">{fmtTokenAmount(block.totalBurnedWei ?? block.burntFeesWei, tokenSymbol)}</Stat>
+            <Stat label="Total gas fees" title="Σ gasUsed × effective gas price (rent excluded)">{fmtTokenAmount(block.totalTransactionFeeWei, tokenSymbol)}</Stat>
             <Stat label="Avg fee price">{fmtGasPrice(block.averageFeePriceWei)}</Stat>
             <Stat label="Avg tx fee">{fmtTokenAmount(block.averageTransactionFeeWei, tokenSymbol)}</Stat>
             <Stat label="Avg tx gas">{fmtInteger(block.averageTransactionGasUsed)}</Stat>
@@ -366,9 +368,15 @@ function transactionColumns(tokenSymbol: string, onLocationChange: () => void): 
     },
     {
       key: "transactionFeeWei",
-      label: "Tx fee",
+      label: "Gas fee",
       className: "text-right font-mono tabular-nums",
       render: (row) => fmtTokenAmount(row.transactionFeeWei, tokenSymbol),
+    },
+    {
+      key: "rentFeeWei",
+      label: "Rent",
+      className: "text-right font-mono tabular-nums",
+      render: (row) => (row.status === "0" ? <span className="text-muted-foreground" title="Failed: gas charged, no rent">—</span> : fmtTokenAmount(row.rentFeeWei, tokenSymbol)),
     },
   ];
 }

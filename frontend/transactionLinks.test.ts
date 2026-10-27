@@ -1,42 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import {
-  DEFAULT_PAYLOAD_PROVIDER_BASE_URL,
-  DEFAULT_TRANSACTION_DECODER_BASE_URL,
-  addressSearchHref,
-  payloadInfoHref,
-  readPayloadProviderBaseUrl,
-  readTransactionDecoderBaseUrl,
-  transactionDecoderHref,
-} from "./src/transactionLinks";
+import { addressSearchHref, readTransactionDecoderBaseUrl, transactionDecoderHref } from "./src/transactionLinks";
+
+const HASH = "0xf8da0a7fd7af9dae0730e43b9d0184500de5c77975dd3e644e2da22c044891c6";
 
 describe("transaction links", () => {
-  test("links transaction hashes to the Atlas transaction decoder", () => {
-    const hash = "0xf8da0a7fd7af9dae0730e43b9d0184500de5c77975dd3e644e2da22c044891c6";
-
-    expect(transactionDecoderHref(hash)).toBe(`${DEFAULT_TRANSACTION_DECODER_BASE_URL}?tx=${hash}`);
+  test("the decoder link is off unless configured", () => {
+    expect(readTransactionDecoderBaseUrl({})).toBeNull();
+    expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "" })).toBeNull();
+    for (const off of ["off", "OFF", "none", "false", "0", "disabled"]) {
+      expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: off })).toBeNull();
+    }
+    expect(transactionDecoderHref(HASH, null)).toBeNull();
   });
 
-  test("reads configured transaction decoder base URLs", () => {
-    expect(
-      readTransactionDecoderBaseUrl({
-        VITE_TRANSACTION_DECODER_BASE_URL: "https://decoder.example.test",
-      }),
-    ).toBe("https://decoder.example.test/");
+  test("reads a configured decoder base URL and links hashes to it", () => {
+    const base = readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "https://decoder.example.test" });
+    expect(base).toBe("https://decoder.example.test/");
+    expect(transactionDecoderHref(HASH, base)).toBe(`https://decoder.example.test/?tx=${HASH}`);
   });
 
-  test("defaults invalid transaction decoder base URLs", () => {
-    expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "" })).toBe(
-      DEFAULT_TRANSACTION_DECODER_BASE_URL,
-    );
-    expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "ftp://example.test/" })).toBe(
-      DEFAULT_TRANSACTION_DECODER_BASE_URL,
-    );
+  test("an invalid decoder URL turns the link off rather than guessing", () => {
+    expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "ftp://example.test/" })).toBeNull();
+    expect(readTransactionDecoderBaseUrl({ VITE_TRANSACTION_DECODER_BASE_URL: "not a url" })).toBeNull();
   });
 
   test("does not build decoder links for missing or malformed transaction hashes", () => {
-    expect(transactionDecoderHref(null)).toBeNull();
-    expect(transactionDecoderHref("")).toBeNull();
-    expect(transactionDecoderHref("0x1234")).toBeNull();
+    const base = "https://decoder.example.test/";
+    expect(transactionDecoderHref(null, base)).toBeNull();
+    expect(transactionDecoderHref("", base)).toBeNull();
+    expect(transactionDecoderHref("0x1234", base)).toBeNull();
   });
 
   test("builds internal address detail links", () => {
@@ -49,32 +41,5 @@ describe("transaction links", () => {
     expect(addressSearchHref(null)).toBeNull();
     expect(addressSearchHref("")).toBeNull();
     expect(addressSearchHref("0x1234")).toBeNull();
-  });
-
-  test("links payload reference ids to the payload provider", () => {
-    const id = "a806b74c6c933e9c0c3cfd7c099c7c6cdbf86bef1a48da310a90bd050c37b4e5";
-    expect(payloadInfoHref(id)).toBe(`${DEFAULT_PAYLOAD_PROVIDER_BASE_URL}payloads/${id}`);
-    // Mixed-case input is normalized to the lowercase content-addressed id.
-    expect(payloadInfoHref(id.toUpperCase())).toBe(`${DEFAULT_PAYLOAD_PROVIDER_BASE_URL}payloads/${id}`);
-  });
-
-  test("reads configured and defaults invalid payload provider base URLs", () => {
-    expect(
-      readPayloadProviderBaseUrl({ VITE_PAYLOAD_PROVIDER_BASE_URL: "https://payload.example.test" }),
-    ).toBe("https://payload.example.test/");
-    expect(readPayloadProviderBaseUrl({ VITE_PAYLOAD_PROVIDER_BASE_URL: "" })).toBe(
-      DEFAULT_PAYLOAD_PROVIDER_BASE_URL,
-    );
-    expect(
-      readPayloadProviderBaseUrl({ VITE_PAYLOAD_PROVIDER_BASE_URL: "ftp://payload.example.test" }),
-    ).toBe(DEFAULT_PAYLOAD_PROVIDER_BASE_URL);
-  });
-
-  test("does not build payload links for missing or malformed ids", () => {
-    expect(payloadInfoHref(null)).toBeNull();
-    expect(payloadInfoHref("")).toBeNull();
-    expect(payloadInfoHref("not-hex")).toBeNull();
-    // 0x-prefixed or wrong-length ids are not valid content-addressed ids.
-    expect(payloadInfoHref("0xa806b74c")).toBeNull();
   });
 });

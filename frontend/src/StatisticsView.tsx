@@ -3,7 +3,10 @@ import { fetchStatistics } from "./api";
 import { STATISTICS_PERIODS, type StatisticsPeriod, type StatisticsResponse } from "../../src/indexerStatisticsTypes";
 import { Stat, StatGrid } from "@/components/stat";
 import { Card, CardContent } from "@/components/ui/card";
-import { fmtDate } from "./format";
+import { fmtDate, fmtTokenAmount } from "./format";
+import { schemaCondition } from "./attributes";
+import { dataQueryHref, openDataQuery } from "@/components/filter-menu";
+import { shouldHandleClientNavigation } from "./permalinks";
 import { selectClass } from "@/components/filters-panel";
 import { readStoredString, writeStoredString } from "./localStorage";
 import { formatStatisticsBytes, isStatisticsByteUnit, type StatisticsByteUnit } from "./statisticsFormat";
@@ -36,7 +39,7 @@ function Section({ title, note, children }: { title: StatisticsHelpKey; note?: s
   </section>;
 }
 
-export function StatisticsView({ timeZone }: { timeZone: string }) {
+export function StatisticsView({ timeZone, tokenSymbol, onLocationChange }: { timeZone: string; tokenSymbol: string; onLocationChange?: () => void }) {
   const [data, setData] = useState<StatisticsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [byteUnit, setByteUnit] = useState<StatisticsByteUnit>(() =>
@@ -135,6 +138,13 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
         </StatGrid>
         <p className="text-xs text-muted-foreground">A zero means no matching stored activity; incomplete indexing can leave history missing.</p>
       </Section>
+      <Section title="Fees and rent" note={`${periodLabel} activity in stored blocks. Rent is burned outside gas; a failed transaction pays gas and no rent.`}>
+        <StatGrid>
+          <ExplainedStat label="Gas fees" size="lg">{fmtTokenAmount(activity.blocks.gasFeeWei, tokenSymbol)}</ExplainedStat>
+          <ExplainedStat label="Rent" size="lg">{fmtTokenAmount(activity.blocks.rentFeeWei, tokenSymbol)}</ExplainedStat>
+          <ExplainedStat label="Burned" size="lg">{fmtTokenAmount(activity.blocks.burnedWei, tokenSymbol)}</ExplainedStat>
+        </StatGrid>
+      </Section>
       <Section title="Entity operations" note={`${periodLabel} activity. Attempts grouped by receipt outcome; repeated changes count separately and genesis imports have no create transaction.`}>
         <div className="overflow-x-auto border border-border">
           <table className="w-full text-left text-xs">
@@ -158,7 +168,7 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
         </StatGrid>
         <p className="text-xs text-muted-foreground">Projection starts at block {integer(entity.floorBlock)}. Genesis import: {entity.genesisStatus ?? "unknown"}. This is the stored entity state at collection time; a lagging or incomplete projection cannot give an exact live-chain count.</p>
       </Section>
-      <Section title="Transaction input and payloads" note={`${periodLabel} activity. Input totals measure calldata, excluding signatures and envelope overhead. Referenced payload bytes are declared per write and may repeat the same payload.`}>
+      <Section title="Transaction input and attribute writes" note={`${periodLabel} activity. Input totals measure calldata, excluding signatures and envelope overhead. Attribute writes count the triples successful creates and patches set; bytes values count by size, repeats included.`}>
         <StatGrid>
           <ExplainedStat label="Input bytes in block metrics">{bytes(activity.blocks.inputBytes)}</ExplainedStat>
           <ExplainedStat label="Compressed input in block metrics">{bytes(activity.blocks.compressedInputBytes)}</ExplainedStat>
@@ -190,7 +200,7 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
           <ExplainedStat label="Entities with attributes">{integer(entity.activeWithAttributes)}</ExplainedStat>
           <ExplainedStat label="Mean attributes per active entity">{average(entity.activeAttributes, entity.active)}</ExplainedStat>
           <ExplainedStat label="Maximum attributes per entity">{integer(entity.maxAttributesPerActiveEntity)}</ExplainedStat>
-          {entity.attributeTypes.map((row) => <Stat key={row.typeId} label={<StatisticsLabel label={`${row.name} attributes`} explanation={attributeExplanation(row.typeId, row.name)} />}>{integer(row.count)}</Stat>)}
+          {entity.attributeTypes.map((row) => <Stat key={row.typeId} label={<StatisticsLabel label={`${row.name} attributes`} explanation={attributeExplanation(row.typeId, row.name)} />}>{integer(row.count)}<span className="ml-1.5 text-[10px] text-muted-foreground">{row.indexed === "0" ? "all stored" : row.indexed === row.count ? "all indexed" : `${integer(row.indexed)} indexed`}</span></Stat>)}
         </StatGrid>
       </Section>
       {(entity.topSchemas.length > 0 || entity.activeUntagged !== null) && <Section title="Top schemas" note="Current state, independent of the activity period. Up to 20 arkiv.schema tags by active entity count.">
@@ -198,7 +208,14 @@ export function StatisticsView({ timeZone }: { timeZone: string }) {
         {entity.topSchemas.length > 0 && <div className="overflow-x-auto border border-border"><table className="w-full text-left text-xs">
           <thead className="bg-muted"><tr>{(["Schema", "Schema active entities", "Schema bytes"] as const).map((h) => <th key={h} className="px-3 py-2 font-medium"><HelpLabel name={h} label={h === "Schema active entities" ? "Active entities" : h === "Schema bytes" ? "Bytes" : h} /></th>)}</tr></thead>
           <tbody>{entity.topSchemas.map((row) => <tr key={row.schemaName} className="border-t border-border">
-            <td className="px-3 py-2 break-all">{row.schemaName}</td>
+            <td className="px-3 py-2 break-all">
+              <a className="font-mono text-foreground hover:text-accent hover:underline" href={dataQueryHref(schemaCondition(row.schemaName))} title={`Query ${schemaCondition(row.schemaName)}`}
+                onClick={(event) => {
+                  if (!shouldHandleClientNavigation(event)) return;
+                  event.preventDefault();
+                  openDataQuery(schemaCondition(row.schemaName), onLocationChange);
+                }}>{row.schemaName}</a>
+            </td>
             <td className="px-3 py-2 font-mono">{integer(row.entities)}</td><td className="px-3 py-2 font-mono">{bytes(row.bytes)}</td>
           </tr>)}</tbody>
         </table></div>}

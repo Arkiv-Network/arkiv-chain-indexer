@@ -16,7 +16,9 @@ const INPUT_LIMITS = "This measures calldata only, without signatures or transac
 const ENTITY_SOURCE = "entity_versions, evaluated at entity_index_state.projected_through_block (the projection block shown above).";
 const VERSION_SCOPE = "Choose the version with from_block ≤ projection block and to_block > projection block, or no to_block. Each known entity contributes once; superseded and future versions do not contribute.";
 const ACTIVE_SCOPE = "Use the version valid at the projection block, require deleted = false and expires_at > that block. An entity expiring exactly at that block is already inactive.";
-const ENTITY_LIMITS = "Unavailable means the projection is missing, has no head, or is importing genesis. Missing creates, an incomplete genesis import, pending historical refolds and inferred pre-log expiries can limit accuracy. This is not a live-node census. Entity, payload and attribute state always uses the current projection block, independent of the activity period.";
+const ENTITY_LIMITS = "Unavailable means the projection is missing, has no head, or is importing genesis. Missing creates, an incomplete genesis import, pending historical refolds and inferred pre-log expiries can limit accuracy. This is not a live-node census. Entity, bytes and attribute state always uses the current projection block, independent of the activity period.";
+const FEE_SOURCE = "blocks.total_transaction_fee_wei, total_rent_fee_wei and total_burned_wei, summed exactly over the stored blocks whose block_date falls in the selected period.";
+const FEE_LIMITS = "Only stored blocks contribute; missing history is not estimated. Rent comes from each receipt's rentFee and is burned outside gas: it is not part of a transaction's gas fee, the gas limit or eth_feeHistory.";
 const BYTES_LIMITS = "The projection carries bytes attribute sizes (and keccak256 hashes) decoded from calldata, never their contents. Totals are not deduplicated and say nothing about node storage beyond the entities' own size.";
 const OP_SOURCE = "The selected period filters transaction_operations.block_date, even for operations without a transaction row. transaction_operations joined to transactions by (block_number, position); operation_type selects the operation and the stored receipt status selects its outcome.";
 const SUCCESS_SCOPE = "Only operations whose transaction has receipt status 1. Reverted, unknown-status and missing-transaction rows are excluded. Every operation counts separately, including multiple operations in one transaction or repeated writes to one entity. " + ACTIVITY_SCOPE;
@@ -33,7 +35,7 @@ export const STATISTICS_HELP = {
     "The worker normally refreshes about every five minutes. Missing indexed history remains missing; statistics are not estimates of unscanned data. Open each info icon for the particular metric's rules.",
   ),
   "Activity period": explain(
-    "Selects the time range for indexed blocks, transactions, entity operation attempts and input/payload writes.",
+    "Selects the time range for indexed blocks, transactions, fees and rent, entity operation attempts and input/attribute writes.",
     "The windows object in the precomputed snapshot. Finite periods share gatheredAtUtc as their UTC cutoff; no query or new sweep is triggered by selection.",
     "1, 2, 6, 12, 24, 48 or 72 hours, or exactly 7 × 24 hours, ending at the collection cutoff. A block timestamp equal to the start is included; one equal to the cutoff is excluded. All time includes every stored row, including future-dated rows.",
     "The period filters each table's stored block_date, not scan/import time. All time is the default and your selection is remembered in this browser. Older snapshots without windows support only All time.",
@@ -163,7 +165,7 @@ export const STATISTICS_HELP = {
     "transaction_operations joined to transactions on block_number and position.",
     "COUNT of operation rows for this kind where transactions.status = '1'. The status is the receipt's numeric status stored as a decimal string.",
     SUCCESS_SCOPE,
-    "Success is taken from the transaction receipt, not recomputed from entity state or a payload-reference verification verdict. Missing receipt status is not treated as success in this table.",
+    "Success is taken from the transaction receipt, not recomputed from entity state. Missing receipt status is not treated as success in this table.",
   ),
   "Reverted": explain(
     "Operation attempts decoded from transactions whose receipts report failure.",
@@ -176,7 +178,7 @@ export const STATISTICS_HELP = {
     "Decoded operation attempts for which the stored data does not establish a normal successful or reverted receipt outcome.",
     "The left join from transaction_operations to transactions by block_number and position.",
     "COUNT where status is null, is neither '0' nor '1', or no matching transaction row exists.",
-    "These operations are excluded from the successful-operation and successful-payload totals. Unknown does not mean failed.",
+    "These operations are excluded from the successful-operation and successful attribute-write totals. Unknown does not mean failed.",
     "Legacy entity projection code may trust older rows with no status, so entity-state counts need not be reconstructible by summing the Successful column alone.",
   ),
   "Entity state": explain(
@@ -214,12 +216,40 @@ export const STATISTICS_HELP = {
     VERSION_SCOPE + " Both explicit delete operations and recorded expire/prune operations can create tombstones in the projector.",
     "This is a distinct-entity state count, not the Deleted operation total. An entity can also be absent from the projection because its create was never known; that is not counted as a deletion. " + ENTITY_LIMITS,
   ),
-  "Transaction input and payloads": explain(
-    "Activity data volume in the selected period: transaction calldata and payload writes in successful operations.",
-    "Stored block/transaction input-size fields and decoded transaction_operations payload metadata, filtered by stored block_date.",
-    "Sum input and successful-operation metadata within the selected period. Current active bytes state is shown separately and does not use the selected period.",
+  "Transaction input and attribute writes": explain(
+    "Activity data volume in the selected period: transaction calldata, and the attributes successful operations wrote.",
+    "Stored block/transaction input-size fields and the decoded transaction_operations attribute triples, filtered by stored block_date.",
+    "Sum input sizes; count attribute triples by their indexed flag, tombstones, schema tags and bytes values (by size) in successful creates and patches. Current active state is shown separately and does not use the selected period.",
     "Input totals include reverted transactions. Successful operation totals require receipt status 1. " + ACTIVITY_SCOPE,
-    "These categories overlap and must not be added into one storage total. Calldata can contain operation metadata or reference receipts rather than entity bytes, and repeated writes are not deduplicated.",
+    "These categories overlap and must not be added into one storage total. bytes contents are never stored, only their sizes and keccak256 hashes, and repeated writes are not deduplicated.",
+  ),
+  "Fees and rent": explain(
+    "What the stored blocks' transactions paid in the selected period: gas fees, storage rent, and everything burned.",
+    FEE_SOURCE,
+    "Sum the per-block totals: gas fees = Σ gasUsed × effective gas price; rent = Σ receipt rentFee; burned = base fee × gas + rent.",
+    "Successful and reverted transactions both pay gas; only successful ones pay rent. " + ACTIVITY_SCOPE,
+    FEE_LIMITS,
+  ),
+  "Gas fees": explain(
+    "Gas fees paid by the period's transactions, excluding rent.",
+    FEE_SOURCE,
+    "SUM(blocks.total_transaction_fee_wei): each transaction's gasUsed × effective gas price, summed per block.",
+    ACTIVITY_SCOPE,
+    FEE_LIMITS,
+  ),
+  "Rent": explain(
+    "Storage rent the period's transactions burned, outside gas.",
+    FEE_SOURCE,
+    "SUM(blocks.total_rent_fee_wei): each receipt's rentFee, summed per block. A failed transaction pays none.",
+    ACTIVITY_SCOPE,
+    FEE_LIMITS + " Rent for a lifetime is charged up front, at most one rent cap ahead; a permanent entity pays the cap's rent.",
+  ),
+  "Burned": explain(
+    "Everything the period's blocks burned: the base fee on gas, plus rent.",
+    FEE_SOURCE,
+    "SUM(blocks.total_burned_wei) = gas burnt (base fee × receipt gas) + rent.",
+    ACTIVITY_SCOPE,
+    FEE_LIMITS + " Priority fees, which go to the producer, are not burned.",
   ),
   "Input bytes in block metrics": explain(
     "Total uncompressed transaction input/calldata bytes recorded across the stored blocks.",
@@ -233,7 +263,7 @@ export const STATISTICS_HELP = {
     "SUM(blocks.total_input_data_compressed_size_bytes). Each transaction's decoded input bytes are compressed separately with Bun.zstdCompressSync before the block total is stored.",
     "Add the individual compressed byte lengths. This is not the size obtained by compressing a whole block or the entire transaction history together.",
     "The same included transactions as the block input total contribute, regardless of receipt outcome. Empty and very small inputs can have compression-frame overhead, so compression is not guaranteed to save space.",
-    "This is not HTTP compression, PostgreSQL storage size, or payload-provider usage. Historical default-zero size fields may understate the total.",
+    "This is not HTTP compression or PostgreSQL storage size. Historical default-zero size fields may understate the total.",
   ),
   "Input bytes in transaction rows": explain(
     "Total uncompressed calldata size across the detailed transaction rows that are actually stored.",
@@ -246,8 +276,8 @@ export const STATISTICS_HELP = {
     "How many stored transactions have a recorded nonempty calldata field.",
     "transactions.input_data_size_bytes.",
     "COUNT of transaction rows whose recorded input size is greater than zero.",
-    TX_SCOPE + " A transaction can contain input without being an Arkiv operation or carrying an entity payload.",
-    "Zero-size legacy records cannot establish whether the transaction actually had no input. This count is neither the number of successful payload writes nor the number of entities with payloads.",
+    TX_SCOPE + " A transaction can contain input without being an Arkiv operation or writing any attribute.",
+    "Zero-size legacy records cannot establish whether the transaction actually had no input. This count is neither the number of successful attribute writes nor the number of entities with bytes.",
   ),
   "Mean input per transaction": explain(
     "Average uncompressed calldata size per stored transaction, including transactions with empty input.",
@@ -422,7 +452,7 @@ export const STATISTICS_HELP = {
     "The limitations array supplied with the statistics worker's snapshot, plus the source-specific rules in each info tooltip.",
     "Open this section to read the caveats. Zero is an observed empty sum/count where applicable; Unavailable or Unknown means the required state or denominator is absent.",
     "Block, detailed transaction, decoded operation and entity projection coverage can differ. A complete block percentage does not certify completeness of every other dataset.",
-    "The index deliberately stores no payload contents. Full signed-transaction sizes, exact live entity counts while behind, unique provider storage and exact encoded attribute bytes cannot be established by these statistics.",
+    "The index deliberately stores no bytes contents, only their sizes and hashes. Full signed-transaction sizes, exact live entity counts while behind, and exact encoded attribute bytes cannot be established by these statistics.",
   ),
 } satisfies Record<string, StatisticsExplanation>;
 
@@ -430,7 +460,7 @@ export type StatisticsHelpKey = keyof typeof STATISTICS_HELP;
 
 const OPERATION_DETAILS: Record<number, [string, string]> = {
   1: ["Create attempts that ask Arkiv to allocate a new entity.", "Successful creates count even when old decoder history did not retain the assigned entity key. Imported genesis entities contribute no create operation, and a later deletion does not remove a historical create count."],
-  2: ["Update/patch attempts that modify an existing entity's attributes or payload metadata.", "Repeated updates to the same entity count repeatedly. This is not the number of changed attributes, distinct updated entities, or entities whose current state differs from their initial state."],
+  2: ["Patch attempts that set, retype, re-index or unset an existing entity's attributes.", "Repeated patches to the same entity count repeatedly. This is not the number of changed attributes, distinct patched entities, or entities whose current state differs from their initial state."],
   3: ["Expiry-extension attempts for existing entities.", "A successful extension counts as an operation, not as the number of extra blocks of lifetime. It does not guarantee that the entity is still active at the current projection block."],
   4: ["Ownership-transfer attempts for existing entities.", "Each successful transfer operation contributes once; this does not count distinct owners or distinct entities transferred. Later transfers do not remove earlier ones from the total."],
   5: ["Explicit delete attempts for existing entities.", "The Successful column counts delete operations, not all entities currently inactive. Passive expiry is separate, and the projected Deleted entities count can also include expire/prune tombstones."],
@@ -451,7 +481,7 @@ const ATTRIBUTE_MEANINGS: Record<number, string> = {
   1: "Boolean values (true or false).", 2: "Signed 32-bit integer values.",
   3: "Unsigned 64-bit integer values.", 4: "Unsigned 256-bit integer values.",
   5: "Fixed-point decimal values stored with 18 fractional places.", 6: "Fixed-length 32-byte values.",
-  7: "Variable-length byte values; this system type is normally unsupported by the attribute projector.",
+  7: "Variable-length byte values; never indexed, and the index keeps only their size and keccak256.",
   8: "String values.", 9: "20-byte address values.", 10: "32-byte entity-key values.",
 };
 

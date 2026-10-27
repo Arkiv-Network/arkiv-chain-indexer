@@ -136,7 +136,9 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
                 <TableHead>{renderTableHeader("Address")}</TableHead>
                 <TableHead className="text-right">{renderTableHeader("Tx count")}</TableHead>
                 <TableHead className="text-right">{renderTableHeader("Gas used")}</TableHead>
-                <TableHead className="text-right">{renderTableHeader(`Fees spent (${tokenSymbol})`)}</TableHead>
+                <TableHead className="text-right">{renderTableHeader(`Gas fees (${tokenSymbol})`)}</TableHead>
+                <TableHead className="text-right">{renderTableHeader(`Rent (${tokenSymbol})`)}</TableHead>
+                <TableHead className="text-right">{renderTableHeader(`Total cost (${tokenSymbol})`)}</TableHead>
                 <TableHead className="text-right">{renderTableHeader("Avg gas per tx")}</TableHead>
                 <TableHead className="text-right">{renderTableHeader(`Avg fee (${tokenSymbol})`)}</TableHead>
                 <TableHead>{renderTableHeader("First tx (block/date)")}</TableHead>
@@ -158,8 +160,14 @@ export function SendersView({ locationSearch, onLocationChange, timeZone, tokenS
                   <TableCell className="text-right font-mono tabular-nums" data-label="Gas used">
                     {fmtMillions(row.totalGasUsed)}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums" data-label="Fees spent">
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Gas fees">
                     {fmtTokenAmount(row.totalTransactionFeeWei, tokenSymbol, { trimZeros: false })}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Rent" title="Storage rent, burned outside gas">
+                    {fmtTokenAmount(row.totalRentFeeWei ?? "0", tokenSymbol)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums" data-label="Total cost">
+                    {fmtTokenAmount(row.totalCostWei ?? row.totalTransactionFeeWei, tokenSymbol)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums" data-label="Avg gas">
                     {fmtThousands(row.averageGasUsed)}

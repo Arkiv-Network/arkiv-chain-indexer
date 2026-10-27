@@ -42,7 +42,7 @@ export function SearchView({ locationSearch, onNavigate, onLocationChange }: {
     <PageBreadcrumbs items={[{ view: "home", label: "Home" }, { view: "search", label: "Search" }]} onLocationChange={onLocationChange} />
     <h2>Search the indexer</h2>
     <OmniSearch initialQuery={query} onNavigate={submit} autofocus={!query} />
-    <p className="search-help">Find a block number, an address, a block or transaction hash, or an entity key. Identifier prefixes need at least six hex digits. Search covers stored identifiers; attributes, attribute values, and payloads are not searched.</p>
+    <p className="search-help">Find a block number, an address, a block or transaction hash, or an entity key. Identifier prefixes need at least six hex digits. Search covers stored identifiers; attributes, attribute values, and bytes contents are not searched.</p>
     {loading ? <p role="status">Searching…</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     {result ? <>

@@ -459,8 +459,14 @@ export interface InspectedBlock {
   maxGasInBlock: string;
   transactionCount: number;
   blockRewardWei?: string;
+  /** Base fee × receipt gas: the gas side of what the block burned. */
   burntFeesWei?: string;
+  /** Gas fees only (Σ gasUsed × effectiveGasPrice). */
   totalTransactionFeeWei?: string;
+  /** Storage rent the block's transactions burned, outside gas. */
+  totalRentFeeWei?: string;
+  /** burntFeesWei + totalRentFeeWei. */
+  totalBurnedWei?: string;
   averageFeePriceWei?: string;
   averageTransactionFeeWei?: string;
   averageTransactionGasUsed?: string;

@@ -1,10 +1,22 @@
 import { ExternalLink } from "lucide-react";
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import {
+  fetchEntityByKey,
   fetchTransactionByHash,
   type StoredArkivOperation,
   type StoredTransaction,
 } from "./api";
+import {
+  applyAttributeMutations,
+  fromOperationAttribute,
+  isPermanentExpiry,
+  summarizeChanges,
+  toChecksumAddress,
+  withoutSchemaTag,
+} from "./attributes";
+import { AttributeTable } from "@/components/attribute-table";
+import { PermanentBadge, SchemaBadge } from "@/components/entity-badges";
+import { findOperationEvent, foldEntityHistory, type EntityHistoryEvent } from "./entityHistory";
 import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
 import { CedricOnTimer } from "./Cedric";
@@ -38,7 +50,6 @@ interface TransactionViewProps {
   onLocationChange: () => void;
   timeZone: string;
   tokenSymbol: string;
-  blockTimeMs: number;
 }
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -50,7 +61,6 @@ export function TransactionView({
   onLocationChange,
   timeZone,
   tokenSymbol,
-  blockTimeMs,
 }: TransactionViewProps) {
   const [query, setQuery] = useState(hash ?? "");
   const [formError, setFormError] = useState<string | null>(null);
@@ -152,7 +162,6 @@ export function TransactionView({
           transaction={data}
           timeZone={timeZone}
           tokenSymbol={tokenSymbol}
-          blockTimeMs={blockTimeMs}
           onLocationChange={onLocationChange}
         />
       ) : null}
@@ -169,14 +178,15 @@ function TransactionDetail({
   transaction: StoredTransaction;
   timeZone: string;
   tokenSymbol: string;
-  /** Unused since operations carry their resolved expiry block; kept for callers. */
-  blockTimeMs: number;
   onLocationChange: () => void;
 }) {
   const status = statusInfo(transaction.status);
   const decoderHref = transactionDecoderHref(transaction.hash);
   const isContractCreation = !transaction.to && Boolean(transaction.contractAddress);
   const operations = transaction.operations ?? [];
+  const failed = transaction.status === "0";
+  const histories = useEntityHistories(operations);
+  const totalCostWei = transaction.totalCostWei ?? addWei(transaction.transactionFeeWei, transaction.rentFeeWei);
 
   return (
     <div className="relative sm:mt-6">
@@ -198,6 +208,15 @@ function TransactionDetail({
             </a>
           ) : null}
         </div>
+
+        {failed ? (
+          <p className="border border-red-600/30 bg-red-600/5 px-3 py-2 text-xs text-red-700 dark:border-red-400/30 dark:text-red-300" role="note">
+            The transaction reverted: gas was charged, no rent was, and{" "}
+            {operations.length > 0
+              ? `none of its ${operations.length === 1 ? "operation" : `${operations.length} operations`} changed any entity.`
+              : "it changed no state."}
+          </p>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <section className="flex flex-col gap-1">
@@ -244,9 +263,27 @@ function TransactionDetail({
           </section>
 
           <section className="flex flex-col gap-1">
-            <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Fees</h3>
+            <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Cost</h3>
             <dl className="flex flex-col">
-              <Row label="Transaction fee">{fmtTokenAmount(transaction.transactionFeeWei, tokenSymbol)}</Row>
+              <Row label="Gas fee" title="gasUsed × effective gas price">
+                {fmtTokenAmount(transaction.transactionFeeWei, tokenSymbol)}
+              </Row>
+              <Row
+                label="Rent"
+                title={`Storage rent: ${tokenSymbol} burned from the sender's balance, outside gas and the gas limit (receipt rentFee)`}
+              >
+                {failed ? (
+                  <span className="text-muted-foreground">none — gas charged, no rent</span>
+                ) : (
+                  <span>
+                    {fmtTokenAmount(transaction.rentFeeWei, tokenSymbol)}
+                    <span className="ml-1.5 text-[10px] text-muted-foreground">outside gas</span>
+                  </span>
+                )}
+              </Row>
+              <Row label="Total cost" title="Gas fee + rent">
+                <span className="font-semibold">{fmtTokenAmount(totalCostWei, tokenSymbol)}</span>
+              </Row>
               <Row label="Effective gas price">{fmtGasPrice(transaction.effectiveGasPriceWei)}</Row>
               <Row label="Base fee">{fmtGasPrice(transaction.baseBlockFeeWei)}</Row>
               <Row label="Priority fee">{fmtGasPrice(transaction.priorityFeeWei)}</Row>
@@ -266,6 +303,9 @@ function TransactionDetail({
               <OperationCard
                 key={operation.opIndex}
                 operation={operation}
+                transaction={transaction}
+                failed={failed}
+                history={operation.entityKey ? histories.get(operation.entityKey.toLowerCase()) : undefined}
                 onLocationChange={onLocationChange}
               />
             ))}
@@ -276,21 +316,97 @@ function TransactionDetail({
   );
 }
 
+/** What the entity's stored history says an operation did; undefined while loading or unavailable. */
+type HistoryState = { status: "loading" } | { status: "loaded"; events: EntityHistoryEvent[] } | { status: "failed"; error: string };
+
+/** Operations that need the entity's earlier state to be shown as a change. */
+const NEEDS_HISTORY = new Set(["patch", "extend", "transfer"]);
+/** A transaction with more distinct entities than this shows their patches without old values. */
+const MAX_HISTORY_FETCHES = 24;
+
+/**
+ * Fetches and folds the stored history of every entity the transaction
+ * patches, extends or transfers, so the cards can say old → new.
+ */
+function useEntityHistories(operations: readonly StoredArkivOperation[]): Map<string, HistoryState> {
+  const keys = [
+    ...new Set(
+      operations
+        .filter((operation) => NEEDS_HISTORY.has(operation.operation) && operation.entityKey && !isAllZeroBytes32(operation.entityKey))
+        .map((operation) => operation.entityKey!.toLowerCase()),
+    ),
+  ].slice(0, MAX_HISTORY_FETCHES);
+  const signature = keys.join(",");
+  const [histories, setHistories] = useState<Map<string, HistoryState>>(new Map());
+
+  useEffect(() => {
+    if (keys.length === 0) {
+      setHistories(new Map());
+      return;
+    }
+    let cancelled = false;
+    setHistories(new Map(keys.map((key) => [key, { status: "loading" } as HistoryState])));
+    for (const key of keys) {
+      fetchEntityByKey(key)
+        .then((body) => {
+          if (cancelled) return;
+          const state: HistoryState = body
+            ? {
+                status: "loaded",
+                events: foldEntityHistory({
+                  genesis: body.genesis ?? null,
+                  operations: body.operations,
+                  truncated: body.truncated ?? false,
+                  currentVersion: body.state?.version ?? null,
+                }),
+              }
+            : { status: "failed", error: "no stored history" };
+          setHistories((previous) => new Map(previous).set(key, state));
+        })
+        .catch((error: Error) => {
+          if (!cancelled) setHistories((previous) => new Map(previous).set(key, { status: "failed", error: error.message }));
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // `signature` stands for `keys`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
+  return histories;
+}
+
 function OperationCard({
   operation,
+  transaction,
+  failed,
+  history,
   onLocationChange,
 }: {
   operation: StoredArkivOperation;
-  onLocationChange?: () => void;
+  transaction: StoredTransaction;
+  failed: boolean;
+  history: HistoryState | undefined;
+  onLocationChange: () => void;
 }) {
   const entityKey =
     operation.entityKey && !isAllZeroBytes32(operation.entityKey) ? operation.entityKey : null;
+  const event = history?.status === "loaded" ? findOperationEvent(history.events, transaction.hash, operation.opIndex) : null;
+  const mutations = operation.attributes.map(fromOperationAttribute);
+  const blockNumber = Number(transaction.blockNumberDecimal);
+  const bytesSource = { entityKey, atBlock: Number.isSafeInteger(blockNumber) ? blockNumber : undefined };
+  const actions = { onLocationChange };
+  const kind = event ? (event.kind === "failed" ? event.attemptedKind : event.kind) : null;
 
   return (
-    <div className="border border-border p-3">
+    <div className={cn("border border-border p-3", failed && "border-dashed")}>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <OpBadge operation={operation.operation} />
         <span className="text-xs text-muted-foreground">#{operation.opIndex}</span>
+        {kind === "extended-to-permanent" ? <span className="text-xs font-medium text-violet-700 dark:text-violet-300">extended to permanent</span> : null}
+        {operation.schemaName ? <SchemaBadge name={operation.schemaName} actions={actions} /> : null}
+        {failed ? <StatusBadge tone="fail">not applied</StatusBadge> : null}
       </div>
       <dl className="flex flex-col">
         <Row label="Entity key">
@@ -300,7 +416,6 @@ function OperationCard({
                 className="truncate font-mono text-foreground transition-colors hover:text-accent hover:underline"
                 href={entityDetailHref(entityKey)}
                 onClick={(event) => {
-                  if (!onLocationChange) return;
                   event.preventDefault();
                   if (writeEntityPermalink(entityKey)) onLocationChange();
                 }}
@@ -310,47 +425,117 @@ function OperationCard({
               </a>
               <CopyButton value={entityKey} label="entity key" />
             </span>
+          ) : operation.operation === "create" && failed ? (
+            <span className="text-muted-foreground">none — the create did not apply</span>
           ) : (
             "—"
           )}
         </Row>
-        {operation.schemaName ? <Row label="Schema">{operation.schemaName}</Row> : null}
-        {operation.bytesSize > 0 ? (
-          <Row label="Bytes" title={`${fmtInteger(operation.bytesSize)} bytes in bytes attributes (contents are not stored)`}>
-            {fmtBytes(operation.bytesSize)}
-          </Row>
-        ) : null}
-        {operation.attributes.length > 0 ? (
-          <Row label="Attributes">
-            <div className="flex flex-col gap-0.5">
-              {operation.attributes.map((attribute, index) => (
-                <div key={`${attribute.name}:${index}`} title={`${attribute.type}${attribute.indexed ? ", indexed" : ", stored"}`}>
-                  {attribute.name} ={" "}
-                  <span className="font-mono">
-                    {attribute.type === "tombstone"
-                      ? "(unset)"
-                      : attribute.value === null
-                        ? attribute.keccak256 ?? "—"
-                        : String(attribute.value)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Row>
+        {operation.operation === "create" ? (
+          <>
+            {operation.salt !== null ? <Row label="Salt" title="uint128 salt, decimal">{operation.salt}</Row> : null}
+            <Row label="Flags">{describeCreationFlags(operation.creationFlags)}</Row>
+          </>
         ) : null}
         {operation.resolvedExpiresAt !== null ? (
-          <Row label="Expires">
-            {operation.permanent ? "Permanent" : `block ${fmtInteger(operation.resolvedExpiresAt)}`}
+          <Row
+            label="Expires"
+            title={`Requested expiresAt ${operation.expiresAt ?? "—"}, minLifetime ${operation.minLifetime ?? "—"}; resolved max(expiresAt, block + minLifetime)`}
+          >
+            <ExpiryChange
+              before={operation.operation === "extend" ? event?.expiresBefore ?? null : null}
+              after={operation.resolvedExpiresAt}
+              permanent={operation.permanent === true}
+              onLocationChange={onLocationChange}
+            />
           </Row>
         ) : null}
         {operation.newOwner ? (
           <Row label="New owner">
-            <AddressCell address={operation.newOwner} />
+            <span className="inline-flex items-center gap-1.5">
+              <AddressCell address={toChecksumAddress(operation.newOwner)} />
+              {event?.ownerBefore ? <span className="text-[11px] text-muted-foreground">from {shortAddress(event.ownerBefore)}</span> : null}
+            </span>
+          </Row>
+        ) : null}
+        {operation.bytesSize > 0 ? (
+          <Row label="Bytes" title={`${fmtInteger(operation.bytesSize)} bytes in bytes attributes (the index keeps sizes and hashes, never contents)`}>
+            {fmtBytes(operation.bytesSize)}
           </Row>
         ) : null}
       </dl>
+      {operation.operation === "create" ? (
+        <div className="mt-3">
+          <h4 className="mb-1 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Attributes ({withoutSchemaTag(mutations).length})</h4>
+          <AttributeTable attributes={withoutSchemaTag(mutations)} actions={actions} bytes={bytesSource} onLocationChange={onLocationChange} />
+        </div>
+      ) : operation.operation === "patch" ? (
+        <div className="mt-3">
+          <h4 className="mb-1 flex flex-wrap items-baseline gap-2 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+            <span>Changes ({mutations.length})</span>
+            <span className="normal-case tracking-normal">
+              {event ? summarizeChanges(event.changes) : history?.status === "loading" ? "loading the previous values…" : "previous values unavailable"}
+            </span>
+          </h4>
+          <AttributeTable
+            changes={event ? event.changes : applyAttributeMutations(null, mutations).changes}
+            actions={actions}
+            bytes={bytesSource}
+            onLocationChange={onLocationChange}
+          />
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function ExpiryChange({
+  before,
+  after,
+  permanent,
+  onLocationChange,
+}: {
+  before: string | null;
+  after: string;
+  permanent: boolean;
+  onLocationChange: () => void;
+}) {
+  const show = (value: string, isPermanent: boolean) =>
+    isPermanent ? <PermanentBadge /> : <span>block <BlockNumberLink blockNumber={value} onLocationChange={onLocationChange} /></span>;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {before !== null && before !== after ? (
+        <>
+          <span className="text-muted-foreground">{show(before, isPermanentExpiry(before))}</span>
+          <span className="text-muted-foreground">→</span>
+        </>
+      ) : null}
+      {show(after, permanent || isPermanentExpiry(after))}
+    </span>
+  );
+}
+
+function describeCreationFlags(flags: number | null): string {
+  if (flags === null) return "—";
+  const names: string[] = [];
+  if (flags & 1) names.push("readonly");
+  if (flags & 2) names.push("permissionless extension");
+  const rest = flags & ~3;
+  if (rest) names.push(`other bits 0x${rest.toString(16)}`);
+  return names.length > 0 ? names.join(", ") : "none";
+}
+
+function addWei(a: string | null | undefined, b: string | null | undefined): string {
+  try {
+    return (BigInt(a ?? "0") + BigInt(b ?? "0")).toString();
+  } catch {
+    return a ?? "0";
+  }
+}
+
+function shortAddress(value: string): string {
+  const checksum = toChecksumAddress(value);
+  return checksum.length > 18 ? `${checksum.slice(0, 8)}…${checksum.slice(-6)}` : checksum;
 }
 
 function isAllZeroBytes32(value: string): boolean {

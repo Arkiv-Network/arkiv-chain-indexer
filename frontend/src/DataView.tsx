@@ -18,6 +18,7 @@ import {
   EMPTY_DATA_FILTERS,
   EXAMPLE_QUERIES,
   EXPIRATION_FILTERS,
+  expiryBlockNumber,
   isExpiringSoon,
   normalizeQueryInput,
   PAGE_SIZE_OPTIONS,
@@ -34,6 +35,7 @@ import {
   BACKEND_RPC_PATH,
   COMPARE_SOURCES,
   callRpc,
+  rpcModeNeedsAdmin,
   checkRpcSource,
   describeRpcEndpoint,
   fetchBlockTiming,
@@ -75,6 +77,7 @@ import {
   writePermalink,
 } from "./permalinks";
 import { AddressCell, copyText } from "./TransactionsView";
+import { describeNodeUrl, NODE_RPC_URL } from "./nodeRpc";
 import type { MouseEvent } from "react";
 
 const QueryEditor = lazy(() => import("./QueryEditor"));
@@ -86,7 +89,7 @@ interface DataViewProps {
   locationSearch: string;
   onLocationChange: () => void;
   timeZone: string;
-  /** Whether the node relay (`backend`, `both`) may be offered; without it the page is index-only. */
+  /** Whether the backend's node relay (`backend`, and `both` without a node of the deployment's own) may be offered. */
   adminModeActive: boolean;
   /** The current session's CSRF token, sent only to the application relay. */
   csrfToken: string | undefined;
@@ -140,8 +143,8 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   const [chosenSource, setSource] = useState<RpcSource>(() => linkedSource?.source ?? readStoredRpcSource());
   const [chosenMode, setMode] = useState<RpcMode>(() => linkedSource?.mode ?? readStoredRpcMode());
   // The relay is an admin surface: outside admin mode a remembered or linked
-  // `backend`/`both` is used as `index`, and the choice itself is kept for
-  // when admin mode comes back.
+  // `backend` (or a `both` that needs it) is used as the default, and the
+  // choice itself is kept for when admin mode comes back.
   const mode = permittedRpcMode(chosenMode, adminModeActive);
   const source: RpcSource = mode === "both" || mode === chosenSource.kind ? chosenSource : { ...chosenSource, kind: mode };
   const rpcDeps = { csrfToken };
@@ -220,7 +223,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
 
   const runQuery = useCallback(
     async (rawQuery: string, size: PageSize, continueFrom?: { cursor: string; atBlock: number }, via: RpcSource = source, requestedBlock?: number) => {
-      if (via.kind === "backend" && !adminModeActive) via = { kind: "index", customUrl: "" };
+      if (via.kind === "backend" && !adminModeActive) via = { kind: NODE_RPC_URL ? "node" : "index", customUrl: "" };
       const normalized = normalizeQueryInput(rawQuery);
       if (!normalized) return;
       if (via.kind === "custom" && !isValidRpcUrl(via.customUrl)) {
@@ -283,15 +286,15 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   );
 
   /**
-   * Sends the same query to the node's relay and to the experimental index and
-   * reports where they part company. Both calls are pinned to the lower of the
+   * Sends the same query to the node (the deployment's own, else the backend's
+   * relay) and to the experimental index and reports where they part company. Both calls are pinned to the lower of the
    * two heads: the index runs a little behind the node, and an unpinned pair
    * would read as a wall of differences that is really just that lag. An index
    * far behind is not followed down (see {@link pickComparisonBlock}): the
    * node's head is used and the index side fails, which is the honest report.
    */
   const runComparison = useCallback(async (rawQuery: string, size: PageSize, requestedBlock?: number) => {
-    if (!adminModeActive) return;
+    if (!adminModeActive && rpcModeNeedsAdmin("both")) return;
     const normalized = normalizeQueryInput(rawQuery);
     if (!normalized) return;
     setFormError(null);
@@ -373,9 +376,12 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     }
   }, [csrfToken, adminModeActive, resetCount]);
 
+  /** Counting runs where the query would: the node or the index (both answer arkiv_getEntityCount {query, block}). */
+  const countSource: RpcSource | null = mode === "index" || mode === "node" ? { kind: mode, customUrl: "" } : null;
+
   const countQuery = async () => {
     const normalized = normalizeQueryInput(query);
-    if (!normalized || mode !== "index") return;
+    if (!normalized || !countSource) return;
     let block: number | undefined;
     try { block = parseQueryBlock(blockInput); }
     catch (error) { setFormError((error as Error).message); return; }
@@ -392,7 +398,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
     setComparison({ status: "idle" });
     setCountResult({ query: normalized, total: null, error: null, running: true });
     try {
-      const total = await callRpc({ kind: "index", customUrl: "" }, "arkiv_getEntityCount", [{ query: normalized, ...(block === undefined ? {} : { block }) }], {
+      const total = await callRpc(countSource, "arkiv_getEntityCount", [{ query: normalized, ...(block === undefined ? {} : { block }) }], {
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -555,10 +561,14 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
   const visibleEntities =
     expiration === "soon"
       ? results.timing
-        ? results.entities.filter((entity) => isExpiringSoon(entity.expiresAt, results.timing as BlockTiming, nowMs))
+        ? results.entities.filter((entity) => isExpiringSoon(expiryBlockNumber(entity), results.timing as BlockTiming, nowMs))
         : []
       : results.entities;
   const hasText = query.trim().length > 0;
+  // bytes contents come from a node: the one that answered, else the deployment's own.
+  const bytesSource: RpcSource | null =
+    mode === "custom" ? source : NODE_RPC_URL ? { kind: "node", customUrl: "" } : null;
+  const compareLabel = `${describeRpcEndpoint(COMPARE_SOURCES[0])} vs ${BACKEND_INDEX_RPC_PATH}`;
   const running = results.running !== null || countResult?.running === true;
   const permalink =
     results.executedQuery === null
@@ -589,8 +599,10 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
       </div>
 
       <p className="max-w-3xl text-xs text-muted-foreground">
-        Query entity state from the indexer&apos;s experimental entity index, or from any node you name; in admin mode
-        the deployment&apos;s own node relay is available too, so the two can be compared.{" "}
+        {NODE_RPC_URL
+          ? "Query entity state straight from the node, with the indexer's experimental entity index beside it for comparison, or from any node you name."
+          : "Query entity state from the indexer's experimental entity index, or from any node you name; in admin mode the deployment's node relay is available too, so the two can be compared."}{" "}
+        Only indexed attributes are ever matched; stored ones are returned but never queried.{" "}
         <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
           Query language docs
         </a>
@@ -601,13 +613,18 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         <span className="text-xs font-medium text-muted-foreground">Query against</span>
         <Tabs value={mode} onValueChange={(value) => updateMode(value as RpcMode)}>
           <TabsList aria-label="RPC source">
+            {NODE_RPC_URL ? (
+              <TabsTrigger value="node" title={describeNodeUrl(NODE_RPC_URL)}>
+                Node
+              </TabsTrigger>
+            ) : null}
             {adminModeActive ? <TabsTrigger value="backend" title={BACKEND_RPC_PATH}>
-              Default node
+              Backend relay
             </TabsTrigger> : null}
             <TabsTrigger value="index" title={BACKEND_INDEX_RPC_PATH}>
               Experimental index
             </TabsTrigger>
-            {adminModeActive ? <TabsTrigger value="both">Both (compare)</TabsTrigger> : null}
+            {adminModeActive || !rpcModeNeedsAdmin("both") ? <TabsTrigger value="both">Both (compare)</TabsTrigger> : null}
             {mode === "custom" || source.customUrl.trim() ? (
               <TabsTrigger value="custom" title={describeRpcEndpoint({ kind: "custom", customUrl: source.customUrl })}>
                 Custom
@@ -616,7 +633,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
           </TabsList>
         </Tabs>
         <span className="font-mono text-xs text-muted-foreground">
-          {mode === "both" ? `${BACKEND_RPC_PATH} vs ${BACKEND_INDEX_RPC_PATH}` : describeRpcEndpoint(source) || "not set"}
+          {mode === "both" ? compareLabel : describeRpcEndpoint(source) || "not set"}
         </span>
       </div>
       {indexOff && (mode === "index" || mode === "both") ? (
@@ -698,8 +715,8 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
             type="button"
             className="secondary"
             onClick={() => void countQuery()}
-            disabled={!hasText || running || mode !== "index" || indexOff}
-            title={mode === "index" ? "Count all matches, regardless of page size or the Show filter" : "Select Experimental index to count query matches"}
+            disabled={!hasText || running || !countSource || (mode === "index" && indexOff)}
+            title={countSource ? "Count all matches, regardless of page size or the Show filter" : "Select the node or the experimental index to count query matches"}
           >
             Count query
           </button>
@@ -767,6 +784,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
         error={results.error}
         expirationFilter={expiration}
         timeZone={timeZone}
+        bytesSource={bytesSource}
         onLoadMore={loadMore}
         onQueryOnly={queryOnly}
         onAddToQuery={addToQuery}
@@ -778,7 +796,7 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
           <span className="text-muted-foreground">RPC endpoint</span>
           <span className="min-w-0 flex-1 truncate font-mono text-foreground">
-            {mode === "both" ? `${BACKEND_RPC_PATH} vs ${BACKEND_INDEX_RPC_PATH}` : describeRpcEndpoint(source) || "not set"}
+            {mode === "both" ? compareLabel : describeRpcEndpoint(source) || "not set"}
           </span>
           {mode === "backend" && backend.status === "known" ? (
             <StatusBadge tone={backend.methods !== false && missing.length === 0 ? "ok" : "fail"}>
@@ -802,7 +820,16 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
             <div className="flex flex-col gap-2">
               <h3 className="text-xs font-semibold text-foreground">RPC endpoint</h3>
               <div className="flex flex-col gap-2" role="radiogroup" aria-label="RPC endpoint">
-                {adminModeActive ? <RpcSourceOption checked={mode === "backend"} onChange={() => onKindChange("backend")} title="Indexer backend">
+                {NODE_RPC_URL ? (
+                  <RpcSourceOption checked={mode === "node"} onChange={() => onKindChange("node")} title="Node" badge={<StatusBadge tone="ok">default</StatusBadge>}>
+                    <span>
+                      <span className="font-mono">{describeNodeUrl(NODE_RPC_URL)}</span> is this deployment&apos;s Arkiv node,
+                      called straight from the browser. It answers with the chain&apos;s own state, bytes contents included,
+                      and is what the experimental index is checked against.
+                    </span>
+                  </RpcSourceOption>
+                ) : null}
+                {adminModeActive ? <RpcSourceOption checked={mode === "backend"} onChange={() => onKindChange("backend")} title="Backend relay">
                   <span>
                     <span className="font-mono">{BACKEND_RPC_PATH}</span> forwards the entity reads to the node it is
                     configured with, using the deployment&apos;s own API key.
@@ -818,9 +845,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
                 >
                   <span>
                     <span className="font-mono">{BACKEND_INDEX_RPC_PATH}</span> answers the entity reads from the
-                    indexer&apos;s own projection of the decoded operations, without asking a node. Same query
-                    language and wire format, so its answers can be checked against the backend&apos;s. Payloads are
-                    never available, entities created before the index floor are unknown, and{" "}
+                    indexer&apos;s own projection of the decoded operations, without asking a node. Same wire format,
+                    so its answers can be checked against the node&apos;s. It never holds bytes contents (they come back
+                    null; load them from the node), entities created before the index floor are unknown, and{" "}
                     <span className="font-mono">latest</span> means the projected head.
                   </span>
                   <IndexStatusNote backend={backend} />
@@ -844,9 +871,9 @@ export function DataView({ locationSearch, onLocationChange, timeZone, adminMode
                   />
                 </RpcSourceOption>
 
-                {adminModeActive ? <RpcSourceOption checked={mode === "both"} onChange={() => updateMode("both")} title="Both, compared">
+                {adminModeActive || !rpcModeNeedsAdmin("both") ? <RpcSourceOption checked={mode === "both"} onChange={() => updateMode("both")} title="Both, compared">
                   <span>
-                    Sends each query to <span className="font-mono">{BACKEND_RPC_PATH}</span> and{" "}
+                    Sends each query to <span className="font-mono">{describeRpcEndpoint(COMPARE_SOURCES[0])}</span> and{" "}
                     <span className="font-mono">{BACKEND_INDEX_RPC_PATH}</span> at once, both pinned to the lower of
                     the two heads so the index&apos;s lag does not read as a difference, and reports the timings side
                     by side with every field the two answers disagree on. The table below shows the node&apos;s
@@ -941,14 +968,18 @@ function ComparisonPanel({ report }: { report: ComparisonReport }) {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <ComparisonSideRow label="Default node" path={BACKEND_RPC_PATH} side={report.node} />
+        <ComparisonSideRow
+          label={COMPARE_SOURCES[0].kind === "node" ? "Node" : "Backend relay"}
+          path={describeRpcEndpoint(COMPARE_SOURCES[0])}
+          side={report.node}
+        />
         <ComparisonSideRow label="Experimental index" path={BACKEND_INDEX_RPC_PATH} side={report.index} />
       </div>
 
       {report.identical ? (
         <p className="text-xs text-muted-foreground">
-          Same entities, same order, same fields on the first page. Later pages are not compared: a cursor belongs to
-          the endpoint that issued it.
+          Same entities, same order, same fields on the first page (bytes contents, which the index withholds, are not
+          compared). Later pages are not compared: a cursor belongs to the endpoint that issued it.
         </p>
       ) : (
         <ul className="flex flex-col gap-1.5 border-t border-border pt-3">

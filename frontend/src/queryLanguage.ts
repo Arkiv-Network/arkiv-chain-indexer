@@ -11,8 +11,11 @@
 //   TYPEOF(<name>) = <tag>            attribute is set with exactly this type
 // Literals are typed constructor calls: str('...') i32(10) u64(1200000)
 //   u256(1000000) dec(3.5) addr(0x...) key(0x...) bytes32(0x...) true / false
-// System attributes: $key $owner $creator $createdAt $updatedAt $expiresAt
-//   $contentType $payload $creationFlags
+// System attributes (as the UDC node queries them): $key $owner $creator
+//   $createdAt $expiresAt. $updatedAt and $creationFlags are projections only,
+//   and entities have no $payload or $contentType.
+// Attribute names: [A-Za-z][A-Za-z0-9_.-]*, e.g. arkiv.schema. Only indexed
+//   attributes are ever matched; bytes attributes are never indexed.
 //
 // Example: level >= i32(10) AND (status = str('open') OR NOT EXISTS(closedAt))
 
@@ -20,20 +23,16 @@ import { autocompletion, type Completion, type CompletionContext } from "@codemi
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 
-const SYSTEM_ATTRIBUTES: Record<string, string> = {
+export const SYSTEM_ATTRIBUTES: Record<string, string> = {
   $key: "entity key",
   $owner: "entity owner address",
   $creator: "entity creator address",
   $createdAt: "block the entity was created at",
-  $updatedAt: "block the entity was last patched at",
-  $expiresAt: "block the entity expires at",
-  $contentType: "payload content type",
-  $payload: "entity payload bytes",
-  $creationFlags: "entity creation flags",
+  $expiresAt: "block the entity expires at (u64; 18446744073709551615 = permanent)",
 };
 
 // The nine tags a user can construct a literal with, or name in TYPEOF(...) = <tag>.
-// The tenth, `bytes`, only backs the system $payload cell and cannot be written.
+// The tenth, `bytes`, is never indexed, so no query can match a bytes value.
 const TYPE_TAGS: Record<string, string> = {
   bool: "boolean literal constructor",
   i32: "32-bit signed integer literal constructor",
@@ -46,7 +45,7 @@ const TYPE_TAGS: Record<string, string> = {
   key: "entity key literal constructor",
 };
 
-const completions: Completion[] = [
+export const completions: Completion[] = [
   ...Object.entries(SYSTEM_ATTRIBUTES).map(([label, detail]) => ({ label, type: "variable", detail })),
   ...Object.entries(TYPE_TAGS).map(([label, detail]) => ({
     label: `${label}()`,
@@ -59,6 +58,7 @@ const completions: Completion[] = [
   { label: "STARTSWITH", apply: "STARTSWITH str('')", type: "keyword", detail: "prefix match on a str attribute" },
   { label: "EXISTS", apply: "EXISTS()", type: "keyword", detail: "attribute is set, any type" },
   { label: "TYPEOF", apply: "TYPEOF() = ", type: "keyword", detail: "attribute is set with exactly this type" },
+  { label: "arkiv.schema", apply: "arkiv.schema = str('')", type: "variable", detail: "the SDK's schema tag (an indexed str)" },
 ];
 
 const ADDRESS_LENGTH = 42;
@@ -84,7 +84,7 @@ function arkivCompletions(context: CompletionContext) {
   if (rawHex && /^\s*$/.test(context.state.doc.sliceString(0, rawHex.from))) {
     return { from: rawHex.from, options: rawHexCompletions(rawHex.text), filter: false };
   }
-  const word = context.matchBefore(/[\w$]*/);
+  const word = context.matchBefore(/[\w$.-]*/);
   if (!word || (word.from === word.to && !context.explicit)) return null;
   return { from: word.from, options: completions };
 }
@@ -122,7 +122,8 @@ const arkivStreamParser = StreamLanguage.define({
     if (stream.match(/^0x[0-9a-fA-F]+/) || stream.match(/^\d+(\.\d+)?/)) return "number";
 
     // Matched case-sensitively so an attribute named `android` is not half-highlighted as `AND`.
-    if (stream.match(/^[a-zA-Z_]\w*/)) {
+    // Names may carry `.`, `_` and `-` after the first letter (arkiv.schema).
+    if (stream.match(/^[a-zA-Z_][\w.-]*/)) {
       const word = stream.current();
       if (LOGICAL_KEYWORDS.has(word) || OPERATOR_WORDS.has(word)) return "keyword";
       if (TYPE_TAG_SET.has(word)) return "typeName";

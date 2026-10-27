@@ -1,18 +1,20 @@
 import { addressDetailHref } from "./permalinks";
 import { envValues } from "./runtimeConfig";
 
-export const DEFAULT_TRANSACTION_DECODER_BASE_URL = "https://decoder.atlas.arkiv-global.net/";
-export const DEFAULT_PAYLOAD_PROVIDER_BASE_URL = "https://payload.atlas.arkiv-global.net/";
+/**
+ * External links are off unless configured. The payload-era Atlas decoder at
+ * decoder.atlas.arkiv-global.net cannot read UDC calldata, so it is no longer
+ * the default: set VITE_TRANSACTION_DECODER_BASE_URL (build or runtime
+ * config) to a decoder UI that takes `?tx=<hash>`, or leave it unset / `off`.
+ */
+const OFF_VALUES = new Set(["off", "none", "false", "0", "disabled"]);
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-// Content-addressed payload id: 64-char lowercase hex (matches the decoder's
-// PayloadReference.id format).
-const PAYLOAD_ID_RE = /^[0-9a-f]{64}$/;
 
 function normalizeHttpBaseUrl(value: string | undefined): string | null {
   const trimmed = value?.trim();
-  if (!trimmed) return null;
+  if (!trimmed || OFF_VALUES.has(trimmed.toLowerCase())) return null;
 
   try {
     const parsed = new URL(trimmed);
@@ -24,39 +26,24 @@ function normalizeHttpBaseUrl(value: string | undefined): string | null {
   return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
 }
 
+/** The configured decoder UI base URL, or null when the link is off (the default). */
 export function readTransactionDecoderBaseUrl(
   env: Record<string, string | undefined> = envValues(),
-): string {
-  return normalizeHttpBaseUrl(env.VITE_TRANSACTION_DECODER_BASE_URL) ?? DEFAULT_TRANSACTION_DECODER_BASE_URL;
+): string | null {
+  return normalizeHttpBaseUrl(env.VITE_TRANSACTION_DECODER_BASE_URL);
 }
 
 const TRANSACTION_DECODER_BASE_URL = readTransactionDecoderBaseUrl();
 
-export function transactionDecoderHref(hash: string | null | undefined): string | null {
+export function transactionDecoderHref(
+  hash: string | null | undefined,
+  baseUrl: string | null = TRANSACTION_DECODER_BASE_URL,
+): string | null {
   const value = hash?.trim();
-  if (!value || !TX_HASH_RE.test(value)) return null;
-  const url = new URL(TRANSACTION_DECODER_BASE_URL);
+  if (!baseUrl || !value || !TX_HASH_RE.test(value)) return null;
+  const url = new URL(baseUrl);
   url.searchParams.set("tx", value);
   return url.toString();
-}
-
-export function readPayloadProviderBaseUrl(
-  env: Record<string, string | undefined> = envValues(),
-): string {
-  return normalizeHttpBaseUrl(env.VITE_PAYLOAD_PROVIDER_BASE_URL) ?? DEFAULT_PAYLOAD_PROVIDER_BASE_URL;
-}
-
-const PAYLOAD_PROVIDER_BASE_URL = readPayloadProviderBaseUrl();
-
-/**
- * Link to the payload provider's info page for a content-addressed payload id
- * (the decoder's PayloadReference.id), e.g.
- * `https://payload.atlas.arkiv-global.net/payloads/<id>`.
- */
-export function payloadInfoHref(id: string | null | undefined): string | null {
-  const value = id?.trim().toLowerCase();
-  if (!value || !PAYLOAD_ID_RE.test(value)) return null;
-  return `${PAYLOAD_PROVIDER_BASE_URL}payloads/${value}`;
 }
 
 export function addressSearchHref(address: string | null | undefined): string | null {

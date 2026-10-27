@@ -1,31 +1,34 @@
 // The result list of the Data page: one card per entity, with the metadata the
-// node returned, an estimated lifetime, and attribute chips that copy complete
-// query conditions. Payloads are not fetched here; the entity page shows history.
+// endpoint returned, an estimated lifetime (none for a permanent entity), its
+// schema badge, and the shared attribute table whose indexed rows offer query
+// conditions. bytes contents load from the node on demand; the entity page
+// shows the history.
 
-import { Clipboard, Filter, ListPlus, Loader2, Search } from "lucide-react";
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
+import { type MouseEvent, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { CopyButton } from "@/components/copy-cell";
+import { AttributeTable } from "@/components/attribute-table";
+import { PermanentBadge, SchemaBadge } from "@/components/entity-badges";
+import { FilterMenu } from "@/components/filter-menu";
 import { cn } from "@/lib/utils";
+import { schemaNameOf, toChecksumAddress, withoutSchemaTag } from "./attributes";
 import { BlockNumberLink } from "./blockLinks";
 import {
-  attributeFilterExpression,
   describeQueryError,
   estimateBlockTimestampMs,
+  expiryBlockNumber,
   formatRelativeMs,
   lifetimeProgress,
   locateQueryPosition,
-  NUMERIC_ATTRIBUTE_TYPES,
-  type EntityAttribute,
   type EntityRecord,
 } from "./dataQuery";
-import type { BlockTiming } from "./dataRpc";
-import { isPermanentEntity } from "./entityLifetime";
+import type { BlockTiming, RpcSource } from "./dataRpc";
 import { fmtDate, fmtInteger } from "./format";
 import { entityDetailHref, shouldHandleClientNavigation, writeEntityPermalink } from "./permalinks";
-import { AddressCell, copyText } from "./TransactionsView";
+import { AddressCell } from "./TransactionsView";
 
 export interface EntityResultsProps {
   /** The query the results belong to, as sent to the node. */
@@ -42,6 +45,11 @@ export interface EntityResultsProps {
   error: unknown | null;
   expirationFilter: "all" | "soon";
   timeZone: string;
+  /**
+   * Where bytes contents load from: the endpoint a node answer came from, or
+   * the deployment's node for an index answer; null hides the action.
+   */
+  bytesSource?: RpcSource | null;
   onLoadMore: () => void;
   onQueryOnly: (expression: string) => void;
   onAddToQuery: (expression: string) => void;
@@ -60,6 +68,7 @@ export function EntityResults({
   error,
   expirationFilter,
   timeZone,
+  bytesSource,
   onLoadMore,
   onQueryOnly,
   onAddToQuery,
@@ -121,6 +130,8 @@ export function EntityResults({
               timing={timing}
               nowMs={nowMs}
               timeZone={timeZone}
+              blockNumber={blockNumber}
+              bytesSource={bytesSource}
               onQueryOnly={onQueryOnly}
               onAddToQuery={onAddToQuery}
               onLocationChange={onLocationChange}
@@ -164,6 +175,8 @@ function EntityCard({
   timing,
   nowMs,
   timeZone,
+  blockNumber,
+  bytesSource,
   onQueryOnly,
   onAddToQuery,
   onLocationChange,
@@ -172,6 +185,8 @@ function EntityCard({
   timing: BlockTiming | null;
   nowMs: number;
   timeZone: string;
+  blockNumber: number | null;
+  bytesSource: RpcSource | null | undefined;
   onQueryOnly: (expression: string) => void;
   onAddToQuery: (expression: string) => void;
   onLocationChange: () => void;
@@ -183,21 +198,20 @@ function EntityCard({
       )
     : [];
   const creatorDiffers = entity.creator !== null && entity.owner !== null && entity.creator.toLowerCase() !== entity.owner.toLowerCase();
-  const permanent = isPermanentEntity(entity.createdAt, entity.expiresAt, timing?.blockDurationSeconds ?? null);
+  const actions = { onQueryOnly, onAddToQuery, onLocationChange };
+  const schemaName = schemaNameOf(entity.attributes);
+  const rows = withoutSchemaTag(entity.attributes);
+  const expiresAtBlock = expiryBlockNumber(entity);
 
   return (
-    <Card className="gap-0 overflow-hidden py-0">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+    <Card className="gap-0 overflow-visible py-0">
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-border px-4 py-2">
         <EntityKeyLink entityKey={entity.key} onLocationChange={onLocationChange} />
-        <span className="flex shrink-0 items-center gap-1">
+        <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {schemaName ? <SchemaBadge name={schemaName} actions={actions} /> : null}
+          {entity.permanent ? <PermanentBadge /> : null}
           <CopyButton value={entity.key} label="entity key" />
-          <FilterMenu
-            expression={`$key = key(${entity.key})`}
-            label="this key"
-            copyValue={entity.key}
-            onQueryOnly={onQueryOnly}
-            onAddToQuery={onAddToQuery}
-          />
+          <FilterMenu expression={`$key = key(${entity.key})`} label="this key" copyValue={entity.key} actions={actions} />
         </span>
       </header>
 
@@ -206,13 +220,12 @@ function EntityCard({
           <MetaRow label="Owner">
             {entity.owner ? (
               <span className="flex min-w-0 items-center gap-1">
-                <AddressCell address={entity.owner} />
+                <AddressCell address={toChecksumAddress(entity.owner)} />
                 <FilterMenu
-                  expression={`$owner = addr(${entity.owner})`}
+                  expression={`$owner = addr(${entity.owner.toLowerCase()})`}
                   label="this owner"
-                  copyValue={entity.owner}
-                  onQueryOnly={onQueryOnly}
-                  onAddToQuery={onAddToQuery}
+                  copyValue={toChecksumAddress(entity.owner)}
+                  actions={actions}
                 />
               </span>
             ) : (
@@ -222,18 +235,16 @@ function EntityCard({
           {creatorDiffers || (entity.creator && !entity.owner) ? (
             <MetaRow label="Creator">
               <span className="flex min-w-0 items-center gap-1">
-                <AddressCell address={entity.creator} />
+                <AddressCell address={entity.creator ? toChecksumAddress(entity.creator) : null} />
                 <FilterMenu
-                  expression={`$creator = addr(${entity.creator})`}
+                  expression={`$creator = addr(${(entity.creator ?? "").toLowerCase()})`}
                   label="this creator"
-                  copyValue={entity.creator ?? ""}
-                  onQueryOnly={onQueryOnly}
-                  onAddToQuery={onAddToQuery}
+                  copyValue={entity.creator ? toChecksumAddress(entity.creator) : ""}
+                  actions={actions}
                 />
               </span>
             </MetaRow>
           ) : null}
-          <MetaRow label="Content type">{entity.contentType ?? "—"}</MetaRow>
           {flagNames.length > 0 ? (
             <MetaRow label="Flags">
               <div className="flex flex-wrap gap-1.5">
@@ -244,8 +255,8 @@ function EntityCard({
                     className="font-mono text-[10px]"
                     title={
                       name === "readonly"
-                        ? "The attributes and payload can never change; only the expiry can be extended, ownership transferred, or the entity deleted."
-                        : "Anyone, not just the owner, may extend this entity's expiry."
+                        ? "The attributes can never change; only the expiry can be extended, ownership transferred, or the entity deleted."
+                        : "Anyone, not just the owner, may extend this entity's expiry, up to the rent cap."
                     }
                   >
                     {name}
@@ -263,29 +274,33 @@ function EntityCard({
             </MetaRow>
           ) : null}
           <MetaRow label="Expires">
-            {permanent ? "Permanent" : (
-              <BlockStamp block={entity.expiresAt} timing={timing} nowMs={nowMs} timeZone={timeZone} onLocationChange={onLocationChange} />
+            {entity.permanent ? (
+              <PermanentBadge />
+            ) : expiresAtBlock !== null ? (
+              <BlockStamp block={expiresAtBlock} timing={timing} nowMs={nowMs} timeZone={timeZone} onLocationChange={onLocationChange} />
+            ) : (
+              <span className="font-mono">{entity.expiresAt ?? "—"}</span>
             )}
           </MetaRow>
         </div>
 
-        {!permanent && entity.createdAt !== null && entity.expiresAt !== null && timing ? (
-          <LifetimeBar createdAt={entity.createdAt} expiresAt={entity.expiresAt} timing={timing} nowMs={nowMs} />
+        {!entity.permanent && entity.createdAt !== null && expiresAtBlock !== null && timing ? (
+          <LifetimeBar createdAt={entity.createdAt} expiresAt={expiresAtBlock} timing={timing} nowMs={nowMs} />
         ) : null}
       </div>
 
-      {entity.attributes.length > 0 ? (
-        <div className="border-t border-border px-4 py-3">
-          <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Attributes</span>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {entity.attributes.map((attribute) => (
-              <AttributeChip key={attribute.name} attribute={attribute} />
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">No attributes</div>
-      )}
+      <div className="border-t border-border px-4 py-3">
+        <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+          Attributes ({rows.length})
+        </span>
+        <AttributeTable
+          className="mt-1"
+          attributes={rows}
+          actions={actions}
+          bytes={{ entityKey: entity.key, atBlock: blockNumber ?? undefined, rpc: bytesSource }}
+          onLocationChange={onLocationChange}
+        />
+      </div>
     </Card>
   );
 }
@@ -384,156 +399,5 @@ function LifetimeBar({
         <div className={cn("h-full", LIFETIME_BAR_TONE[tone])} style={{ width: `${progress.consumedPct}%` }} />
       </div>
     </div>
-  );
-}
-
-function TypeTagChip({ tag }: { tag: string }) {
-  return (
-    <span className="inline-flex shrink-0 items-center border border-border bg-background px-1 py-px font-mono text-[9px] leading-none text-muted-foreground">
-      {tag}
-    </span>
-  );
-}
-
-function AttributeChip({ attribute }: { attribute: EntityAttribute }) {
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
-  useEffect(() => {
-    if (copyStatus === "idle") return;
-    const timeout = window.setTimeout(() => setCopyStatus("idle"), 1500);
-    return () => window.clearTimeout(timeout);
-  }, [copyStatus]);
-
-  const expression = attributeFilterExpression(attribute);
-  const numeric = NUMERIC_ATTRIBUTE_TYPES.has(attribute.type);
-  const shown = attribute.value.length > 40 ? `${attribute.value.slice(0, 40)}…` : attribute.value;
-  return (
-    <button
-      type="button"
-      className={`attr-chip attr-chip-copy inline-flex max-w-full items-center gap-1 border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent ${copyStatus}`}
-      title={`Copy condition: ${expression}`}
-      aria-label={`Copy condition: ${expression}`}
-      onClick={async () => setCopyStatus(await copyText(expression) ? "copied" : "failed")}
-    >
-      <TypeTagChip tag={attribute.type} />
-      <span className="attr-chip-name">{attribute.name}</span>
-      <span className="attr-chip-eq">=</span>
-      <span className={`attr-chip-value ${numeric ? "numeric" : "text"}`}>{numeric || attribute.type === "bool" ? shown : `"${shown}"`}</span>
-      <span className="attr-chip-copy-feedback" role="status">
-        {copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Could not copy" : (
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="11" height="11" rx="2" />
-            <path d="M5 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2" />
-          </svg>
-        )}
-      </span>
-    </button>
-  );
-}
-
-/**
- * A small menu offering to query by one value, add it to the current query, or
- * copy it. Triggered by the funnel button next to a key or address.
- */
-function FilterMenu({
-  expression,
-  label,
-  copyValue,
-  onQueryOnly,
-  onAddToQuery,
-}: {
-  expression: string;
-  label: string;
-  copyValue: string;
-  onQueryOnly: (expression: string) => void;
-  onAddToQuery: (expression: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const rootRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timeout = window.setTimeout(() => setCopied(false), 1200);
-    return () => window.clearTimeout(timeout);
-  }, [copied]);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(copyValue);
-      setCopied(true);
-    } catch {
-      // Clipboard unavailable (insecure context); nothing to do.
-    }
-  };
-
-  return (
-    <span className="relative inline-flex" ref={rootRef}>
-      <button
-        type="button"
-        className="inline-flex size-5 shrink-0 items-center justify-center border border-border text-muted-foreground opacity-70 transition-colors hover:border-accent hover:text-accent hover:opacity-100"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={`Query by ${label}`}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Filter className="size-3" />
-      </button>
-      {open ? (
-        <span className="absolute top-full left-0 z-20 mt-1 min-w-48 border border-border bg-popover p-1 shadow-md" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent"
-            onClick={() => {
-              setOpen(false);
-              onQueryOnly(expression);
-            }}
-          >
-            <Search className="size-3 text-muted-foreground" />
-            Query by {label} only
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent"
-            onClick={() => {
-              setOpen(false);
-              onAddToQuery(expression);
-            }}
-          >
-            <ListPlus className="size-3 text-muted-foreground" />
-            Add to current query
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent"
-            onClick={copy}
-          >
-            <Clipboard className="size-3 text-muted-foreground" />
-            {copied ? "Copied" : "Copy value"}
-          </button>
-          <span className="mt-1 block truncate border-t border-border px-2.5 pt-1.5 font-mono text-[10px] text-muted-foreground">
-            {expression}
-          </span>
-        </span>
-      ) : null}
-    </span>
   );
 }
