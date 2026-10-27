@@ -453,12 +453,15 @@ services:
       # contents load from (never through the backend). An absolute URL must
       # answer CORS; `/node-rpc` uses NODE_RPC_UPSTREAM below, same-origin.
       VITE_NODE_RPC_URL: ${VITE_NODE_RPC_URL:-}
-      # The node's /signed/v1/status, for the rent cap; defaults to the RPC URL
-      # + /signed/v1/status. Unreachable is fine: the UI says so.
+      # The node's /signed/v1/status, for the rent cap. Derived only for
+      # VITE_NODE_RPC_URL=/node-rpc; any other node needs it set (or none is
+      # read). Unreachable is fine: the UI says so.
       VITE_NODE_STATUS_URL: ${VITE_NODE_STATUS_URL:-}
       # Where /node-rpc forwards (JSON-RPC and /signed/v1/status only, without
-      # cookies). Empty: /node-rpc answers 503.
+      # cookies; at most NODE_RPC_MAX_IN_FLIGHT at once). Empty: 503. Set it
+      # explicitly; it is never derived from SHADOW_RPC_UPSTREAM.
       NODE_RPC_UPSTREAM: ${NODE_RPC_UPSTREAM:-}
+      NODE_RPC_MAX_IN_FLIGHT: ${NODE_RPC_MAX_IN_FLIGHT:-32}
     ports:
       - "${FRONTEND_HOST:-127.0.0.1}:${FRONTEND_PORT:-23560}:23560"
 

@@ -16,10 +16,11 @@
 # SHADOW_RPC_UPSTREAM pointing at http://<node container>:8545, for example
 # http://arkiv-sourcify-node-1:8545.
 #
-# The frontend joins the network too and forwards /node-rpc to the node
-# (NODE_RPC_UPSTREAM, default SHADOW_RPC_UPSTREAM), so the Data tab and the
-# bytes "load from node" action reach a node that answers no CORS, same-origin
-# (VITE_NODE_RPC_URL, default /node-rpc).
+# The frontend joins the network too, so it can forward /node-rpc to the node
+# when the env file says so: NODE_RPC_UPSTREAM=http://<node container>:8545 and
+# VITE_NODE_RPC_URL=/node-rpc give the Data tab and the bytes "load from node"
+# action a same-origin line to a node that answers no CORS. Neither is derived
+# from SHADOW_RPC_UPSTREAM, which may carry an API key: set both explicitly.
 
 x-prefill-network: &prefill-network
   networks:
@@ -35,9 +36,6 @@ services:
     <<: *prefill-network
   frontend:
     <<: *prefill-network
-    environment:
-      NODE_RPC_UPSTREAM: ${NODE_RPC_UPSTREAM:-${SHADOW_RPC_UPSTREAM:-}}
-      VITE_NODE_RPC_URL: ${VITE_NODE_RPC_URL:-/node-rpc}
   backend:
     <<: *prefill-network
     volumes:

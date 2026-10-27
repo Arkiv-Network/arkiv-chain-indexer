@@ -16,11 +16,17 @@ describe("node configuration", () => {
     expect(readNodeRpcUrl({ VITE_NODE_RPC_URL: "node:8545" })).toBeNull();
   });
 
-  test("the status URL defaults to the RPC URL + /signed/v1/status and can be set or turned off", () => {
+  test("the status URL is derived for the /node-rpc passthrough only, else configured or off", () => {
     expect(readNodeStatusUrl({})).toBeNull();
     expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "/node-rpc" })).toBe("/node-rpc/signed/v1/status");
-    expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "http://127.0.0.1:28545/" })).toBe("http://127.0.0.1:28545/signed/v1/status");
-    expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "/node-rpc", VITE_NODE_STATUS_URL: "https://status.example.test/s" })).toBe("https://status.example.test/s");
+    expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "/node-rpc/" })).toBe("/node-rpc/signed/v1/status");
+    // nginx's `location = /rpc` would answer /rpc/signed/v1/status with the SPA: never guessed.
+    expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "https://alt-node-fast.arkiv-global.net/rpc" })).toBeNull();
+    expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "http://127.0.0.1:28545/" })).toBeNull();
+    expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "/rpc" })).toBeNull();
+    expect(
+      readNodeStatusUrl({ VITE_NODE_RPC_URL: "https://alt-node-fast.arkiv-global.net/rpc", VITE_NODE_STATUS_URL: "https://alt-node-fast.arkiv-global.net/signed/v1/status" }),
+    ).toBe("https://alt-node-fast.arkiv-global.net/signed/v1/status");
     expect(readNodeStatusUrl({ VITE_NODE_RPC_URL: "/node-rpc", VITE_NODE_STATUS_URL: "off" })).toBeNull();
   });
 
@@ -46,8 +52,11 @@ describe("rent cap", () => {
   test("an unreachable or non-JSON status degrades to null", async () => {
     const failing = (async () => { throw new TypeError("network"); }) as unknown as typeof fetch;
     expect(await fetchNodeRentCap(failing, "/node-rpc/signed/v1/status")).toBeNull();
-    const html = (async () => new Response("<!doctype html>", { status: 200 })) as unknown as typeof fetch;
+    const html = (async () => new Response("<!doctype html>", { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
     expect(await fetchNodeRentCap(html, "/x")).toBeNull();
+    // A JSON body served as HTML (an SPA fallback) is not trusted either.
+    const mislabelled = (async () => new Response(JSON.stringify(status), { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    expect(await fetchNodeRentCap(mislabelled, "/x")).toBeNull();
     const ok = (async () => Response.json(status)) as unknown as typeof fetch;
     expect((await fetchNodeRentCap(ok, "/x"))?.maxRentLifetimeBlocks).toBe("15768000");
     expect(await fetchNodeRentCap(ok, null)).toBeNull();

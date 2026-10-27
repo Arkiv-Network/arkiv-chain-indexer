@@ -224,8 +224,24 @@ function proxyApi(req, res) {
   req.pipe(proxyReq);
 }
 
+const NODE_RPC_TIMEOUT_MS = 120_000;
+/** Requests forwarded at once; beyond it /node-rpc answers 503 instead of queueing. */
+const NODE_RPC_MAX_IN_FLIGHT = Math.max(1, Number.parseInt(process.env.NODE_RPC_MAX_IN_FLIGHT ?? "32", 10) || 32);
+// Every /node-rpc answer is JSON whatever the upstream says, so a browser never
+// sniffs node output into something else.
+const NODE_RPC_HEADERS = {
+  "content-type": "application/json",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+};
+let nodeRpcInFlight = 0;
+
 function nodeRpcError(res, status, message) {
-  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
+  res.writeHead(status, NODE_RPC_HEADERS);
   res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message } }));
 }
 
@@ -260,33 +276,55 @@ function proxyNodeRpc(req, res) {
     nodeRpcError(res, 413, "request body too large");
     return;
   }
+  if (nodeRpcInFlight >= NODE_RPC_MAX_IN_FLIGHT) {
+    nodeRpcError(res, 503, "Too many node requests in flight; try again shortly");
+    return;
+  }
+  nodeRpcInFlight += 1;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    nodeRpcInFlight -= 1;
+  };
+
   // Only what JSON-RPC needs: the browser's cookies and credentials stay here.
-  const headers = { accept: req.headers.accept ?? "application/json" };
+  const headers = { accept: "application/json" };
   if (req.headers["content-type"]) headers["content-type"] = req.headers["content-type"];
   if (req.headers["content-length"]) headers["content-length"] = req.headers["content-length"];
   const client = upstream.protocol === "https:" ? https : http;
-  const proxyReq = client.request(
-    upstream,
-    { method: req.method, headers },
-    (proxyRes) => {
-      res.writeHead(proxyRes.statusCode ?? 502, {
-        "content-type": proxyRes.headers["content-type"] ?? "application/json",
-        "cache-control": "no-store",
-      });
-      proxyRes.pipe(res);
-    },
-  );
-  proxyReq.setTimeout(120_000, () => proxyReq.destroy(new Error("upstream timeout")));
-  proxyReq.on("error", (err) => {
-    if (!res.headersSent) nodeRpcError(res, 502, `Bad gateway: ${err.message}`);
-    else res.end();
+  // The first outcome wins; later errors from tearing the other side down are ignored.
+  let settled = false;
+  const fail = (status, message) => {
+    if (settled) return;
+    settled = true;
+    proxyReq.destroy();
+    nodeRpcError(res, status, message);
+  };
+  const proxyReq = client.request(upstream, { method: req.method, headers }, (proxyRes) => {
+    if (settled) {
+      proxyRes.resume();
+      return;
+    }
+    settled = true;
+    res.writeHead(proxyRes.statusCode ?? 502, NODE_RPC_HEADERS);
+    proxyRes.pipe(res);
+  });
+  proxyReq.setTimeout(NODE_RPC_TIMEOUT_MS, () => fail(504, "The node did not answer in time"));
+  // A fixed message: the upstream's address stays on this side.
+  proxyReq.on("error", () => fail(502, "The node could not be reached"));
+  // A client that goes away takes its upstream request with it.
+  res.on("close", () => {
+    release();
+    if (!res.writableFinished) proxyReq.destroy();
   });
   let received = 0;
   req.on("data", (chunk) => {
     received += chunk.length;
     if (received > NODE_RPC_MAX_BODY_BYTES) {
-      proxyReq.destroy(new Error("request body too large"));
-      req.destroy();
+      req.unpipe(proxyReq);
+      req.resume();
+      fail(413, "request body too large");
     }
   });
   req.pipe(proxyReq);

@@ -1253,7 +1253,9 @@ dependency-free Node HTTP server that:
    prefix). For example a browser request to `/api/blocks?blockGt=1` is forwarded to `http://backend:3000/blocks?blockGt=1`.
 3. Optionally forwards `POST /node-rpc` (JSON-RPC) and `GET /node-rpc/signed/v1/status` to an Arkiv node
    (`NODE_RPC_UPSTREAM`), for a node the browser cannot reach with CORS. Only those two routes, without cookies or
-   credentials; the indexer backend is not involved.
+   credentials, bodies up to 1 MiB, at most `NODE_RPC_MAX_IN_FLIGHT` at once; answers are always JSON with `nosniff`,
+   a client that disconnects aborts its upstream request, and upstream failures are reported without the node's
+   address. The indexer backend is not involved.
 4. Falls back to `index.html` for any other unknown path (SPA routing).
 
 The frontend production build also writes `.br` siblings for the files in `frontend/dist/`. The Node static server
@@ -1347,8 +1349,9 @@ The frontend container reads these env vars:
 | `VITE_TOKEN_SYMBOL` | `ETH` | Three-letter token symbol used in frontend native-token labels. |
 | `VITE_TRANSACTION_DECODER_BASE_URL` | _(off)_ | Base URL of an external decoder UI linked from the transaction page (`/?tx=<hash>`). Unset, empty or `off`: no link (the payload-era Atlas decoder cannot read UDC calldata). Build arg and runtime config. |
 | `VITE_NODE_RPC_URL` | _(none)_ | The browser's Arkiv node: the Data tab's default endpoint and where bytes contents load from. Absolute (the node must answer CORS) or same-origin, e.g. `/node-rpc` with `NODE_RPC_UPSTREAM`. Unset or `off`: the Data tab defaults to the experimental index and bytes cannot be loaded. Runtime config. |
-| `VITE_NODE_STATUS_URL` | RPC URL + `/signed/v1/status` | The node's status document, read once for the rent cap shown on permanent entities; unreachable is fine (the tooltip says so). `off` skips it. Runtime config. |
-| `NODE_RPC_UPSTREAM` | _(none)_ | Where `/node-rpc` forwards (JSON-RPC and `/signed/v1/status` only). `docker-compose.prefill.yml` sets it to `SHADOW_RPC_UPSTREAM` and `VITE_NODE_RPC_URL` to `/node-rpc`. |
+| `VITE_NODE_STATUS_URL` | `/node-rpc/signed/v1/status` with `VITE_NODE_RPC_URL=/node-rpc`, else none | The node's status document, read once for the rent cap shown on permanent entities. Set it for an absolute node URL (behind nginx the RPC path is often an exact `location = /rpc`, so it cannot be derived). Unreachable or not JSON: the tooltip says the cap is not available. `off` skips it. Runtime config. |
+| `NODE_RPC_UPSTREAM` | _(none)_ | Where `/node-rpc` forwards (JSON-RPC and `/signed/v1/status` only). Set it explicitly — it is never derived from `SHADOW_RPC_UPSTREAM`, which may carry an API key; with `docker-compose.prefill.yml` the frontend is on the node's network, so `NODE_RPC_UPSTREAM=http://<node container>:8545` plus `VITE_NODE_RPC_URL=/node-rpc` gives a same-origin line to a node without CORS. |
+| `NODE_RPC_MAX_IN_FLIGHT` | `32` | Requests `/node-rpc` forwards at once; beyond it it answers 503. |
 | `VITE_NO_BATCHER` | `false` | Set to `true` for networks without batcher metrics; hides batcher panels, fields, and chart options. |
 
 ### Developing the frontend locally

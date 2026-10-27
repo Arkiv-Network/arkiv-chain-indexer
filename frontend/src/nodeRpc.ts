@@ -6,8 +6,11 @@
 //   VITE_NODE_RPC_URL     JSON-RPC endpoint, absolute or same-origin
 //                         (`/node-rpc` when frontend/server.js proxies
 //                         NODE_RPC_UPSTREAM); unset or `off` for none.
-//   VITE_NODE_STATUS_URL  the node's `/signed/v1/status`; defaults to the RPC
-//                         URL + `/signed/v1/status`; `off` for none.
+//   VITE_NODE_STATUS_URL  the node's `/signed/v1/status`. Derived only for the
+//                         same-origin `/node-rpc` form (the passthrough serves
+//                         it); an absolute node URL cannot be extended safely
+//                         (nginx often routes an exact `location = /rpc`), so it
+//                         needs this set. `off` for none.
 //
 // A node called cross-origin must answer CORS; the rent cap is optional and
 // every reader degrades without it.
@@ -33,12 +36,18 @@ export function readNodeRpcUrl(env: RuntimeConfig = envValues()): string | null 
   return configuredUrl(env.VITE_NODE_RPC_URL);
 }
 
-/** The node's status document URL: configured, derived from the RPC URL, or null. */
+/** The same-origin passthrough of frontend/server.js, which also serves the status document. */
+export const NODE_RPC_PASSTHROUGH_PATH = "/node-rpc";
+
+/**
+ * The node's status document URL: as configured, or derived for the
+ * `/node-rpc` passthrough only; null otherwise.
+ */
 export function readNodeStatusUrl(env: RuntimeConfig = envValues()): string | null {
   const explicit = env.VITE_NODE_STATUS_URL?.trim();
   if (explicit) return configuredUrl(explicit);
-  const rpc = readNodeRpcUrl(env);
-  return rpc ? `${rpc.replace(/\/+$/, "")}/signed/v1/status` : null;
+  const rpc = readNodeRpcUrl(env)?.replace(/\/+$/, "");
+  return rpc === NODE_RPC_PASSTHROUGH_PATH ? `${NODE_RPC_PASSTHROUGH_PATH}/signed/v1/status` : null;
 }
 
 export const NODE_RPC_URL = readNodeRpcUrl();
@@ -120,7 +129,11 @@ export function fetchNodeRentCap(
   if (!url) return Promise.resolve(null);
   if (fetchImpl === fetch && rentCapPromise) return rentCapPromise;
   const promise = fetchImpl(url, { credentials: "omit", headers: { accept: "application/json" }, signal: AbortSignal.timeout(8000) })
-    .then(async (response) => (response.ok ? parseNodeRentCap(await response.json()) : null))
+    .then(async (response) => {
+      // A wrong URL often lands on an HTML page (an SPA fallback) with 200: not the status.
+      if (!response.ok || !(response.headers.get("content-type") ?? "").toLowerCase().includes("json")) return null;
+      return parseNodeRentCap(await response.json());
+    })
     .catch(() => null);
   if (fetchImpl === fetch) rentCapPromise = promise;
   return promise;
