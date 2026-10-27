@@ -153,3 +153,16 @@ describe("foldEntityHistory", () => {
     expect(findOperationEvent(events, first.hash, 7)).toBeNull();
   });
 });
+
+describe("extensions without the previous expiry", () => {
+  test("a truncated history does not claim an extension to permanent", () => {
+    const events = foldEntityHistory({
+      operations: [op(900, "extend", { resolvedExpiresAt: PERMANENT_EXPIRES_AT, permanent: true })],
+      truncated: true,
+      currentVersion: 5,
+    });
+    expect(events[0]!.kind).toBe("extended");
+    expect(events[0]!.expiresBefore).toBeNull();
+    expect(events[0]!.expiresAfter).toBe(PERMANENT_EXPIRES_AT);
+  });
+});

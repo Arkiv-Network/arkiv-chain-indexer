@@ -44,8 +44,9 @@ export function PermanentBadge({ className }: { className?: string }) {
           costs the same rent as a lifetime of that cap.
         </p>
         <p>
-          Only the owner can extend beyond the cap: a permissionless extension by anyone else stops at the cap,
-          and extending to permanent is owner-only.
+          Only the owner can extend beyond the cap. Anyone else may extend an entity created with permissionless
+          extension only up to the current block plus the cap; the node rejects a longer extension, and any
+          extension to permanent, from a non-owner (PermanenceOwnerOnly).
         </p>
         {cap === null ? (
           <p>

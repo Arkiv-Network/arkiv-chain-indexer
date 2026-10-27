@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import {
   fmtBytes,
   fmtDate,
+  fmtExactTokenAmount,
   fmtGasPrice,
   fmtInteger,
   fmtRatio,
@@ -267,12 +268,12 @@ function TransactionDetail({
           <section className="flex flex-col gap-1">
             <h3 className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">Cost</h3>
             <dl className="flex flex-col">
-              <Row label="Gas fee" title="gasUsed × effective gas price">
+              <Row label="Gas fee" title={`${fmtExactTokenAmount(transaction.transactionFeeWei, tokenSymbol)}: gasUsed × effective gas price`}>
                 {fmtTokenAmount(transaction.transactionFeeWei, tokenSymbol)}
               </Row>
               <Row
                 label="Rent"
-                title={`Storage rent: ${tokenSymbol} burned from the sender's balance, outside gas and the gas limit (receipt rentFee)`}
+                title={`${fmtExactTokenAmount(transaction.rentFeeWei, tokenSymbol)}: storage rent, burned from the sender's balance outside gas and the gas limit (receipt rentFee)`}
               >
                 {failed ? (
                   <span className="text-muted-foreground">none — gas charged, no rent</span>
@@ -283,7 +284,7 @@ function TransactionDetail({
                   </span>
                 )}
               </Row>
-              <Row label="Total cost" title="Gas fee + rent">
+              <Row label="Total cost" title={`${fmtExactTokenAmount(totalCostWei, tokenSymbol)}: gas fee + rent`}>
                 <span className="font-semibold">{fmtTokenAmount(totalCostWei, tokenSymbol)}</span>
               </Row>
               <Row label="Effective gas price">{fmtGasPrice(transaction.effectiveGasPriceWei)}</Row>

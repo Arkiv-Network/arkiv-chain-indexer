@@ -4,6 +4,7 @@
 // against the hash the index recorded.
 
 import { callRpc, type RpcCallDeps, type RpcSource } from "./dataRpc";
+import { visibleText } from "./attributes";
 import { hexToBytes, keccak256Hex } from "./keccak";
 
 export interface LoadedBytes {
@@ -68,7 +69,11 @@ export async function loadBytesFromNode(
   };
 }
 
-/** The content as UTF-8 text when it is printable text, else null. */
+/**
+ * The content as UTF-8 text when it is printable text, else null. Bidi and
+ * C1 controls and invisible format characters come back as visible escapes,
+ * so the text cannot disguise itself.
+ */
 export function bytesAsText(content: string): string | null {
   let bytes: Uint8Array;
   try {
@@ -84,5 +89,5 @@ export function bytesAsText(content: string): string | null {
   }
   // Mostly-printable only: control characters other than whitespace mean binary.
   const control = text.match(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g)?.length ?? 0;
-  return control === 0 ? text : null;
+  return control === 0 ? visibleText(text) : null;
 }

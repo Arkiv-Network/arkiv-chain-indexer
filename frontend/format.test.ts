@@ -128,3 +128,15 @@ describe("frontend format helpers", () => {
     expect(fmtDurationSeconds(7_200)).toBe("2h 0m");
   });
 });
+
+describe("fmtExactTokenAmount", () => {
+  test("keeps every digit and the wei", async () => {
+    const { fmtExactTokenAmount } = await import("./src/format");
+    expect(fmtExactTokenAmount("11804100000000000", "GLM")).toBe("0.0118041 GLM (11804100000000000 wei)");
+    expect(fmtExactTokenAmount("1596000000000", "GLM")).toBe("0.000001596 GLM (1596000000000 wei)");
+    expect(fmtExactTokenAmount("2027336234327314860", "GLM")).toBe("2.02733623432731486 GLM (2027336234327314860 wei)");
+    expect(fmtExactTokenAmount("0", "GLM")).toBe("0 GLM (0 wei)");
+    expect(fmtExactTokenAmount("3000000000000000000", "GLM")).toBe("3 GLM (3000000000000000000 wei)");
+    expect(fmtExactTokenAmount(null, "GLM")).toBe("");
+  });
+});

@@ -73,6 +73,26 @@ export function fmtTokenAmount(
   return `${fmtEth(wei.toString(), options)} ${tokenSymbol}`;
 }
 
+/**
+ * A token amount with every digit, for tooltips beside the rounded figure:
+ * "0.0118041 GLM (11804100000000000 wei)". fmtTokenAmount keeps four
+ * significant digits, which hides most of a rent or fee.
+ */
+export function fmtExactTokenAmount(weiStr: string | null | undefined, tokenSymbol: string): string {
+  if (weiStr === undefined || weiStr === null) return "";
+  let wei: bigint;
+  try {
+    wei = BigInt(weiStr);
+  } catch {
+    return String(weiStr);
+  }
+  const negative = wei < 0n;
+  const abs = negative ? -wei : wei;
+  const whole = abs / ETH_IN_WEI;
+  const fraction = (abs % ETH_IN_WEI).toString().padStart(18, "0").replace(/0+$/, "");
+  return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""} ${tokenSymbol} (${wei.toString()} wei)`;
+}
+
 export function fmtEth(
   weiStr: string | null | undefined,
   options: FmtSigOptions = {},

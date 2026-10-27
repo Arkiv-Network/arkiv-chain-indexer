@@ -170,7 +170,13 @@ export function foldEntityHistory(input: EntityHistoryInput): EntityHistoryEvent
         nextExpiry = operation.resolvedExpiresAt ?? state.expiresAt;
         const wasPermanent = isPermanentExpiry(state.expiresAt);
         const nowPermanent = operation.permanent === true || isPermanentExpiry(nextExpiry);
-        kind = wasPermanent && nowPermanent ? "extend-noop" : nowPermanent ? "extended-to-permanent" : "extended";
+        // Without the previous expiry (a truncated history) no transition is claimed:
+        // the entity may already have been permanent.
+        kind =
+          state.expiresAt === null ? "extended"
+          : wasPermanent && nowPermanent ? "extend-noop"
+          : nowPermanent ? "extended-to-permanent"
+          : "extended";
         break;
       }
       case "transfer":

@@ -112,3 +112,12 @@ describe("loading bytes from the node", () => {
     expect(bytesAsText("0xff")).toBeNull();
   });
 });
+
+describe("bytes shown as text", () => {
+  test("cannot spoof with bidi or C1 controls", () => {
+    // "abc" RLO "exe.txt" → shown with the override escaped
+    expect(bytesAsText("0x616263e280ae6578652e747874")).toBe("abc\\u{202E}exe.txt");
+    // C2 85 is U+0085 (NEL, a C1 control)
+    expect(bytesAsText("0x61c28562")).toBe("a\\u{0085}b");
+  });
+});

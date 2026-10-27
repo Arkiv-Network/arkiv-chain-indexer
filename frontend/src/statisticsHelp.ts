@@ -56,7 +56,7 @@ export const STATISTICS_HELP = {
     BYTES_LIMITS,
   ),
   "Byte units": explain(
-    "Controls the display of all byte sizes on this page, including means and content-type totals.",
+    "Controls the display of all byte sizes on this page, including means and bytes totals.",
     "The worker sends decimal byte-count strings. This selector changes only their presentation in your browser.",
     "Bytes shows whole totals exactly in B. Decimal automatically selects kB, MB, GB, TB and larger units using powers of 1000. Binary uses KiB, MiB, GiB, TiB and powers of 1024.",
     "Decimal is the default. Your choice is remembered in this browser. Non-byte counts and the coverage percentage are unaffected.",

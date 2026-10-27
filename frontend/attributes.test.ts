@@ -170,3 +170,13 @@ describe("patches", () => {
     expect(other.changes[0]!.kind).toBe("changed");
   });
 });
+
+describe("visible text", () => {
+  test("bidi, C1 and invisible format characters are shown escaped", async () => {
+    const { visibleText } = await import("./src/attributes");
+    expect(visibleText("abc‮txt.exe")).toBe("abc\\u{202E}txt.exe");
+    expect(visibleText("a\u0085b​c⁦d⁩﻿")).toBe("a\\u{0085}b\\u{200B}c\\u{2066}d\\u{2069}\\u{FEFF}");
+    // Ordinary text, accents, CJK and joined emoji are untouched.
+    expect(visibleText("zażółć 日本語 👨‍👩‍👧")).toBe("zażółć 日本語 👨‍👩‍👧");
+  });
+});

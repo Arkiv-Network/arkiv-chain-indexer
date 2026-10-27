@@ -531,7 +531,8 @@ function VersionHistory({
                     <AttributeTable
                       changes={event.changes}
                       actions={event.kind === "failed" ? undefined : actions}
-                      bytes={{ entityKey, atBlock: operation && Number.isSafeInteger(blockNumber) ? blockNumber : undefined }}
+                      // The genesis version is read at block 0; any other at its operation's block.
+                      bytes={{ entityKey, atBlock: !operation ? 0 : Number.isSafeInteger(blockNumber) ? blockNumber : undefined }}
                       onLocationChange={onLocationChange}
                     />
                   </TableCell>

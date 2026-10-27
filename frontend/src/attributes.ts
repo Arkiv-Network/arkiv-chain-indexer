@@ -196,6 +196,23 @@ export function attributeText(attribute: AttributeView): string {
   }
 }
 
+/**
+ * Characters that can reorder, hide or disguise text on screen: C1 controls,
+ * bidirectional embeddings, overrides, isolates and marks, and invisible
+ * format characters (zero-width space and non-joiner, word joiner, BOM). The
+ * zero-width joiner stays: emoji sequences need it.
+ */
+const SPOOFING_CHARACTERS = /[\u0080-\u009f\u061c\u200b\u200c\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+
+/**
+ * Text as it is safe to show: every spoofing character written out as a
+ * visible `\u{XXXX}` escape. For display only — query conditions and copied
+ * values keep the real text.
+ */
+export function visibleText(text: string): string {
+  return text.replace(SPOOFING_CHARACTERS, (char) => `\\u{${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}}`);
+}
+
 /** Two values are the same when their type and canonical text are (bytes: size and keccak256). */
 export function sameAttributeValue(a: AttributeView, b: AttributeView): boolean {
   if (a.type !== b.type) return false;

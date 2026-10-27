@@ -7,6 +7,7 @@ import {
   attributeText,
   conditionUnavailableReason,
   sameAttributeValue,
+  visibleText,
   type AttributeChange,
   type AttributeView,
 } from "@/attributes";
@@ -260,10 +261,12 @@ export function AttributeValue({
         </span>
       );
     case "str": {
-      const cut = text.length > STR_DISPLAY_LIMIT ? `${text.slice(0, STR_DISPLAY_LIMIT)}…` : text;
+      // Shown with spoofing characters escaped; the copy button keeps the real text.
+      const shown = visibleText(text);
+      const cut = shown.length > STR_DISPLAY_LIMIT ? `${shown.slice(0, STR_DISPLAY_LIMIT)}…` : shown;
       return (
         <span className="inline-flex max-w-full items-start gap-1">
-          <span className="break-words whitespace-pre-wrap text-foreground" title={cut !== text ? text : undefined}>
+          <span className="break-words whitespace-pre-wrap text-foreground" title={cut !== shown ? shown : undefined}>
             {cut === "" ? <span className="text-muted-foreground italic">empty string</span> : cut}
           </span>
           {plain || text.length <= 40 ? null : <CopyButton value={text} label="value" />}
