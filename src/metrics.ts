@@ -67,7 +67,11 @@ export function computeBlockMetrics(
     totalReceiptGasUsed += gasUsed;
   }
 
-  const burntFees = baseFee * totalGasUsed;
+  // What the transactions burned at the base fee: their receipts' gas, not the
+  // header's. The two differ where the block spends gas no transaction pays
+  // for — the Arkiv engine charges its expiry sweep (19,500 per expired
+  // entity) to the block — and that gas burns nobody's balance.
+  const burntFees = baseFee * totalReceiptGasUsed;
   const weightedPriorityFee =
     totalReceiptGasUsed === 0n ? 0n : gasWeightedPriorityFeeNumerator / totalReceiptGasUsed;
   const transactionCount = includedTransactions.length;

@@ -383,9 +383,9 @@ function blockRewardFor(block: StoredBlock): bigint {
 }
 
 function burntFeesFor(block: StoredBlock): bigint {
-  const stored = BigInt(block.burntFeesWei ?? "0");
-  if (stored > 0n) return stored;
-  return BigInt(block.baseBlockFeeWei) * BigInt(block.totalGasUsed);
+  // Stored for every block (receipt gas × base fee). Never re-derived from the
+  // header's gasUsed, which on Arkiv includes gas no transaction paid.
+  return BigInt(block.burntFeesWei ?? "0");
 }
 
 function priorityFeeGasWeightFor(block: StoredBlock): {

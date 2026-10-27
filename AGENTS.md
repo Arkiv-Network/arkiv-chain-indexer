@@ -47,6 +47,9 @@ docker compose up --build
 
 ## Metric Conventions
 
+- `burnt_fees_wei` is `baseFeePerGas × Σ receipt.gasUsed`, never the header's `gasUsed`: Arkiv blocks charge
+  their expiry sweep's gas to the header, and no balance pays it. `total_gas_used` stays the header's value.
+
 - `base_block_fee_wei` comes from block `baseFeePerGas`; use `0` if the network does not provide it.
 - `max_gas_in_block` is block `gasLimit`.
 - Transaction fee size is `receipt.gasUsed * receipt.effectiveGasPrice`.

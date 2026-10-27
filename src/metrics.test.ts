@@ -103,6 +103,29 @@ describe("computeBlockMetrics", () => {
     expect(metrics.averageTransactionFeeWei).toBe(((54_760n * 1_000_000_000n) / 2n).toString());
   });
 
+  test("burns the base fee on the receipts' gas, not on gas the block spends for itself", () => {
+    // An Arkiv expiry sweep charges 19,500 gas per expired entity to the block
+    // header; no transaction pays it.
+    const block: RpcBlock = {
+      number: "0x20",
+      timestamp: "0x65a0bb80",
+      baseFeePerGas: "0x3b9aca00",
+      gasUsed: `0x${(21_000 + 2 * 19_500).toString(16)}`,
+      gasLimit: "0x5f5e100",
+      transactions: [{ hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+    };
+    const metrics = computeBlockMetrics(block, [
+      { transactionHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", gasUsed: "0x5208", effectiveGasPrice: "0x3b9aca00" },
+    ]);
+    expect(metrics.totalGasUsed).toBe("60000");
+    expect(metrics.burntFeesWei).toBe((21_000n * 1_000_000_000n).toString());
+    expect(metrics.totalTransactionFeeWei).toBe((21_000n * 1_000_000_000n).toString());
+    expect(metrics.totalBurnedWei).toBe((21_000n * 1_000_000_000n).toString());
+    // An empty sweep-only block burns nothing.
+    const sweepOnly = computeBlockMetrics({ ...block, transactions: [] }, []);
+    expect(sweepOnly.burntFeesWei).toBe("0");
+  });
+
   test("stores zero averages for empty blocks", () => {
     const block: RpcBlock = {
       number: "0x1",
@@ -171,7 +194,8 @@ describe("computeBlockMetrics", () => {
     expect(computeBlockMetrics(block, receipts, { ...block, number: "0x7a", timestamp: "0x65a0bb7f", transactions: [] })).toMatchObject({
       blockTimeSeconds: "1",
       transactionCount: 2,
-      burntFeesWei: "1500",
+      // The dead sender's gas is in the header but burns nobody's balance.
+      burntFeesWei: "1000",
       totalTransactionFeeWei: "1280",
       feePriceSumWei: "310",
       priorityFeeSumWei: "110",

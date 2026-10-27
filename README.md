@@ -467,7 +467,7 @@ lose precision.
 | `max_gas_in_block` | Block `gasLimit`; this is the maximum possible gas for that block and can vary by network. |
 | `transaction_count` | Number of transactions in the block. |
 | `total_transaction_fee_wei` | Sum of actual transaction gas fees: `sum(receipt.gasUsed * effectiveGasPrice)`. Never includes rent. |
-| `burnt_fees_wei` | Base-fee burn: `baseFeePerGas * gasUsed`. |
+| `burnt_fees_wei` | Base-fee burn: `baseFeePerGas * sum(receipt.gasUsed)` over the stored transactions. Not the header's `gasUsed`: an Arkiv block also spends gas no transaction pays (its expiry sweep, 19,500 per expired entity). |
 | `total_rent_fee_wei` | Sum of the receipts' `rentFee`: storage rent burned outside gas (Arkiv UDC chains; 0 elsewhere). |
 | `total_burned_wei` | `burnt_fees_wei + total_rent_fee_wei`. |
 | `fee_price_sum_wei` | Exact sum of transaction fee prices: `sum(effectiveGasPrice)`. |
