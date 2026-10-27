@@ -326,6 +326,59 @@ export async function queryAll(
 }
 
 /** Deep equality on JSON values, insensitive to object key order. */
+// ---------------------------------------------------------------------------
+// Bytes the index withholds
+
+/** A bytes attribute the node holds, as the index should record it. */
+export interface ExpectedBytes {
+  name: string;
+  size: number;
+  keccak256: string;
+}
+
+export interface SplitBytes {
+  /** The index's entity with every bytes value blanked. */
+  got: RpcEntity;
+  /** The node's entity with every bytes value blanked. */
+  want: RpcEntity;
+  /** The node's size and keccak256 per bytes attribute. */
+  expected: ExpectedBytes[];
+  /** bytes attributes the index answered with a value: it must never hold one. */
+  leaked: string[];
+}
+
+/**
+ * The index withholds bytes contents: where the node answers a bytes
+ * attribute with its content (`0x` data), the index answers `value: null`.
+ * Blanks every bytes value on both sides so the rest compares exactly, and
+ * returns the node's size and keccak256 per bytes attribute (to check against
+ * the index's own record) and the bytes the index did not withhold.
+ */
+export function splitBytes(got: RpcEntity, want: RpcEntity): SplitBytes {
+  const blank = (entity: RpcEntity): RpcEntity =>
+    entity.attributes
+      ? { ...entity, attributes: entity.attributes.map((a) => (a.type === "bytes" ? { ...a, value: null } : a)) }
+      : entity;
+  const expected = (want.attributes ?? [])
+    .filter((a) => a.type === "bytes" && typeof a.value === "string")
+    .map((a) => {
+      const hex = String(a.value).toLowerCase() as Hex;
+      return { name: a.name, size: (hex.length - 2) / 2, keccak256: keccak256(hex) };
+    });
+  const leaked = (got.attributes ?? []).filter((a) => a.type === "bytes" && a.value !== null).map((a) => a.name);
+  return { got: blank(got), want: blank(want), expected, leaked };
+}
+
+/**
+ * Whether the index withheld every bytes value: `fail` with the names when it
+ * returned content, `pass` when there were bytes and it withheld them all,
+ * `none` when the entity has no bytes to judge.
+ */
+export function withheldVerdict(split: Pick<SplitBytes, "expected" | "leaked">): { outcome: "pass" | "fail" | "none"; leaked: string[] } {
+  if (split.leaked.length > 0) return { outcome: "fail", leaked: split.leaked };
+  return { outcome: split.expected.length > 0 ? "pass" : "none", leaked: [] };
+}
+
 export function jsonEqual(a: unknown, b: unknown): boolean {
   return stableJson(a) === stableJson(b);
 }

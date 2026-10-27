@@ -31,7 +31,10 @@ State, logs and reports go to `UDC_E2E_DIR` (default `~/.cache/arkiv-udc-e2e`):
 | Screens | `scripts/udcE2eScreenshots.ts` | `--screenshots`; needs `bun install` and `bunx playwright install chromium` here |
 
 The explorer env (`UDC_E2E_DIR/explorer.env`) points both RPC URLs at
-`http://udc-e2e-node:8545`, sets `ENTITY_INDEX_GENESIS=auto`,
+`http://udc-e2e-node:8545`, and so, explicitly, the frontend's same-origin node
+passthrough (`NODE_RPC_UPSTREAM=http://udc-e2e-node:8545`,
+`VITE_NODE_RPC_URL=/node-rpc`: the Data tab and "Load from node" reach the
+devnet node, which answers no CORS), sets `ENTITY_INDEX_GENESIS=auto`,
 `SAVE_TRANSACTION_DATA=true`, `ENTITY_QUERY_INDEX=true`, backfill from block 0, a
 dummy `RPC_PROXY_UPSTREAM`, and keeps the genesis progress file inside the
 container (`/tmp`) so nothing root-owned lands in the state dir.
@@ -102,9 +105,11 @@ the explorer:
 - `/shadow-rpc/experimental`: every entity at the target block as raw JSON,
   the order, the count, the manifest's keys and the absent queries. bytes
   contents are the exception: the index never holds them and answers `value:
-  null`, which counts as withheld (a non-null value is a failure,
+  null`, which counts as withheld (a non-null value, from the RPC for any
+  entity or manifest key or from `GET /entity/<key>`, is a failure,
   `explorer:bytes-withheld`); each one is compared by size and keccak256 with
   the index's record in `GET /entity/<key>` instead (`explorer:bytes-hash`).
+  `bun test scripts/udcE2eModel.test.ts` covers that splitting.
 
 `scripts/udcExplorerApi.ts` is the only module that knows the backend's REST
 shapes; update it when WP2/WP3 change them. It already reads `rentFeeWei`

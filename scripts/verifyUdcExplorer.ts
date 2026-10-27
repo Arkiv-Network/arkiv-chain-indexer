@@ -40,10 +40,11 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { keccak256, type Hex } from "viem";
+import type { Hex } from "viem";
 import { explorerApi, type ExplorerApi } from "./udcExplorerApi";
 import {
   canonicalEntity,
+  type ExpectedBytes,
   expectationDiffs,
   FULL_SELECT,
   hexBlock,
@@ -54,7 +55,10 @@ import {
   rpcCall,
   RpcError,
   type RpcEntity,
+  type SplitBytes,
+  splitBytes,
   stableJson,
+  withheldVerdict,
 } from "./udcE2eModel";
 import { collectNodeTruth, nodeHead, type NodeTruth } from "./udcE2eNodeTruth";
 
@@ -433,6 +437,7 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
       else if (!got) fail("explorer:entity-keys", "missing", key);
       else {
         const split = splitBytes(got, want);
+        checkWithheld(split, key);
         if (jsonEqual(split.got, split.want)) pass("explorer:entity-keys");
         else fail("explorer:entity-keys", "differs", `${key}: ${diffFields(split.got, split.want).join(", ")}`);
       }
@@ -443,38 +448,11 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
   if (manifest) await absentQueries(index, manifest, target, "explorer:absent-queries");
 }
 
-/** A bytes attribute the node holds, as the index should record it. */
-interface ExpectedBytes {
-  name: string;
-  size: number;
-  keccak256: string;
-}
-
-/**
- * The index withholds bytes contents: where the node answers a bytes
- * attribute with its content (`0x` data), the index answers `value: null`.
- * Blanks every bytes value on both sides so the rest compares exactly, and
- * returns the node's size and keccak256 per bytes attribute (to check against
- * the index's own record) and the bytes the index did not withhold.
- */
-function splitBytes(got: RpcEntity, want: RpcEntity): { got: RpcEntity; want: RpcEntity; expected: ExpectedBytes[]; leaked: string[] } {
-  const blank = (entity: RpcEntity): RpcEntity =>
-    entity.attributes
-      ? { ...entity, attributes: entity.attributes.map((a) => (a.type === "bytes" ? { ...a, value: null } : a)) }
-      : entity;
-  const expected = (want.attributes ?? [])
-    .filter((a) => a.type === "bytes" && typeof a.value === "string")
-    .map((a) => {
-      const hex = String(a.value).toLowerCase() as Hex;
-      return { name: a.name, size: (hex.length - 2) / 2, keccak256: keccak256(hex) };
-    });
-  const leaked = (got.attributes ?? []).filter((a) => a.type === "bytes" && a.value !== null).map((a) => a.name);
-  return { got: blank(got), want: blank(want), expected, leaked };
-}
-
-function checkWithheld(split: { expected: ExpectedBytes[]; leaked: string[] }, where: string) {
-  if (split.leaked.length > 0) fail("explorer:bytes-withheld", "index returned bytes content", `${where}: ${split.leaked.join(", ")}`);
-  else if (split.expected.length > 0) pass("explorer:bytes-withheld");
+/** Records the withheld-bytes verdict (see withheldVerdict) under explorer:bytes-withheld. */
+function checkWithheld(split: SplitBytes, where: string) {
+  const verdict = withheldVerdict(split);
+  if (verdict.outcome === "fail") fail("explorer:bytes-withheld", "index returned bytes content", `${where}: ${verdict.leaked.join(", ")}`);
+  else if (verdict.outcome === "pass") pass("explorer:bytes-withheld");
 }
 
 /** Each withheld bytes value, by size and keccak256, against what GET /entity/<key> says the index holds. */
@@ -502,6 +480,9 @@ async function checkBytesHashes(api: ExplorerApi, entities: Array<{ key: string;
         fail("explorer:bytes-hash", "missing", where);
         continue;
       }
+      // The REST state withholds the content just as the RPC does.
+      if (got.value !== null) fail("explorer:bytes-withheld", "GET /entity returned bytes content", where);
+      else pass("explorer:bytes-withheld");
       const sizeOk = same("explorer:bytes-hash", "size", got.size, want.size, where);
       const hashOk = same("explorer:bytes-hash", "keccak256", got.keccak256, want.keccak256, where);
       if (sizeOk && hashOk) pass("explorer:bytes-hash");

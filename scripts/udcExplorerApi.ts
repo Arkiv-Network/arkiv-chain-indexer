@@ -53,6 +53,8 @@ export interface ExplorerBlock {
 export interface ExplorerBytes {
   size: number;
   keccak256: string;
+  /** The REST `value`; null unless the API leaks the content. */
+  value: unknown;
 }
 
 export interface ExplorerApi {
@@ -202,7 +204,10 @@ export function explorerApi(base: string, auth?: ExplorerAuth): ExplorerApi {
       return new Map(
         attributes
           .filter((a: any) => a?.type === "bytes")
-          .map((a: any) => [String(a.name), { size: Number(a.size), keccak256: String(a.keccak256 ?? "").toLowerCase() }]),
+          .map((a: any) => [
+            String(a.name),
+            { size: Number(a.size), keccak256: String(a.keccak256 ?? "").toLowerCase(), value: a.value === undefined ? null : a.value },
+          ]),
       );
     },
   };
