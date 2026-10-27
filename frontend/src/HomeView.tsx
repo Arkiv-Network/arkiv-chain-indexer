@@ -337,9 +337,9 @@ export function HomeView({
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-8 px-3 md:px-6">
-      <div className="home-hero flex flex-col items-center gap-3 pt-8 pb-2 text-center md:pt-14 md:pb-4">
+      <div className="home-hero flex flex-col items-center gap-3 pt-8 pb-8 text-center md:pt-14 md:pb-14">
         <h1 className="font-heading text-3xl font-black tracking-tight md:text-5xl">
-          Explore {settings.networkName || settings.chainName}
+          Explore [ ARKIV ]
         </h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Search for a block number, address, transaction or block hash, or entity key.
