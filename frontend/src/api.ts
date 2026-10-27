@@ -224,8 +224,11 @@ interface CompactRangesResponse {
 export interface ArkivOperationAttribute {
   key: string;
   valueType: number;
-  valueTypeName: string; // "uint" | "string" | "entityKey" | "unknown"
-  value: string;
+  valueTypeName: string; // "uint" | "string" | "entityKey" | "unknown"; udc: "str", "u64", "tombstone", …
+  value: string; // "" for a udc `bytes` value or tombstone
+  indexed?: boolean; // udc only
+  size?: number; // udc `bytes` only: the value's length (the bytes are never stored)
+  keccak256?: string; // udc `bytes` only
 }
 
 export interface ArkivReferenceVerification {
@@ -266,7 +269,7 @@ export interface ArkivPayloadReference {
 export interface ArkivOperation {
   opIndex: number; // 0-based index of the operation within the tx's execute() call
   operationType: number; // 1=create 2=update 3=extend 4=transfer 5=delete 6=expire
-  operation: string; // "create" | "update" | "extend" | "transfer" | "delete" | "expire" | "unknown(N)"
+  operation: string; // "create" | "update" | "patch" | "extend" | "transfer" | "delete" | "expire" | "unknown(N)"
   entityKey: string | null; // bytes32 hex as returned by decoder
   contentType: string | null; // decoded MIME-ish string or null
   payloadSizeBytes: number; // SIZE ONLY — the payload bytes/hex/text are NEVER stored anywhere

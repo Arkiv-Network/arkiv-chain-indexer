@@ -3,6 +3,7 @@ import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import {
   fetchTransactionByHash,
   type ArkivOperation,
+  type ArkivOperationAttribute,
   type ArkivReferenceVerification,
   type PayloadProviderPaymentBreakdown,
   type StoredTransaction,
@@ -484,9 +485,7 @@ function OperationCard({
           <Row label="Attributes">
             <div className="flex flex-col gap-0.5">
               {operation.attributes.map((attribute, index) => (
-                <div key={`${attribute.key}:${index}`} title={attribute.valueTypeName}>
-                  {attribute.key} = <span className="font-mono">{attribute.value}</span>
-                </div>
+                <AttributeLine key={`${attribute.key}:${index}`} attribute={attribute} />
               ))}
             </div>
           </Row>
@@ -504,6 +503,36 @@ function OperationCard({
           </Row>
         ) : null}
       </dl>
+    </div>
+  );
+}
+
+/**
+ * One attribute of an operation. A udc attribute (one with `indexed` set) also
+ * shows its type and whether the node indexes it; a `bytes` value is never
+ * stored, so it shows its size instead, and a tombstone unsets the attribute.
+ */
+function AttributeLine({ attribute }: { attribute: ArkivOperationAttribute }) {
+  const typed = attribute.indexed !== undefined;
+  const value =
+    attribute.valueTypeName === "tombstone" ? (
+      <span className="text-muted-foreground italic">unset</span>
+    ) : attribute.valueTypeName === "bytes" ? (
+      <span className="text-muted-foreground" title={attribute.keccak256 ? `keccak256 ${attribute.keccak256}` : undefined}>
+        {attribute.size !== undefined ? fmtBytes(attribute.size) : "bytes"}
+      </span>
+    ) : (
+      <span className="font-mono break-all">{attribute.value}</span>
+    );
+  return (
+    <div title={typed ? undefined : attribute.valueTypeName}>
+      {attribute.key} = {value}
+      {typed && attribute.valueTypeName !== "tombstone" ? (
+        <span className="ml-1.5 text-[10px] text-muted-foreground">
+          {attribute.valueTypeName}
+          {attribute.indexed ? " · indexed" : ""}
+        </span>
+      ) : null}
     </div>
   );
 }

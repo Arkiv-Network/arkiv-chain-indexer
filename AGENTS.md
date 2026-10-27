@@ -61,6 +61,14 @@ docker compose up --build
   transaction rows. A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes
   the whole block retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
   `GET /transactions` rows that have stored operations.
+- A decoder that reads the udc (schema-typed attribute) `execute()` format — Jalebi's — answers with
+  `"format": "udc"` and an operation shape of its own; `parseUdcOperation` maps it onto the same row. Operation
+  numbers carry over (2 is `patch` where it was `update`); there is no payload or content type, so
+  `payload_size_bytes` holds the size of the operation's `bytes` attributes (never the bytes); attribute values are
+  rewritten into the text encoding the entity index reads (`u64`/`u256` decimal, `bool` `"true"`/`"false"`), with
+  the raw type id's indexed bit kept as `indexed`; and `expires_at_blocks` stays a lifetime from the landing block,
+  computed as the engine does, `max(expiresAt, block + minLifetime) - block`, with `PERMANENT_LIFETIME_BLOCKS`
+  standing for "never expires". Compose picks the image from `ARKIV_DECODER_IMAGE`.
 - `src/storage.ts` uses the pooled Bun SQL client through `src/db.ts`. The whole storage API is async;
   `db.transaction()` wraps `sql.begin()` so every write uses the same transaction connection. Storage optionally
   takes a `schema` so tests can run in isolated schemas against a shared database.
