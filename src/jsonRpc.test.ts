@@ -1032,6 +1032,16 @@ describe("passthrough", () => {
     expect(passthrough.calls).toEqual([]);
   });
 
+  test("without built-in methods the endpoint is a pure relay", async () => {
+    const passthrough = fakeForwarder(["arkiv_query"], () => ({ data: [] }));
+    const options = { passthrough, builtInMethods: false };
+    expect((await call(source, "arkiv_query", ["$key = key(0x00)"], options)).result).toEqual({ data: [] });
+    // The index could answer these, and must not: nothing here comes from stored data.
+    expect((await call(source, "eth_chainId", [], options)).error?.code).toBe(JSON_RPC_METHOD_NOT_FOUND);
+    expect((await call(source, "eth_blockNumber", [], options)).error?.code).toBe(JSON_RPC_METHOD_NOT_FOUND);
+    expect(passthrough.calls).toHaveLength(1);
+  });
+
   test("the transaction-data gate does not apply to a forwarded method", async () => {
     const passthrough = fakeForwarder(["eth_getTransactionCount"], () => "0x2a");
     const options = { transactionDataEnabled: false, passthrough };

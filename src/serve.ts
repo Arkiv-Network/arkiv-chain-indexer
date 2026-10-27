@@ -11,7 +11,7 @@ import { PrecomputedResponse } from "./precomputedResponse";
 import { ResponseCache } from "./responseCache";
 import { ValueCache } from "./valueCache";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
-import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
+import { ENTITY_EXPLORER_RPC_METHODS, JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import { EntityProjector } from "./entityProjector";
 import { createRpcGenesisSource } from "./entityGenesis";
@@ -162,6 +162,25 @@ async function main(): Promise<void> {
       timeoutMs: config.jsonRpcPassthrough.timeoutMs,
       rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
     });
+    // A wallet's current balance, for GET /balances/live: the indexed chain's
+    // own node (the same one /shadow-rpc relays to), asked only eth_getBalance.
+    const liveBalance = new JsonRpcPassthrough({
+      url: config.jsonRpcPassthrough.url ?? (() => passthroughStorage.getScannerRpcUrl()),
+      ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
+      methods: ["eth_getBalance"],
+      timeoutMs: config.jsonRpcPassthrough.timeoutMs,
+      rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
+      logLabel: "live balance",
+    });
+    // The frontend entity explorer reads the same node, asked only its two methods.
+    const entityExplorerRpc = new JsonRpcPassthrough({
+      url: config.jsonRpcPassthrough.url ?? (() => passthroughStorage.getScannerRpcUrl()),
+      ...(config.jsonRpcPassthrough.apiKey ? { apiKey: config.jsonRpcPassthrough.apiKey } : {}),
+      methods: ENTITY_EXPLORER_RPC_METHODS,
+      timeoutMs: config.jsonRpcPassthrough.timeoutMs,
+      rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
+      logLabel: "entity-explorer rpc",
+    });
     // Experimental: the entity index behind /shadow-rpc/experimental. Its own
     // small pool, so a long initial fold never starves the API's connections.
     let genesisImportDescription = "off";
@@ -228,6 +247,8 @@ async function main(): Promise<void> {
       transactionCountCache,
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
+      entityExplorerRpc,
+      liveBalance,
       ...(entityIndex ? { entityIndex } : {}),
       metricsEnabled: config.metricsEnabled,
     });
@@ -261,6 +282,11 @@ async function main(): Promise<void> {
     );
     console.log(
       `JSON-RPC passthrough: forwarding ${jsonRpcPassthrough.describe()} to ${
+        config.jsonRpcPassthrough.url ? "SHADOW_RPC_UPSTREAM" : "the node the scanner recorded"
+      }`,
+    );
+    console.log(
+      `Entity explorer relay and live balances: forwarding ${entityExplorerRpc.describe()} and eth_getBalance to ${
         config.jsonRpcPassthrough.url ? "SHADOW_RPC_UPSTREAM" : "the node the scanner recorded"
       }`,
     );

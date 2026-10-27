@@ -11,6 +11,18 @@ const arkivRegistryAddress = ARKIV_REGISTRY_ADDRESS.toLowerCase();
 
 const CREATE_OPERATION_TYPE = 1;
 
+/** Bit 7 of a udc attribute's raw type id: the node indexes the attribute. */
+const UDC_INDEXED_FLAG = 0x80;
+
+/** A udc `expiresAt` asking never to expire: the largest uint64. */
+const UDC_PERMANENT_EXPIRES_AT = 2n ** 64n - 1n;
+
+/**
+ * `expiresAtBlocks` for a permanent udc entity. Any lifetime this long reads as
+ * permanent to the frontend, and it still fits a JS number and the BIGINT column.
+ */
+export const PERMANENT_LIFETIME_BLOCKS = Number.MAX_SAFE_INTEGER;
+
 /** How often a repeating decoder refusal is warned about, in refusals. */
 const REJECTION_WARNING_INTERVAL = 1000;
 
@@ -30,10 +42,18 @@ async function readRejectionReason(response: Response): Promise<string | undefin
 
 export interface ArkivOperationAttribute {
   key: string;
+  /** The type id without the indexed flag: 0 a tombstone, 1-10 the typed-attribute ids. */
   valueType: number;
-  /** "uint" | "string" | "entityKey" | "unknown" */
+  /** "uint" | "string" | "entityKey" | "unknown"; under the udc format the type tag ("str", "u64", "tombstone", …) */
   valueTypeName: string;
+  /** Text in the entity index's stored encoding; "" for a `bytes` value or a tombstone. */
   value: string;
+  /** udc only: the node indexes the attribute (bit 7 of the raw type id). */
+  indexed?: boolean;
+  /** udc `bytes` only: the length of the value. The bytes themselves are never stored. */
+  size?: number;
+  /** udc `bytes` only: keccak256 of the value. */
+  keccak256?: string;
 }
 
 /**
@@ -166,7 +186,12 @@ export class ArkivDecoderClient {
     );
   }
 
-  async decodeCalldata(data: Hex): Promise<ArkivOperation[] | null> {
+  /**
+   * `blockNumber` is the block the call landed in. The udc format states expiry
+   * as an absolute deadline plus a lifetime floor from the landing block, so
+   * turning that into a lifetime takes the block.
+   */
+  async decodeCalldata(data: Hex, blockNumber?: bigint): Promise<ArkivOperation[] | null> {
     const url = `${this.baseUrl}/decode`;
     const body =
       this.chainId !== undefined
@@ -193,7 +218,7 @@ export class ArkivDecoderClient {
       throw new Error(`Arkiv decoder at ${url} returned HTTP ${response.status}`);
     }
 
-    return parseDecoderResponse(await response.json());
+    return parseDecoderResponse(await response.json(), blockNumber);
   }
 }
 
@@ -217,6 +242,7 @@ export async function decodeBlockArkivOperations(
     receiptsByHash.set(receipt.transactionHash.toLowerCase(), receipt);
   }
 
+  const blockNumber = block.number ? BigInt(block.number) : undefined;
   const results: TransactionArkivOperations[] = [];
   for (const [position, transaction] of block.transactions.entries()) {
     if (shouldIgnoreTransaction(transaction)) {
@@ -228,7 +254,7 @@ export async function decodeBlockArkivOperations(
     if (!transaction.input || transaction.input === "0x") {
       continue;
     }
-    const operations = await client.decodeCalldata(transaction.input);
+    const operations = await client.decodeCalldata(transaction.input, blockNumber);
     if (operations !== null && operations.length > 0) {
       fillCreateEntityKeys(
         transaction.hash,
@@ -289,11 +315,111 @@ export function fillCreateEntityKeys(
   });
 }
 
-function parseDecoderResponse(body: unknown): ArkivOperation[] {
+function parseDecoderResponse(body: unknown, blockNumber: bigint | undefined): ArkivOperation[] {
   if (!isRecord(body) || !Array.isArray(body.operations)) {
     throw new Error("Arkiv decoder returned an unexpected response shape");
   }
+  // A decoder built for the udc (schema-typed attribute) execute() format says
+  // so; its operations have a shape of their own.
+  if (body.format === "udc") {
+    return body.operations.map((operation, index) => parseUdcOperation(operation, index, blockNumber));
+  }
   return body.operations.map((operation, index) => parseDecoderOperation(operation, index));
+}
+
+/**
+ * Maps a udc operation onto the stored shape. Operation types keep their
+ * numbers (1 create, 2 patch, 3 extend, 4 transfer, 5 delete), so a patch takes
+ * the slot an update had. There is no payload or content type: an entity's
+ * content lives in `bytes` attributes, whose combined size stands in for the
+ * payload size and whose bytes are never stored.
+ */
+function parseUdcOperation(
+  operation: unknown,
+  opIndex: number,
+  blockNumber: bigint | undefined,
+): ArkivOperation {
+  if (
+    !isRecord(operation) ||
+    typeof operation.operationType !== "number" ||
+    typeof operation.operation !== "string" ||
+    typeof operation.bytesSize !== "number" ||
+    !Array.isArray(operation.attributes)
+  ) {
+    throw new Error(`Arkiv decoder returned an unexpected operation shape at index ${opIndex}`);
+  }
+  return {
+    opIndex,
+    operationType: operation.operationType,
+    operation: operation.operation,
+    entityKey: typeof operation.entityKey === "string" ? operation.entityKey : null,
+    contentType: null,
+    payloadSizeBytes: operation.bytesSize,
+    attributes: operation.attributes.map(parseUdcAttribute),
+    expiresAtBlocks: udcLifetimeBlocks(operation, blockNumber),
+    newOwner: typeof operation.newOwner === "string" ? operation.newOwner : null,
+    isReference: false,
+    payloadReference: null,
+    referenceVerification: null,
+    referenceError: null,
+  };
+}
+
+/**
+ * The lifetime in blocks from the landing block, as the payload format's
+ * `expiresAtBlocks` was: the engine keeps an entity until
+ * `max(expiresAt, block + minLifetime)`, `expiresAt` 0 meaning unset. 0 for an
+ * operation that sets no expiry.
+ */
+export function udcLifetimeBlocks(operation: Record<string, unknown>, blockNumber: bigint | undefined): number {
+  const expiresAt = decimalBigInt(operation.expiresAt);
+  const minLifetime = decimalBigInt(operation.minLifetime);
+  if (expiresAt === undefined && minLifetime === undefined) return 0;
+  if (operation.permanent === true || expiresAt === UDC_PERMANENT_EXPIRES_AT) return PERMANENT_LIFETIME_BLOCKS;
+  const block = blockNumber ?? 0n;
+  const floor = minLifetime ?? 0n;
+  const deadline = expiresAt !== undefined && expiresAt > block + floor ? expiresAt : block + floor;
+  if (deadline >= UDC_PERMANENT_EXPIRES_AT) return PERMANENT_LIFETIME_BLOCKS;
+  const lifetime = deadline - block;
+  return lifetime > BigInt(PERMANENT_LIFETIME_BLOCKS) ? PERMANENT_LIFETIME_BLOCKS : Number(lifetime);
+}
+
+function decimalBigInt(value: unknown): bigint | undefined {
+  return typeof value === "string" && /^\d+$/.test(value) ? BigInt(value) : undefined;
+}
+
+/**
+ * Maps a udc attribute onto the stored shape, its value in the text encoding
+ * the entity index reads (`toStoredAttributeValue`): the decoder answers in the
+ * node's wire encoding, which differs for `bool`, `i32` and the `0x` quantities
+ * of `u64`/`u256`. A `bytes` value is never returned, only its size and hash.
+ */
+function parseUdcAttribute(attribute: unknown): ArkivOperationAttribute {
+  if (
+    !isRecord(attribute) ||
+    typeof attribute.name !== "string" ||
+    typeof attribute.typeId !== "number" ||
+    typeof attribute.type !== "string"
+  ) {
+    throw new Error("Arkiv decoder returned an unexpected attribute shape");
+  }
+  return {
+    key: attribute.name,
+    valueType: attribute.typeId & ~UDC_INDEXED_FLAG,
+    valueTypeName: attribute.type,
+    value: udcValueText(attribute.type, attribute.value),
+    indexed: attribute.indexed === true,
+    ...(attribute.type === "bytes" && typeof attribute.size === "number" ? { size: attribute.size } : {}),
+    ...(typeof attribute.keccak256 === "string" ? { keccak256: attribute.keccak256 } : {}),
+  };
+}
+
+function udcValueText(type: string, value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if ((type === "u64" || type === "u256") && typeof value === "string" && /^0x[0-9a-f]+$/i.test(value)) {
+    return BigInt(value).toString();
+  }
+  return String(value);
 }
 
 function parseDecoderOperation(operation: unknown, opIndex: number): ArkivOperation {

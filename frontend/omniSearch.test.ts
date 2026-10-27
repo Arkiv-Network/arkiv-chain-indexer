@@ -1,5 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { canSuggest, fetchSearch, normalizeSearchQuery, searchHref } from "./src/searchApi";
+import {
+  canSuggest, entityExplorerHref, fetchSearch, fullHashHref, fullHashQuery, normalizeSearchQuery, scopedExactHref,
+  searchHref, suggestionsInScope, withEntitiesInExplorer, type SearchResponse,
+} from "./src/searchApi";
 import { readViewFromLocation } from "./src/permalinks";
 
 const originalFetch = globalThis.fetch;
@@ -49,8 +52,64 @@ test("search requests carry an abort signal and encode input as a parameter", as
     expect(url.searchParams.get("q")).toBe("name=a&b");
     expect(init?.signal).toBe(abort.signal);
     called = true;
-    return Response.json({ query: "name=a&b", suggestions: [] });
+    return Response.json({ query: "name=a&b", results: [], suggestions: [] });
   }) as unknown as typeof fetch;
   await fetchSearch("name=a&b", true, abort.signal);
   expect(called).toBe(true);
+});
+
+test("scoped searches open a complete address or transaction hash directly", () => {
+  const address = `0x${"Ab".repeat(20)}`;
+  const hash = `0x${"cd".repeat(32)}`;
+  expect(scopedExactHref(` ${address} `, ["address"])).toBe(`/address/0x${"ab".repeat(20)}`);
+  expect(scopedExactHref("ab".repeat(20), ["address", "transaction"])).toBe(`/address/0x${"ab".repeat(20)}`);
+  expect(scopedExactHref(hash, ["address", "transaction"])).toBe(`/tx/${hash}`);
+  expect(scopedExactHref(hash, ["address"])).toBeNull();
+  expect(scopedExactHref("0xabcdef", ["address", "transaction"])).toBeNull();
+  expect(scopedExactHref("12345", ["address", "transaction"])).toBeNull();
+});
+
+test("scoped suggestions keep only the pages in scope", () => {
+  const suggestion = (href: string) => ({ label: href, query: href, detail: "", href });
+  const all = [suggestion("/address/0x1"), suggestion("/tx/0x2"), suggestion("/block/3"), suggestion("/entity/0x4")];
+  expect(suggestionsInScope(all, ["address"]).map((item) => item.href)).toEqual(["/address/0x1"]);
+  expect(suggestionsInScope(all, ["address", "transaction"]).map((item) => item.href)).toEqual(["/address/0x1", "/tx/0x2"]);
+});
+
+const KEY = `0x${"ab".repeat(32)}`;
+const response = (results: SearchResponse["results"], suggestions: SearchResponse["suggestions"] = []) =>
+  ({ query: KEY, results, suggestions, truncated: false, partial: false, notes: [] }) as unknown as SearchResponse;
+
+test("an entity key opens the entity explorer looking it up by key", () => {
+  const href = new URL(entityExplorerHref(` 0x${"AB".repeat(32)} `), "https://explorer.example");
+  expect(href.pathname).toBe("/entity-explorer");
+  expect(href.searchParams.get("q")).toBe(`$key = key(${KEY})`);
+});
+
+test("search links entity keys to the entity explorer, and leaves other links alone", () => {
+  const rewritten = withEntitiesInExplorer(response(
+    [
+      { kind: "entity", label: KEY, detail: "", href: `/entity/${KEY}`, scope: "indexed" },
+      { kind: "transaction", label: KEY, detail: "", href: `/tx/${KEY}`, scope: "indexed" },
+    ],
+    [{ label: KEY, query: KEY, detail: "", href: `/entity/${KEY}` }],
+  ));
+  expect(rewritten.results.map((result) => result.href)).toEqual([entityExplorerHref(KEY), `/tx/${KEY}`]);
+  expect(rewritten.suggestions[0]!.href).toBe(entityExplorerHref(KEY));
+});
+
+test("only a complete 32-byte value counts as a full hash", () => {
+  expect(fullHashQuery("ab".repeat(32))).toBe(KEY);
+  expect(fullHashQuery(` ${KEY.toUpperCase().replace("0X", "0x")} `)).toBe(KEY);
+  expect(fullHashQuery("0xabcdef")).toBeNull();
+  expect(fullHashQuery(`0x${"ab".repeat(20)}`)).toBeNull();
+});
+
+test("a full hash opens the explorer unless the index knows it as a block or transaction", () => {
+  expect(fullHashHref(KEY, response([]))).toBe(entityExplorerHref(KEY));
+  expect(fullHashHref(KEY, response([{ kind: "entity", label: KEY, detail: "", href: "", scope: "indexed" }]))).toBe(entityExplorerHref(KEY));
+  expect(fullHashHref(KEY, response([{ kind: "transaction", label: KEY, detail: "", href: "", scope: "indexed" }]))).toBe(searchHref(KEY));
+  expect(fullHashHref(KEY, response([{ kind: "block", label: KEY, detail: "", href: "", scope: "indexed" }]))).toBe(searchHref(KEY));
+  // Without the index's answer, the search page decides rather than guessing.
+  expect(fullHashHref(KEY, null)).toBe(searchHref(KEY));
 });

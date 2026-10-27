@@ -3,20 +3,22 @@ import type { View } from "./permalinks";
 export interface NavItem {
   view: View;
   label: string;
+  /** Shown as a link in the header; every other page is linked from the footer. */
+  primary?: boolean;
   requiresAdmin?: boolean;
   requiresTransactionData?: boolean;
 }
 
 export const ALL_NAV_ITEMS: readonly NavItem[] = [
-  { view: "home", label: "Home" },
+  { view: "home", label: "Home", primary: true },
+  { view: "blocks", label: "Blocks", primary: true },
+  { view: "senders", label: "Wallets", primary: true, requiresTransactionData: true },
+  { view: "transactions", label: "Transactions", primary: true, requiresTransactionData: true },
+  { view: "entity-explorer", label: "Entities", primary: true },
   { view: "statistics", label: "Statistics" },
   { view: "search", label: "Search" },
-  { view: "blocks", label: "Blocks" },
-  { view: "data", label: "Data" },
   { view: "block", label: "Block", requiresTransactionData: true },
   { view: "entity", label: "Entity", requiresTransactionData: true },
-  { view: "transactions", label: "Address", requiresTransactionData: true },
-  { view: "senders", label: "Senders", requiresTransactionData: true },
   { view: "transaction-records", label: "Records" },
   { view: "ranges", label: "Ranges" },
   { view: "charts", label: "Charts" },
@@ -25,6 +27,14 @@ export const ALL_NAV_ITEMS: readonly NavItem[] = [
   { view: "admin", label: "Admin", requiresAdmin: true },
   { view: "baseload", label: "Baseload", requiresAdmin: true },
 ];
+
+/** Detail pages highlight the header link of the list they belong to. */
+const PRIMARY_NAV_PARENT: Partial<Record<View, View>> = {
+  block: "blocks",
+  transaction: "transactions",
+  address: "senders",
+  entity: "entity-explorer",
+};
 
 export function visibleNavItems(
   adminVerified: boolean,
@@ -37,8 +47,8 @@ export function visibleNavItems(
   });
 }
 
-export function navLabelForView(view: View): string | undefined {
-  return ALL_NAV_ITEMS.find((item) => item.view === view)?.label;
+export function primaryNavViewFor(view: View): View {
+  return PRIMARY_NAV_PARENT[view] ?? view;
 }
 
 /** Guard view rendering as well as menu visibility, including direct links. */

@@ -1,5 +1,5 @@
 // The CodeMirror editor for entity queries. This file is the lazy chunk: the
-// Data page imports it with React.lazy so CodeMirror only loads on /data.
+// entity explorer imports it with React.lazy so CodeMirror only loads there.
 //
 // The editor is controlled from the outside: `value` is the source of truth,
 // edits report through `onChange`, and a `value` that differs from the document
@@ -11,7 +11,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, placeholder as cmPlaceholder } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import "./queryEditor.css";
-import { arkivQueryLanguage } from "./queryLanguage";
+import { arkivQueryLanguage, type AttributeHint } from "../lib/editorLanguage";
 
 export interface QueryEditorProps {
   value: string;
@@ -19,6 +19,8 @@ export interface QueryEditorProps {
   onExecute: (value: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Columns of the results on screen, offered as completions. */
+  attributeHints?: readonly AttributeHint[];
 }
 
 const editorTheme = EditorView.theme({
@@ -61,16 +63,18 @@ const editorTheme = EditorView.theme({
   ".cm-completionDetail": { color: "var(--color-muted-foreground)", marginLeft: "0.6rem", fontStyle: "normal" },
 });
 
-export default function QueryEditor({ value, onChange, onExecute, placeholder, autoFocus }: QueryEditorProps) {
+export default function QueryEditor({ value, onChange, onExecute, placeholder, autoFocus, attributeHints = [] }: QueryEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onExecuteRef = useRef(onExecute);
+  const hintsRef = useRef(attributeHints);
   const initialValue = useRef(value);
 
   useEffect(() => {
     onChangeRef.current = onChange;
     onExecuteRef.current = onExecute;
+    hintsRef.current = attributeHints;
   });
 
   useEffect(() => {
@@ -101,7 +105,7 @@ export default function QueryEditor({ value, onChange, onExecute, placeholder, a
         }),
         cmPlaceholder(placeholder ?? ""),
         EditorView.lineWrapping,
-        ...arkivQueryLanguage(),
+        ...arkivQueryLanguage(() => hintsRef.current),
       ],
     });
 

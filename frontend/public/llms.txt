@@ -96,6 +96,7 @@ Related scanner and worker settings:
 | JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
 | Account balances | `SCANNER_TRACK_BALANCES` on the scanner; `account_balances` rows | `GET /balances` and `eth_getBalance` on `/shadow-rpc`. Both answer empty/`-32000` without stored readings. |
 | JSON-RPC passthrough | Explicit `SHADOW_RPC_UPSTREAM` or the scanner-recorded node; methods listed in `/health` | Relays `eth_sendRawTransaction` and the four Arkiv reads by default. Until a node is available, forwarded calls return `-32000`. |
+| Entity explorer relay | Always on; same node as the JSON-RPC passthrough (`SHADOW_RPC_UPSTREAM` or the scanner-recorded node); methods in `features.entityExplorerRpc` in `/health` | Open `POST /entity-explorer/rpc` relays only `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node; every other method is `-32601` (nothing is answered from the index). Rate limited (`-32005`). |
 | Entity query index (experimental) | on by default (`ENTITY_QUERY_INDEX=false` turns it off); status in `features.entityQueryIndex` in `/health` | `POST /shadow-rpc/experimental` answers `arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming` from the indexer's own entity tables. `404` when off. |
 
 ## Endpoint Index
@@ -117,6 +118,7 @@ Related scanner and worker settings:
 | `GET` | `/transaction-records` | Top stored transaction records by gas, fee, and effective fee. |
 | `GET` | `/senders` | Precomputed sender-address activity stats. |
 | `GET` | `/balances` | Account balance readings per block, for addresses a block touched. |
+| `GET` | `/balances/live` | An account's current balance, asked of the chain's node at `latest` (`?address=`). |
 | `GET` | `/guzzlers` | Redis-cached active sender leaderboards over recent windows. |
 | `GET` | `/guzzler/:address` | One sender's recent per-minute guzzler history. |
 | `GET` | `/baseload` | Current backend Baseload state and worker statuses. |
@@ -287,9 +289,8 @@ Worth knowing before pointing a wallet at it:
   and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
   no business relying on. List it explicitly if a deployment's node really does.
 - **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`)
-  are forwarded by default too.** On this path they read the node's entity state. The Data page defaults
-  to the experimental index on `/shadow-rpc/experimental`; administrators can select the backend relay
-  or compare both sources.
+  are forwarded by default too.** On this path they read the node's entity state. The entity explorer does not
+  use this relay; it queries the network's RPC directly.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -373,12 +374,9 @@ creates a suite of entities covering every attribute type, every mutation, expir
 transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
 a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
 
-The frontend's `/data` page defaults to the experimental index (`rpc=index` in shared links) and also
-offers a custom node. In admin mode, the backend relay (`/shadow-rpc`) and **both** (`rpc=both`) are
-available. The comparison sends each query to the two endpoints at once — pinned to the lower of their two heads so the index's lag
-is not read as a difference — and prints the timings side by side with every field the answers disagree on,
-the browser-side twin of `scripts/compareEntityQuery.ts`. Only the first page is compared: a cursor belongs
-to the endpoint that issued it.
+The frontend's entity explorer (`/entity-explorer`) no longer reads the index: it queries the network's RPC in the user-defined column
+format, which the index's projection does not fold yet. `scripts/compareEntityQuery.ts` remains the way to
+compare the index with a node.
 
 ## `GET /blocks`
 
@@ -686,6 +684,13 @@ balance row is a compact JSON array of values in `names` order:
 blockNumber, blockDate, address, balanceWei
 ```
 
+## `GET /balances/live`
+
+`?address=0x…` (required). What the account holds now, from the indexed chain's node (`eth_getBalance` at
+`latest`), not from the index: works on nodes that serve only their head, has no history, is not cached and
+shares the `/shadow-rpc` relay's rate limit. Returns `{ address, balanceWei, blockTag, fetchedAtUtc }`;
+`400` bad address, `429` rate limited, `502` node failure, `503` no node available.
+
 ## `GET /guzzlers`
 
 Requires Redis-backed guzzler tracking. Returns cached active-sender leaderboards computed by the
@@ -779,7 +784,7 @@ Invalid JSON or invalid config returns `400`. Missing login configuration refuse
 
 ### Google login
 
-GET `/auth/google/start?returnTo=/data` begins login; `/auth/google/callback` exchanges the authorization code.
+GET `/auth/google/start?returnTo=/entity-explorer` begins login; `/auth/google/callback` exchanges the authorization code.
 GET `/auth/session` returns role, identity, CSRF token, expiry and login availability. POST `/auth/logout`
 requires the session cookie, configured Origin and X-CSRF-Token. All auth routes are no-store.
 The sole default administrator is verified `sieciech.czajka@golem.network`, with signed `hd=golem.network`.
@@ -848,7 +853,6 @@ responses. They are intentionally dropped and must not be persisted.
 - Public explorer reads need no login. Browser administrator requests use session cookies and an
   in-memory CSRF token; credentials are never stored in browser local storage. Custom-node requests
   omit application cookies and CSRF headers.
-- The `/data` page defaults to `/api/shadow-rpc/experimental`. It queries projected entity state at
-  the index's head, excludes payload bytes, and keeps queries and paging options in shareable URLs.
-  A custom RPC URL can be called directly from the browser if it permits cross-origin requests.
-  Admin mode also offers the backend relay and comparison with the index.
+- The `/entity-explorer` page queries the network's RPC through the Arkiv SDK in the user-defined column format.
+  It reads the indexed chain's own node through the backend relay `POST /api/entity-explorer/rpc`. Queries
+  and paging options are kept in shareable URLs.

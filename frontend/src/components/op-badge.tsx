@@ -18,6 +18,7 @@ const TONE_CLASS: Record<Tone, string> = {
 const OP_TONE: Record<string, Tone> = {
   create: "emerald",
   update: "sky",
+  patch: "sky",
   extend: "amber",
   transfer: "violet",
   delete: "red",

@@ -7,6 +7,7 @@ import { chartTimeAxis } from "./chartTime";
 import { useZonedChartLayout } from "./useZonedChartLayout";
 import { fetchGuzzlerHistory, type GuzzlerHistoryPoint, type GuzzlerHistoryResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
+import { PageHeader } from "@/components/page-header";
 import { Stat, StatGrid } from "@/components/stat";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -126,38 +127,39 @@ export function GuzzlerActivityView({
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Button type="button" variant="ghost" size="sm" onClick={onBack} className="gap-1">
-            <ArrowLeft className="size-3.5" />
-            Leaderboard
-          </Button>
-          <h2 className="font-heading text-lg font-black tracking-tight">Wallet activity</h2>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Tabs value={metricKey} onValueChange={(value) => setMetricKey(value as GuzzlerActivityMetricKey)}>
-            <TabsList aria-label="Metric">
-              {GUZZLER_ACTIVITY_METRICS.map((m) => (
-                <TabsTrigger key={m.key} value={m.key}>
-                  {m.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-          <Tabs value={windowKey} onValueChange={(value) => onWindowChange(value as GuzzlerActivityWindowKey)}>
-            <TabsList aria-label="Time window">
-              {GUZZLER_ACTIVITY_WINDOWS.map((w) => (
-                <TabsTrigger key={w.key} value={w.key}>
-                  {w.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-          <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
-            {loading ? "Refreshing" : "Refresh"}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Wallet activity"
+        description="Per-minute activity for one wallet."
+        actions={
+          <>
+            <Button type="button" variant="ghost" size="sm" onClick={onBack} className="gap-1">
+              <ArrowLeft className="size-3.5" />
+              Leaderboard
+            </Button>
+            <Tabs value={metricKey} onValueChange={(value) => setMetricKey(value as GuzzlerActivityMetricKey)}>
+              <TabsList aria-label="Metric">
+                {GUZZLER_ACTIVITY_METRICS.map((m) => (
+                  <TabsTrigger key={m.key} value={m.key}>
+                    {m.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <Tabs value={windowKey} onValueChange={(value) => onWindowChange(value as GuzzlerActivityWindowKey)}>
+              <TabsList aria-label="Time window">
+                {GUZZLER_ACTIVITY_WINDOWS.map((w) => (
+                  <TabsTrigger key={w.key} value={w.key}>
+                    {w.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <Button type="button" variant="outline" size="sm" onClick={load} disabled={loading}>
+              {loading ? "Refreshing" : "Refresh"}
+            </Button>
+          </>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3 border border-border bg-card p-3">
         <AddressFace address={address} className="size-10 border border-border" />

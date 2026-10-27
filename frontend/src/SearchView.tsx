@@ -1,13 +1,12 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { OmniSearch } from "./OmniSearch";
 import { fetchSearch, searchHref, type SearchResponse } from "./searchApi";
-import { PageBreadcrumbs } from "./PageBreadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import { shouldHandleClientNavigation } from "./permalinks";
 
-export function SearchView({ locationSearch, onNavigate, onLocationChange }: {
+export function SearchView({ locationSearch, onNavigate }: {
   locationSearch: string;
   onNavigate: (href: string) => void;
-  onLocationChange: () => void;
 }) {
   const query = new URLSearchParams(locationSearch).get("q") ?? "";
   const [result, setResult] = useState<SearchResponse | null>(null);
@@ -38,11 +37,14 @@ export function SearchView({ locationSearch, onNavigate, onLocationChange }: {
     onNavigate(event.currentTarget.getAttribute("href")!);
   };
   const address = /^(?:0x)?[0-9a-f]{40}$/i.test(query.trim()) ? `0x${query.trim().replace(/^0x/i, "").toLowerCase()}` : null;
-  return <section className="search-page">
-    <PageBreadcrumbs items={[{ view: "home", label: "Home" }, { view: "search", label: "Search" }]} onLocationChange={onLocationChange} />
-    <h2>Search the indexer</h2>
-    <OmniSearch initialQuery={query} onNavigate={submit} autofocus={!query} />
-    <p className="search-help">Find a block number, an address, a block or transaction hash, or an entity key. Identifier prefixes need at least six hex digits. Search covers stored identifiers; attributes, attribute values, and payloads are not searched.</p>
+  return <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+    <PageHeader
+      title="Search"
+      description="Find a block number, an address, a block or transaction hash, or an entity key. Identifier prefixes need at least six hex digits. Search covers stored identifiers; attributes, attribute values, and payloads are not searched."
+    />
+    <div className="max-w-2xl">
+      <OmniSearch initialQuery={query} onNavigate={submit} autofocus={!query} />
+    </div>
     {loading ? <p role="status">Searching…</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     {result ? <>

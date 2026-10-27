@@ -61,6 +61,14 @@ docker compose up --build
   transaction rows. A decoder HTTP 400 means "not an Arkiv execute() call" (skip); any other decoder failure makes
   the whole block retry. The HTTP API attaches `operations` to `GET /transaction/<hash>` and `operationsSummary` to
   `GET /transactions` rows that have stored operations.
+- A decoder that reads the udc (schema-typed attribute) `execute()` format — Jalebi's — answers with
+  `"format": "udc"` and an operation shape of its own; `parseUdcOperation` maps it onto the same row. Operation
+  numbers carry over (2 is `patch` where it was `update`); there is no payload or content type, so
+  `payload_size_bytes` holds the size of the operation's `bytes` attributes (never the bytes); attribute values are
+  rewritten into the text encoding the entity index reads (`u64`/`u256` decimal, `bool` `"true"`/`"false"`), with
+  the raw type id's indexed bit kept as `indexed`; and `expires_at_blocks` stays a lifetime from the landing block,
+  computed as the engine does, `max(expiresAt, block + minLifetime) - block`, with `PERMANENT_LIFETIME_BLOCKS`
+  standing for "never expires". Compose picks the image from `ARKIV_DECODER_IMAGE`.
 - `src/storage.ts` uses the pooled Bun SQL client through `src/db.ts`. The whole storage API is async;
   `db.transaction()` wraps `sql.begin()` so every write uses the same transaction connection. Storage optionally
   takes a `schema` so tests can run in isolated schemas against a shared database.
@@ -119,8 +127,8 @@ docker compose up --build
   data, with an allowlisted node passthrough below. The path demands administrator authentication: a session
   with configured Origin and X-CSRF-Token, or a temporary access token (it spends the upstream's quota).
   `/shadow-rpc/experimental` is open
-  and explicitly receives no passthrough forwarder; the Data tab offers only the
-  index and a custom node outside admin mode. `latest` means the indexed head (`scanner_state.last_successful_block`);
+  and explicitly receives no passthrough forwarder. The entity explorer uses neither: it queries the network's
+  own RPC through the Arkiv SDK (see the entity explorer note below). `latest` means the indexed head (`scanner_state.last_successful_block`);
   `eth_syncing` exposes the gap. Block/transaction/receipt objects keep the standard shape and set every
   field the scanner does not persist to `null` (roots, signatures, logs; `input` is always null by the
   calldata invariant). `blocks.block_hash` / `parent_hash` are filled for blocks scanned after the columns
@@ -192,7 +200,30 @@ docker compose up --build
   switched on and the series is sparse (a row exists only where an address was touched). `getBalanceAt` takes
   the newest reading at or before a block; when there is none, `eth_getBalance` and `GET /balances` say so
   rather than answering `0x0` — an unindexed account and an empty one are different facts, and conflating them
-  is the `eth_getLogs`-below-the-floor mistake again.
+  is the `eth_getLogs`-below-the-floor mistake again. Tracking reads each block's state, so it needs a node that
+  serves past state; Jalebi serves only its head, and a failed read retries the block forever. For that case
+  `GET /balances/live?address=` asks the indexed chain's node (the `/shadow-rpc` relay's node and key, allowlisted
+  to `eth_getBalance` at `latest`, same rate limit) what an account holds now, uncached and with no history;
+  the frontend's wallet page shows it.
+- The frontend entity explorer (`/entity-explorer`, code in `frontend/src/entityExplorer/`) speaks the user-defined column format: entities carry
+  typed attributes (indexed or stored only, zero or more `bytes` blobs, an `arkiv.schema` tag) instead of a
+  payload and content type. It queries a public node through `@arkiv-network/sdk@next`, by way of the backend's
+  `POST /entity-explorer/rpc` (`/api/entity-explorer/rpc` publicly): a pure relay — `builtInMethods: false`, so
+  nothing is answered from the index — of `ENTITY_EXPLORER_RPC_METHODS` (exactly what the explorer calls: `arkiv_query`, `arkiv_getBlockTiming`),
+  built on `JsonRpcPassthrough`. It reads the indexed chain's own node — the one `/shadow-rpc` relays to
+  (`SHADOW_RPC_UPSTREAM`, else the node the scanner recorded), with that relay's key, timeout and rate limit — so
+  the explorer and the indexer always look at the same chain and there is nothing extra to configure; the
+  frontend pins no chain. A key embedded in the node's URL (Jalebi accepts one as the last path segment, e.g.
+  `…/sdk_test`) stays on the server. The node caps a page at 100 entities, and `select: "*"`
+  leaves out `$attributeSchema`, so the explorer names every field it needs (`EXPLORER_SELECT`). It does not use `/shadow-rpc` or the entity index, whose
+  projection still folds the payload format. It fetches with TanStack Query and keeps `q`, `pageSize` and
+  `expiration` in the URL with nuqs; the nuqs adapter wraps the page inside its lazy chunk, since no
+  other page uses it. Layout: `EntityExplorerView.tsx` composes the page, `hooks/` holds the run
+  (`useEntitySearch`) and saved queries, `components/` the UI, `lib/` the framework-free logic the frontend
+  tests cover. `/data`, the page's old path, still resolves to it.
+- Frontend data fetching goes through TanStack Query (`useQuery` / `useInfiniteQuery`), never `fetch` inside a
+  `useEffect`. The one `QueryClient` is `frontend/src/queryClient.ts` (no retries, no refetch on focus), provided
+  app-wide in `frontend/src/main.tsx`. Older views still fetch in effects; move them over when touching them.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

@@ -224,8 +224,11 @@ interface CompactRangesResponse {
 export interface ArkivOperationAttribute {
   key: string;
   valueType: number;
-  valueTypeName: string; // "uint" | "string" | "entityKey" | "unknown"
-  value: string;
+  valueTypeName: string; // "uint" | "string" | "entityKey" | "unknown"; udc: "str", "u64", "tombstone", …
+  value: string; // "" for a udc `bytes` value or tombstone
+  indexed?: boolean; // udc only
+  size?: number; // udc `bytes` only: the value's length (the bytes are never stored)
+  keccak256?: string; // udc `bytes` only
 }
 
 export interface ArkivReferenceVerification {
@@ -266,7 +269,7 @@ export interface ArkivPayloadReference {
 export interface ArkivOperation {
   opIndex: number; // 0-based index of the operation within the tx's execute() call
   operationType: number; // 1=create 2=update 3=extend 4=transfer 5=delete 6=expire
-  operation: string; // "create" | "update" | "extend" | "transfer" | "delete" | "expire" | "unknown(N)"
+  operation: string; // "create" | "update" | "patch" | "extend" | "transfer" | "delete" | "expire" | "unknown(N)"
   entityKey: string | null; // bytes32 hex as returned by decoder
   contentType: string | null; // decoded MIME-ish string or null
   payloadSizeBytes: number; // SIZE ONLY — the payload bytes/hex/text are NEVER stored anywhere
@@ -803,6 +806,8 @@ export interface HealthResponse {
     jsonRpc?: boolean;
     /** Methods the backend forwards to its upstream node, or `false` without an upstream. */
     jsonRpcPassthrough?: string[] | false;
+    /** Methods `/api/entity-explorer/rpc` relays to the entity explorer's public node, or `false` when it is off. */
+    entityExplorerRpc?: string[] | false;
     /** The experimental entity index behind `/api/shadow-rpc/experimental`, or `false` when not enabled. */
     entityQueryIndex?: false | EntityQueryIndexHealth;
   };
@@ -940,6 +945,18 @@ export interface StoredBaseloadConfig extends StoredBaseloadConfigSummary {
 
 export interface BaseloadConfigsResponse {
   configs: StoredBaseloadConfigSummary[];
+}
+
+/** `GET /balances/live`: an account's balance read from the chain's node at its head. */
+export interface LiveBalance {
+  address: string;
+  balanceWei: string;
+  blockTag: "latest";
+  fetchedAtUtc: string;
+}
+
+export function fetchLiveBalance(address: string): Promise<LiveBalance> {
+  return getJson<LiveBalance>("/balances/live", new URLSearchParams({ address }));
 }
 
 async function getJson<T>(

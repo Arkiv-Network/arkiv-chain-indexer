@@ -41,6 +41,8 @@ import type { ArkivOperation, ArkivOperationSummaryEntry } from "./arkivOperatio
 import { BaseloadRuntime } from "./baseloadRuntime";
 import { type BaseloadConfig } from "./baseloadConfig";
 import { ResponseCache } from "./responseCache";
+import { JsonRpcError } from "./jsonRpc";
+import { JSON_RPC_LIMIT_EXCEEDED } from "./jsonRpcPassthrough";
 import { ValueCache } from "./valueCache";
 import type {
   BalanceQueryFilter,
@@ -297,6 +299,88 @@ describe("POST /shadow-rpc is an admin surface", () => {
     const response = await post("/shadow-rpc/experimental", {}, { entityIndex });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: "0x539" });
+  });
+});
+
+describe("POST /entity-explorer/rpc relays to the explorer's public node", () => {
+  const storage = { getChainId: async () => 1337n } as unknown as ScannerStorage;
+  const relay = {
+    calls: [] as string[],
+    methods: new Set(["arkiv_query", "eth_getLogs"]),
+    async forward(method: string) {
+      this.calls.push(method);
+      return { data: [], blockNumber: "0x1" };
+    },
+  };
+  const post = (method: string, options = {}) =>
+    handleRequest(
+      new Request("http://example.test/entity-explorer/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: ["$key = key(0x00)"] }),
+      }),
+      storage,
+      { auth: testAuth(), ...options },
+    );
+
+  test("is open, and forwards the listed methods", async () => {
+    const response = await post("arkiv_query", { entityExplorerRpc: relay });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: { data: [], blockNumber: "0x1" } });
+    expect(relay.calls).toEqual(["arkiv_query"]);
+  });
+
+  test("answers nothing from the index", async () => {
+    const response = await post("eth_chainId", { entityExplorerRpc: relay });
+    expect((await response.json()).error.code).toBe(-32601);
+  });
+
+  test("is a 404 when the deployment has no relay", async () => {
+    expect((await post("arkiv_query")).status).toBe(404);
+  });
+});
+
+describe("GET /balances/live", () => {
+  const ADDRESS = "0x44a22aCf16f0a1e958E0B28135D7e27067909b3F";
+  const forwarder = (answer: () => unknown) => ({
+    calls: [] as unknown[][],
+    methods: new Set(["eth_getBalance"]),
+    async forward(_method: string, params: unknown[]) {
+      this.calls.push(params);
+      return answer();
+    },
+  });
+  const get = (query: string, options = {}) =>
+    handleRequest(new Request(`http://example.test/balances/live${query}`), {} as ScannerStorage, options);
+
+  test("asks the node for the balance at its head and answers it in wei", async () => {
+    const liveBalance = forwarder(() => "0x10a741a462780000");
+    const response = await get(`?address=${ADDRESS}`, { liveBalance });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ address: ADDRESS.toLowerCase(), balanceWei: "1200000000000000000", blockTag: "latest" });
+    expect(liveBalance.calls).toEqual([[ADDRESS.toLowerCase(), "latest"]]);
+  });
+
+  test("rejects a malformed address before asking the node", async () => {
+    const liveBalance = forwarder(() => "0x0");
+    expect((await get("?address=0x1234", { liveBalance })).status).toBe(400);
+    expect(liveBalance.calls).toEqual([]);
+  });
+
+  test("is a 503 without a node, a 429 when rate limited and a 502 when the node fails", async () => {
+    expect((await get(`?address=${ADDRESS}`)).status).toBe(503);
+    const limited = forwarder(() => {
+      throw new JsonRpcError(JSON_RPC_LIMIT_EXCEEDED, "eth_getBalance is rate limited");
+    });
+    expect((await get(`?address=${ADDRESS}`, { liveBalance: limited })).status).toBe(429);
+    const failing = forwarder(() => {
+      throw new JsonRpcError(-32000, "eth_getBalance could not be forwarded to the upstream node");
+    });
+    const response = await get(`?address=${ADDRESS}`, { liveBalance: failing });
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toBe("eth_getBalance could not be forwarded to the upstream node");
   });
 });
 

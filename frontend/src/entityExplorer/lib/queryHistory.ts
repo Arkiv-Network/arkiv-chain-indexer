@@ -1,4 +1,4 @@
-import { readStoredString, writeStoredString, type StorageLike } from "./localStorage";
+import { readStoredString, writeStoredString, type StorageLike } from "@/localStorage";
 
 export const QUERY_HISTORY_LIMIT = 50;
 const STORAGE_KEY = "data.queryHistory";

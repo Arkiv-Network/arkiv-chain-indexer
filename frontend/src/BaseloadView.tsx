@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PageHeader } from "@/components/page-header";
 import {
   BASELOAD_BEHAVIOR_LABELS,
   BASELOAD_WORKER_BEHAVIORS,
@@ -279,19 +280,22 @@ export function BaseloadView({
   };
 
   return (
-    <section className="view baseload-view">
-      <div className="view-heading-row">
-        <h2>Baseload workers</h2>
-        <div className="button-row">
-          <label className="secondary file-button">
-            Load config
-            <input type="file" accept="application/json,.json" onChange={loadConfigFile} />
-          </label>
-          <button type="button" className="secondary" onClick={downloadConfig}>
-            Download config
-          </button>
-        </div>
-      </div>
+    <section className="baseload-view mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
+      <PageHeader
+        title="Baseload"
+        description="Baseload workers"
+        actions={
+          <>
+            <label className="secondary file-button">
+              Load config
+              <input type="file" accept="application/json,.json" onChange={loadConfigFile} />
+            </label>
+            <button type="button" className="secondary" onClick={downloadConfig}>
+              Download config
+            </button>
+          </>
+        }
+      />
 
       <p className={`summary${error || backendError || displayedConfigManagerError ? " error" : ""}`}>
         {error ||

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   BaseloadRpcKeyPool,
   applyRpcKey,
+  describeRpcTarget,
   maskKey,
   parseBaseloadRpcKeyRuntimeConfig,
   parseGeneratedKey,
@@ -116,6 +117,15 @@ describe("maskKey", () => {
   test("keeps enough of a key to identify it without revealing it", () => {
     expect(maskKey("ark_live_EXAMPLEkeyFIXTUREonly0123456789ab")).toBe("ark_live_EXA…89ab");
     expect(maskKey("short")).toBe("shor…");
+  });
+});
+
+describe("describeRpcTarget", () => {
+  test("masks a key carried in the URL so it can be logged", () => {
+    expect(
+      describeRpcTarget("https://rpc.example.test/ark_live_EXAMPLEkeyFIXTUREonly0123456789ab"),
+    ).toBe("https://rpc.example.test/ark_live_EXA…89ab");
+    expect(describeRpcTarget("https://rpc.example.test/")).toBe("https://rpc.example.test/");
   });
 });
 

@@ -13,7 +13,7 @@ import { BaseloadFaucetClient } from "./baseloadFaucet";
 import {
   BaseloadRpcKeyPool,
   bareRpcEndpoint,
-  maskKey,
+  describeRpcTarget,
   type BaseloadRpcEndpoint,
 } from "./baseloadRpcKeys";
 import { RpcKeyRing, attachRpcKeyRing } from "./rpcKeyRing";
@@ -1413,11 +1413,6 @@ async function callRpc(
     );
   }
   return body.result;
-}
-
-/** Renders an RPC URL for logs, masking a key carried as the last path segment. */
-export function describeRpcTarget(rpcUrl: string): string {
-  return rpcUrl.replace(/ark_live_[A-Za-z0-9_-]+/g, (key) => maskKey(key));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

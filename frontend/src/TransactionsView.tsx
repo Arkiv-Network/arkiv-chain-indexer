@@ -1,5 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
+import { fetchLiveBalance, fetchTransactions, type StoredTransaction, type TransactionsResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { AddressFace } from "./AddressFace";
 import { BlockCell } from "@/components/block-cell";
@@ -9,8 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FilterField, FilterGroup, FiltersPanel } from "@/components/filters-panel";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { CedricOnTimer } from "./Cedric";
+import { PageSearch } from "./OmniSearch";
+import type { SearchKind } from "./searchApi";
 import { fmtBytes, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
 import {
   buildAddressPermalinkHref,
@@ -122,6 +126,8 @@ const EMPTY: TransactionFilters = {
 // instead of the empty "enter an address…" prompt.
 const BASELINE_BLOCK_GT = "0";
 const CLEARED: TransactionFilters = { ...EMPTY, blockGt: BASELINE_BLOCK_GT };
+
+const TRANSACTION_SEARCH_SCOPE: readonly SearchKind[] = ["transaction", "address"];
 
 function transactionColumns(
   timeZone: string,
@@ -372,11 +378,22 @@ export function TransactionsView({
 
   return (
     <section className="mx-auto flex w-full max-w-415 flex-col gap-4 px-3 md:px-6">
-      <h2 className="font-heading text-lg font-black tracking-tight">Address transactions</h2>
+      <PageHeader
+        title={locked ? "Wallet" : "Transactions"}
+        description={locked ? "Transactions sent from this address." : undefined}
+      />
+      <PageSearch
+        scope={TRANSACTION_SEARCH_SCOPE}
+        placeholder="Search by transaction hash or address…"
+        onLocationChange={onLocationChange}
+      />
       {locked ? (
-        <div className="flex items-center gap-2 border border-border bg-card px-3 py-2">
-          <AddressFace address={lockedAddr} />
-          <CopyCell value={lockedAddr} label={lockedAddr} copyLabel="address" />
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border border-border bg-card px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <AddressFace address={lockedAddr} />
+            <CopyCell value={lockedAddr} label={lockedAddr} copyLabel="address" />
+          </div>
+          <LiveBalanceField address={lockedAddr} tokenSymbol={tokenSymbol} />
         </div>
       ) : null}
 
@@ -704,3 +721,33 @@ function shortHash(value: string | null | undefined): string {
 
 // Keep the public helper available to query history and existing consumers.
 export { copyText } from "@/components/copy-cell";
+
+/**
+ * What the wallet holds now, read from the chain's node rather than the index
+ * (which keeps no balances for chains whose node serves only its head).
+ */
+function LiveBalanceField({ address, tokenSymbol }: { address: string; tokenSymbol: string }) {
+  const balance = useQuery({
+    queryKey: ["live-balance", address.toLowerCase()],
+    queryFn: () => fetchLiveBalance(address),
+    // A reading of the node's head: refreshed each time the page is opened, never trusted for long.
+    staleTime: 10_000,
+  });
+
+  return (
+    <div className="flex items-baseline gap-2 text-xs">
+      <span className="text-muted-foreground">Balance</span>
+      {balance.data ? (
+        <span className="font-mono font-medium" title={`${balance.data.balanceWei} wei, read from the node at its latest block`}>
+          {fmtTokenAmount(balance.data.balanceWei, tokenSymbol)}
+        </span>
+      ) : balance.error ? (
+        <span className="text-muted-foreground" title={balance.error.message}>
+          unavailable
+        </span>
+      ) : (
+        <span className="text-muted-foreground">…</span>
+      )}
+    </div>
+  );
+}

@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
-import { NavigationMenu } from "./NavigationMenu";
-import { useEffect, useState } from "react";
+import { DisplaySettingsMenu, FooterNavigation, PrimaryNavigation } from "./NavigationMenu";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   deleteBaseloadConfig,
   fetchBaseloadState,
@@ -26,7 +26,6 @@ import { BaseloadView } from "./BaseloadView";
 import { EMPTY_BASELOAD_CONFIG, type BaseloadConfig } from "./baseloadConfig";
 import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
-import { DataView } from "./DataView";
 import { EntityView } from "./EntityView";
 import { ChartsView } from "./ChartsView";
 import { CedricView } from "./CedricView";
@@ -61,8 +60,13 @@ import { TransactionsView } from "./TransactionsView";
 import { TransactionView } from "./TransactionView";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { OmniSearch } from "./OmniSearch";
 import { SearchView } from "./SearchView";
+
+// The entity explorer carries the Arkiv SDK and viem, so it loads on first
+// visit rather than with every other page.
+const EntityExplorerView = lazy(() =>
+  import("./entityExplorer/EntityExplorerView").then((module) => ({ default: module.EntityExplorerView })),
+);
 
 const TIME_ZONE_STORAGE_KEY = "timeZone";
 const ADMIN_MODE_ENABLED_STORAGE_KEY = "admin.modeEnabled";
@@ -139,7 +143,7 @@ export function App() {
 
   useEffect(() => {
     const network = pageSettings.networkName ? ` · ${pageSettings.networkName}` : "";
-    const screen = activeView === "data" ? "Data (experimental, use with caution) · " : "";
+    const screen = activeView === "entity-explorer" ? "Entity explorer · " : "";
     document.title = `${screen}${pageSettings.chainName} BlockExplorer${network}`;
   }, [activeView, pageSettings.chainName, pageSettings.networkName]);
 
@@ -485,40 +489,12 @@ export function App() {
             </span>
           ) : null}
 
-          {activeView !== "search" ? <div className="header-search min-w-0 flex-1 basis-56"><OmniSearch onNavigate={navigateSearch} /></div> : null}
+          <div className="order-last w-full md:order-none md:w-auto md:flex-1 md:pl-4">
+            <PrimaryNavigation activeView={activeView} navItems={navItems} onNavigate={setView} />
+          </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <AccountControls auth={auth} />
-            {adminMode !== "hidden" ? (
-              <Badge
-                variant={adminMode === "enabled" ? "default" : "outline"}
-                render={<button type="button" />}
-                aria-pressed={adminMode === "enabled"}
-                onClick={() => setAdminModeEnabled((value) => !value)}
-                title={adminMode === "enabled" ? "Disable admin mode" : "Enable admin mode"}
-                className="cursor-pointer tracking-wide uppercase"
-              >
-                Admin {adminMode}
-              </Badge>
-            ) : null}
-
-            <a
-              href="https://github.com/Arkiv-Network/reported-issues/issues/new/choose"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-              title="Submit feedback or report a bug"
-              data-umami-event="outbound-link-click"
-              data-umami-event-url="https://github.com/Arkiv-Network/reported-issues/issues/new/choose"
-            >
-              Feedback
-              <ExternalLink className="size-3" />
-            </a>
-
-            <NavigationMenu
-              activeView={activeView}
-              navItems={navItems}
-              onNavigate={setView}
+          <div className="ml-auto md:ml-0">
+            <DisplaySettingsMenu
               fullWidth={fullWidth}
               onToggleFullWidth={toggleFullWidth}
               darkModeActive={darkModeActive}
@@ -542,15 +518,17 @@ export function App() {
         )}
       >
         {activeView === "search" ? (
-          <SearchView locationSearch={locationSearch} onNavigate={navigateSearch} onLocationChange={refreshFromLocation} />
+          <SearchView locationSearch={locationSearch} onNavigate={navigateSearch} />
         ) : activeView === "statistics" ? (
           <StatisticsView timeZone={timeZone} />
         ) : activeView === "home" ? (
           <HomeView
             onLocationChange={refreshFromLocation}
+            onNavigate={navigateSearch}
             timeZone={timeZone}
             settings={pageSettings}
             adminModeActive={adminModeIsActive}
+            transactionDataEnabled={transactionDataEnabled}
           />
         ) : activeView === "blocks" ? (
           <BlocksView
@@ -598,15 +576,10 @@ export function App() {
             tokenSymbol={pageSettings.tokenSymbol}
             lockedAddress={addressParam}
           />
-        ) : activeView === "data" ? (
-          <DataView
-            key={`${auth.session.user?.id ?? "anonymous"}:${adminModeIsActive}`}
-            locationSearch={locationSearch}
-            onLocationChange={refreshFromLocation}
-            timeZone={timeZone}
-            adminModeActive={adminModeIsActive}
-            csrfToken={csrfToken}
-          />
+        ) : activeView === "entity-explorer" ? (
+          <Suspense fallback={<p className="mx-auto w-full max-w-415 px-3 py-8 text-xs text-muted-foreground md:px-6">Loading…</p>}>
+            <EntityExplorerView timeZone={timeZone} />
+          </Suspense>
         ) : activeView === "transaction-records" ? (
           <RecordTransactionsView
             onLocationChange={refreshFromLocation}
@@ -674,14 +647,46 @@ export function App() {
           />
         )}
       </main>
-      <footer className="border-t border-border bg-card">
-        <div className={cn("mx-auto flex items-center justify-end gap-4 px-3 py-2 md:px-6", !fullWidth && "max-w-415")}>
-          <a
-            href="/llms.txt"
-            className="text-xs text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:underline"
-          >
-            llms.txt
-          </a>
+      <footer className="site-footer relative border-t border-border bg-card">
+        <div className={cn("mx-auto flex flex-col gap-3 px-3 py-4 md:px-6", !fullWidth && "max-w-415")}>
+          <FooterNavigation activeView={activeView} navItems={navItems} onNavigate={setView} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <AccountControls auth={auth} />
+              {adminMode !== "hidden" ? (
+                <Badge
+                  variant={adminMode === "enabled" ? "default" : "outline"}
+                  render={<button type="button" />}
+                  aria-pressed={adminMode === "enabled"}
+                  onClick={() => setAdminModeEnabled((value) => !value)}
+                  title={adminMode === "enabled" ? "Disable admin mode" : "Enable admin mode"}
+                  className="cursor-pointer tracking-wide uppercase"
+                >
+                  Admin {adminMode}
+                </Badge>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-4">
+              <a
+                href="https://github.com/Arkiv-Network/reported-issues/issues/new/choose"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                title="Submit feedback or report a bug"
+                data-umami-event="outbound-link-click"
+                data-umami-event-url="https://github.com/Arkiv-Network/reported-issues/issues/new/choose"
+              >
+                Feedback
+                <ExternalLink className="size-3" />
+              </a>
+              <a
+                href="/llms.txt"
+                className="text-xs text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:underline"
+              >
+                llms.txt
+              </a>
+            </div>
+          </div>
         </div>
       </footer>
     </div>

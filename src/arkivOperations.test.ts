@@ -3,7 +3,9 @@ import {
   ARKIV_REGISTRY_ADDRESS,
   ArkivDecoderClient,
   ENTITY_CREATED_TOPIC0,
+  PERMANENT_LIFETIME_BLOCKS,
   decodeBlockArkivOperations,
+  udcLifetimeBlocks,
 } from "./arkivOperations";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import type { Hex, RpcBlock, RpcLog, RpcReceipt, RpcTransaction } from "./types";
@@ -310,6 +312,157 @@ describe("ArkivDecoderClient.decodeCalldata", () => {
       messageHash: null,
     });
     expect(operations?.[0]?.referenceVerification?.errors).toHaveLength(1);
+  });
+});
+
+/** A udc-format operation, as the decoder answered for a Jalebi create in block 73451. */
+function udcOperationFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    operationType: 1,
+    operation: "create",
+    entityKey: null,
+    salt: "39653799458797120401352573990242243967",
+    creationFlags: 0,
+    expiresAt: "0",
+    minLifetime: "3600",
+    permanent: false,
+    newOwner: null,
+    bytesSize: 96,
+    attributes: [
+      { name: "arkiv.schema", typeId: 136, type: "str", indexed: true, value: "explorer-demo.posts", size: 19 },
+      { name: "author", typeId: 137, type: "addr", indexed: true, value: `0x${"44".repeat(20)}`, size: 32 },
+      {
+        name: "body",
+        typeId: 7,
+        type: "bytes",
+        indexed: false,
+        value: null,
+        size: 96,
+        keccak256: `0x${"45".repeat(32)}`,
+      },
+      { name: "featured", typeId: 129, type: "bool", indexed: true, value: true, size: 32 },
+      { name: "rank", typeId: 130, type: "i32", indexed: true, value: -3, size: 32 },
+      { name: "publishedAt", typeId: 131, type: "u64", indexed: true, value: "0x6ae09504", size: 32 },
+      { name: "score", typeId: 133, type: "dec", indexed: true, value: "4.9", size: 32 },
+    ],
+    ...overrides,
+  };
+}
+
+function udcResponse(operations: unknown[]): Response {
+  return Response.json({ functionName: "execute", format: "udc", operations });
+}
+
+describe("udc decoder format", () => {
+  test("maps a create's typed attributes into the stored encoding", async () => {
+    stubFetch(() => udcResponse([udcOperationFixture()]));
+    const client = new ArkivDecoderClient("http://decoder.test");
+
+    const operations = await client.decodeCalldata("0x1234", 73451n);
+
+    expect(operations).toEqual([
+      {
+        opIndex: 0,
+        operationType: 1,
+        operation: "create",
+        entityKey: null,
+        contentType: null,
+        payloadSizeBytes: 96,
+        attributes: [
+          { key: "arkiv.schema", valueType: 8, valueTypeName: "str", value: "explorer-demo.posts", indexed: true },
+          { key: "author", valueType: 9, valueTypeName: "addr", value: `0x${"44".repeat(20)}`, indexed: true },
+          {
+            key: "body",
+            valueType: 7,
+            valueTypeName: "bytes",
+            value: "",
+            indexed: false,
+            size: 96,
+            keccak256: `0x${"45".repeat(32)}`,
+          },
+          { key: "featured", valueType: 1, valueTypeName: "bool", value: "true", indexed: true },
+          { key: "rank", valueType: 2, valueTypeName: "i32", value: "-3", indexed: true },
+          { key: "publishedAt", valueType: 3, valueTypeName: "u64", value: "1793103108", indexed: true },
+          { key: "score", valueType: 5, valueTypeName: "dec", value: "4.9", indexed: true },
+        ],
+        expiresAtBlocks: 3600,
+        newOwner: null,
+        isReference: false,
+        payloadReference: null,
+        referenceVerification: null,
+        referenceError: null,
+      },
+    ]);
+  });
+
+  test("keeps a patch as operation type 2 and its tombstones", async () => {
+    stubFetch(() =>
+      udcResponse([
+        udcOperationFixture({
+          operationType: 2,
+          operation: "patch",
+          entityKey: `0x${"9c".repeat(32)}`,
+          salt: null,
+          creationFlags: null,
+          expiresAt: null,
+          minLifetime: null,
+          permanent: null,
+          bytesSize: 0,
+          attributes: [
+            { name: "featured", typeId: 129, type: "bool", indexed: true, value: false, size: 32 },
+            { name: "draft", typeId: 0, type: "tombstone", indexed: false, value: null, size: 0 },
+          ],
+        }),
+      ]),
+    );
+    const client = new ArkivDecoderClient("http://decoder.test");
+
+    const [patch] = (await client.decodeCalldata("0x1234", 73463n)) ?? [];
+
+    expect(patch?.operationType).toBe(2);
+    expect(patch?.operation).toBe("patch");
+    expect(patch?.entityKey).toBe(`0x${"9c".repeat(32)}`);
+    expect(patch?.expiresAtBlocks).toBe(0);
+    expect(patch?.attributes).toEqual([
+      { key: "featured", valueType: 1, valueTypeName: "bool", value: "false", indexed: true },
+      { key: "draft", valueType: 0, valueTypeName: "tombstone", value: "", indexed: false },
+    ]);
+  });
+
+  test("turns a deadline and a lifetime floor into the engine's lifetime", () => {
+    expect(udcLifetimeBlocks({ expiresAt: "0", minLifetime: "3600" }, 100n)).toBe(3600);
+    expect(udcLifetimeBlocks({ expiresAt: "5100", minLifetime: "0" }, 100n)).toBe(5000);
+    // The engine keeps the later of the two.
+    expect(udcLifetimeBlocks({ expiresAt: "5100", minLifetime: "9000" }, 100n)).toBe(9000);
+    expect(udcLifetimeBlocks({ expiresAt: "5100", minLifetime: "10" }, 100n)).toBe(5000);
+    expect(udcLifetimeBlocks({ expiresAt: null, minLifetime: null }, 100n)).toBe(0);
+    expect(
+      udcLifetimeBlocks({ expiresAt: (2n ** 64n - 1n).toString(), minLifetime: "0", permanent: true }, 100n),
+    ).toBe(PERMANENT_LIFETIME_BLOCKS);
+    // A floor that reaches the largest uint64 is permanent too, which only the block tells.
+    expect(udcLifetimeBlocks({ expiresAt: "0", minLifetime: (2n ** 64n - 101n).toString() }, 100n)).toBe(
+      PERMANENT_LIFETIME_BLOCKS,
+    );
+  });
+
+  test("passes each transaction's block to the decoder client", async () => {
+    stubFetch(() => udcResponse([udcOperationFixture({ expiresAt: "73551", minLifetime: "0" })]));
+    const client = new ArkivDecoderClient("http://decoder.test");
+    const block = {
+      ...blockFixture([transactionFixture(0, { to: ARKIV_REGISTRY_ADDRESS as Hex, input: "0x49650044" })]),
+      number: "0x11eeb" as Hex,
+    };
+
+    const [result] = await decodeBlockArkivOperations(block, client);
+
+    expect(result?.operations[0]?.expiresAtBlocks).toBe(100);
+  });
+
+  test("throws on a udc operation without its byte count", async () => {
+    stubFetch(() => udcResponse([udcOperationFixture({ bytesSize: undefined })]));
+    const client = new ArkivDecoderClient("http://decoder.test");
+
+    expect(client.decodeCalldata("0x1234", 1n)).rejects.toThrow("unexpected operation shape");
   });
 });
 
