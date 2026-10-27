@@ -49,6 +49,12 @@ export interface ExplorerBlock {
   rentSum: string | null | undefined;
 }
 
+/** One bytes attribute as the index holds it: its size and keccak256, never the content. */
+export interface ExplorerBytes {
+  size: number;
+  keccak256: string;
+}
+
 export interface ExplorerApi {
   base: string;
   /** Ethereum JSON-RPC answered from the index (arkiv_* relayed to the node); admin only. */
@@ -62,6 +68,12 @@ export interface ExplorerApi {
   transaction(hash: Hex): Promise<ExplorerTx | null>;
   /** Every stored block in [from, to], keyed by number. */
   blocks(from: number, to: number): Promise<Map<number, ExplorerBlock>>;
+  /**
+   * The bytes attributes of an entity's current state in the index (`GET
+   * /entity/<key>`, `state`), by name. null when the explorer does not know
+   * the entity; undefined when it exposes no state.
+   */
+  entityBytes(key: Hex): Promise<Map<string, ExplorerBytes> | null | undefined>;
 }
 
 const num = (value: unknown): number | null =>
@@ -179,6 +191,19 @@ export function explorerApi(base: string, auth?: ExplorerAuth): ExplorerApi {
         below = lowest;
       }
       return out;
+    },
+
+    async entityBytes(key) {
+      const { status, body } = await get(`/entity/${key}`);
+      if (status === 404) return null;
+      if (status !== 200) throw new Error(`/entity/${key}: HTTP ${status}: ${JSON.stringify(body).slice(0, 300)}`);
+      const attributes = body?.state?.attributes;
+      if (!Array.isArray(attributes)) return undefined;
+      return new Map(
+        attributes
+          .filter((a: any) => a?.type === "bytes")
+          .map((a: any) => [String(a.name), { size: Number(a.size), keccak256: String(a.keccak256 ?? "").toLowerCase() }]),
+      );
     },
   };
 }

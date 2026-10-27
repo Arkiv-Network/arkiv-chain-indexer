@@ -100,7 +100,11 @@ the explorer:
   tx's status, gas, gas fee and rent;
 - `/shadow-rpc`: every receipt (rentFee included) and block, field by field;
 - `/shadow-rpc/experimental`: every entity at the target block as raw JSON,
-  the order, the count, the manifest's keys and the absent queries.
+  the order, the count, the manifest's keys and the absent queries. bytes
+  contents are the exception: the index never holds them and answers `value:
+  null`, which counts as withheld (a non-null value is a failure,
+  `explorer:bytes-withheld`); each one is compared by size and keccak256 with
+  the index's record in `GET /entity/<key>` instead (`explorer:bytes-hash`).
 
 `scripts/udcExplorerApi.ts` is the only module that knows the backend's REST
 shapes; update it when WP2/WP3 change them. It already reads `rentFeeWei`

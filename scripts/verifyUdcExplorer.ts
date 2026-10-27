@@ -15,6 +15,11 @@
  *   - /shadow-rpc: every receipt and block, field by field, rentFee included;
  *   - /shadow-rpc/experimental: every entity at the target block, exactly
  *     (raw JSON), plus order, counts, the manifest's keys and absent queries.
+ *     The one exception is bytes contents, which the index never holds: its
+ *     `value: null` for a bytes attribute is "withheld", not a difference, and
+ *     the content is checked by size and keccak256 against what GET
+ *     /entity/<key> says the index holds (a non-null bytes value from the
+ *     index is a failure).
  *
  * Usage:
  *   bun verifyUdcExplorer.ts --node http://127.0.0.1:28545 --manifest manifest.json --node-only
@@ -35,7 +40,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import type { Hex } from "viem";
+import { keccak256, type Hex } from "viem";
 import { explorerApi, type ExplorerApi } from "./udcExplorerApi";
 import {
   canonicalEntity,
@@ -371,8 +376,10 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
       if (ok) pass("explorer:shadow-blocks");
     });
 
-  // Entity index: every entity at the target block, exactly as the node has it.
+  // Entity index: every entity at the target block, exactly as the node has it
+  // (bytes contents aside: see splitBytes).
   const index = api.experimentalRpcUrl;
+  const bytesToCheck: Array<{ key: string; expected: ExpectedBytes[] }> = [];
   let indexed: RpcEntity[] | null = null;
   try {
     indexed = await queryAll(index, "*", target, FULL_SELECT);
@@ -388,13 +395,16 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
         fail("explorer:entities", "missing", where);
         continue;
       }
-      if (jsonEqual(got, want)) {
+      const split = splitBytes(got, want);
+      checkWithheld(split, where);
+      if (split.expected.length > 0) bytesToCheck.push({ key: where, expected: split.expected });
+      if (jsonEqual(split.got, split.want)) {
         pass("explorer:entities");
         continue;
       }
       for (const field of Object.keys(FULL_SELECT)) {
-        const g = (got as any)[field];
-        const w = (want as any)[field];
+        const g = (split.got as any)[field];
+        const w = (split.want as any)[field];
         if (!jsonEqual(g, w)) {
           const detail =
             field === "attributes" || field === "attributeSchema"
@@ -408,6 +418,7 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
     for (const key of byKey.keys()) if (!nodeKeys.has(key)) fail("explorer:entities", "extra (not live on the node)", key);
     const order = (list: RpcEntity[]) => list.map((e) => String(e.key).toLowerCase()).filter((k) => nodeKeys.has(k) && byKey.has(k));
     same("explorer:entity-order", "order", order(indexed), order(truth.entities), "* at target") && pass("explorer:entity-order");
+    await checkBytesHashes(api, bytesToCheck);
   }
   try {
     const count = Number(await rpcCall(index, "arkiv_getEntityCount", [{ query: "*", block: target }]));
@@ -420,13 +431,82 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
       const [got] = await queryAll(index, `$key = key(${key})`, target, FULL_SELECT);
       if (!want) same("explorer:entity-keys", "absent", got ? "live" : "absent", "absent", key) && pass("explorer:entity-keys");
       else if (!got) fail("explorer:entity-keys", "missing", key);
-      else if (jsonEqual(got, want)) pass("explorer:entity-keys");
-      else fail("explorer:entity-keys", "differs", `${key}: ${diffFields(got, want).join(", ")}`);
+      else {
+        const split = splitBytes(got, want);
+        if (jsonEqual(split.got, split.want)) pass("explorer:entity-keys");
+        else fail("explorer:entity-keys", "differs", `${key}: ${diffFields(split.got, split.want).join(", ")}`);
+      }
     } catch (error) {
       fail("explorer:entity-keys", "query failed", `${key}: ${(error as Error).message}`);
     }
   }
   if (manifest) await absentQueries(index, manifest, target, "explorer:absent-queries");
+}
+
+/** A bytes attribute the node holds, as the index should record it. */
+interface ExpectedBytes {
+  name: string;
+  size: number;
+  keccak256: string;
+}
+
+/**
+ * The index withholds bytes contents: where the node answers a bytes
+ * attribute with its content (`0x` data), the index answers `value: null`.
+ * Blanks every bytes value on both sides so the rest compares exactly, and
+ * returns the node's size and keccak256 per bytes attribute (to check against
+ * the index's own record) and the bytes the index did not withhold.
+ */
+function splitBytes(got: RpcEntity, want: RpcEntity): { got: RpcEntity; want: RpcEntity; expected: ExpectedBytes[]; leaked: string[] } {
+  const blank = (entity: RpcEntity): RpcEntity =>
+    entity.attributes
+      ? { ...entity, attributes: entity.attributes.map((a) => (a.type === "bytes" ? { ...a, value: null } : a)) }
+      : entity;
+  const expected = (want.attributes ?? [])
+    .filter((a) => a.type === "bytes" && typeof a.value === "string")
+    .map((a) => {
+      const hex = String(a.value).toLowerCase() as Hex;
+      return { name: a.name, size: (hex.length - 2) / 2, keccak256: keccak256(hex) };
+    });
+  const leaked = (got.attributes ?? []).filter((a) => a.type === "bytes" && a.value !== null).map((a) => a.name);
+  return { got: blank(got), want: blank(want), expected, leaked };
+}
+
+function checkWithheld(split: { expected: ExpectedBytes[]; leaked: string[] }, where: string) {
+  if (split.leaked.length > 0) fail("explorer:bytes-withheld", "index returned bytes content", `${where}: ${split.leaked.join(", ")}`);
+  else if (split.expected.length > 0) pass("explorer:bytes-withheld");
+}
+
+/** Each withheld bytes value, by size and keccak256, against what GET /entity/<key> says the index holds. */
+async function checkBytesHashes(api: ExplorerApi, entities: Array<{ key: string; expected: ExpectedBytes[] }>) {
+  await pool(entities, 8, async ({ key, expected }) => {
+    let held: Awaited<ReturnType<ExplorerApi["entityBytes"]>>;
+    try {
+      held = await api.entityBytes(key as Hex);
+    } catch (error) {
+      fail("explorer:bytes-hash", "request failed", `${key}: ${(error as Error).message}`);
+      return;
+    }
+    if (held === null) {
+      fail("explorer:bytes-hash", "entity unknown to the API", key);
+      return;
+    }
+    if (held === undefined) {
+      fail("explorer:bytes-hash", "entity state not exposed", key);
+      return;
+    }
+    for (const want of expected) {
+      const where = `${key} ${want.name}`;
+      const got = held.get(want.name);
+      if (!got) {
+        fail("explorer:bytes-hash", "missing", where);
+        continue;
+      }
+      const sizeOk = same("explorer:bytes-hash", "size", got.size, want.size, where);
+      const hashOk = same("explorer:bytes-hash", "keccak256", got.keccak256, want.keccak256, where);
+      if (sizeOk && hashOk) pass("explorer:bytes-hash");
+    }
+  });
 }
 
 function diffFields(got: RpcEntity, want: RpcEntity): string[] {
