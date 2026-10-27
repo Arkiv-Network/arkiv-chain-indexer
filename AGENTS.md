@@ -195,16 +195,20 @@ docker compose up --build
   is the `eth_getLogs`-below-the-floor mistake again.
 - The frontend entity explorer (`/entity-explorer`, code in `frontend/src/entityExplorer/`) speaks the user-defined column format: entities carry
   typed attributes (indexed or stored only, zero or more `bytes` blobs, an `arkiv.schema` tag) instead of a
-  payload and content type. It queries the network's RPC through `@arkiv-network/sdk`, installed from
-  `frontend/vendor/` until that SDK is published (the frontend Dockerfile copies the tarball before `npm ci`).
-  No live node serves the format yet, so the network is a mock node in the browser
-  (`entityExplorer/mock/`, a viem transport over a generated dataset with a query-language interpreter);
-  `entityExplorer/lib/client.ts` builds the one client, so a real node is a transport swap there. It does not use `/shadow-rpc` or the entity index, whose
+  payload and content type. It queries a public node through `@arkiv-network/sdk@next`, by way of the backend's
+  `POST /entity-explorer/rpc` (`/api/entity-explorer/rpc` publicly): a pure relay — `builtInMethods: false`, so
+  nothing is answered from the index — of `ENTITY_EXPLORER_RPC_METHODS` (exactly what the explorer calls: `arkiv_query`, `arkiv_getBlockTiming`),
+  built on `JsonRpcPassthrough` with its own rate limit. It adds `ENTITY_EXPLORER_RPC_API_KEY` as `x-api-key`, so
+  the key never reaches a browser. The node is `ENTITY_EXPLORER_RPC` (default Jalebi,
+  `https://rpc.jalebi.db-chain.testnet.arkiv.network`) and is unrelated to the indexed network and to
+  `SHADOW_RPC_UPSTREAM`; the frontend pins no chain. Jalebi's gateway meters by key (an unknown key is a 401;
+  `sdk_test` is the public SDK test key). The node caps a page at 100 entities, and `select: "*"`
+  leaves out `$attributeSchema`, so the explorer names every field it needs (`EXPLORER_SELECT`). It does not use `/shadow-rpc` or the entity index, whose
   projection still folds the payload format. It fetches with TanStack Query and keeps `q`, `pageSize` and
   `expiration` in the URL with nuqs; both providers wrap the page inside its lazy chunk, since no
   other page uses them. Layout: `EntityExplorerView.tsx` composes the page, `hooks/` holds the run
   (`useEntitySearch`) and saved queries, `components/` the UI, `lib/` the framework-free logic the frontend
-  tests cover, and `mock/` the mock node. `/data`, the page's old path, still resolves to it.
+  tests cover. `/data`, the page's old path, still resolves to it.
 - `src/ranges.ts` owns the parameterized aggregation math. Supported range sizes are
   `2, 5, 10, 20, 50, 100, 200, 500, 1000`; range boundaries are `[k * M, k * M + M - 1]`.
 - `src/aggregator.ts` + `src/aggregate.ts` host the one-shot single-range aggregator

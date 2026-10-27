@@ -1,41 +1,17 @@
 // The client the entity explorer queries the network with, through the Arkiv SDK.
-// No live node speaks the user-defined column format yet, so the network is a
-// mock node that runs in the browser. The SDK sends it the same JSON-RPC calls
-// it would send a node; pointing the page at a real one only means giving the
-// client an http transport instead.
+// It talks to the backend's relay rather than to a node: the relay forwards the
+// explorer's reads to a public RPC (Jalebi by default) and adds the API key, so
+// the key never reaches the browser. Which node that is is backend config
+// (ENTITY_EXPLORER_RPC), so no chain is pinned here.
 
-import { createPublicClient, ENTITY_EVENTS_ABI } from "@arkiv-network/sdk";
-import { defineChain, type Hex } from "viem";
-import { MOCK_CHAIN_ID } from "../mock/dataset";
-import { mockTransport } from "../mock/transport";
+import { createPublicClient } from "@arkiv-network/sdk";
+import { http } from "viem";
 
-const mockChain = defineChain({
-  id: MOCK_CHAIN_ID,
-  name: "Arkiv Mock",
-  nativeCurrency: { name: "GLM", symbol: "GLM", decimals: 18 },
-  rpcUrls: { default: { http: [] } },
-});
+/** `POST /entity-explorer/rpc` on the backend, behind the frontend's `/api` prefix. */
+export const EXPLORER_RPC_PATH = "/api/entity-explorer/rpc";
 
-export const explorerClient = createPublicClient({ chain: mockChain, transport: mockTransport() });
+export const explorerClient = createPublicClient({ transport: http(EXPLORER_RPC_PATH) });
 
 export type DataClient = typeof explorerClient;
 export type BlockTiming = Awaited<ReturnType<DataClient["getBlockTiming"]>>;
 
-/** The Arkiv storage contract. The SDK keeps this in consts.ts but does not export it. */
-const ARKIV_ADDRESS = "0x4400000000000000000000000000000000000044";
-
-/**
- * A query result does not carry the creating transaction, but the contract
- * emits EntityCreated with the key as an indexed topic, so one getLogs call on
- * the creation block finds it.
- */
-export async function getCreationTxHash(entityKey: Hex, createdAt: bigint): Promise<Hex | null> {
-  const logs = await explorerClient.getLogs({
-    address: ARKIV_ADDRESS,
-    event: ENTITY_EVENTS_ABI[0],
-    args: { entityKey },
-    fromBlock: createdAt,
-    toBlock: createdAt,
-  });
-  return logs[0]?.transactionHash ?? null;
-}

@@ -803,6 +803,8 @@ export interface HealthResponse {
     jsonRpc?: boolean;
     /** Methods the backend forwards to its upstream node, or `false` without an upstream. */
     jsonRpcPassthrough?: string[] | false;
+    /** Methods `/api/entity-explorer/rpc` relays to the entity explorer's public node, or `false` when it is off. */
+    entityExplorerRpc?: string[] | false;
     /** The experimental entity index behind `/api/shadow-rpc/experimental`, or `false` when not enabled. */
     entityQueryIndex?: false | EntityQueryIndexHealth;
   };

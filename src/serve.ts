@@ -11,7 +11,7 @@ import { PrecomputedResponse } from "./precomputedResponse";
 import { ResponseCache } from "./responseCache";
 import { ValueCache } from "./valueCache";
 import { PayloadProviderPaymentResolver } from "./payloadProviderPayments";
-import { JsonRpcPassthrough } from "./jsonRpcPassthrough";
+import { ENTITY_EXPLORER_RPC_METHODS, JsonRpcPassthrough } from "./jsonRpcPassthrough";
 import { EntityIndexStorage } from "./entityIndexStorage";
 import { EntityProjector } from "./entityProjector";
 import { createRpcGenesisSource } from "./entityGenesis";
@@ -162,6 +162,14 @@ async function main(): Promise<void> {
       timeoutMs: config.jsonRpcPassthrough.timeoutMs,
       rateLimitPerMinute: config.jsonRpcPassthrough.rateLimitPerMinute,
     });
+    // The frontend entity explorer's node: a public RPC, keyed here.
+    const entityExplorerRpc = new JsonRpcPassthrough({
+      url: config.entityExplorerRpc.url,
+      ...(config.entityExplorerRpc.apiKey ? { apiKey: config.entityExplorerRpc.apiKey } : {}),
+      methods: ENTITY_EXPLORER_RPC_METHODS,
+      rateLimitPerMinute: config.entityExplorerRpc.rateLimitPerMinute,
+      logLabel: "entity-explorer rpc",
+    });
     // Experimental: the entity index behind /shadow-rpc/experimental. Its own
     // small pool, so a long initial fold never starves the API's connections.
     let genesisImportDescription = "off";
@@ -226,6 +234,7 @@ async function main(): Promise<void> {
       transactionCountCache,
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
+      entityExplorerRpc,
       ...(entityIndex ? { entityIndex } : {}),
       metricsEnabled: config.metricsEnabled,
     });
@@ -261,6 +270,10 @@ async function main(): Promise<void> {
       `JSON-RPC passthrough: forwarding ${jsonRpcPassthrough.describe()} to ${
         config.jsonRpcPassthrough.url ? "SHADOW_RPC_UPSTREAM" : "the node the scanner recorded"
       }`,
+    );
+    console.log(
+      `Entity explorer relay: forwarding ${entityExplorerRpc.describe()} to ${new URL(config.entityExplorerRpc.url).host} ` +
+        (config.entityExplorerRpc.apiKey ? "with ENTITY_EXPLORER_RPC_API_KEY" : "without an API key"),
     );
     console.log(
       entityIndex

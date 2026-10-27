@@ -300,6 +300,45 @@ describe("POST /shadow-rpc is an admin surface", () => {
   });
 });
 
+describe("POST /entity-explorer/rpc relays to the explorer's public node", () => {
+  const storage = { getChainId: async () => 1337n } as unknown as ScannerStorage;
+  const relay = {
+    calls: [] as string[],
+    methods: new Set(["arkiv_query", "eth_getLogs"]),
+    async forward(method: string) {
+      this.calls.push(method);
+      return { data: [], blockNumber: "0x1" };
+    },
+  };
+  const post = (method: string, options = {}) =>
+    handleRequest(
+      new Request("http://example.test/entity-explorer/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: ["$key = key(0x00)"] }),
+      }),
+      storage,
+      { auth: testAuth(), ...options },
+    );
+
+  test("is open, and forwards the listed methods", async () => {
+    const response = await post("arkiv_query", { entityExplorerRpc: relay });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: { data: [], blockNumber: "0x1" } });
+    expect(relay.calls).toEqual(["arkiv_query"]);
+  });
+
+  test("answers nothing from the index", async () => {
+    const response = await post("eth_chainId", { entityExplorerRpc: relay });
+    expect((await response.json()).error.code).toBe(-32601);
+  });
+
+  test("is a 404 when the deployment has no relay", async () => {
+    expect((await post("arkiv_query")).status).toBe(404);
+  });
+});
+
 describe("parseRangeFilterFromQuery", () => {
   test("parses range size, start, and date filters", () => {
     const filter = parseRangeFilterFromQuery(

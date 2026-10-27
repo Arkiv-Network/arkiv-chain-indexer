@@ -61,8 +61,8 @@ import { cn } from "./lib/utils";
 import { OmniSearch } from "./OmniSearch";
 import { SearchView } from "./SearchView";
 
-// The Data page carries the Arkiv SDK, viem and the mock network's dataset, so
-// it loads on first visit rather than with every other page.
+// The entity explorer carries the Arkiv SDK and viem, so it loads on first
+// visit rather than with every other page.
 const EntityExplorerView = lazy(() =>
   import("./entityExplorer/EntityExplorerView").then((module) => ({ default: module.EntityExplorerView })),
 );

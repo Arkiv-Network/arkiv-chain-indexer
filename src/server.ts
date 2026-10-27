@@ -122,6 +122,11 @@ export interface BlockServerOptions {
    */
   jsonRpcPassthrough?: JsonRpcForwarder;
   /**
+   * Relays the frontend entity explorer's reads to a public node with the
+   * deployment's API key. Omitted, `POST /entity-explorer/rpc` is a 404.
+   */
+  entityExplorerRpc?: JsonRpcForwarder;
+  /**
    * The experimental entity index. When present, `POST /shadow-rpc/experimental`
    * answers the `arkiv_*` reads from it; absent, that path is a 404 and only
    * `/shadow-rpc` (forwarding to a node) serves them.
@@ -318,6 +323,8 @@ export interface HealthResponseBody {
      * is the only way a caller can tell which writes the endpoint accepts.
      */
     jsonRpcPassthrough: string[] | false;
+    /** Methods `POST /entity-explorer/rpc` relays to its public node, sorted; `false` when it is off. */
+    entityExplorerRpc: string[] | false;
     /**
      * The experimental entity index behind `POST /shadow-rpc/experimental`:
      * `false` when the deployment has not enabled it, else where its
@@ -644,6 +651,12 @@ const JSON_RPC_PATH = "/shadow-rpc";
  * can be compared by changing nothing but the URL.
  */
 const JSON_RPC_EXPERIMENTAL_PATH = "/shadow-rpc/experimental";
+/**
+ * The entity explorer's way to a public node: a pure relay of a fixed method
+ * list, with the API key added here so it never reaches a browser. Nothing on
+ * it is answered from the index, and it is not `/shadow-rpc`'s upstream.
+ */
+const ENTITY_EXPLORER_RPC_PATH = "/entity-explorer/rpc";
 /** Largest JSON-RPC request body accepted, in bytes; batches are capped separately. */
 const JSON_RPC_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -671,6 +684,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
         ...(options.statisticsProvider ? { statisticsProvider: options.statisticsProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
+        ...(options.entityExplorerRpc ? { entityExplorerRpc: options.entityExplorerRpc } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
         ...(options.search ? { search: options.search } : {}),
         ...(options.metricsEnabled !== undefined ? { metricsEnabled: options.metricsEnabled } : {}),
@@ -818,6 +832,23 @@ async function routeRequest(
     );
   }
 
+  if (url.pathname === ENTITY_EXPLORER_RPC_PATH) {
+    if (!options.entityExplorerRpc) {
+      return jsonError(404, "The entity explorer relay is not configured on this deployment");
+    }
+    // Open like the explorer page itself; the relay's rate limit, not a login,
+    // is what keeps callers from draining the key's quota.
+    return handleJsonRpcRequest(
+      request,
+      storage,
+      transactionDataEnabled,
+      options.entityExplorerRpc,
+      undefined,
+      ENTITY_EXPLORER_RPC_PATH,
+      false,
+    );
+  }
+
   if (request.method !== "GET") {
     return jsonError(405, `Method ${request.method} is not allowed`);
   }
@@ -847,6 +878,7 @@ async function routeRequest(
       options.guzzlerStore,
       options.jsonRpcPassthrough,
       options.entityIndex,
+      options.entityExplorerRpc,
     );
   }
 
@@ -1057,6 +1089,7 @@ async function handleGetHealth(
   guzzlerStore: GuzzlerStore | undefined,
   jsonRpcPassthrough: JsonRpcForwarder | undefined,
   entityIndex: BlockServerOptions["entityIndex"],
+  entityExplorerRpc: JsonRpcForwarder | undefined,
 ): Promise<Response> {
   const guzzlers = await readGuzzlerCacheHealth(guzzlerStore);
   const now = new Date();
@@ -1106,6 +1139,7 @@ async function handleGetHealth(
       jsonRpcPassthrough: jsonRpcPassthrough
         ? [...jsonRpcPassthrough.methods].sort()
         : false,
+      entityExplorerRpc: entityExplorerRpc ? [...entityExplorerRpc.methods].sort() : false,
       entityQueryIndex,
     },
     guzzlers,
@@ -1179,6 +1213,7 @@ async function handleJsonRpcRequest(
   passthrough: JsonRpcForwarder | undefined,
   localOverrides?: Record<string, JsonRpcMethodHandler>,
   path: string = JSON_RPC_PATH,
+  builtInMethods = true,
 ): Promise<Response> {
   if (request.method !== "POST") {
     return jsonError(405, `JSON-RPC requests must be POSTed to ${path}`);
@@ -1198,6 +1233,7 @@ async function handleJsonRpcRequest(
     path,
     ...(passthrough ? { passthrough } : {}),
     ...(localOverrides ? { localOverrides } : {}),
+    builtInMethods,
   });
   const payload = JSON.stringify(body);
   return recordResponseBytes(

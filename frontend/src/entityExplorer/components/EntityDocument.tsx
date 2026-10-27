@@ -2,14 +2,13 @@
 // for every entity on the left, the entity's own typed columns and blobs on
 // the right. Every queryable value opens a small menu that turns it into a filter.
 
-import { useQuery } from "@tanstack/react-query";
 import { Check, Database, Link } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Hex } from "viem";
 import { copyText } from "@/components/copy-cell";
 import { Badge } from "@/components/ui/badge";
 import { findBytesHint } from "../lib/bytes";
-import { getCreationTxHash, type BlockTiming } from "../lib/client";
+import type { BlockTiming } from "../lib/client";
 import { getAttributes, getSchemaName, isFilterable, schemaFilter, type ExplorerEntity } from "../lib/entity";
 import { AttributeTable, blobAnchor } from "./AttributeTable";
 import { truncateMiddle } from "./AttributeValue";
@@ -45,15 +44,6 @@ export function EntityDocument({
   const indexedCount = attributes.filter(isFilterable).length;
   const patched = entity.$updatedAt > entity.$createdAt;
   const transferred = entity.$owner.toLowerCase() !== entity.$creator.toLowerCase();
-
-  // The transaction is a nicety; a node without logs for that block just leaves it out.
-  const creationTx =
-    useQuery({
-      queryKey: ["creation-tx", entityKey],
-      queryFn: () => getCreationTxHash(entityKey, entity.$createdAt),
-      // An entity is created once, so its transaction never changes.
-      staleTime: Infinity,
-    }).data ?? null;
 
   useEffect(() => {
     if (!linkCopied) return;
@@ -139,19 +129,6 @@ export function EntityDocument({
               {entity.$creator}
             </button>
           </div>
-          {creationTx ? (
-            <div>
-              <span className={fieldLabelClass}>Creation tx</span>
-              <button
-                type="button"
-                className={linkButtonClass}
-                title={creationTx}
-                onClick={(event) => openPopup(event, { expression: "", label: "", copyValue: creationTx })}
-              >
-                {truncateMiddle(creationTx, 14, 12)}
-              </button>
-            </div>
-          ) : null}
           {entity.$creationFlags.readonly || entity.$creationFlags.permissionlessExtension ? (
             <div>
               <span className={fieldLabelClass}>Creation flags</span>

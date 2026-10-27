@@ -96,6 +96,7 @@ Related scanner and worker settings:
 | JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
 | Account balances | `SCANNER_TRACK_BALANCES` on the scanner; `account_balances` rows | `GET /balances` and `eth_getBalance` on `/shadow-rpc`. Both answer empty/`-32000` without stored readings. |
 | JSON-RPC passthrough | Explicit `SHADOW_RPC_UPSTREAM` or the scanner-recorded node; methods listed in `/health` | Relays `eth_sendRawTransaction` and the four Arkiv reads by default. Until a node is available, forwarded calls return `-32000`. |
+| Entity explorer relay | Always on; `ENTITY_EXPLORER_RPC` (default Jalebi testnet) and `ENTITY_EXPLORER_RPC_API_KEY`; methods in `features.entityExplorerRpc` in `/health` | Open `POST /entity-explorer/rpc` relays only `arkiv_query` and `arkiv_getBlockTiming` to that public node with the key added server-side; every other method is `-32601` (nothing is answered from the index). Rate limited (`-32005`). |
 | Entity query index (experimental) | on by default (`ENTITY_QUERY_INDEX=false` turns it off); status in `features.entityQueryIndex` in `/health` | `POST /shadow-rpc/experimental` answers `arkiv_query`, `arkiv_getEntity`, `arkiv_getEntityCount`, `arkiv_getBlockTiming` from the indexer's own entity tables. `404` when off. |
 
 ## Endpoint Index
@@ -845,5 +846,5 @@ responses. They are intentionally dropped and must not be persisted.
   in-memory CSRF token; credentials are never stored in browser local storage. Custom-node requests
   omit application cookies and CSRF headers.
 - The `/entity-explorer` page queries the network's RPC through the Arkiv SDK in the user-defined column format.
-  The network is a mock node simulated in the browser, since no live node serves the format yet. Queries
+  It reads a public node (default the Jalebi testnet) through the backend relay `POST /api/entity-explorer/rpc`. Queries
   and paging options are kept in shareable URLs.

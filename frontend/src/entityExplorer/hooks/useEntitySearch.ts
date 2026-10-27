@@ -6,7 +6,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { parseAsString, parseAsStringLiteral, useQueryStates } from "nuqs";
 import { useMemo } from "react";
 import { explorerClient } from "../lib/client";
-import type { ExplorerEntity } from "../lib/entity";
+import { EXPLORER_SELECT, type ExplorerEntity } from "../lib/entity";
 import {
   DEFAULT_EXPIRATION_FILTER,
   DEFAULT_PAGE_SIZE,
@@ -64,7 +64,7 @@ export function useEntitySearch() {
       const started = performance.now();
       const page = await abortable(
         explorerClient.query(executedQuery, {
-          select: "*",
+          select: EXPLORER_SELECT,
           limit: Math.min(Number(pageSize), MAX_QUERY_LIMIT),
           ...(pageParam ? { cursor: pageParam.cursor, atBlock: pageParam.atBlock } : {}),
         }),

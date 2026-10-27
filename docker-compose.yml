@@ -378,6 +378,11 @@ services:
       SHADOW_RPC_UPSTREAM_METHODS: ${SHADOW_RPC_UPSTREAM_METHODS:-}
       SHADOW_RPC_UPSTREAM_TIMEOUT_MS: ${SHADOW_RPC_UPSTREAM_TIMEOUT_MS:-}
       SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE: ${SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE:-}
+      # The entity explorer's public node (POST /entity-explorer/rpc); the key
+      # stays here. Empty URL means the Jalebi testnet.
+      ENTITY_EXPLORER_RPC: ${ENTITY_EXPLORER_RPC:-}
+      ENTITY_EXPLORER_RPC_API_KEY: ${ENTITY_EXPLORER_RPC_API_KEY:-sdk_test}
+      ENTITY_EXPLORER_RPC_RATE_LIMIT_PER_MINUTE: ${ENTITY_EXPLORER_RPC_RATE_LIMIT_PER_MINUTE:-}
       # Experimental: answer arkiv_query / arkiv_getEntity / arkiv_getEntityCount /
       # arkiv_getBlockTiming from the indexer's own tables on
       # POST /shadow-rpc/experimental. On by default, false switches it off;

@@ -231,7 +231,8 @@ metric columns.
 
 Kalarepa uses a key registered directly with Tiramisu's bouncer. A single key in
 `RPC_KEY_POOL_FILE` is shared by the scanner, gap filler, backfill scanner and Baseload
-workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately.
+workers; `SHADOW_RPC_UPSTREAM_API_KEY` configures the backend's forwarded requests separately, and
+`ENTITY_EXPLORER_RPC_API_KEY` the entity explorer's relay to its public node.
 See [direct key provisioning and rotation](docs/tiramisu-rpc-keys.md). This setup needs
 neither the Hub browser generator nor the optional proxy below.
 
@@ -1210,15 +1211,16 @@ are hidden:
 - **Entity explorer** (`/entity-explorer`; `/data` still works) — entity state with user-defined columns, read from the network's RPC through the Arkiv
   SDK rather than from the index. Entities carry typed attributes (bool, i32, u64, u256, dec, str, addr, key,
   bytes32, bytes), each indexed or stored only, zero or more `bytes` blobs, and an `arkiv.schema` tag when
-  written through a named schema. No live node serves this format yet, so the network is a mock node
-  simulated in the browser over a generated dataset, answering queries with the documented semantics and error
-  codes (`frontend/src/entityExplorer/lib/client.ts` is where a real node's transport would go). A CodeMirror
+  written through a named schema. The page reads a public node through `@arkiv-network/sdk@next`, by way of
+  the backend's `POST /entity-explorer/rpc` relay, which forwards only the explorer's methods and adds
+  `ENTITY_EXPLORER_RPC_API_KEY` server-side (node: `ENTITY_EXPLORER_RPC`, default the Jalebi testnet
+  `https://rpc.jalebi.db-chain.testnet.arkiv.network`). A CodeMirror
   editor (loaded as its own chunk) highlights the query language and completes the filterable entity fields,
   `arkiv.schema` and the column names of the results on screen; a pasted bare entity key or address is
   rewritten to `$key = key(..)` / `$owner = addr(..)`. The run is recorded in the URL as
   `/entity-explorer?q=...&pageSize=...&expiration=...` so it can be shared and reached by back/forward. Results are
   one row per entity — key, schema, owner, a preview of its attributes, expiry — and expand in place to the full
-  entity: owner, creator, creation transaction, flags, a lifetime bar with dates estimated from block timing,
+  entity: owner, creator, flags, a lifetime bar with dates estimated from block timing,
   every column with its type and whether it is indexed, and a viewer per blob (text/JSON, image, hex, gzip
   decompression guided by a sibling `<name>Encoding` column). Schema chips narrow a mixed page to one schema.
   Values open a menu to query by them, add them to the query, or copy them; unindexed ones say why they cannot

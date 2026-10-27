@@ -3,10 +3,26 @@
 // queried with, and the schema a page of results implies. No React here so
 // `bun test` can cover it.
 
-import { type ArkivValue, type FullEntity, SCHEMA_ATTRIBUTE, type TypeTag } from "@arkiv-network/sdk";
+import { type ArkivValue, type AttributeSchema, type FullEntity, SCHEMA_ATTRIBUTE, type TypeTag } from "@arkiv-network/sdk";
 
 /** A row as the explorer fetches it: every entity field, attributes and their schema. */
-export type ExplorerEntity = FullEntity;
+export type ExplorerEntity = FullEntity & { readonly $attributeSchema: AttributeSchema };
+
+/**
+ * The selection that fetches an {@link ExplorerEntity}. `"*"` leaves out
+ * `$attributeSchema`, which only comes back when asked for by name.
+ */
+export const EXPLORER_SELECT = {
+  $key: true,
+  $owner: true,
+  $creator: true,
+  $createdAt: true,
+  $updatedAt: true,
+  $expiresAt: true,
+  $creationFlags: true,
+  $attributes: true,
+  $attributeSchema: true,
+} as const;
 
 export type EntityAttribute = {
   name: string;

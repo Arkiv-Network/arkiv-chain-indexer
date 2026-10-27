@@ -26,7 +26,7 @@ export const PAGE_SIZE_OPTIONS = ["5", "10", "25", "50", "100"] as const;
 export type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 export const DEFAULT_PAGE_SIZE: PageSize = "50";
 /** The node caps `limit` here; anything larger is refused. */
-export const MAX_QUERY_LIMIT = 200;
+export const MAX_QUERY_LIMIT = 100;
 
 export const EXPIRATION_FILTERS = ["all", "soon"] as const;
 export type ExpirationFilter = (typeof EXPIRATION_FILTERS)[number];
@@ -219,12 +219,15 @@ export interface ExampleQuery {
   query: string;
 }
 
-/** Written against the mock network's schemas; literals are typed constructor calls. */
+/**
+ * Written against the explorer-demo entities seeded on Jalebi; literals are
+ * typed constructor calls, and `0x` marks a value to fill in.
+ */
 export const EXAMPLE_QUERIES: readonly ExampleQuery[] = [
   { label: "By entity key", query: "$key = key(0x)" },
   { label: "By owner", query: "$owner = addr(0x)" },
-  { label: "By schema", query: "arkiv.schema = str('arkiv-demo.posts')" },
-  { label: "Decimal range", query: "arkiv.schema = str('defi-feed.positions') AND healthFactor < dec(1.5)" },
+  { label: "By schema", query: "arkiv.schema = str('explorer-demo.posts')" },
+  { label: "Decimal range", query: "arkiv.schema = str('explorer-demo.sensors') AND temperature < dec(20)" },
   { label: "Text prefix", query: "device STARTSWITH str('warsaw')" },
   { label: "Same name, other type", query: "TYPEOF(score) = i32" },
   { label: "Latest entities", query: "$expiresAt >= u64(0)" },
@@ -237,8 +240,8 @@ function templateLiteral(text: string): string {
 /** The same query as SDK code, so a reader can take it from the page into their own app. */
 export function typescriptSnippet(query: string, sdkVersion: string): string {
   const normalized = normalizeQueryInput(query) || "<QUERY>";
-  // The mock network only exists on this page, and a custom URL may carry a
-  // key that should not end up pasted elsewhere, so the node is left to fill in.
+  // The node is left to fill in, so the snippet does not tie a reader's app to
+  // the testnet this page happens to read.
   return `// @arkiv-network/sdk ${sdkVersion}
 import { createPublicClient } from "@arkiv-network/sdk"
 import { http } from "viem"
