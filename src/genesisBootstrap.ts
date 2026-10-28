@@ -130,6 +130,8 @@ export interface BootstrapDownloadOptions {
 
 const MiB = 1024 * 1024;
 const downloadDefaults = { label: "bootstrap object", partBytes: 64 * MiB, concurrency: 8, retryInitialMs: 1_000, retryMaxMs: 60_000, stallTimeoutMs: 120_000 };
+/** Failed attempts of one part (a deleted object, revoked access) before the worker loop re-reads its reference and resumes. */
+const partAttempts = 8;
 
 /** Local and manual runs tune the download; managed charts refuse these settings. */
 export function bootstrapDownloadTuning(env: Record<string, string | undefined>): Pick<BootstrapDownloadOptions, "partBytes" | "concurrency"> {
@@ -410,13 +412,13 @@ async function downloadRanged(object: BootstrapObject, path: string, fetcher: Bo
     // Each part keeps its own backoff, so a completed part starts the next one fresh.
     const withRetry = async <T>(part: number, attempt: (progress: { bytes: number }) => Promise<T>): Promise<T> => {
       let delayMs = o.retryInitialMs;
-      for (;;) {
+      for (let failures = 1; ; failures++) {
         const progress = { bytes: 0 };
         try {
           return await attempt(progress);
         } catch (error) {
           if (run.signal.aborted || error instanceof BootstrapIntegrityError || error instanceof ObjectChanged ||
-              error instanceof ScratchWriteFailure) throw error;
+              error instanceof ScratchWriteFailure || failures === partAttempts) throw error;
           o.log?.(`${o.label} part ${part} interrupted at ${mb(progress.bytes)} of ${mb(lengthOf(part))} MB: ${failureClass(error)}; retrying in ${delayMs / 1000} s`);
           await sleep(delayMs, undefined, { signal: run.signal });
           delayMs = Math.min(delayMs * 2, o.retryMaxMs);
@@ -489,13 +491,15 @@ export async function downloadBootstrapObject(object: BootstrapObject, path: str
     return;
   }
   await rm(path, { force: true });
-  for (;;) {
+  for (let restarts = 0; ; restarts++) {
     try {
       return await downloadRanged(object, path, fetcher, signal, o, discard);
     } catch (error) {
       if (!(error instanceof ObjectChanged)) throw error;
       // A replaced object is never spliced onto the old prefix.
       await discard();
+      // Restart once here; storage that keeps refusing its own ETag waits in the worker loop instead.
+      if (restarts > 0) throw error;
       o.log?.(`${o.label} changed in object storage; restarting the download`);
     }
   }
