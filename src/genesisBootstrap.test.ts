@@ -271,6 +271,18 @@ describe("resumable ranged genesis bootstrap download", () => {
     expect(await readdir(dir)).toEqual(["state"]);
   }));
 
+  test("storage that refuses its own ETag restarts once, then returns to the worker loop", () => withScratch(async (dir) => {
+    const log: string[] = [];
+    const store = rangedStore(data, { fault: (start) => start > 0 ? "changed" : undefined });
+    const failure = await downloadBootstrapObject(object, join(dir, "state"), store.fetcher, undefined, fast(log))
+      .then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(BootstrapIntegrityError);
+    expect(store.attempts.get(0)).toBe(2);
+    expect(log.filter((line) => line === "bootstrap object changed in object storage; restarting the download")).toHaveLength(1);
+    expect(await readdir(dir)).toEqual([]);
+  }));
+
   test("a 200 to a range request falls back to one stream", () => withScratch(async (dir) => {
     const path = join(dir, "state");
     const log: string[] = [];
@@ -332,6 +344,25 @@ describe("resumable ranged genesis bootstrap download", () => {
     expect(new Uint8Array(await readFile(path))).toEqual(data);
     expect(store.attempts.get(2000)).toBe(2);
     expect(log.some((line) => line.startsWith("bootstrap object part 2 interrupted at 0.0 of 0.0 MB: stalled; retrying in"))).toBe(true);
+  }));
+
+  test("a part that keeps failing returns to the worker loop and keeps finished parts", () => withScratch(async (dir) => {
+    const path = join(dir, "state");
+    await writeFile(`${path}.partial`, data);
+    await writeFile(`${path}.parts`, JSON.stringify({ version: 1, etag: "\"v1\"", bytes: data.length, partBytes: 1000, done: [0, 1, 2, 3] }));
+    const log: string[] = [];
+    let refused = 0;
+    const failure = await downloadBootstrapObject(object, path, async () => { refused++; return new Response(null, { status: 404 }); },
+      undefined, fast(log, { concurrency: 1 })).then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(BootstrapIntegrityError);
+    expect(refused).toBe(8);
+    expect(log.filter((line) => line.startsWith("bootstrap object part 4 interrupted at 0.0 of 0.0 MB: HTTP 404; retrying in"))).toHaveLength(7);
+    expect((await readdir(dir)).sort()).toEqual(["state.partial", "state.parts"]);
+    const store = rangedStore(data);
+    await downloadBootstrapObject(object, path, store.fetcher, undefined, fast([]));
+    expect(store.requests.map((r) => r.start).sort()).toEqual([4000, 5000]);
+    expect(new Uint8Array(await readFile(path))).toEqual(data);
   }));
 
   test("download start removes other artifacts' resume files; release removes its own", () => withScratch(async (dir) => {
