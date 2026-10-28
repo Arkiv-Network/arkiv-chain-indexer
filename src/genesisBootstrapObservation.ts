@@ -10,5 +10,6 @@ export class GenesisCountMismatchConfirmation {
 }
 
 export function bootstrapPollInterval(status: string): number {
-  return status === "done" || /^(refused|failed):/.test(status) ? 60_000 : 5_000;
+  // Free scratch space does not change in seconds; it waits as long as terminal states.
+  return status === "done" || /^(refused|failed|insufficient scratch space):/.test(status) ? 60_000 : 5_000;
 }

@@ -19,7 +19,7 @@ test("consecutive mismatches cannot carry over to a different genesis or dump", 
 });
 
 test("terminal dispositions back off, availability and repair keep retrying promptly", () => {
-  for (const status of ["done", "refused: identity mismatch", "failed: reset required"]) {
+  for (const status of ["done", "refused: identity mismatch", "failed: reset required", "insufficient scratch space: need 12.3 GB, have 4.5 GB"]) {
     expect(bootstrapPollInterval(status)).toBe(60_000);
   }
   for (const status of ["waiting for reference, database, node or object storage; retrying", "waiting to confirm block-zero entity count mismatch", "waiting for backend repair", "importing genesis entities"]) {
