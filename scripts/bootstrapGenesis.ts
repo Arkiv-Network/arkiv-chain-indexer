@@ -6,10 +6,10 @@ import { EntityIndexStorage } from "../src/entityIndexStorage";
 import { createRpcGenesisSource } from "../src/entityGenesis";
 import { fileDumpSource } from "../src/entityGenesisDump";
 import { GenesisImportRefused, importGenesisDump, parseDumpManifest, recordGenesisVerificationFailure } from "../src/entityGenesisDumpImport";
-import { BootstrapIntegrityError, bootstrapDisposition, createBootstrapFetcher, downloadGenesisBootstrap, parseBootstrapReference, prepareBootstrapScratch, releaseBootstrapScratch } from "../src/genesisBootstrap";
+import { BootstrapIntegrityError, BootstrapScratchSpaceError, bootstrapDisposition, bootstrapDownloadTuning, createBootstrapFetcher, downloadGenesisBootstrap, parseBootstrapReference, prepareBootstrapScratch, releaseBootstrapScratch } from "../src/genesisBootstrap";
 
 if (process.argv.includes("--help")) {
-  console.log("bootstrapGenesis: managed pod worker. Requires DATABASE_URL, GENESIS_BOOTSTRAP_RPC, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY. Optional GENESIS_BOOTSTRAP_REFERENCE (default /bootstrap/reference.json), GENESIS_BOOTSTRAP_SCRATCH (default /bootstrap-scratch), AWS_REGION (default auto). Waits for the private reference; exits only on SIGTERM/SIGINT. Completion is genesis_import=done, not process exit.");
+  console.log("bootstrapGenesis: managed pod worker. Requires DATABASE_URL, GENESIS_BOOTSTRAP_RPC, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY. Optional GENESIS_BOOTSTRAP_REFERENCE (default /bootstrap/reference.json), GENESIS_BOOTSTRAP_SCRATCH (default /bootstrap-scratch), AWS_REGION (default auto), GENESIS_BOOTSTRAP_PART_BYTES (default 67108864), GENESIS_BOOTSTRAP_CONCURRENCY (default 8). Waits for the private reference; exits only on SIGTERM/SIGINT. Completion is genesis_import=done, not process exit.");
   process.exit(0);
 }
 
@@ -21,6 +21,13 @@ const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 if (!databaseUrl || !rpc || !accessKeyId || !secretAccessKey) {
   console.error("genesis bootstrap: required database, node or storage configuration is missing");
+  process.exit(2);
+}
+let tuning: ReturnType<typeof bootstrapDownloadTuning>;
+try {
+  tuning = bootstrapDownloadTuning(process.env);
+} catch (error) {
+  console.error(`genesis bootstrap: ${(error as Error).message}`);
   process.exit(2);
 }
 const stop = new AbortController();
@@ -73,11 +80,14 @@ try {
             }
           } else {
             try {
-              report("downloading and verifying retained artifacts");
+              // Resume and progress lines show when a download proceeds after a space shortage.
+              if (!lastStatus.startsWith("insufficient scratch space:")) report("downloading and verifying retained artifacts");
               const fetcher = createBootstrapFetcher(reference, { accessKeyId, secretAccessKey,
                 region: process.env.AWS_REGION ?? "auto",
                 ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}) });
-              const files = await downloadGenesisBootstrap(reference, scratch, fetcher, stop.signal);
+              // Download lines carry sizes and part numbers only, never object addresses or ETags.
+              const files = await downloadGenesisBootstrap(reference, scratch, fetcher, stop.signal,
+                { ...tuning, log: (message) => console.log(`genesis bootstrap: ${message}`) });
               report("importing genesis entities");
               await importGenesisDump({ storage, source: fileDumpSource(files.dump), dumpPath: files.dump,
                 manifest: async () => parseDumpManifest(await Bun.file(files.manifest).json()), sha256: reference.sha256,
@@ -90,6 +100,8 @@ try {
               if (error instanceof BootstrapIntegrityError) {
                 await recordGenesisVerificationFailure(storage, identity, error.message);
                 report("failed: retained artifact integrity mismatch");
+              } else if (error instanceof BootstrapScratchSpaceError) {
+                report(error.message);
               } else throw error;
             }
           }
