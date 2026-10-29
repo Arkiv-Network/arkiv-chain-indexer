@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { parseEntityQuery } from "./entityQueryLanguage";
-import { compileEntityQuery, likePrefixPattern, queryValueOperand } from "./entityQuerySql";
+import { compileEntityQuery, nextBytePrefix, queryValueOperand } from "./entityQuerySql";
 
 const ATTRS = '"public".entity_version_attributes';
 const compile = (query: string, paramOffset = 0) =>
   compileEntityQuery(parseEntityQuery(query), { attributesTable: ATTRS, paramOffset });
+const utf8 = (text: string) => Buffer.from(text, "utf8");
 
 describe("compileEntityQuery", () => {
   test("* is TRUE and binds nothing", () => {
@@ -20,12 +21,12 @@ describe("compileEntityQuery", () => {
     expect(params).toEqual(["level", 2, "10"]);
   });
 
-  test("unordered types compare the canonical text", () => {
-    expect(compile("name = str('Bob')")).toMatchObject({ params: ["name", 8, "Bob"] });
-    expect(compile("name = str('Bob')").text).toContain("a.value_text = $3)");
-    expect(compile("flag = true")).toMatchObject({ params: ["flag", 1, "true"] });
-    expect(compile(`who = addr(0x${"AB".repeat(20)})`)).toMatchObject({ params: ["who", 9, `0x${"ab".repeat(20)}`] });
-    expect(compile(`parent = key(0x${"cd".repeat(32)})`)).toMatchObject({ params: ["parent", 10, `0x${"cd".repeat(32)}`] });
+  test("unordered types compare the UTF-8 of the canonical text", () => {
+    expect(compile("name = str('Bob')")).toMatchObject({ params: ["name", 8, utf8("Bob")] });
+    expect(compile("name = str('Bob')").text).toContain("a.value_bytes = $3::bytea)");
+    expect(compile("flag = true")).toMatchObject({ params: ["flag", 1, utf8("true")] });
+    expect(compile(`who = addr(0x${"AB".repeat(20)})`)).toMatchObject({ params: ["who", 9, utf8(`0x${"ab".repeat(20)}`)] });
+    expect(compile(`parent = key(0x${"cd".repeat(32)})`)).toMatchObject({ params: ["parent", 10, utf8(`0x${"cd".repeat(32)}`)] });
   });
 
   test("ordered types compare the scaled numeric", () => {
@@ -35,12 +36,29 @@ describe("compileEntityQuery", () => {
     expect(compile("height = u64(7)").text).toContain("a.value_num = $3::numeric");
   });
 
-  test("STARTSWITH is an escaped LIKE prefix", () => {
+  test("STARTSWITH on an attribute is the byte range [prefix, next prefix)", () => {
     const { text, params } = compile("desc STARTSWITH str('50%_off\\')");
-    expect(text).toContain("a.value_text LIKE $3 ESCAPE '\\'");
-    expect(params[2]).toBe("50\\%\\_off\\\\%");
-    expect(likePrefixPattern("plain")).toBe("plain%");
+    expect(text).toContain("a.value_bytes >= $3::bytea AND a.value_bytes < $4::bytea))");
+    // LIKE metacharacters are plain bytes here.
+    expect(params.slice(2)).toEqual([utf8("50%_off\\"), utf8("50%_off]")]);
   });
+
+  test("an empty prefix has no upper bound", () => {
+    const { text, params } = compile("desc STARTSWITH str('')");
+    expect(text).toContain("a.value_bytes >= $3::bytea))");
+    expect(params.slice(2)).toEqual([utf8("")]);
+  });
+
+  test("nextBytePrefix carries past 0xff and has none for all 0xff", () => {
+    expect(nextBytePrefix(Uint8Array.of(0x61, 0x62))).toEqual(Uint8Array.of(0x61, 0x63));
+    expect(nextBytePrefix(Uint8Array.of(0x61, 0xff, 0xff))).toEqual(Uint8Array.of(0x62));
+    expect(nextBytePrefix(Uint8Array.of(0xff))).toBeNull();
+    expect(nextBytePrefix(new Uint8Array())).toBeNull();
+    const prefix = Buffer.from("ab");
+    nextBytePrefix(prefix);
+    expect(prefix).toEqual(Buffer.from("ab"));
+  });
+
 
   test("system attributes hit the version columns", () => {
     expect(compile(`$owner = addr(0x${"ab".repeat(20)})`)).toEqual({ text: "(v.owner = $1)", params: [`0x${"ab".repeat(20)}`] });
@@ -55,20 +73,19 @@ describe("compileEntityQuery", () => {
     expect(text).toBe(
       "((NOT ((EXISTS (SELECT 1 FROM " +
         ATTRS +
-        " a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed AND a.name = $4 AND a.type_id = $5::smallint AND a.value_text = $6))" +
+        " a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed AND a.name = $4 AND a.type_id = $5::smallint AND a.value_bytes = $6::bytea))" +
         " OR (EXISTS (SELECT 1 FROM " +
         ATTRS +
         " a WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed AND a.name = $7 AND a.type_id = $8::smallint AND a.value_num = $9::numeric)))) AND (v.owner = $10))",
     );
-    expect(params).toEqual(["a", 1, "true", "b", 2, "2", `0x${"ab".repeat(20)}`]);
+    expect(params).toEqual(["a", 1, utf8("true"), "b", 2, "2", `0x${"ab".repeat(20)}`]);
   });
 
-  test("a str literal with NUL can match nothing", () => {
-    // Postgres text cannot hold NUL, so the driver would reject it as a parameter.
-    expect(compile("name STARTSWITH str('a\0')")).toEqual({ text: "FALSE", params: [] });
-    expect(compile("name = str('a\0b')")).toEqual({ text: "FALSE", params: [] });
-    expect(compile("NOT (name = str('a\0b'))")).toEqual({ text: "(NOT FALSE)", params: [] });
+  test("a str literal with NUL is compared as bytes", () => {
+    expect(compile("name = str('a\0b')").params).toEqual(["name", 8, utf8("a\0b")]);
+    expect(compile("name STARTSWITH str('a\0')").params).toEqual(["name", 8, utf8("a\0"), utf8("a\u0001")]);
   });
+
 
   test("$createdAt past the bigint column is decided without touching the column", () => {
     expect(compile("$createdAt >= u64(9223372036854775808)")).toEqual({ text: "FALSE", params: [] });

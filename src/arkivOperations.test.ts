@@ -5,10 +5,12 @@ import {
   DecoderContractError,
   ENTITY_CREATED_TOPIC0,
   decodeBlockArkivOperations,
+  fromStoredOperationAttributes,
   minedOperationFault,
   parseDecoderResponse,
   resolveOperationExpiry,
   schemaNameOf,
+  toStoredOperationAttributes,
 } from "./arkivOperations";
 import { IGNORED_TRANSACTION_FROM_ADDRESS } from "./transactionFilter";
 import { LIVE_BLOCKS, decoderOperationJson, decoderResponseJson, udcAttribute } from "./testUdc";
@@ -632,5 +634,44 @@ describe("create entity keys from receipts", () => {
     const results = await decodeBlockArkivOperations(block, client);
 
     expect(results[0]?.operations[0]?.entityKey).toBeNull();
+  });
+});
+
+describe("stored operation attributes", () => {
+  test("str values are stored as UTF-8 hex, so jsonb can hold a NUL, and read back exactly", () => {
+    const attributes = [
+      udcAttribute("nul", "str", "nul\u0000inside"),
+      udcAttribute("count", "u64", "0x2a"),
+      udcAttribute("who", "addr", `0x${"ab".repeat(20)}`),
+      udcAttribute("gone", "tombstone", null),
+    ];
+    const stored = toStoredOperationAttributes(attributes);
+    expect(stored.map((attribute) => attribute.value)).toEqual(["0x6e756c00696e73696465", "0x2a", `0x${"ab".repeat(20)}`, null]);
+    expect(JSON.stringify(stored)).not.toContain("\\u0000");
+    expect(fromStoredOperationAttributes(stored)).toEqual(attributes);
+  });
+
+  test("the encoding follows the typeId, not the decoder's tag", () => {
+    // A reverted transaction keeps a flagged triple whatever its tag says.
+    const flagged = { ...udcAttribute("note", "str", "a\u0000b"), type: "invalid(0x88)", error: "flagged" };
+    const [stored] = toStoredOperationAttributes([flagged]);
+    expect(stored!.value).toBe("0x610062");
+    expect(fromStoredOperationAttributes([stored!])).toEqual([flagged]);
+  });
+
+  test("a NUL anywhere but a str value is refused, so jsonb never meets one", () => {
+    const withAttribute = (attribute: object) =>
+      decoderResponseJson([decoderOperationJson({ attributes: [attribute] })]);
+    expect(() => parseDecoderResponse(withAttribute({ ...udcAttribute("note", "str", "x"), name: "no\u0000te" }))).toThrow(
+      "attributes[0].name holds a NUL",
+    );
+    expect(() =>
+      parseDecoderResponse(withAttribute({ ...udcAttribute("count", "u64", "0x1\u0000"), error: "flagged" })),
+    ).toThrow("attributes[0].value holds a NUL");
+    expect(() =>
+      parseDecoderResponse(withAttribute({ ...udcAttribute("note", "str", null), error: "bad\u0000" })),
+    ).toThrow("attributes[0].error holds a NUL");
+    const [operation] = parseDecoderResponse(withAttribute(udcAttribute("nul", "str", "nul\u0000inside")));
+    expect(operation!.attributes[0]!.value).toBe("nul\u0000inside");
   });
 });

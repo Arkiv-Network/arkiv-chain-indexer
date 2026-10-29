@@ -11,11 +11,11 @@
  *   blocks `[from_block, to_block)`; the row with `to_block IS NULL` is the
  *   entity's latest state, `deleted` marks the tombstone a delete leaves.
  * - `entity_version_attributes`: the same versions' attributes, one row per
- *   `(version, name)`, typed and in two comparable forms (`value_text` for
- *   equality and prefix, `value_num` for ranges), with the triple's `indexed`
- *   flag. Every attribute is stored — the node returns unindexed ones too —
- *   but only `indexed` rows can match a query, so the value indexes are
- *   partial on it. A `bytes` attribute's row holds its keccak256 and size,
+ *   `(version, name)`, typed and in two comparable forms (`value_bytes`, the
+ *   UTF-8 of the canonical form, for equality and prefix, `value_num` for
+ *   ranges), with the triple's `indexed` flag. Every attribute is stored —
+ *   the node returns unindexed ones too — but only `indexed` rows can match
+ *   a query, so the value indexes are partial on it. A `bytes` attribute's row holds its keccak256 and size,
  *   never its content. `current` mirrors "latest and not deleted" so the
  *   head-state indexes can stay partial.
  *
@@ -27,7 +27,7 @@
  * `transaction_operations.scanned_at`, which is how operations that land
  * *below* the fold point (a gap fill, a rescan) are noticed.
  */
-import type { ArkivOperationAttribute } from "./arkivOperations";
+import { fromStoredOperationAttributes, type ArkivOperationAttribute } from "./arkivOperations";
 import { openDb, textArrayLiteral, type Db, type DbQueryable } from "./db";
 import {
   attachEventsToOps,
@@ -38,6 +38,7 @@ import {
   type StoredEntityAttribute,
 } from "./entityIndex";
 import type { QueryAst } from "./entityQueryLanguage";
+import { byteaLiteral, bytesToText, fromUtf8Hex, utf8Hex } from "./entityValues";
 import { assertDataModel } from "./storage";
 import { compileEntityQuery } from "./entityQuerySql";
 
@@ -221,8 +222,8 @@ export function foldKeyBatches(keys: readonly string[], size: number): string[][
  * by expiry over every version, live or not — at a past block B only
  * versions with expires_at > B can be live, a small slice of a table where
  * most rows belong to entities long gone. The attribute indexes cover
- * indexed attributes only (a predicate never matches another) and use
- * text_pattern_ops so a LIKE 'prefix%' (STARTSWITH) walks the index too;
+ * indexed attributes only (a predicate never matches another); bytea orders
+ * bytewise, so a STARTSWITH byte range walks the value index too;
  * `current` covers the head only, so the same two exist over every row.
  *
  * Listed here rather than inline so a bulk load can drop them and rebuild.
@@ -241,12 +242,12 @@ const SECONDARY_INDEXES: ReadonlyArray<{ name: string; table: "versions" | "attr
   { name: "entity_versions_owner_expiry_idx", table: "versions", definition: "(owner, expires_at)" },
   { name: "entity_versions_creator_expiry_idx", table: "versions", definition: "(creator, expires_at)" },
   {
-    name: "entity_version_attributes_live_text_idx",
+    name: "entity_version_attributes_live_bytes_idx",
     table: "attributes",
-    definition: "(name, type_id, value_text text_pattern_ops) WHERE current AND indexed",
+    definition: "(name, type_id, value_bytes) WHERE current AND indexed",
   },
   { name: "entity_version_attributes_live_num_idx", table: "attributes", definition: "(name, type_id, value_num) WHERE current AND indexed" },
-  { name: "entity_version_attributes_text_idx", table: "attributes", definition: "(name, type_id, value_text text_pattern_ops) WHERE indexed" },
+  { name: "entity_version_attributes_bytes_idx", table: "attributes", definition: "(name, type_id, value_bytes) WHERE indexed" },
   { name: "entity_version_attributes_num_idx", table: "attributes", definition: "(name, type_id, value_num) WHERE indexed" },
 ];
 
@@ -304,15 +305,17 @@ interface VersionRow {
   expires_at: string;
   creation_flags: number | null;
   bytes_size: number;
-  schema_name: string | null;
+  /** bytea: a str may hold a NUL, which text cannot. */
+  schema_name: Uint8Array | null;
   attributes: StoredAttributeJson[];
 }
 
+/** One attribute in `entity_versions.attributes`; jsonb cannot hold a NUL, so the value travels as {@link utf8Hex}. */
 interface StoredAttributeJson {
   name: string;
   typeId: number;
   indexed: boolean;
-  valueText: string;
+  valueHex: string;
   valueNum: string | null;
 }
 
@@ -328,7 +331,7 @@ function mapVersionRow(row: VersionRow): EntityVersion {
       name: attribute.name,
       typeId: attribute.typeId,
       indexed: attribute.indexed,
-      valueText: attribute.valueText,
+      valueText: fromUtf8Hex(attribute.valueHex),
       valueNum: attribute.valueNum === null ? null : BigInt(attribute.valueNum),
     }),
   );
@@ -349,7 +352,7 @@ function mapVersionRow(row: VersionRow): EntityVersion {
     expiresAt: BigInt(row.expires_at),
     creationFlags: row.creation_flags,
     bytesSize: row.bytes_size,
-    schemaName: row.schema_name,
+    schemaName: row.schema_name === null ? null : bytesToText(row.schema_name),
     attributes,
   };
 }
@@ -373,13 +376,13 @@ function versionRows(versions: readonly EntityVersion[]) {
     expires_at: version.expiresAt,
     creation_flags: version.creationFlags,
     bytes_size: version.bytesSize,
-    schema_name: version.schemaName,
+    schema_name: version.schemaName === null ? null : byteaLiteral(version.schemaName),
     attributes: version.attributes.map(
       (attribute): StoredAttributeJson => ({
         name: attribute.name,
         typeId: attribute.typeId,
         indexed: attribute.indexed,
-        valueText: attribute.valueText,
+        valueHex: utf8Hex(attribute.valueText),
         valueNum: attribute.valueNum === null ? null : attribute.valueNum.toString(),
       }),
     ),
@@ -395,7 +398,7 @@ function attributeRows(versions: readonly EntityVersion[]) {
       name: attribute.name,
       type_id: attribute.typeId,
       indexed: attribute.indexed,
-      value_text: attribute.valueText,
+      value_bytes: byteaLiteral(attribute.valueText),
       value_num: attribute.valueNum,
       current: version.toBlock === null && !version.deleted,
     })),
@@ -493,7 +496,7 @@ export class EntityIndexStorage implements EntityIndexReader {
         expires_at NUMERIC(20, 0) NOT NULL,
         creation_flags SMALLINT,
         bytes_size INTEGER NOT NULL,
-        schema_name TEXT,
+        schema_name BYTEA,
         attributes JSONB NOT NULL,
         PRIMARY KEY (entity_key, version)
       )
@@ -505,7 +508,7 @@ export class EntityIndexStorage implements EntityIndexReader {
         name TEXT NOT NULL,
         type_id SMALLINT NOT NULL,
         indexed BOOLEAN NOT NULL,
-        value_text TEXT NOT NULL,
+        value_bytes BYTEA NOT NULL,
         value_num NUMERIC,
         current BOOLEAN NOT NULL DEFAULT FALSE,
         PRIMARY KEY (entity_key, version, name)
@@ -893,7 +896,7 @@ export class EntityIndexStorage implements EntityIndexReader {
         entityKey: row.entity_key.toLowerCase(),
         sender: row.from_address.toLowerCase(),
         creationFlags: row.creation_flags,
-        attributes: row.attributes,
+        attributes: fromStoredOperationAttributes(row.attributes),
         expiresAt: row.expires_at === null ? null : BigInt(row.expires_at),
         minLifetime: row.min_lifetime === null ? null : BigInt(row.min_lifetime),
         newOwner: row.new_owner,

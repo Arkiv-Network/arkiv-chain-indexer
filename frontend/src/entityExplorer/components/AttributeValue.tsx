@@ -7,6 +7,8 @@ import { ArrowRight } from "lucide-react";
 import { useMemo } from "react";
 import { hexToBytes } from "viem";
 import { cn } from "@/lib/utils";
+import { escapedStrValue } from "@/attributes";
+import { StrValue } from "@/components/str-value";
 import { classifyBytes, formatBytes, kindLabel, type BytesHint } from "../lib/bytes";
 import { asUnixDate, NUMERIC_TYPES } from "../lib/entity";
 import { fmtDate } from "@/format";
@@ -45,7 +47,7 @@ export function BytesSummary({ value, hint }: { value: `0x${string}`; hint?: Byt
 }
 
 /**
- * Strings quoted, numbers in full, references with a button to open the entity
+ * Strings quoted, with control characters as visible escapes, numbers in full, references with a button to open the entity
  * they point at, blobs as a summary. `compact` keeps it on one line.
  */
 export function AttributeValue({
@@ -68,8 +70,11 @@ export function AttributeValue({
       return <BytesSummary value={value.value} hint={hint} />;
     case "str":
       return (
-        <span className={cn(tone, compact ? "truncate" : "wrap-break-word whitespace-pre-wrap")}>
-          &quot;{value.value}&quot;
+        <span
+          className={cn(tone, compact ? "truncate" : "wrap-break-word whitespace-pre-wrap")}
+          title={compact ? escapedStrValue(value.value) : undefined}
+        >
+          &quot;<StrValue text={value.value} />&quot;
         </span>
       );
     case "key":

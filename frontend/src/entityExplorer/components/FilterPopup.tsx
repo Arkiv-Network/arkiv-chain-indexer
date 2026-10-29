@@ -1,9 +1,11 @@
 // The small menu a value opens in the entity explorer: query by it, add it to
 // the current query, or copy it. Values that cannot be filtered on say why.
 
-import { Check, Clipboard, ListPlus, Search } from "lucide-react";
+import { Check, Clipboard, CodeXml, ListPlus, Search } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { copyText } from "@/components/copy-cell";
+import { StrValue } from "@/components/str-value";
+import { escapedStrCopy } from "@/attributes";
 import { attributeFilter, isFilterable, type EntityAttribute } from "../lib/entity";
 
 const menuItemClass = "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted";
@@ -14,6 +16,8 @@ export interface FilterPopupState {
   expression: string;
   label: string;
   copyValue: string;
+  /** A str's escaped form (escapedStrCopy), offered beside the value when it has one. */
+  copyEscapedValue?: string;
   /** Shown instead of the query items, to say why this value can't be filtered on. */
   note?: string;
   x: number;
@@ -49,7 +53,7 @@ export function FilterPopup({
   onClose: () => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"value" | "escaped" | null>(null);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -113,19 +117,38 @@ export function FilterPopup({
         role="menuitem"
         className={menuItemClass}
         onClick={async () => {
-          if (await copyText(state.copyValue)) setCopied(true);
+          if (await copyText(state.copyValue)) setCopied("value");
         }}
       >
-        {copied ? <Check className="size-3 text-(--ok)" /> : <Clipboard className="size-3 text-muted-foreground" />}
-        {copied ? "Copied" : "Copy value"}
+        {copied === "value" ? <Check className="size-3 text-(--ok)" /> : <Clipboard className="size-3 text-muted-foreground" />}
+        {copied === "value" ? "Copied" : "Copy value"}
       </button>
+      {state.copyEscapedValue ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={menuItemClass}
+          onClick={async () => {
+            if (await copyText(state.copyEscapedValue!)) setCopied("escaped");
+          }}
+        >
+          {copied === "escaped" ? <Check className="size-3 text-(--ok)" /> : <CodeXml className="size-3 text-muted-foreground" />}
+          {copied === "escaped" ? "Copied" : "Copy escaped value"}
+        </button>
+      ) : null}
       {state.expression ? (
         <span className="mt-1 block truncate border-t border-border px-2.5 pt-1.5 font-mono text-[10px] text-muted-foreground">
-          {state.expression}
+          <StrValue text={state.expression} />
         </span>
       ) : null}
     </div>
   );
+}
+
+/** The copy fields for a str value: itself, and its escaped form when it has one. */
+export function strCopy(text: string): Pick<FilterPopupState, "copyValue" | "copyEscapedValue"> {
+  const escaped = escapedStrCopy(text);
+  return { copyValue: text, ...(escaped !== null ? { copyEscapedValue: escaped } : {}) };
 }
 
 /** The popup for one attribute: query items when it's indexed, an explanation when not. */
@@ -135,7 +158,7 @@ export function attributePopup(event: PointerLike, attribute: EntityAttribute): 
   return popupAt(event, {
     expression: filterable ? attributeFilter(name, value) : "",
     label: name,
-    copyValue: String(value.value),
+    ...(value.type === "str" ? strCopy(value.value) : { copyValue: String(value.value) }),
     note: filterable
       ? undefined
       : value.type === "bytes"

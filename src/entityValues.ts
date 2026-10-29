@@ -11,11 +11,17 @@
  *   `transaction_operations.attributes[].value`, so a decoded value and the
  *   node's compare with plain equality (see {@link fromWireAttributeValue} and
  *   {@link wireAttributeValue});
- * - the **stored form** in `entity_version_attributes` (`value_text` for
+ * - the **stored form** in `entity_version_attributes` (`value_bytes` for
  *   equality/prefix, `value_num` for ordering — see {@link toStoredAttributeValue}).
  *
+ * A `str` is any UTF-8 the node accepts, NUL and other control characters
+ * included, and Postgres `text` and `jsonb` cannot hold a NUL. So text values
+ * cross into Postgres as bytes: `bytea` columns take {@link byteaLiteral} /
+ * {@link bytesToText}, and the `jsonb` documents carry a str as
+ * {@link utf8Hex} / {@link fromUtf8Hex} — exact both ways, never trimmed.
+ *
  * `bytes` is the exception: its content is never stored. Its stored form is
- * the keccak256 (`value_text`) and the byte length (`value_num`), and the
+ * the keccak256 (`value_bytes`) and the byte length (`value_num`), and the
  * index answers its wire value as `null`; the content stays on the node.
  *
  * The typeIds are the protocol's: the low seven bits of a triple's `typeId`
@@ -156,9 +162,9 @@ export function toStoredAttributeValue(tag: AttributeTypeTag, text: string): Sto
       return { valueText: formatDecimalUnits(units), valueNum: units };
     }
     case "str":
-      // Postgres text cannot hold NUL; the engine's str values are valid UTF-8
-      // without control characters, so this only ever trims corrupt input.
-      return { valueText: text.replaceAll("\0", ""), valueNum: null };
+      // Any UTF-8 is a str, NUL included; a lone surrogate has no UTF-8 form.
+      // (`\p{Cs}` under the u flag matches only a lone surrogate: a pair is one code point.)
+      return LONE_SURROGATE.test(text) ? null : { valueText: text, valueNum: null };
     case "addr":
       return isHexOfLength(text, 40) ? { valueText: text.toLowerCase(), valueNum: null } : null;
     case "key":
@@ -168,6 +174,8 @@ export function toStoredAttributeValue(tag: AttributeTypeTag, text: string): Sto
       return null;
   }
 }
+
+const LONE_SURROGATE = /\p{Cs}/u;
 
 /** The stored form of a `bytes` value: its keccak256 and its length, never the content. */
 export function storedBytesValue(keccak256: string, size: number): StoredAttributeValue | null {
@@ -235,4 +243,24 @@ export function fromWireAttributeValue(tag: AttributeTypeTag, wire: unknown): St
 /** Byte-wise UTF-8 comparison, the order the engine keeps attributes in. */
 export function compareUtf8(a: string, b: string): number {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+/** Text as Postgres `bytea` input: `\x` and the hex of its UTF-8. */
+export function byteaLiteral(text: string): string {
+  return `\\x${Buffer.from(text, "utf8").toString("hex")}`;
+}
+
+/** Text back from a `bytea` column, which Bun.sql reads as a Buffer. */
+export function bytesToText(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("utf8");
+}
+
+/** Text in a `jsonb` document: `0x` and the hex of its UTF-8, so a NUL travels too. */
+export function utf8Hex(text: string): string {
+  return `0x${Buffer.from(text, "utf8").toString("hex")}`;
+}
+
+/** The inverse of {@link utf8Hex}. */
+export function fromUtf8Hex(hex: string): string {
+  return Buffer.from(hex.slice(2), "hex").toString("utf8");
 }

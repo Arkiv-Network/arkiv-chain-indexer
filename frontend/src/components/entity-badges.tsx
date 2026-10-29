@@ -1,7 +1,8 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { InfoTooltip } from "@/InfoTooltip";
 import { cn } from "@/lib/utils";
-import { schemaCondition } from "@/attributes";
+import { escapedStrValue, schemaCondition } from "@/attributes";
+import { StrValue } from "@/components/str-value";
 import { describeRentCap, fetchNodeRentCap, NODE_STATUS_URL, type NodeRentCap } from "@/nodeRpc";
 import { shouldHandleClientNavigation } from "@/permalinks";
 import { explorerQueryHref, openExplorerQuery, type ConditionActions } from "./filter-menu";
@@ -72,7 +73,7 @@ export function SchemaBadge({ name, actions, className }: { name: string; action
     "border-sky-600/40 bg-sky-600/10 text-sky-700 normal-case transition-colors hover:bg-sky-600/20 dark:border-sky-400/40 dark:bg-sky-400/10 dark:text-sky-300",
     className,
   );
-  const title = `Query ${expression}`;
+  const title = `Query ${escapedStrValue(expression)}`;
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!shouldHandleClientNavigation(event)) return;
     event.preventDefault();
@@ -80,7 +81,7 @@ export function SchemaBadge({ name, actions, className }: { name: string; action
   };
   return (
     <a className={classes} href={explorerQueryHref(expression)} title={title} onClick={onClick}>
-      schema: {name}
+      schema: <StrValue text={name} />
     </a>
   );
 }

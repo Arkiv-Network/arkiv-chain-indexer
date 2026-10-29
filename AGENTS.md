@@ -39,6 +39,11 @@ docker compose up --build
   no (or another) marker before any DDL, the scanner and gap filler refuse a node whose block 0 is not the recorded
   one (`bindGenesisHash`), and the backend checks the recorded hash against the stored block 0. Bump `DATA_MODEL`
   whenever the stored shape changes.
+- A str is any UTF-8 the node accepts — NUL and other control characters included — and is stored exactly.
+  Postgres `text` and `jsonb` cannot hold a NUL, so str values reach Postgres as bytes: `bytea` columns
+  (`entity_version_attributes.value_bytes`, both `schema_name`s) and UTF-8 hex inside the jsonb documents
+  (`toStoredOperationAttributes`, `entity_versions.attributes[].valueHex`), decoded on read. Never strip or
+  replace a character to make a value fit a column.
 - Rent is not gas. `transaction_fee_wei` (and every "fee" field) stays `gasUsed × effectiveGasPrice` —
   `eth_feeHistory` and the priority-fee oracle depend on it; the receipt's `rentFee` goes to `rent_fee_wei` /
   `total_rent_fee_wei`, `total_burned_wei = burnt_fees_wei + total_rent_fee_wei`, and API rows add `totalCostWei`.
@@ -185,7 +190,8 @@ docker compose up --build
   (`~/arkiv-network/arkiv`) with the UDC node's system-attribute rules (`$payload`/`$contentType` are the node's
   exact `-32002`); its other messages still follow the older crate (language parity is deferred);
   `entityValues.ts` holds the type ids, bounds and wire encodings (`dec` is stored as 18-place units, `u256`
-  as `numeric`, strings compared bytewise via `value_text`, `bytes` as keccak256 + size); `entityIndex.ts`
+  as `numeric`, every other value compared bytewise as the UTF-8 in `value_bytes` (bytea), `bytes` as
+  keccak256 + size); `entityIndex.ts`
   folds one key's operations into versions (`foldEntityVersions`, pure — patch mutations apply in order, a
   typed one sets value, type *and* indexed flag, a tombstone unsets, reverted transactions apply nothing,
   expiry comes from the `EntityCreated`/`ExpiryExtended` event when a log is stored and exactly

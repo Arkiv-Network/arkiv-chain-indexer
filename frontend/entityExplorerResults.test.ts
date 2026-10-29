@@ -100,3 +100,44 @@ describe("EntityResults", () => {
     expect(render([], { previousQuery: "arkiv.schema = str('a')" })).toContain("Back to previous query");
   });
 });
+
+describe("str values with control characters", () => {
+  test("result rows show them as escapes on one line, never raw", () => {
+    // As the SDK decodes them from the node (strFromChain): its str() refuses
+    // control characters, but the node stores and matches them.
+    const chainStr = (value: string) => ({ type: "str", value }) as ReturnType<typeof str>;
+    const html = render([entity(4, undefined, { note: chainStr("line one\n\tline two"), nul: chainStr("nul\u0000inside") })]);
+    expect(html).toContain('title="U+000A line feed">\\n</span><span');
+    expect(html).toContain('title="U+0000 NUL">\\0</span>inside');
+    expect(html).not.toContain("\u0000");
+    // Not in the expanded detail either: a \n is shown, never followed.
+    expect(html).not.toContain("\n");
+  });
+
+  test("a value with anything to escape copies both as itself and escaped", async () => {
+    const { attributePopup } = await import("./src/entityExplorer/components/FilterPopup");
+    const at = { clientX: 0, clientY: 0 };
+    // popupAt places the menu inside the window; there is none under bun test.
+    const scope = globalThis as { window?: unknown };
+    const saved = scope.window;
+    scope.window = { innerWidth: 1024 };
+    const value = (text: string) => ({ type: "str", value: text }) as ReturnType<typeof str>;
+    try {
+      expect(attributePopup(at, { name: "nul", value: value("nul\u0000inside"), indexed: true })).toMatchObject({
+        copyValue: "nul\u0000inside",
+        copyEscapedValue: "nul\\0inside",
+        // The query keeps the real character: the node matches it.
+        expression: "nul = str('nul\u0000inside')",
+      });
+      expect(attributePopup(at, { name: "note", value: value("line one\n\tline two"), indexed: true })).toMatchObject({
+        copyValue: "line one\n\tline two",
+        copyEscapedValue: "line one\\n\\tline two",
+      });
+      const plain = attributePopup(at, { name: "title", value: value("Hello"), indexed: true });
+      expect(plain.copyValue).toBe("Hello");
+      expect(plain.copyEscapedValue).toBeUndefined();
+    } finally {
+      scope.window = saved;
+    }
+  });
+});
