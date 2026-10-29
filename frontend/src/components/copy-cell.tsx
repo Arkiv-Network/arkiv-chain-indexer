@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type MouseEvent } from "react";
 import { cn } from "@/lib/utils";
 
@@ -33,10 +33,13 @@ function copyTextFallback(value: string): boolean {
 export function CopyButton({
   value,
   label,
+  icon: Icon = Copy,
   className,
 }: {
   value: string;
   label: string;
+  /** Sets a second copy button apart from the first. */
+  icon?: LucideIcon;
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -64,7 +67,7 @@ export function CopyButton({
       title={copied ? "Copied" : `Copy ${label}`}
       onClick={onCopy}
     >
-      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {copied ? <Check className="size-3" /> : <Icon className="size-3" />}
     </button>
   );
 }

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from
 import { createPortal } from "react-dom";
 import { copyText } from "@/components/copy-cell";
 import { buildRouteHref, shouldHandleClientNavigation, writePermalink } from "@/permalinks";
+import { StrValue } from "@/components/str-value";
 
 /**
  * Where a query condition goes: a link that opens the entity explorer with it.
@@ -134,7 +135,7 @@ export function FilterMenu({
             </button>
           ) : null}
           <span className="mt-1 block max-w-80 truncate border-t border-border px-2.5 pt-1.5 font-mono text-[10px] text-muted-foreground">
-            {expression}
+            <StrValue text={expression} />
           </span>
         </span>,
         document.body,

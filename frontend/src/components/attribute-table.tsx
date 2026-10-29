@@ -1,4 +1,4 @@
-import { Filter } from "lucide-react";
+import { CodeXml, Filter } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import { CopyButton } from "@/components/copy-cell";
 import { cn } from "@/lib/utils";
@@ -6,8 +6,10 @@ import {
   attributeCondition,
   attributeText,
   conditionUnavailableReason,
+  escapedStrCopy,
+  escapedStrValue,
   sameAttributeValue,
-  visibleText,
+  strValueParts,
   type AttributeChange,
   type AttributeView,
 } from "@/attributes";
@@ -15,6 +17,7 @@ import { addressDetailHref, entityDetailHref, shouldHandleClientNavigation, writ
 import { BytesValue, type BytesSource } from "./bytes-value";
 import { IndexedBadge, TypeChip } from "./entity-badges";
 import { FilterMenu, type ConditionActions } from "./filter-menu";
+import { StrValue } from "./str-value";
 
 /** Strings longer than this are cut in the cell; the full text is in the tooltip and the copy button. */
 const STR_DISPLAY_LIMIT = 240;
@@ -261,15 +264,25 @@ export function AttributeValue({
         </span>
       );
     case "str": {
-      // Shown with spoofing characters escaped; the copy button keeps the real text.
-      const shown = visibleText(text);
-      const cut = shown.length > STR_DISPLAY_LIMIT ? `${shown.slice(0, STR_DISPLAY_LIMIT)}…` : shown;
+      // Shown with control and spoofing characters escaped; copied as the real text, and
+      // escaped too when there is anything to escape (escapedStrCopy).
+      const cut = text.length > STR_DISPLAY_LIMIT;
+      const parts = strValueParts(text);
+      const escaped = escapedStrCopy(text, parts);
       return (
         <span className="inline-flex max-w-full items-start gap-1">
-          <span className="break-words whitespace-pre-wrap text-foreground" title={cut !== shown ? shown : undefined}>
-            {cut === "" ? <span className="text-muted-foreground italic">empty string</span> : cut}
+          <span className="break-words whitespace-pre-wrap text-foreground" title={cut ? escapedStrValue(text, parts) : undefined}>
+            {text === "" ? (
+              <span className="text-muted-foreground italic">empty string</span>
+            ) : (
+              <>
+                {cut ? <StrValue text={text.slice(0, STR_DISPLAY_LIMIT)} /> : <StrValue text={text} parts={parts} />}
+                {cut ? "…" : null}
+              </>
+            )}
           </span>
-          {plain || text.length <= 40 ? null : <CopyButton value={text} label="value" />}
+          {plain || (text.length <= 40 && escaped === null) ? null : <CopyButton value={text} label="value" />}
+          {plain || escaped === null ? null : <CopyButton value={escaped} label="escaped value" icon={CodeXml} />}
         </span>
       );
     }

@@ -99,3 +99,31 @@ describe("AttributeTable", () => {
     expect(render({ changes })).toContain("previous value not in the stored history");
   });
 });
+
+describe("str values with control characters", () => {
+  test("show each control character as a marked escape, on one line", () => {
+    const html = render({
+      attributes: [
+        { name: "multiline", type: "str", indexed: true, value: "line one\n\tline two" },
+        { name: "nul", type: "str", indexed: true, value: "nul\u0000inside" },
+      ],
+    });
+    expect(html).toContain('title="U+000A line feed">\\n</span><span');
+    expect(html).not.toContain("\n");
+    expect(html).toContain('title="U+0009 tab">\\t</span>line two');
+    expect(html).toContain('nul<span class="mx-px rounded-[2px] bg-muted px-0.5 font-mono text-muted-foreground" title="U+0000 NUL">\\0</span>inside');
+    expect(html).not.toContain("\u0000");
+    // Both values copy both ways.
+    expect(html.match(/aria-label="Copy escaped value"/g)).toHaveLength(2);
+    expect(html.match(/aria-label="Copy value"/g)).toHaveLength(2);
+  });
+});
+
+describe("schema badge", () => {
+  test("shows a schema name's control characters as escapes", async () => {
+    const { SchemaBadge } = await import("./src/components/entity-badges");
+    const html = renderToStaticMarkup(createElement(SchemaBadge, { name: "a\u0000b" }));
+    expect(html).toContain('a<span class="mx-px rounded-[2px] bg-muted px-0.5 font-mono text-muted-foreground" title="U+0000 NUL">\\0</span>b');
+    expect(html).not.toContain("\u0000");
+  });
+});

@@ -1,6 +1,6 @@
 import { shouldIgnoreTransaction } from "./transactionFilter";
 import type { Hex, RpcBlock, RpcReceipt } from "./types";
-import { TOMBSTONE_TYPE_ID, fromWireAttributeValue, typeTagOfRawId, wireAttributeValue } from "./entityValues";
+import { TOMBSTONE_TYPE_ID, fromUtf8Hex, fromWireAttributeValue, typeTagOfRawId, utf8Hex, wireAttributeValue } from "./entityValues";
 
 export const ARKIV_REGISTRY_ADDRESS = "0x4400000000000000000000000000000000000044";
 
@@ -48,7 +48,8 @@ async function readRejectionReason(response: Response): Promise<string | undefin
 
 /**
  * One attribute triple as the decoder reports it, and as
- * `transaction_operations.attributes` stores it.
+ * `transaction_operations.attributes` stores it — except that a stored str
+ * value is {@link utf8Hex} (see {@link toStoredOperationAttributes}).
  *
  * `value` uses the node's `arkiv_query` encoding (u64/u256 as `0x`
  * quantities, i32 as a JSON number, bool as a JSON boolean, dec as a trimmed
@@ -72,6 +73,26 @@ export interface ArkivOperationAttribute {
   keccak256?: string;
   /** Present only when the triple is malformed. */
   error?: string;
+}
+
+/**
+ * Attributes as `transaction_operations.attributes` stores them: a str value
+ * as the hex of its UTF-8, because jsonb cannot hold the NUL a str may carry.
+ * Keyed on the typeId, which is what the chain carries, so nothing is
+ * ambiguous; no other string in a triple can hold a NUL (parseDecoderResponse
+ * refuses one).
+ */
+export function toStoredOperationAttributes(attributes: readonly ArkivOperationAttribute[]): ArkivOperationAttribute[] {
+  return attributes.map((attribute) => (isStrValue(attribute) ? { ...attribute, value: utf8Hex(attribute.value) } : attribute));
+}
+
+/** The inverse of {@link toStoredOperationAttributes}, for rows read back. */
+export function fromStoredOperationAttributes(attributes: readonly ArkivOperationAttribute[]): ArkivOperationAttribute[] {
+  return attributes.map((attribute) => (isStrValue(attribute) ? { ...attribute, value: fromUtf8Hex(attribute.value) } : attribute));
+}
+
+function isStrValue(attribute: ArkivOperationAttribute): attribute is ArkivOperationAttribute & { value: string } {
+  return typeTagOfRawId(attribute.typeId) === "str" && typeof attribute.value === "string";
 }
 
 export interface ArkivOperation {
@@ -481,6 +502,12 @@ function parseDecoderAttribute(attribute: unknown, where: string): ArkivOperatio
   if (indexed !== ((typeId & INDEXED_TYPE_FLAG) !== 0)) {
     throw new DecoderContractError(`${where}.indexed is ${indexed}, but typeId ${typeId} says otherwise`);
   }
+  // Only a str value may hold a NUL: it is stored as hex, every other string
+  // as text, which jsonb refuses a NUL in. A valid name, tag or error has none.
+  const strings: Array<[string, unknown]> = [["name", name], ["type", type], ["error", error]];
+  if (typeTagOfRawId(typeId) !== "str") strings.push(["value", value]);
+  const withNul = strings.find(([, text]) => isString(text) && text.includes("\0"));
+  if (withNul) throw new DecoderContractError(`${where}.${withNul[0]} holds a NUL, which only a str value can`);
   // bytes content never reaches this process from a v0.3 decoder; refuse one
   // that sends it rather than store it. Keyed on the typeId, which is what the
   // chain carries, not on the tag the decoder names it with.

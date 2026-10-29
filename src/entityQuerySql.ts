@@ -12,9 +12,11 @@
  * that type can match it — and only an *indexed* one: the node keeps
  * unindexed attributes out of its index, so `title = str('x')` never matches
  * an entity whose `title` is stored without the flag. Ordered types compare `value_num` (an exact NUMERIC
- * of the integer or scaled decimal); the rest compare `value_text` in its
- * canonical form. `STARTSWITH` is a `LIKE` on the escaped prefix, which is a
- * byte-prefix match for valid UTF-8 the same way the node's index scan is.
+ * of the integer or scaled decimal); the rest compare `value_bytes`, the UTF-8
+ * of the canonical form, so a str holding a NUL compares as the node compares
+ * it. `STARTSWITH` is the byte range `[prefix, next prefix)`, the node's
+ * index scan. (It never meets a built-in column: those are typed addr, key or
+ * u64, and STARTSWITH takes a str.)
  */
 import type { AttributeRef, ComparisonOperator, QueryAst, QueryValue } from "./entityQueryLanguage";
 import { TYPE_IDS, isOrderedType } from "./entityValues";
@@ -44,9 +46,18 @@ const SQL_OPERATORS: Record<ComparisonOperator, string> = {
   gte: ">=",
 };
 
-/** Escape the LIKE metacharacters so a prefix matches literally. */
-export function likePrefixPattern(prefix: string): string {
-  return `${prefix.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+/**
+ * The smallest byte string above every string that starts with `prefix`, or
+ * null when there is none (the prefix is empty or all 0xff).
+ */
+export function nextBytePrefix(prefix: Uint8Array): Uint8Array | null {
+  let end = prefix.length;
+  while (end > 0 && prefix[end - 1] === 0xff) end--;
+  if (end === 0) return null;
+  // A copy: a Buffer's slice is a view of the prefix it came from.
+  const next = Uint8Array.from(prefix.subarray(0, end));
+  next[end - 1]! += 1;
+  return next;
 }
 
 /** The comparable form of a query value: NUMERIC text for ordered types, canonical text otherwise. */
@@ -107,20 +118,11 @@ function compileNode(node: QueryAst, params: Params, attributesTable: string): s
     case "compare":
     case "startsWith": {
       const isPrefix = node.kind === "startsWith";
-      const operator = isPrefix ? "LIKE" : SQL_OPERATORS[node.op];
-      const operand = isPrefix ? likePrefixPattern(node.value.value) : queryValueOperand(node.value);
-      const escape = isPrefix ? " ESCAPE '\\'" : "";
-      if (node.value.type === "str" && node.value.value.includes("\0")) {
-        // Postgres text cannot hold NUL (the driver rejects it as a parameter)
-        // and stored str values are NUL-stripped, so no indexed value equals or
-        // starts with this literal; str has no ordering in the language.
-        return "FALSE";
-      }
       if (node.key.kind === "builtin") {
+        if (node.kind === "startsWith") throw new Error("STARTSWITH on a system attribute: the parser refuses a str for one");
         const { column, cast } = builtinColumn(node.key.field);
         if (
           node.key.field === "createdAt" &&
-          !isPrefix &&
           (node.value.type === "u64" || node.value.type === "u256") &&
           node.value.value > I64_MAX
         ) {
@@ -128,17 +130,28 @@ function compileNode(node: QueryAst, params: Params, attributesTable: string): s
           // so a larger literal sits above every stored value.
           return node.op === "lt" || node.op === "lte" ? "TRUE" : "FALSE";
         }
-        return `(${column} ${operator} ${params.add(operand)}${cast}${escape})`;
+        return `(${column} ${SQL_OPERATORS[node.op]} ${params.add(queryValueOperand(node.value))}${cast})`;
       }
-      const ordered = !isPrefix && isOrderedType(node.value.type);
-      const valueColumn = ordered ? "a.value_num" : "a.value_text";
-      const cast = ordered ? "::numeric" : "";
+      const name = params.add(node.key.name);
+      const typeId = params.add(TYPE_IDS[node.value.type]);
+      let condition: string;
+      if (isPrefix) {
+        const prefix = Buffer.from(node.value.value, "utf8");
+        const next = nextBytePrefix(prefix);
+        condition = `a.value_bytes >= ${params.add(prefix)}::bytea`;
+        if (next) condition += ` AND a.value_bytes < ${params.add(Buffer.from(next))}::bytea`;
+      } else if (isOrderedType(node.value.type)) {
+        condition = `a.value_num ${SQL_OPERATORS[node.op]} ${params.add(queryValueOperand(node.value))}::numeric`;
+      } else {
+        const operand = Buffer.from(queryValueOperand(node.value), "utf8");
+        condition = `a.value_bytes ${SQL_OPERATORS[node.op]} ${params.add(operand)}::bytea`;
+      }
       return (
         `(EXISTS (SELECT 1 FROM ${attributesTable} a` +
         ` WHERE a.entity_key = v.entity_key AND a.version = v.version AND a.indexed` +
-        ` AND a.name = ${params.add(node.key.name)}` +
-        ` AND a.type_id = ${params.add(TYPE_IDS[node.value.type])}::smallint` +
-        ` AND ${valueColumn} ${operator} ${params.add(operand)}${cast}${escape}))`
+        ` AND a.name = ${name}` +
+        ` AND a.type_id = ${typeId}::smallint` +
+        ` AND ${condition}))`
       );
     }
   }

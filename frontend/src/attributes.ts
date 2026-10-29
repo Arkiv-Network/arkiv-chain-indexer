@@ -213,6 +213,84 @@ export function visibleText(text: string): string {
   return text.replace(SPOOFING_CHARACTERS, (char) => `\\u{${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}}`);
 }
 
+/**
+ * One piece of a str value as it is shown: plain text, or one character that
+ * would otherwise be invisible, swallowed or misleading, written out as an
+ * escape (`\n`, `\u{001B}`) so a renderer can set it apart from literal text.
+ */
+export type StrValuePart =
+  | { kind: "text"; text: string }
+  | { kind: "escape"; text: string; char: string; title: string };
+
+/** C0 controls and DEL, which a node accepts in a str and a browser drops or reflows, plus the spoofing set. */
+const VALUE_ESCAPED_CHARACTERS = new RegExp(`[\\u0000-\\u001f\\u007f]|${SPOOFING_CHARACTERS.source}`, "g");
+
+const NAMED_ESCAPES: Record<string, [escape: string, name: string]> = {
+  "\0": ["\\0", "NUL"],
+  "\t": ["\\t", "tab"],
+  "\n": ["\\n", "line feed"],
+  "\r": ["\\r", "carriage return"],
+};
+
+/**
+ * A str value split for display: every control character, DEL and spoofing
+ * character as its own escape part, the rest as text. A str is any UTF-8 the
+ * node accepts, so `"nul\0inside"` and `"nulinside"` are different values and
+ * must not look alike. For display only — query conditions and copied values
+ * keep the real text.
+ */
+export function strValueParts(text: string): StrValuePart[] {
+  const parts: StrValuePart[] = [];
+  let last = 0;
+  for (const match of text.matchAll(VALUE_ESCAPED_CHARACTERS)) {
+    const char = match[0];
+    if (match.index > last) parts.push({ kind: "text", text: text.slice(last, match.index) });
+    const code = `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
+    const named = NAMED_ESCAPES[char];
+    parts.push(
+      named
+        ? { kind: "escape", text: named[0], char, title: `${code} ${named[1]}` }
+        : { kind: "escape", text: `\\u{${code.slice(2)}}`, char, title: char <= "\u007f" ? `${code} control character` : code },
+    );
+    last = match.index + char.length;
+  }
+  if (last < text.length) parts.push({ kind: "text", text: text.slice(last) });
+  return parts;
+}
+
+function hasEscape(parts: readonly StrValuePart[]): boolean {
+  return parts.some((part) => part.kind === "escape");
+}
+
+/**
+ * {@link strValueParts} as one string, for a tooltip or anywhere styled parts
+ * cannot go. Once anything is escaped, a literal backslash is doubled, so an
+ * escaped newline (`\n`) and a typed backslash and n (`\\n`) never look alike.
+ */
+export function escapedStrValue(text: string, parts: readonly StrValuePart[] = strValueParts(text)): string {
+  if (!hasEscape(parts)) return text;
+  return parts.map((part) => (part.kind === "text" ? part.text.replaceAll("\\", "\\\\") : part.text)).join("");
+}
+
+/**
+ * A str's escaped copy, offered beside the value itself: the body of a
+ * JavaScript string literal that reads back to the value between single or
+ * double quotes — the escapes the explorer shows, with backslashes and quotes
+ * escaped. Null when there is nothing to escape.
+ */
+export function escapedStrCopy(text: string, parts: readonly StrValuePart[] = strValueParts(text)): string | null {
+  if (!hasEscape(parts)) return null;
+  let escaped = "";
+  for (const [index, part] of parts.entries()) {
+    const next = parts[index + 1];
+    if (part.kind === "text") escaped += part.text.replace(/[\\'"]/g, (char) => `\\${char}`);
+    // `\0` before a digit would read as a legacy octal escape.
+    else if (part.char === "\0" && next?.kind === "text" && /^\d/.test(next.text)) escaped += "\\u{0000}";
+    else escaped += part.text;
+  }
+  return escaped;
+}
+
 /** Two values are the same when their type and canonical text are (bytes: size and keccak256). */
 export function sameAttributeValue(a: AttributeView, b: AttributeView): boolean {
   if (a.type !== b.type) return false;

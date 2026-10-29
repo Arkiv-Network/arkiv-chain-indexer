@@ -5,7 +5,8 @@ import { PageHeader } from "@/components/page-header";
 import { Stat, StatGrid } from "@/components/stat";
 import { Card, CardContent } from "@/components/ui/card";
 import { fmtDate, fmtTokenAmount } from "./format";
-import { schemaCondition } from "./attributes";
+import { escapedStrValue, schemaCondition } from "./attributes";
+import { StrValue } from "@/components/str-value";
 import { explorerQueryHref, openExplorerQuery } from "@/components/filter-menu";
 import { shouldHandleClientNavigation } from "./permalinks";
 import { selectClass } from "@/components/filters-panel";
@@ -208,12 +209,12 @@ export function StatisticsView({ timeZone, tokenSymbol, onLocationChange }: { ti
           <thead className="bg-muted"><tr>{(["Schema", "Schema active entities", "Schema bytes"] as const).map((h) => <th key={h} className="px-3 py-2 font-medium"><HelpLabel name={h} label={h === "Schema active entities" ? "Active entities" : h === "Schema bytes" ? "Bytes" : h} /></th>)}</tr></thead>
           <tbody>{entity.topSchemas.map((row) => <tr key={row.schemaName} className="border-t border-border">
             <td className="px-3 py-2 break-all">
-              <a className="font-mono text-foreground hover:text-accent hover:underline" href={explorerQueryHref(schemaCondition(row.schemaName))} title={`Query ${schemaCondition(row.schemaName)}`}
+              <a className="font-mono text-foreground hover:text-accent hover:underline" href={explorerQueryHref(schemaCondition(row.schemaName))} title={`Query ${escapedStrValue(schemaCondition(row.schemaName))}`}
                 onClick={(event) => {
                   if (!shouldHandleClientNavigation(event)) return;
                   event.preventDefault();
                   openExplorerQuery(schemaCondition(row.schemaName), onLocationChange);
-                }}>{row.schemaName}</a>
+                }}><StrValue text={row.schemaName} /></a>
             </td>
             <td className="px-3 py-2 font-mono">{integer(row.entities)}</td><td className="px-3 py-2 font-mono">{bytes(row.bytes)}</td>
           </tr>)}</tbody>

@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { fromWireAttributeValue, storedBytesValue, toStoredAttributeValue, wireAttributeValue, type AttributeTypeTag } from "./entityValues";
+import {
+  byteaLiteral,
+  bytesToText,
+  fromUtf8Hex,
+  fromWireAttributeValue,
+  storedBytesValue,
+  toStoredAttributeValue,
+  utf8Hex,
+  wireAttributeValue,
+  type AttributeTypeTag,
+} from "./entityValues";
 
 describe("fromWireAttributeValue", () => {
   test("round-trips every wire encoding back to the stored form", () => {
@@ -17,6 +27,11 @@ describe("fromWireAttributeValue", () => {
       ["dec", "-0.000000000000000001"],
       ["dec", "42"],
       ["str", "hello 'world'"],
+      // The node takes any UTF-8 as a str, control characters and NUL included.
+      ["str", "line one\n\tline two"],
+      ["str", "nul\u0000inside"],
+      ["str", "\r\n\u001b[0m\u007f"],
+      ["str", ""],
       ["addr", `0x${"ab".repeat(20)}`],
       ["key", `0x${"cd".repeat(32)}`],
       ["bytes32", `0x${"ef".repeat(32)}`],
@@ -46,6 +61,8 @@ describe("fromWireAttributeValue", () => {
     expect(fromWireAttributeValue("u64", "7")).toBeNull();
     expect(fromWireAttributeValue("u64", "0x10000000000000000")).toBeNull();
     expect(fromWireAttributeValue("str", 7)).toBeNull();
+    // A lone surrogate has no UTF-8 form, so no node sends one.
+    expect(fromWireAttributeValue("str", "a\ud800b")).toBeNull();
     expect(fromWireAttributeValue("addr", "0x1234")).toBeNull();
     expect(fromWireAttributeValue("key", `0x${"cd".repeat(31)}`)).toBeNull();
     expect(fromWireAttributeValue("bytes", "0x0")).toBeNull();
@@ -65,5 +82,19 @@ describe("fromWireAttributeValue", () => {
     expect(storedBytesValue("0x12", 7)).toBeNull();
     // The index answers bytes as null on the wire.
     expect(wireAttributeValue("bytes", { valueText: `0x${"ab".repeat(32)}`, valueNum: 7n })).toBeNull();
+  });
+});
+
+describe("text crossing into Postgres as bytes", () => {
+  const texts = ["", "plain", "nul\u0000inside", "line one\n\tline two", "zażółć 🦀"];
+
+  test("utf8Hex round-trips any str, NUL included", () => {
+    for (const text of texts) expect(fromUtf8Hex(utf8Hex(text))).toBe(text);
+    expect(utf8Hex("a\0b")).toBe("0x610062");
+  });
+
+  test("byteaLiteral is Postgres bytea input, and bytesToText reads a bytea back", () => {
+    expect(byteaLiteral("a\0b")).toBe("\\x610062");
+    for (const text of texts) expect(bytesToText(Buffer.from(byteaLiteral(text).slice(2), "hex"))).toBe(text);
   });
 });

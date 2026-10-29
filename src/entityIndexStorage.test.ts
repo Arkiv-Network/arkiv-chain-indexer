@@ -842,7 +842,8 @@ describeWithPostgres("entity index (Postgres)", () => {
     const [version] = await index.getEntityVersions(high);
     expect(version).toMatchObject({ bytesSize: 11, schemaName: null });
     const rows = await indexDb.query<{ name: string; type_id: number; indexed: boolean; value_text: string; value_num: string | null }>(
-      `SELECT name, type_id, indexed, value_text, value_num::text AS value_num FROM "${indexSchema}".entity_version_attributes WHERE entity_key = $1 ORDER BY name`,
+      `SELECT name, type_id, indexed, convert_from(value_bytes, 'UTF8') AS value_text, value_num::text AS value_num
+       FROM "${indexSchema}".entity_version_attributes WHERE entity_key = $1 ORDER BY name`,
       [high],
     );
     expect(rows.rows).toEqual([
@@ -932,6 +933,95 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect((await keysOf("*"))[0]).toBe(key);
     expect((await index.getProgress()).projectedThroughBlock).toBe(106n);
     expect(await result<number>("arkiv_getEntityCount")).toBe(7);
+  });
+});
+
+describeWithPostgres("str values with NUL (Postgres)", () => {
+  // The node takes any UTF-8 as a str, NUL included (rabdi mined one), and
+  // Postgres text and jsonb hold none: the index keeps them exact as bytes.
+  let storage: ScannerStorage;
+  let index: EntityIndexStorage;
+  let indexDb: Db;
+  let cleanup: () => Promise<void>;
+  let methods: ReturnType<typeof createArkivIndexMethods>;
+  const key = `0x${"99".repeat(32)}`;
+  const tx = registryTx(106, 0, ALICE, { logs: [createdLog(0, `0x${"99".repeat(32)}`, ALICE, 500)] });
+
+  const result = async <T = unknown>(method: string, params: unknown[] = []): Promise<T> => {
+    const response = (await handleJsonRpcBody({ jsonrpc: "2.0", id: 1, method, params }, storage, { localOverrides: methods })) as JsonRpcResponse;
+    if (response.error) throw new Error(`${method} failed: ${JSON.stringify(response.error)}`);
+    return response.result as T;
+  };
+  const keysOf = async (query: string) => (await result<{ data: Array<{ key: string }> }>("arkiv_query", [query])).data.map((entity) => entity.key);
+
+  beforeAll(async () => {
+    const isolated = await createIsolatedStorage("entity_index_nul");
+    storage = isolated.storage;
+    cleanup = isolated.cleanup;
+    indexDb = openDb(TEST_DATABASE_URL!, { max: 2 });
+    index = await EntityIndexStorage.fromDb(indexDb, { schema: isolated.schema });
+    methods = createArkivIndexMethods(index, storage);
+    for (const block of fixtureChain()) await storeBlock(storage, block);
+    await storage.saveBlockMetrics(metrics(106, 1), { kind: "lastSuccessfulBlock" }, [tx], [tx], [
+      {
+        position: 0,
+        hash: tx.hash,
+        operations: [
+          operation({
+            opIndex: 0,
+            operationType: 1,
+            entityKey: key,
+            ...lifetime(394),
+            schemaName: "sch\0ema",
+            attributes: [
+              str("arkiv.schema", "sch\0ema"),
+              str("multiline", "line one\n\tline two"),
+              str("nul", "nul\u0000inside"),
+              udcAttribute("stored", "str", "a\0b", { indexed: false }),
+            ],
+          }),
+        ],
+      },
+    ]);
+    await new EntityProjector(index, { log: () => {} }).runOnce();
+  });
+
+  afterAll(async () => {
+    await indexDb.close();
+    await cleanup();
+    await closeTestPools();
+  });
+
+  test("the stored operation reads back exactly, schema name included", async () => {
+    const [stored] = await storage.getOperationsByHash(tx.hash);
+    expect(stored!.schemaName).toBe("sch\0ema");
+    expect(stored!.attributes.map((attribute) => attribute.value)).toEqual(["sch\0ema", "line one\n\tline two", "nul\u0000inside", "a\0b"]);
+  });
+
+  test("the projection answers the values the node does", async () => {
+    const [entity] = (
+      await result<{ data: Array<{ attributes: unknown[] }> }>("arkiv_query", [`$key = key(${key})`, { select: { attributes: true } }])
+    ).data;
+    expect(entity!.attributes).toEqual([
+      { name: "arkiv.schema", type: "str", value: "sch\0ema" },
+      { name: "multiline", type: "str", value: "line one\n\tline two" },
+      { name: "nul", type: "str", value: "nul\u0000inside" },
+      { name: "stored", type: "str", value: "a\0b" },
+    ]);
+    const [version] = await index.getEntityVersions(key);
+    expect(version!.schemaName).toBe("sch\0ema");
+  });
+
+  test("equality and STARTSWITH compare the bytes, NUL included", async () => {
+    expect(await keysOf("nul = str('nul\0inside')")).toEqual([key]);
+    expect(await keysOf("nul = str('nulinside')")).toEqual([]);
+    expect(await keysOf("nul = str('nul')")).toEqual([]);
+    expect(await keysOf("nul STARTSWITH str('nul\0')")).toEqual([key]);
+    expect(await keysOf("nul STARTSWITH str('nul\0i')")).toEqual([key]);
+    expect(await keysOf("nul STARTSWITH str('nul\0x')")).toEqual([]);
+    expect(await keysOf("multiline = str('line one\n\tline two')")).toEqual([key]);
+    // Unindexed: kept and served, never matched.
+    expect(await keysOf("stored = str('a\0b')")).toEqual([]);
   });
 });
 

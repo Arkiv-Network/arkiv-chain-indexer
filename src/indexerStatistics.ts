@@ -1,5 +1,5 @@
 import type { Db } from "./db";
-import { TYPE_TAGS_BY_ID } from "./entityValues";
+import { TYPE_TAGS_BY_ID, bytesToText } from "./entityValues";
 import type { IndexerStatistics } from "./indexerStatisticsTypes";
 import {
   blockStatisticsBounds, foldStatisticsActivity, foldStatisticsWindows, statisticsBandSql, statisticsWindowBounds,
@@ -149,11 +149,12 @@ export async function gatherIndexerStatistics(
           GROUP BY (a->>'typeId')::int ORDER BY (a->>'typeId')::int`, [at])).rows.map((r) => ({
             ...r, name: TYPE_TAGS_BY_ID.get(r.typeId) ?? `unknown(${r.typeId})`,
           }));
-        entities.topSchemas = (await tx.query<IndexerStatistics["entities"]["topSchemas"][number]>(`
+        // schema_name is bytea (a str may hold a NUL), which orders bytewise.
+        entities.topSchemas = (await tx.query<{ schemaName: Uint8Array; entities: string; bytes: string }>(`
           SELECT schema_name AS "schemaName", count(*)::text AS entities,
             coalesce(sum(bytes_size), 0)::text AS bytes
           ${versions} AND ${active} AND schema_name IS NOT NULL GROUP BY schema_name
-          ORDER BY count(*) DESC, schema_name COLLATE "C" ASC LIMIT 20`, [at])).rows;
+          ORDER BY count(*) DESC, schema_name ASC LIMIT 20`, [at])).rows.map((r) => ({ ...r, schemaName: bytesToText(r.schemaName) }));
       }
     }
     const limitations = [

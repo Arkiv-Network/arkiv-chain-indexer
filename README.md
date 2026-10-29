@@ -58,7 +58,7 @@ match the calldata's creates. Decoding requires `SAVE_TRANSACTION_DATA=true`; se
 disable it.
 
 **One database per chain.** Tables are created in their final shape and never migrated. The schema records its
-data model (`scanner_state.data_model = arkiv-udc-1`) and the chain's block-0 hash (`scanner_state.genesis_hash`):
+data model (`scanner_state.data_model = arkiv-udc-2`) and the chain's block-0 hash (`scanner_state.genesis_hash`):
 every process refuses to start on a schema that holds data without that marker or with another one, and the scanner
 (and gap filler) refuse a database whose recorded genesis hash is not the node's block 0 — a restarted chain keeps
 its chain id, so the id alone cannot tell two databases apart. The backend checks the recorded hash against the
@@ -512,9 +512,10 @@ entity key. Each row stores what the operation asked for, as the decoder reporte
 `EntityCreated` log rather than calldata), the uint128 `salt` (`NUMERIC(39)`), the raw `creation_flags` byte, the
 exact expiry pair `expires_at` / `min_lifetime` (`NUMERIC(20)`, so the permanent expiry 2^64 − 1 fits), `new_owner`,
 `bytes_size` (bytes held by the operation's `bytes` attributes), `schema_name` (the value of the indexed str
-`arkiv.schema` the SDK tags named-schema writes with) and `attributes` (JSONB, one
+`arkiv.schema` the SDK tags named-schema writes with, as `BYTEA`) and `attributes` (JSONB, one
 `{name, typeId, type, indexed, value, size, keccak256?, error?}` per triple, in calldata order; for a patch these are
-the mutations, tombstones — `typeId` 0 — included). Values use the node's `arkiv_query` encoding; `bytes` values are
+the mutations, tombstones — `typeId` 0 — included). Values use the node's `arkiv_query` encoding, except that a str
+is stored as the hex of its UTF-8 (a str may hold a NUL, which neither text nor JSONB can) and decoded on read; `bytes` values are
 `null` with their size and keccak256 beside them — bytes contents and calldata are never persisted. The API adds
 `resolvedExpiresAt` (`max(expiresAt, block + minLifetime)` capped at 2^64 − 1, the expiry the engine applies) and
 `permanent` (that resolved expiry is 2^64 − 1), so permanence never rests on the request's deadline alone.

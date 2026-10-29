@@ -10,13 +10,16 @@ import type { BlockMetrics, Hex } from "./types";
 import type { InspectedBlock, InspectedLog, InspectedTransaction } from "./blockInspector";
 import {
   PERMANENT_EXPIRES_AT,
+  fromStoredOperationAttributes,
   resolveOperationExpiry,
+  toStoredOperationAttributes,
   type ArkivOperation,
   type ArkivOperationAttribute,
   type ArkivOperationSummaryEntry,
   type StoredArkivOperation,
   type TransactionArkivOperations,
 } from "./arkivOperations";
+import { bytesToText } from "./entityValues";
 import type { BaseloadConfig } from "./baseloadConfig";
 import type { BatcherMetrics } from "./batcher";
 import type { ScanSample } from "./syncStatus";
@@ -35,9 +38,11 @@ const GENESIS_HASH_KEY = "genesis_hash";
  * The data model this build writes, recorded in `scanner_state.data_model`.
  * `arkiv-udc-1`: the Arkiv UDC entity model (schema-typed attributes with an
  * indexed flag, no payload or content type), storage rent beside gas fees.
+ * `arkiv-udc-2`: str values are stored exactly, NUL included — as bytea
+ * (`value_bytes`, `schema_name`) and as UTF-8 hex inside the jsonb documents.
  * A database written under any other model is refused, never migrated.
  */
-export const DATA_MODEL = "arkiv-udc-1";
+export const DATA_MODEL = "arkiv-udc-2";
 
 /** The database belongs to another data model or another chain; it is refused, never migrated. */
 export class IncompatibleDatabaseError extends Error {
@@ -115,25 +120,28 @@ export async function assertDataModel(db: DbQueryable, schema: string): Promise<
     );
   }
   // Empty but old-shaped tables would survive CREATE TABLE IF NOT EXISTS and
-  // fail at the first write; a column only this model has tells them apart.
+  // fail at the first write; a column only this model has (as `name` or
+  // `name type`) tells them apart.
   const sentinels: Record<string, string> = {
     blocks: "total_rent_fee_wei",
     transactions: "rent_fee_wei",
-    transaction_operations: "schema_name",
+    transaction_operations: "schema_name bytea",
     transaction_records: "rent_fee_wei",
     block_ranges: "total_rent_fee_wei",
     sender_stats: "total_rent_fee_wei",
-    entity_versions: "bytes_size",
-    entity_version_attributes: "indexed",
+    entity_versions: "schema_name bytea",
+    entity_version_attributes: "value_bytes",
   };
   const expected = existing.filter((table) => sentinels[table] !== undefined);
   if (expected.length > 0) {
-    const columns = await db.query<{ table_name: string; column_name: string }>(
-      `SELECT table_name, column_name FROM information_schema.columns
+    const columns = await db.query<{ table_name: string; column_name: string; data_type: string }>(
+      `SELECT table_name, column_name, data_type FROM information_schema.columns
        WHERE table_schema = $1 AND table_name = ANY($2::text[])`,
       [schema, textArrayLiteral(expected)],
     );
-    const present = new Set(columns.rows.map((row) => `${row.table_name}.${row.column_name}`));
+    const present = new Set(
+      columns.rows.flatMap((row) => [`${row.table_name}.${row.column_name}`, `${row.table_name}.${row.column_name} ${row.data_type}`]),
+    );
     const outdated = expected.filter((table) => !present.has(`${table}.${sentinels[table]}`));
     if (outdated.length > 0) {
       throw new IncompatibleDatabaseError(
@@ -785,7 +793,9 @@ export class ScannerStorage {
     // size, plus a bytes value's keccak256. The expiry pair is exact
     // (NUMERIC(20) holds 2^64 − 1, the permanent expiry), as is the uint128
     // salt; schema_name is the value of the operation's indexed str
-    // `arkiv.schema`, when it sets one.
+    // `arkiv.schema`, when it sets one. A str may hold a NUL, which neither
+    // text nor jsonb can, so schema_name is bytea and the str values in
+    // `attributes` are UTF-8 hex (toStoredOperationAttributes).
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS ${this.qTransactionOperations} (
         block_number BIGINT NOT NULL,
@@ -802,7 +812,7 @@ export class ScannerStorage {
         min_lifetime NUMERIC(20, 0),
         new_owner TEXT,
         bytes_size INTEGER NOT NULL,
-        schema_name TEXT,
+        schema_name BYTEA,
         attributes JSONB NOT NULL,
         scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (block_number, position, op_index)
@@ -1773,7 +1783,7 @@ export class ScannerStorage {
     const maxRowsPerInsert = 2_000;
     for (let start = 0; start < rows.length; start += maxRowsPerInsert) {
       const chunk = rows.slice(start, start + maxRowsPerInsert);
-      const params: Array<string | number | null | ArkivOperationAttribute[]> = [];
+      const params: Array<string | number | null | Buffer | ArkivOperationAttribute[]> = [];
       const values = chunk.map(({ transaction, operation }, rowIndex) => {
         const offset = rowIndex * columnsPerRow;
         params.push(
@@ -1791,11 +1801,11 @@ export class ScannerStorage {
           operation.minLifetime,
           operation.newOwner,
           operation.bytesSize,
-          operation.schemaName,
+          operation.schemaName === null ? null : Buffer.from(operation.schemaName, "utf8"),
           // Bind the array itself: Bun.sql serializes JS arrays to jsonb
           // documents but double-encodes pre-stringified JSON into a jsonb
           // string scalar.
-          operation.attributes,
+          toStoredOperationAttributes(operation.attributes),
         );
         const placeholders = Array.from(
           { length: columnsPerRow },
@@ -1804,6 +1814,7 @@ export class ScannerStorage {
         placeholders[8] = `${placeholders[8]}::numeric`; // salt
         placeholders[10] = `${placeholders[10]}::numeric`; // expires_at
         placeholders[11] = `${placeholders[11]}::numeric`; // min_lifetime
+        placeholders[14] = `${placeholders[14]}::bytea`; // schema_name
         placeholders[15] = `${placeholders[15]}::jsonb`; // attributes
         return `(${placeholders.join(", ")})`;
       });
@@ -3664,7 +3675,7 @@ interface TransactionOperationRow {
   min_lifetime: string | null;
   new_owner: string | null;
   bytes_size: number;
-  schema_name: string | null;
+  schema_name: Uint8Array | null;
   attributes: ArkivOperationAttribute[];
 }
 
@@ -3850,9 +3861,9 @@ function mapTransactionOperationRow(row: TransactionOperationRow): StoredArkivOp
     minLifetime: row.min_lifetime,
     newOwner: row.new_owner,
     bytesSize: row.bytes_size,
-    schemaName: row.schema_name,
+    schemaName: row.schema_name === null ? null : bytesToText(row.schema_name),
     // Bun.sql parses jsonb on read.
-    attributes: row.attributes,
+    attributes: fromStoredOperationAttributes(row.attributes),
   };
   const resolvedExpiresAt = resolveOperationExpiry(BigInt(row.block_number), operation);
   return {

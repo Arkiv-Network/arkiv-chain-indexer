@@ -179,4 +179,49 @@ describe("visible text", () => {
     // Ordinary text, accents, CJK and joined emoji are untouched.
     expect(visibleText("zażółć 日本語 👨‍👩‍👧")).toBe("zażółć 日本語 👨‍👩‍👧");
   });
+
+  test("a str value shows every control character, DEL and spoofing character as an escape", async () => {
+    const { strValueParts, escapedStrValue } = await import("./src/attributes");
+    // Rabdi mined these: the node takes any UTF-8 as a str.
+    expect(escapedStrValue("line one\n\tline two")).toBe("line one\\n\\tline two");
+    expect(escapedStrValue("nul\u0000inside")).toBe("nul\\0inside");
+    expect(escapedStrValue("\r\n\u001b[0m")).toBe("\\r\\n\\u{001B}[0m");
+    expect(escapedStrValue("del\u007f")).toBe("del\\u{007F}");
+    expect(escapedStrValue("abc\u202etxt")).toBe("abc\\u{202E}txt");
+    // So "nul\0inside" and "nulinside" never look alike.
+    expect(escapedStrValue("nulinside")).toBe("nulinside");
+    expect(strValueParts("a\u0000b")).toEqual([
+      { kind: "text", text: "a" },
+      { kind: "escape", text: "\\0", char: "\u0000", title: "U+0000 NUL" },
+      { kind: "text", text: "b" },
+    ]);
+    expect(strValueParts("\u001b")).toEqual([{ kind: "escape", text: "\\u{001B}", char: "\u001b", title: "U+001B control character" }]);
+    expect(strValueParts("")).toEqual([]);
+    expect(escapedStrValue("zażółć 日本語 👨‍👩‍👧 'quoted' \\n")).toBe("zażółć 日本語 👨‍👩‍👧 'quoted' \\n");
+    // Once anything is escaped, a typed backslash is doubled: a newline and a typed \\n differ.
+    expect(escapedStrValue("a\nb")).toBe("a\\nb");
+    expect(escapedStrValue("a\\nb\t")).toBe("a\\\\nb\\t");
+  });
+
+  test("a str with anything to escape also copies escaped, as a JavaScript string body", async () => {
+    const { escapedStrCopy } = await import("./src/attributes");
+    expect(escapedStrCopy("plain \\ text")).toBeNull();
+    expect(escapedStrCopy("line one\n\tline two")).toBe("line one\\n\\tline two");
+    expect(escapedStrCopy("nul\u0000inside")).toBe("nul\\0inside");
+    // Literal backslashes are doubled once anything is escaped, so the copy reads back exactly.
+    expect(escapedStrCopy("C:\\dir\n")).toBe("C:\\\\dir\\n");
+    // \0 before a digit would be an octal escape.
+    expect(escapedStrCopy("a\u00001")).toBe("a\\u{0000}1");
+    // Quotes are escaped, so the copy pastes between single or double quotes.
+    expect(escapedStrCopy(`say "hi" it's\n`)).toBe(`say \\"hi\\" it\\'s\\n`);
+    for (const value of ["nul\u0000inside", "line one\n\tline two", "C:\\dir\n", "a\u00001", "\r\n\u001b[0m\u007f", "abc\u202etxt", `say "hi" it's\n`]) {
+      expect(new Function(`return "${escapedStrCopy(value)}"`)()).toBe(value);
+      expect(new Function(`return '${escapedStrCopy(value)}'`)()).toBe(value);
+    }
+  });
+
+  test("visibleText still leaves a text blob's line breaks and tabs alone", async () => {
+    const { visibleText } = await import("./src/attributes");
+    expect(visibleText("line one\n\tline two")).toBe("line one\n\tline two");
+  });
 });

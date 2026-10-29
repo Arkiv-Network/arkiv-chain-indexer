@@ -8,13 +8,15 @@ import type { Hex } from "viem";
 import { copyText } from "@/components/copy-cell";
 import { Badge } from "@/components/ui/badge";
 import { shouldHandleClientNavigation } from "@/permalinks";
+import { escapedStrValue } from "@/attributes";
+import { StrValue } from "@/components/str-value";
 import { findBytesHint } from "../lib/bytes";
 import type { BlockTiming } from "../lib/client";
 import { getAttributes, getSchemaName, isFilterable, schemaFilter, type ExplorerEntity } from "../lib/entity";
 import { AttributeTable, blobAnchor } from "./AttributeTable";
 import { truncateMiddle } from "./AttributeValue";
 import { BytesViewer } from "./BytesViewer";
-import { attributePopup, FilterPopup, popupAt, type FilterPopupState, type PointerLike } from "./FilterPopup";
+import { attributePopup, FilterPopup, popupAt, strCopy, type FilterPopupState, type PointerLike } from "./FilterPopup";
 import { BlockStamp, LifetimeBlock } from "./LifetimeBlock";
 import { fieldLabelClass, linkButtonClass } from "./styles";
 
@@ -73,11 +75,13 @@ export function EntityDocument({
             <button
               type="button"
               className="inline-flex w-fit max-w-full shrink-0 items-center gap-1 border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-foreground transition-colors hover:border-accent hover:text-accent"
-              title={`Schema tag: ${schemaFilter(schemaName)}`}
-              onClick={(event) => openPopup(event, { expression: schemaFilter(schemaName), label: "this schema", copyValue: schemaName })}
+              title={`Schema tag: ${escapedStrValue(schemaFilter(schemaName))}`}
+              onClick={(event) => openPopup(event, { expression: schemaFilter(schemaName), label: "this schema", ...strCopy(schemaName) })}
             >
               <Database className="size-3 shrink-0 text-muted-foreground" />
-              <span className="truncate">{schemaName}</span>
+              <span className="truncate">
+                <StrValue text={schemaName} />
+              </span>
             </button>
           ) : (
             <span

@@ -1660,6 +1660,15 @@ if (!hasPostgresForTests()) {
       );
     });
 
+    test("an arkiv-udc-1 layout is older too: its str columns are text, which cannot hold a NUL", async () => {
+      const { schema, db } = await freshSchema();
+      await db.query(`CREATE TABLE "${schema}".transaction_operations (block_number BIGINT, schema_name TEXT, attributes JSONB)`);
+      await db.query(`CREATE TABLE "${schema}".entity_version_attributes (entity_key TEXT, indexed BOOLEAN, value_text TEXT)`);
+      expect(ScannerStorage.open(TEST_DATABASE_URL!, { schema })).rejects.toThrow(
+        "has tables of an older layout (transaction_operations, entity_version_attributes)",
+      );
+    });
+
     test("an old schema without data is accepted (tables come back in the final shape only when absent)", async () => {
       const { schema, db } = await freshSchema();
       await db.query(`CREATE TABLE "${schema}".scanner_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);

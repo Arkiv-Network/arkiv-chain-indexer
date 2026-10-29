@@ -6,13 +6,15 @@
 import { ChevronRight } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { escapedStrValue } from "@/attributes";
+import { StrValue } from "@/components/str-value";
 import { findBytesHint } from "../lib/bytes";
 import type { BlockTiming } from "../lib/client";
 import { getAttributes, getSchemaName, schemaFilter, type EntityAttribute, type ExplorerEntity } from "../lib/entity";
 import { estimateBlockTimestampMs, formatRelativeMs, isPermanentExpiry } from "../lib/query";
 import { AttributeValue, truncateMiddle } from "./AttributeValue";
 import { EntityDocument } from "./EntityDocument";
-import { FilterPopup, popupAt, type FilterPopupState } from "./FilterPopup";
+import { FilterPopup, popupAt, strCopy, type FilterPopupState } from "./FilterPopup";
 import { valueButtonClass } from "./styles";
 
 const headerCellClass =
@@ -151,13 +153,13 @@ export function ResultTable({
                         <button
                           type="button"
                           className={valueButtonClass}
-                          title={schemaFilter(schemaName)}
+                          title={escapedStrValue(schemaFilter(schemaName))}
                           onClick={(event) => {
                             event.stopPropagation();
-                            setPopup(popupAt(event, { expression: schemaFilter(schemaName), label: "this schema", copyValue: schemaName }));
+                            setPopup(popupAt(event, { expression: schemaFilter(schemaName), label: "this schema", ...strCopy(schemaName) }));
                           }}
                         >
-                          {schemaName}
+                          <StrValue text={schemaName} />
                         </button>
                       ) : (
                         <span className="text-muted-foreground">untagged</span>

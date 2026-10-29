@@ -3,6 +3,7 @@
 
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { escapedStrValue } from "@/attributes";
 import { findBytesHint } from "../lib/bytes";
 import { attributeFilter, isFilterable, type EntityAttribute } from "../lib/entity";
 import { AttributeValue, TypeTagChip } from "./AttributeValue";
@@ -54,7 +55,7 @@ export function AttributeTable({
                 role="button"
                 tabIndex={0}
                 className="min-w-0 cursor-pointer text-left outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring"
-                title={filterable ? `Filter by ${attributeFilter(name, value)}` : `${name} is not indexed`}
+                title={filterable ? `Filter by ${escapedStrValue(attributeFilter(name, value))}` : `${name} is not indexed`}
                 onClick={(event) => onSelect(event, attribute)}
                 onKeyDown={(event) => {
                   const at = popupFromKey(event);
