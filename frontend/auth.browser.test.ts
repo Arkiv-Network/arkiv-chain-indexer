@@ -1,3 +1,4 @@
+import { WebsiteRpcTokens } from "../src/websiteRpcTokens";
 // Opt-in: build frontend first, then RUN_AUTH_BROWSER_TESTS=1 bun --no-env-file test frontend/auth.browser.test.ts
 // Uses a real browser and the production frontend proxy, with a local fake API.
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
@@ -27,11 +28,16 @@ suite("Google login UI and proxy", () => {
     csrfToken: "browser-test-csrf", expiresAt: new Date(Date.now() + 3_600_000).toISOString(), loginAvailable: true,
   });
 
+  let rpcTokens: WebsiteRpcTokens;
   beforeAll(async () => {
     if (!await Bun.file(`${import.meta.dir}/dist/index.html`).exists()) throw new Error("Build frontend before running browser tests");
     backend = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
       const path = new URL(request.url).pathname;
       calls.push({ path, method: request.method, csrf: request.headers.get("X-CSRF-Token") });
+      if (path === "/website-rpc/token") {
+        rpcTokens ??= new WebsiteRpcTokens({ insecureLocalhost: true, publicOrigin: base });
+        return rpcTokens.issue(request);
+      }
       if (path === "/auth/session") return Response.json(session, { headers: { "Cache-Control": "no-store" } });
       if (path === "/auth/access-tokens") {
         if (request.method === "POST") {
@@ -66,6 +72,7 @@ suite("Google login UI and proxy", () => {
       if (path === "/blocks") return Response.json({ blocks: [], count: 0, limit: 10000, truncated: false });
       if (path === "/admin/metrics") return new Response("# TYPE process_uptime_seconds gauge\nprocess_uptime_seconds 1\n");
       if (path === "/entity-explorer/rpc") {
+        if (!rpcTokens.accepts(request)) return new Response(null, { status: 401 });
         // The node, as the relay answers for it: one entity of the node's arkiv_query shape.
         const body = await request.json();
         const owner = `0x${"44".repeat(20)}`;
@@ -186,6 +193,8 @@ suite("Google login UI and proxy", () => {
     const context = await browser.newContext(); const page = await openPage(context);
     await page.goto(`${base}/entity-explorer?q=${encodeURIComponent("arkiv.schema = str('arkiv-demo.posts')")}`);
     await page.getByText(/^\d+ entit/).waitFor();
+    expect(calls.some(({ path }) => path === "/website-rpc/token")).toBe(true);
+    expect(await page.evaluate(() => localStorage.getItem("arkiv.website-rpc.v1"))).toContain("wrpc.");
     expect(calls.some(({ path }) => path === "/entity-explorer/rpc")).toBe(true);
     expect(calls.some(({ path }) => path.startsWith("/shadow-rpc"))).toBe(false);
     await context.close();

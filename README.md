@@ -913,7 +913,7 @@ It is an admin surface: every `POST` needs an administrator session with the con
 `X-CSRF-Token`, or a generated temporary administrator access token. Missing or invalid credentials return
 `401`/`403`; unavailable authentication returns `503`. The passthrough spends the upstream node's quota
 and reaches its mempool. The experimental index path,
-`POST /shadow-rpc/experimental`, stays open to everyone.
+`POST /shadow-rpc/experimental`, requires a website RPC session or authorized administrator credentials.
 
 The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
 answers from what the scanner happened to store, so treat it as a fast read cache for indexed history rather
@@ -999,7 +999,7 @@ Worth knowing before pointing a wallet at it:
 Example:
 
 ```sh
-curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' \
+curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' -H "Authorization: Bearer $INDEX_RPC_ACCESS_TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 
@@ -1425,3 +1425,11 @@ Inspect stored rows:
 docker compose exec postgres psql -U gas -d gas -c 'select * from blocks limit 1;'
 docker compose exec postgres psql -U gas -d gas -c 'select * from scanner_state;'
 ```
+
+## Website RPC access policy
+
+Unauthorized automated RPC use violates the service's terms of use. The website's
+RPC paths require 120-second access tokens bound to a browser cookie, refreshed
+asynchronously every 60 seconds. This anonymous flow is a deterrent, not proof of
+website use. Explicitly authorized tools must use administrator credentials.
+See [Website RPC sessions](docs/website-rpc.md) for configuration, rollout and limits.

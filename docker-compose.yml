@@ -328,6 +328,9 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
+      WEBSITE_RPC_TOKEN_SECRET: ${WEBSITE_RPC_TOKEN_SECRET:-}
+      WEBSITE_RPC_PUBLIC_ORIGIN: ${WEBSITE_RPC_PUBLIC_ORIGIN:-}
+      WEBSITE_RPC_INSECURE_LOCALHOST: ${WEBSITE_RPC_INSECURE_LOCALHOST:-false}
       STATISTICS_FILE: /app/statistics/snapshot.json
       SAVE_TRANSACTION_DATA: ${SAVE_TRANSACTION_DATA:-false}
       # Entity history slice + response cache; empty values fall back to the

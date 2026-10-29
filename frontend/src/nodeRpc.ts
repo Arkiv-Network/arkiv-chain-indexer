@@ -1,3 +1,4 @@
+import { websiteRpcFetch } from "./websiteRpcTokens";
 // The browser's line to the indexed chain's node, beside the index.
 //
 // JSON-RPC goes through the backend's entity-explorer relay
@@ -66,11 +67,11 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 let nextRequestId = 1;
 
 /**
- * One JSON-RPC call to the node through the relay. Cookies stay home: the
- * relay is a public read path, and nothing on it needs a session.
+ * One JSON-RPC call through the website session transport. Custom destinations
+ * never receive website credentials. fetchImpl can inject a transport in tests.
  */
 export async function callNodeRelay<T>(method: string, params: unknown[], deps: NodeRelayDeps = {}): Promise<T> {
-  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fetchImpl = deps.fetchImpl ?? websiteRpcFetch;
   const id = nextRequestId++;
   let response: Response;
   try {

@@ -869,8 +869,7 @@ describeWithPostgres("entity index (Postgres)", () => {
 
     const server = createBlockServer(storage, { port: 0, entityIndex: index, auth: testAuth() });
     try {
-      // The relay is admin-only; the token is sent on both paths to show the
-      // experimental one does not need it.
+      // Administrator credentials authorize diagnostic calls on both RPC paths.
       const post = (body: unknown, path = "/shadow-rpc/experimental") =>
         fetch(`http://${server.hostname}:${server.port}${path}`, {
           method: "POST",

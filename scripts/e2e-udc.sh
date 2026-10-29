@@ -245,6 +245,7 @@ if [ "$EXPLORER" = 1 ]; then
   say "compareEntityQuery (node vs /shadow-rpc/experimental) at the checkpoints"
   for point in $(python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))["checkpoints"]; print(0, c["mid"], c["afterExpiry"], c["end"])' "$MANIFEST"); do
     if bun "$IDX/scripts/compareEntityQuery.ts" --node "$NODE_RPC" --index "$BACKEND/shadow-rpc/experimental" \
+        --admin-token-file "$ADMIN_TOKEN_FILE" --admin-email "$ADMIN_EMAIL" \
         --at-block "$point" --since-block 0 --report "$STATE/compare-$point.json" >"$LOGS/compare-$point.log" 2>&1; then
       echo "block $point: no differences"
     else

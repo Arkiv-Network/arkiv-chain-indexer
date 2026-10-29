@@ -295,9 +295,9 @@ describe("POST /shadow-rpc is an admin surface", () => {
     await expect(response.json()).resolves.toEqual({ error: "Google login is not configured" });
   });
 
-  test("the experimental index path stays open", async () => {
+  test("the experimental index accepts authorized tooling", async () => {
     const entityIndex = {} as never;
-    const response = await post("/shadow-rpc/experimental", {}, { entityIndex });
+    const response = await post("/shadow-rpc/experimental", testAdminHeaders, { entityIndex, auth: testAuth() });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: "0x539" });
   });
@@ -317,17 +317,17 @@ describe("POST /entity-explorer/rpc relays to the explorer's public node", () =>
     handleRequest(
       new Request("http://example.test/entity-explorer/rpc", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...testAdminHeaders },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: ["$key = key(0x00)"] }),
       }),
       storage,
       { auth: testAuth(), ...options },
     );
 
-  test("is open, and forwards the listed methods", async () => {
+  test("forwards the listed methods for authorized tooling", async () => {
     const response = await post("arkiv_query", { entityExplorerRpc: relay });
     expect(response.status).toBe(200);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
     await expect(response.json()).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: { data: [], blockNumber: "0x1" } });
     expect(relay.calls).toEqual(["arkiv_query"]);
   });

@@ -204,10 +204,10 @@ function selfCheck(truth: NodeTruth, manifest: Manifest | null) {
   else fail("node:bytes-markers", "no marker in live state", `${manifest.bytesMarkers.length} markers`);
 }
 
-async function absentQueries(url: string, manifest: Manifest, atBlock: number, name: string) {
+async function absentQueries(url: string, manifest: Manifest, atBlock: number, name: string, headers: Record<string, string> = {}) {
   for (const { query, reason } of manifest.absentQueries) {
     try {
-      const found = await queryAll(url, query, atBlock, { key: true });
+      const found = await queryAll(url, query, atBlock, { key: true }, 64, headers);
       if (found.length === 0) pass(name);
       else fail(name, "matched", `${query} (${reason}): ${found.length}`);
     } catch (error) {
@@ -386,7 +386,7 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
   const bytesToCheck: Array<{ key: string; expected: ExpectedBytes[] }> = [];
   let indexed: RpcEntity[] | null = null;
   try {
-    indexed = await queryAll(index, "*", target, FULL_SELECT);
+    indexed = await queryAll(index, "*", target, FULL_SELECT, 64, headers);
   } catch (error) {
     fail("explorer:entities", "query failed", (error as Error).message);
   }
@@ -425,14 +425,14 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
     await checkBytesHashes(api, bytesToCheck);
   }
   try {
-    const count = Number(await rpcCall(index, "arkiv_getEntityCount", [{ query: "*", block: target }]));
+    const count = Number(await rpcCall(index, "arkiv_getEntityCount", [{ query: "*", block: target }], headers));
     same("explorer:entity-count", "count", count, truth.entityCount, "*") && pass("explorer:entity-count");
   } catch (error) {
     fail("explorer:entity-count", "request failed", (error as Error).message);
   }
   for (const [key, want] of Object.entries(truth.keyed)) {
     try {
-      const [got] = await queryAll(index, `$key = key(${key})`, target, FULL_SELECT);
+      const [got] = await queryAll(index, `$key = key(${key})`, target, FULL_SELECT, 64, headers);
       if (!want) same("explorer:entity-keys", "absent", got ? "live" : "absent", "absent", key) && pass("explorer:entity-keys");
       else if (!got) fail("explorer:entity-keys", "missing", key);
       else {
@@ -445,7 +445,7 @@ async function compareExplorer(truth: NodeTruth, api: ExplorerApi, manifest: Man
       fail("explorer:entity-keys", "query failed", `${key}: ${(error as Error).message}`);
     }
   }
-  if (manifest) await absentQueries(index, manifest, target, "explorer:absent-queries");
+  if (manifest) await absentQueries(index, manifest, target, "explorer:absent-queries", headers);
 }
 
 /** Records the withheld-bytes verdict (see withheldVerdict) under explorer:bytes-withheld. */

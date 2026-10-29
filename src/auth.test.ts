@@ -134,12 +134,12 @@ describe("authorization boundaries", () => {
       expect((await handleRequest(request(path,method,{Authorization:`Bearer ${secret}`}),stubStorage,options)).status).toBe(401);
     }
   });
-  test("public experimental RPC never forwards any method, including mixed batches", async () => {
+  test("authorized experimental RPC never forwards any method, including mixed batches", async () => {
     let calls = 0;
-    const options: BlockServerOptions = { jsonRpcPassthrough:{methods:new Set(["eth_chainId","eth_sendRawTransaction"]),
+    const options: BlockServerOptions = { auth: testAuth(), jsonRpcPassthrough:{methods:new Set(["eth_chainId","eth_sendRawTransaction"]),
       async forward() {calls++;throw new Error("must not forward");}}, entityIndex:{} as BlockServerOptions["entityIndex"] & {} };
     const storage = {getChainId:async () => 1337n} as unknown as ScannerStorage;
-    const response = await handleRequest(request("/shadow-rpc/experimental","POST",{},JSON.stringify([
+    const response = await handleRequest(request("/shadow-rpc/experimental","POST",testAdminHeaders,JSON.stringify([
       {jsonrpc:"2.0",id:1,method:"eth_chainId"},{jsonrpc:"2.0",id:2,method:"eth_sendRawTransaction",params:["0x123"]}
     ])),storage,options);
     expect(response.status).toBe(200);const body = await response.json();
