@@ -292,10 +292,9 @@ docker compose up --build
   decoder link is off unless `VITE_TRANSACTION_DECODER_BASE_URL` is set.
 - The `decoder` image this repo publishes is built by `.github/workflows/publish-images.yml` from
   arkiv-transaction-decoder's source at a pinned commit, with `--build-arg PORT=28884`. Deployments probe that
-  port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. v0.3.0 (the UDC
-  format) is not tagged upstream, so both pin its commit (896e341): compose builds the `decoder` service from
-  that git ref unless `ARKIV_DECODER_IMAGE` names another image, and sets `PORT` itself. Keep the two refs in
-  lockstep.
+  port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. The workflow pins
+  the v0.3.0 release commit (2ae4311); Compose uses the released upstream v0.3.0 image and sets `PORT` itself.
+  `ARKIV_DECODER_IMAGE` overrides the Compose image. Keep the workflow commit and Compose release in lockstep.
 - All required env vars live in `.env.example`.
 
 ## Google login and administrator access
