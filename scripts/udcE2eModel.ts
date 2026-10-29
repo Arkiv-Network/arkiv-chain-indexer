@@ -249,8 +249,8 @@ export class RpcError extends Error {
 /** The node's JSON-RPC batch cap (arkiv-node signed/rpc.rs). */
 export const RPC_BATCH_CAP = 64;
 
-export async function rpcCall<T = any>(url: string, method: string, params: unknown[] = []): Promise<T> {
-  const [result] = await rpcBatch<T>(url, [{ method, params }]);
+export async function rpcCall<T = any>(url: string, method: string, params: unknown[] = [], headers: Record<string, string> = {}): Promise<T> {
+  const [result] = await rpcBatch<T>(url, [{ method, params }], { headers });
   if (result instanceof RpcError) throw result;
   return result as T;
 }
@@ -311,13 +311,14 @@ export async function queryAll(
   atBlock: number,
   select: Record<string, unknown> = FULL_SELECT,
   pageSize = 64,
+  headers: Record<string, string> = {},
 ): Promise<RpcEntity[]> {
   const out: RpcEntity[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 10_000; page++) {
     const options: Record<string, unknown> = { atBlock: hexBlock(atBlock), select, limit: hexBlock(pageSize) };
     if (cursor) options.cursor = cursor;
-    const result = await rpcCall<{ data: RpcEntity[]; cursor?: string }>(url, "arkiv_query", [query, options]);
+    const result = await rpcCall<{ data: RpcEntity[]; cursor?: string }>(url, "arkiv_query", [query, options], headers);
     out.push(...result.data);
     if (!result.cursor || result.data.length === 0) return out;
     cursor = result.cursor;

@@ -5,12 +5,13 @@
 
 import { createPublicClient } from "@arkiv-network/sdk";
 import { http } from "viem";
+import { websiteRpcFetch } from "@/websiteRpcTokens";
 import { NODE_RELAY_PATH } from "@/nodeRpc";
 
 /** `POST /entity-explorer/rpc` on the backend, behind the frontend's `/api` prefix (shared with nodeBytes.ts). */
 export const EXPLORER_RPC_PATH = NODE_RELAY_PATH;
 
-export const explorerClient = createPublicClient({ transport: http(EXPLORER_RPC_PATH) });
+export const explorerClient = createPublicClient({ transport: http(EXPLORER_RPC_PATH, { fetchFn: websiteRpcFetch, retryCount: 0 }) });
 
 export type DataClient = typeof explorerClient;
 export type BlockTiming = Awaited<ReturnType<DataClient["getBlockTiming"]>>;

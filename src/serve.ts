@@ -1,3 +1,4 @@
+import { WebsiteRpcTokens } from "./websiteRpcTokens";
 import { AuthService } from "./auth";
 import { AuthStorage } from "./authStorage";
 import { parseServerConfig, ServerHelpRequested } from "./serverConfig";
@@ -34,6 +35,13 @@ async function main(): Promise<void> {
 
   try {
     const config = parseServerConfig(process.argv.slice(2));
+    const secret = process.env.WEBSITE_RPC_TOKEN_SECRET?.trim() || undefined;
+    if (!secret) console.warn("Website RPC uses an ephemeral signing key; set WEBSITE_RPC_TOKEN_SECRET identically on all replicas.");
+    const websiteRpcTokens = new WebsiteRpcTokens({
+      ...(secret ? { secret } : {}),
+      insecureLocalhost: process.env.WEBSITE_RPC_INSECURE_LOCALHOST === "true",
+      ...(process.env.WEBSITE_RPC_PUBLIC_ORIGIN ? { publicOrigin: process.env.WEBSITE_RPC_PUBLIC_ORIGIN } : {}),
+    });
     // open() refuses a database of another data model; the recorded genesis
     // hash must also match the stored block 0 (the scanner checks it against
     // the node itself).
@@ -247,6 +255,7 @@ async function main(): Promise<void> {
       ...(syncPrecomputer ? { syncStatusProvider: syncPrecomputer } : {}),
       ...(jsonRpcPassthrough ? { jsonRpcPassthrough } : {}),
       entityExplorerRpc,
+      websiteRpcTokens,
       liveBalance,
       ...(entityIndexReader ? { entityIndex: entityIndexReader } : {}),
       metricsEnabled: config.metricsEnabled,

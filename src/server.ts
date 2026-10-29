@@ -1,3 +1,4 @@
+import { WebsiteRpcTokens, WEBSITE_RPC_TOKEN_PATH } from "./websiteRpcTokens";
 import { AuthService, anonymousSession, authError, privateResponse, requireAdmin } from "./auth";
 import { readFile } from "node:fs/promises";
 import { isDatabaseError, publicErrorMessage } from "./internalError";
@@ -69,6 +70,7 @@ import {
 } from "./storage";
 
 export interface BlockServerOptions {
+  websiteRpcTokens?: WebsiteRpcTokens;
   /** Worker-produced snapshot only; no database fallback on HTTP requests. */
   statisticsProvider?: { get(): Promise<StatisticsResponse | null> };
   /** Read-only bounded omni search, with an independent small connection pool. */
@@ -725,12 +727,13 @@ const JSON_RPC_PATH = "/shadow-rpc";
 const JSON_RPC_EXPERIMENTAL_PATH = "/shadow-rpc/experimental";
 /**
  * The entity explorer's way to the indexed chain's node (the one `/shadow-rpc`
- * relays to): a pure relay of a fixed method list, open where `/shadow-rpc`
- * needs a login. Nothing on it is answered from the index.
+ * relays to): a fixed method list guarded by anonymous website credentials.
+ * `/shadow-rpc` instead requires administrator authorization. Nothing on it is answered from the index.
  */
 const ENTITY_EXPLORER_RPC_PATH = "/entity-explorer/rpc";
 /** Largest JSON-RPC request body accepted, in bytes; batches are capped separately. */
 const JSON_RPC_MAX_BODY_BYTES = 1024 * 1024;
+const defaultWebsiteRpcTokens = new WebsiteRpcTokens();
 
 export function createBlockServer(storage: ScannerStorage, options: BlockServerOptions = {}) {
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
@@ -753,6 +756,7 @@ export function createBlockServer(storage: ScannerStorage, options: BlockServerO
         ...(options.syncStatusProvider ? { syncStatusProvider: options.syncStatusProvider } : {}),
         ...(options.statisticsProvider ? { statisticsProvider: options.statisticsProvider } : {}),
         ...(options.jsonRpcPassthrough ? { jsonRpcPassthrough: options.jsonRpcPassthrough } : {}),
+        ...(options.websiteRpcTokens ? { websiteRpcTokens: options.websiteRpcTokens } : {}),
         ...(options.entityExplorerRpc ? { entityExplorerRpc: options.entityExplorerRpc } : {}),
         ...(options.liveBalance ? { liveBalance: options.liveBalance } : {}),
         ...(options.entityIndex ? { entityIndex: options.entityIndex } : {}),
@@ -773,7 +777,7 @@ export async function handleRequest(
 ): Promise<Response> {
   return observeHttpRequest(request, async () => {
     const response = await routeRequestSafely(request, storage, options);
-    return sensitiveRequest(request) ? privateResponse(response) : applyConditionalGet(request, response);
+    return (sensitiveRequest(request) || websiteRpcRequest(request)) ? privateResponse(response) : applyConditionalGet(request, response);
   });
 }
 
@@ -828,6 +832,21 @@ function applyConditionalGet(request: Request, response: Response): Response {
   return recordResponseBytes(new Response(null, { status: 304, headers }), 0);
 }
 
+function websiteRpcRequest(request: Request): boolean {
+  return [WEBSITE_RPC_TOKEN_PATH, JSON_RPC_EXPERIMENTAL_PATH, ENTITY_EXPLORER_RPC_PATH].includes(new URL(request.url).pathname);
+}
+
+async function requireWebsiteRpc(request: Request, options: BlockServerOptions): Promise<Response | undefined> {
+  if ((options.websiteRpcTokens ?? defaultWebsiteRpcTokens).accepts(request)) return;
+  // Explicitly authorized tooling can continue using existing administrator credentials.
+  // Never feed browser RPC bearer tokens into administrator authentication.
+  if (options.auth && !request.headers.get("authorization")?.startsWith("Bearer wrpc.")) {
+    const denied = await requireAdmin(request, options.auth);
+    if (!denied) return;
+  }
+  return jsonError(401, "Website RPC session required. Unauthorized automated RPC use violates the service's terms of use.");
+}
+
 function sensitiveRequest(request: Request): boolean {
   const path = new URL(request.url).pathname;
   return path.startsWith("/auth/") || path.startsWith("/admin/") || path === JSON_RPC_PATH ||
@@ -844,7 +863,11 @@ async function routeRequest(
   const transactionDataEnabled = options.transactionDataEnabled ?? true;
 
   if (request.method === "OPTIONS") {
-    return recordResponseBytes(new Response(null, { status: 204, headers: sensitiveRequest(request) ? {} : CORS_HEADERS }), 0);
+    return recordResponseBytes(new Response(null, { status: 204, headers: (sensitiveRequest(request) || websiteRpcRequest(request)) ? {} : CORS_HEADERS }), 0);
+  }
+
+  if (url.pathname === WEBSITE_RPC_TOKEN_PATH) {
+    return (options.websiteRpcTokens ?? defaultWebsiteRpcTokens).issue(request);
   }
 
   if (url.pathname.startsWith("/auth/")) {
@@ -881,7 +904,7 @@ async function routeRequest(
 
   if (url.pathname === JSON_RPC_PATH) {
     // The node relay spends the upstream's quota and reaches its mempool, so
-    // it is an admin surface; the entity index below answers anonymously.
+    // it is an admin surface; the entity index below also accepts website credentials.
     return handleJsonRpcRequest(request, storage, transactionDataEnabled, options.jsonRpcPassthrough);
   }
 
@@ -892,6 +915,8 @@ async function routeRequest(
         "The experimental entity index is not enabled on this deployment (ENTITY_QUERY_INDEX=true); use /shadow-rpc",
       );
     }
+    const denied = await requireWebsiteRpc(request, options);
+    if (denied) return denied;
     return handleJsonRpcRequest(
       request,
       storage,
@@ -906,8 +931,9 @@ async function routeRequest(
     if (!options.entityExplorerRpc) {
       return jsonError(404, "The entity explorer relay is not configured on this deployment");
     }
-    // Open like the explorer page itself; the relay's rate limit, not a login,
-    // is what keeps callers from draining the node's quota.
+    const denied = await requireWebsiteRpc(request, options);
+    if (denied) return denied;
+    // Anonymous website credentials supplement the relay's existing rate limit.
     return handleJsonRpcRequest(
       request,
       storage,

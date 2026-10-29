@@ -99,7 +99,7 @@ Related scanner and worker settings:
 | JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
 | Account balances | `SCANNER_TRACK_BALANCES` on the scanner; `account_balances` rows | `GET /balances` and `eth_getBalance` on `/shadow-rpc`. Both answer empty/`-32000` without stored readings. |
 | JSON-RPC passthrough | Explicit `SHADOW_RPC_UPSTREAM` or the scanner-recorded node; methods listed in `/health` | Relays `eth_sendRawTransaction` and the three Arkiv reads by default. Until a node is available, forwarded calls return `-32000`. |
-| Entity explorer relay | Always on; same node as the JSON-RPC passthrough (`SHADOW_RPC_UPSTREAM` or the scanner-recorded node); methods in `features.entityExplorerRpc` in `/health` | Open `POST /entity-explorer/rpc` relays only `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node (the entity explorer, and "Load from node" for bytes contents); every other method is `-32601` (nothing is answered from the index). Rate limited (`-32005`). |
+| Entity explorer relay | Always on; same node as the JSON-RPC passthrough (`SHADOW_RPC_UPSTREAM` or the scanner-recorded node); methods in `features.entityExplorerRpc` in `/health` | Website-session-protected `POST /entity-explorer/rpc` relays only `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node (the entity explorer, and "Load from node" for bytes contents); every other method is `-32601` (nothing is answered from the index). Rate limited (`-32005`). |
 | Entity query index (experimental) | on by default (`ENTITY_QUERY_INDEX=false` turns it off); status in `features.entityQueryIndex` in `/health` | `POST /shadow-rpc/experimental` answers `arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming` from the indexer's own entity tables. `404` when off. |
 
 ## Endpoint Index
@@ -111,7 +111,7 @@ Related scanner and worker settings:
 | `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
 | `GET` | `/statistics` | Worker snapshot of chain coverage, transaction/operation totals, gas fees and rent, entity state, bytes sizes, schemas and attributes. |
 | `POST` | `/shadow-rpc` | Ethereum JSON-RPC 2.0 served from stored data, plus any methods the optional passthrough relays to a real node. |
-| `POST` | `/entity-explorer/rpc` | Open relay of `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node (the entity explorer and "Load from node"); nothing is answered from the index. |
+| `POST` | `/entity-explorer/rpc` | Website-session-protected relay of `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node (the entity explorer and "Load from node"); nothing is answered from the index. |
 | `GET` | `/blocks` | Compact rows for stored per-block metrics. |
 | `GET` | `/blocks/:blockNumber` | One compact stored block row. |
 | `GET` | `/block/:blockNumber` | Stored block plus stored transaction rows for inspection. |
@@ -228,7 +228,7 @@ It is an admin surface: every `POST` needs an administrator session with configu
 `X-CSRF-Token`, or a generated temporary administrator access token. Missing/invalid credentials return
 `401`/`403`; unavailable authentication returns `503`. The passthrough spends the upstream node's quota
 and reaches its mempool. The experimental index path,
-`POST /shadow-rpc/experimental`, stays open to everyone.
+`POST /shadow-rpc/experimental`, requires a website RPC session or authorized administrator credentials.
 
 The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
 answers from what the scanner happened to store, so treat it as a fast read cache for indexed history rather
@@ -297,7 +297,7 @@ Worth knowing before pointing a wallet at it:
   no business relying on. List it explicitly if a deployment's node really does.
 - **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`; the UDC node has no
   `arkiv_getEntity`) are forwarded by default too.** On this path they read the node's entity state. The entity
-  explorer does not use this relay; it reads the same node through the open `POST /entity-explorer/rpc`.
+  explorer does not use this relay; it reads the same node through the website-session-protected `POST /entity-explorer/rpc`.
 - **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
   codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
   node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
@@ -312,7 +312,7 @@ Worth knowing before pointing a wallet at it:
 Example:
 
 ```sh
-curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' \
+curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' -H "Authorization: Bearer $INDEX_RPC_ACCESS_TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
 ```
 
@@ -917,3 +917,11 @@ in database rows or API responses. They are intentionally dropped and must not b
   attribute from the node through that relay (which stores nothing) and checks it against the keccak256 the
   index recorded.
 - Permanence is exact: `expiresAt === "18446744073709551615"` (2^64 − 1), never a lifetime heuristic.
+
+## Website RPC access policy
+
+Unauthorized automated RPC use violates the service's terms of use. The website's
+RPC paths require 120-second access tokens bound to a browser cookie, refreshed
+asynchronously every 60 seconds. This anonymous flow is a deterrent, not proof of
+website use. Explicitly authorized tools must use administrator credentials.
+See [Website RPC sessions](docs/website-rpc.md) for configuration, rollout and limits.

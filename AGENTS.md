@@ -139,7 +139,7 @@ docker compose up --build
   once nginx and the frontend proxy strip `/api`), an Ethereum JSON-RPC 2.0 surface answered from stored
   data, with an allowlisted node passthrough below. The path demands administrator authentication: a session
   with configured Origin and X-CSRF-Token, or a temporary access token (it spends the upstream's quota).
-  `/shadow-rpc/experimental` is open
+  `/shadow-rpc/experimental` requires website RPC credentials or administrator access
   and explicitly receives no passthrough forwarder. The entity explorer uses neither: it queries the indexed
   chain's node through the Arkiv SDK and the `/entity-explorer/rpc` relay (see the entity explorer note below).
   `latest` means the indexed head (`scanner_state.last_successful_block`);
@@ -236,7 +236,7 @@ docker compose up --build
   publicly): a pure relay — `builtInMethods: false`, so nothing is answered from the index — of
   `ENTITY_EXPLORER_RPC_METHODS` (exactly what the frontend calls there: `arkiv_query`, `arkiv_getBlockTiming`;
   the transaction and entity pages' "Load from node" for a bytes value, `nodeBytes.ts`, is an `arkiv_query` too),
-  built on `JsonRpcPassthrough`. The relay is open and only rate limited (issue #121 tracks its auth). It reads the indexed chain's own node — the one `/shadow-rpc` relays to
+  built on `JsonRpcPassthrough`. The relay requires website RPC credentials or administrator access and remains rate limited. It reads the indexed chain's own node — the one `/shadow-rpc` relays to
   (`SHADOW_RPC_UPSTREAM`, else the node the scanner recorded), with that relay's key, timeout and rate limit — so
   the explorer and the indexer always look at the same chain and there is nothing extra to configure; the
   frontend pins no chain. A key embedded in the node's URL (Jalebi accepts one as the last path segment, e.g.
@@ -322,11 +322,24 @@ docker compose up --build
   ordinary users. Keep provider=token identities separate from Google, with email_verified=false. Token
   sessions require the current token fingerprint on every lookup, so disabling or rotating the token rejects them.
   This is an explicit testing option, never a bearer API fallback; keep it disabled on proper deployments.
-- `/auth/session` returns role/user/csrfToken/expiresAt/loginAvailable/tokenLoginAvailable. The frontend never stores credentials;
-  custom node fetches omit cookies and CSRF even for application-origin URLs. Gate direct admin views as well
+- `/auth/session` returns role/user/csrfToken/expiresAt/loginAvailable/tokenLoginAvailable. The frontend never stores administrator credentials;
+  custom node fetches omit cookies and CSRF. Website RPC access tokens alone use localStorage. Gate direct admin views as well
   as navigation; logout/role loss stops privileged polling and debug state.
 - Normal tests only use TEST_DATABASE_URL when explicitly provided, never DATABASE_URL. Run with
   `bun --no-env-file test` when local .env contains real application credentials. OAuth fixture tests mock
   discovery/JWKS with signed tokens; real account login and HTTPS callback validation remain opt-in manual checks.
 - See docs/google-login.md for configuration, rollout and scraper migration. Auth callback request queries
   must not be logged by proxies. Do not expose client secrets, tokens, authorization codes or state in logs.
+
+## Website RPC deterrent
+
+- `websiteRpcTokens.ts` signs anonymous browser-binding cookies and access tokens
+  for `/entity-explorer/rpc` and `/shadow-rpc/experimental`. Hard TTL is 120 seconds;
+  the shared frontend manager refreshes every 60 seconds and before stale calls.
+- Keep website response privacy separate from `sensitiveRequest` admin authorization.
+  Website credentials never grant admin privileges. Existing admin credentials are
+  accepted on these two routes for explicitly authorized diagnostic tools.
+- Keep binding cookies stable on refresh, preserve one-time 401 recovery, and never
+  attach credentials to custom node URLs. The SDK client and nodeBytes share the manager.
+- Use one `WEBSITE_RPC_TOKEN_SECRET` across replicas; ephemeral keys are single-process
+  only. See `docs/website-rpc.md`. This is a deterrent, not an anti-bot guarantee.

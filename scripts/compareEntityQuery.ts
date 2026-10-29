@@ -47,6 +47,9 @@
  *     --index http://127.0.0.1:3100/shadow-rpc/experimental \
  *     [--manifest fixtures.json] [--bench 20]
  *
+ * Operator access: set INDEX_RPC_ACCESS_TOKEN to a temporary administrator token,
+ * or use --admin-token-file and --admin-email on a token-login test deployment.
+ *
  * Options:
  *   --at-block <n|0xhex>   block to evaluate at (default: the index head)
  *   --since-block <n>      index floor (default: read from /health next to --index)
@@ -66,6 +69,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { explorerApi } from "./udcExplorerApi";
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -74,6 +78,8 @@ const { values: args } = parseArgs({
   options: {
     node: { type: "string" },
     index: { type: "string" },
+    "admin-token-file": { type: "string" },
+    "admin-email": { type: "string" },
     "at-block": { type: "string" },
     "since-block": { type: "string" },
     health: { type: "string" },
@@ -96,7 +102,8 @@ if (args.help || !args.node || !args.index) {
   console.log(
     "usage: bun run scripts/compareEntityQuery.ts --node <url> --index <url> [--at-block n] [--since-block n]\n" +
       "       [--queries file.json] [--manifest fixtures.json] [--limit 100] [--max-pages 50] [--window-counts 6]\n" +
-      "       [--bench 20 --concurrency 8 --bench-seconds 10] [--report out.json] [--verbose]",
+      "       [--bench 20 --concurrency 8 --bench-seconds 10] [--report out.json] [--verbose]\n" +
+      "       [--admin-token-file file --admin-email email] (or INDEX_RPC_ACCESS_TOKEN)",
   );
   process.exit(args.help ? 0 : 2);
 }
@@ -133,6 +140,16 @@ interface RpcOutcome {
 const NODE: RpcSource = { name: "node", url: args.node };
 const INDEX: RpcSource = { name: "index", url: args.index };
 const SOURCES = [NODE, INDEX] as const;
+// Operator-authorized access only; never automate the website token handshake.
+// INDEX_RPC_ACCESS_TOKEN is an existing temporary administrator access token.
+const indexHeaders: Record<string, string> = process.env.INDEX_RPC_ACCESS_TOKEN
+  ? { authorization: `Bearer ${process.env.INDEX_RPC_ACCESS_TOKEN}` }
+  : args["admin-token-file"]
+    ? await explorerApi(args.index.replace(/\/shadow-rpc\/experimental\/?$/, ""), {
+        adminToken: readFileSync(args["admin-token-file"], "utf8").trim(),
+        adminEmail: args["admin-email"],
+      }).shadowRpcHeaders()
+    : {};
 
 let nextId = 1;
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
@@ -164,7 +181,7 @@ async function rpc(source: RpcSource, method: string, params: unknown[]): Promis
       response = await fetch(source.url, {
         method: "POST",
         // Cloudflare fronts some edges and answers non-browser agents with 403.
-        headers: { "content-type": "application/json", "user-agent": USER_AGENT },
+        headers: { "content-type": "application/json", "user-agent": USER_AGENT, ...(source === INDEX ? indexHeaders : {}) },
         body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
       });
     } catch (error) {
