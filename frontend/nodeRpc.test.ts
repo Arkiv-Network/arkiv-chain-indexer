@@ -26,7 +26,7 @@ describe("the node relay", () => {
       calls.push({ url: String(input), init });
       return Response.json({ jsonrpc: "2.0", id: 1, result: { currentBlock: "0x10" } });
     }) as unknown as typeof fetch;
-    expect(await callNodeRelay("arkiv_getBlockTiming", [], { fetchImpl })).toEqual({ currentBlock: "0x10" });
+    expect(await callNodeRelay<{ currentBlock: string }>("arkiv_getBlockTiming", [], { fetchImpl })).toEqual({ currentBlock: "0x10" });
     expect(NODE_RELAY_PATH).toBe("/api/entity-explorer/rpc");
     expect(calls[0]!.url).toBe(NODE_RELAY_PATH);
     expect(calls[0]!.init?.credentials).toBe("omit");
