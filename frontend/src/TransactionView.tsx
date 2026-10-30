@@ -19,7 +19,6 @@ import { PermanentBadge, SchemaBadge } from "@/components/entity-badges";
 import { findOperationEvent, foldEntityHistory, type EntityHistoryEvent } from "./entityHistory";
 import { AddressCell } from "./TransactionsView";
 import { BlockNumberLink } from "./blockLinks";
-import { CedricOnTimer } from "./Cedric";
 import { CopyButton } from "@/components/copy-cell";
 
 // Re-exported so existing `import { CopyButton } from "./TransactionView"`
@@ -182,8 +181,7 @@ function TransactionDetail({
   const totalCostWei = transaction.totalCostWei ?? addWei(transaction.transactionFeeWei, transaction.rentFeeWei);
 
   return (
-    <div className="relative sm:mt-6">
-      <CedricOnTimer />
+    <div className="relative">
       <div className="relative z-10 flex flex-col gap-4 border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <StatusBadge tone={status.tone}>{status.label}</StatusBadge>

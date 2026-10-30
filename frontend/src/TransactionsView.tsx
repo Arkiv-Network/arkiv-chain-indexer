@@ -12,7 +12,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { FilterField, FilterGroup, FiltersPanel } from "@/components/filters-panel";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
-import { CedricOnTimer } from "./Cedric";
 import { PageSearch } from "./OmniSearch";
 import type { SearchKind } from "./searchApi";
 import { fmtBytes, fmtGasPrice, fmtInteger, fmtTokenAmount } from "./format";
@@ -512,7 +511,7 @@ export function TransactionsView({
       </div>
 
       <div className="flex flex-col gap-2">
-        <p className={cn("flex items-end text-xs sm:min-h-12 sm:pr-32", error ? "text-destructive" : "text-muted-foreground")}>
+        <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
           {loading
             ? "Loading..."
             : error
@@ -525,7 +524,6 @@ export function TransactionsView({
         </p>
 
         <div className="relative">
-          <CedricOnTimer />
           <div className="relative z-10 overflow-x-auto border border-border bg-card">
             <Table>
               <TableHeader>

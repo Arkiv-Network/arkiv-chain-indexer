@@ -22,7 +22,6 @@ import {
 } from "./permalinks";
 import { readStoredStringRecord, writeStoredStringRecord } from "./localStorage";
 import { PageHeader } from "@/components/page-header";
-import { CedricOnTimer } from "./Cedric";
 import { renderTableHeader } from "./tableHeader";
 
 interface BlocksViewProps {
@@ -405,8 +404,7 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
       </FiltersPanel>
 
       <div className="flex flex-col gap-2">
-        {/* Keep peek space above the table; align the count at its lower left, clear of Cedric. */}
-        <p className={cn("flex items-end text-xs sm:min-h-12 sm:pr-32", error ? "text-destructive" : "text-muted-foreground")}>
+        <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
           {loading
             ? "Loading…"
             : error
@@ -417,7 +415,6 @@ export function BlocksView({ locationSearch, onLocationChange, timeZone, tokenSy
         </p>
 
         <div className="relative">
-          <CedricOnTimer />
           <div className="relative z-10 overflow-x-auto border border-border bg-card">
             <Table>
               <TableHeader>
