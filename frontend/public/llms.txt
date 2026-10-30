@@ -1,116 +1,55 @@
 # Arkiv Chain Indexer
 
-> A block explorer for an Arkiv chain: blocks, transactions, wallets, fees and rent, and the entities
-> stored on chain with their typed attributes. Every page is reachable by URL, and every filter or
-> query lives in the URL's query string, so a link reproduces exactly what the page shows.
+> A block explorer for an Arkiv chain: blocks, transactions, wallets, gas fees and storage rent, and the
+> entities stored on chain with their typed attributes. Every page's filters and queries live in its URL, so
+> a link reproduces exactly what the page shows.
 
-Paths below are relative to this site's origin. Pages are rendered in the browser (a React app); to read
-data without rendering, use the JSON API under `/api/` (see the last section). Amounts are in wei, and
-the native token is shown with the site's configured symbol. An entity is permanent when its expiry
-block is 18446744073709551615 (2^64 − 1). Arkiv transactions pay rent for storage beside their gas fee;
-rent is burned outside gas and is never counted as part of the fee.
+Links are relative to this site's origin. Amounts are in wei. Arkiv transactions pay rent for storage
+beside their gas fee; rent is burned and never counted as part of the fee. An entity whose expiry block is
+18446744073709551615 (2^64 − 1) is permanent.
+
+The entity explorer (`/entity-explorer`) lists the entities matching a query, as they are now. Its URL
+parameters are `q` (the query, URL-encoded), `pageSize` (5, 10, 25, 50 or 100; default 50) and
+`expiration` (`all`, or `soon` for entities expiring within 24 hours). A bare entity key or address in `q`
+is read as `$key = key(0x...)` or `$owner = addr(0x...)`. Query syntax:
+
+- A condition compares an attribute with a typed literal using `=`, `!=`, `<`, `<=`, `>` or `>=`:
+  `status = str('open')`.
+- Literals: `str('text')` (a quote inside is doubled: `str('it''s')`), `i32(-5)`, `u64(1200000)`,
+  `u256(10)`, `dec(3.5)`, `addr(0x...)`, `key(0x...)`, `bytes32(0x...)`, and bare `true` / `false`.
+- `name STARTSWITH str('prefix')`, `EXISTS(name)`, and `TYPEOF(name) = u64`.
+- Combine with `AND`, `OR`, `NOT` and parentheses. `&&` and `||` are not accepted.
+- Entity fields: `$key`, `$owner`, `$creator`, `$createdAt` and `$expiresAt` (block numbers, as `u64(...)`).
+- Entities written with a named schema carry the attribute `arkiv.schema`.
+- Only indexed attributes match a condition; stored-only and `bytes` attributes never do.
+
+Examples:
+
+- `arkiv.schema = str('note')` →
+  `/entity-explorer?q=arkiv.schema%20%3D%20str('note')`
+- `$owner = addr(0x1111111111111111111111111111111111111111) AND $createdAt > u64(100000)`, 10 per page →
+  `/entity-explorer?q=%24owner%20%3D%20addr(0x1111111111111111111111111111111111111111)%20AND%20%24createdAt%20%3E%20u64(100000)&pageSize=10`
+
+Blocks, Transactions and Address pages take these URL parameters: `blockGt` and `blockLt` (block
+numbers, exclusive), `dateGt` and `dateLt` (ISO-8601, e.g. `2026-10-30T12:00:00Z`), and `limit`.
 
 ## Pages
 
-- [Home](/): search box, latest blocks and latest transactions.
-- [Search](/search?q=0x...): `q` is a block number, transaction hash, address or entity key; lists the
-  pages that match it.
-- [Blocks](/blocks): stored blocks with gas, base fee, burned gas fees and rent.
-  Parameters: `blockGt`, `blockLt` (block numbers, exclusive), `dateGt`, `dateLt` (ISO-8601 timestamps,
-  e.g. `2026-10-30T12:00:00Z`), `limit` (10, 100, 250, 500, 1000, 2500, 5000 or 10000; default 1000).
-  Example: `/blocks?blockGt=1000&blockLt=2000&limit=500`
-- [Block](/block?block=12345): one block with its transactions. `block` is the block number.
-- [Transactions](/transactions): stored transactions, newest first.
-  Parameters: `block` (one exact block), `blockGt`, `blockLt`, `dateGt`, `dateLt`, `address` (sent from
-  or to this address), `nonceGt`, `nonceLt` (with `address`), `limit` (rows per page, at most 1000),
-  `page` (1-based). Example: `/transactions?address=0xabc...&limit=100&page=2`
-- [Transaction](/tx/0x...): `/tx/<transaction hash>`. Gas fee, rent and total cost, and each Arkiv
-  operation in the transaction (create, patch, extend, transfer, delete) with its entity,
-  expiry and attributes.
-- [Wallets](/senders): the most active sender addresses. Parameter: `limit` (default 100).
-- [Address](/address/0x...): `/address/<address>`. A wallet's current balance and its transactions; takes
-  the same filters as Transactions except `address`.
-- [Entity](/entity/0x...): `/entity/<entity key>`. An entity's indexed history: current state (live,
-  expired or deleted), owner, expiry, attributes, and one row per operation with its rent.
-- [Entity explorer](/entity-explorer): queries the chain's node for the entities stored right now (see the
-  next section).
-- [Statistics](/statistics): chain-wide totals: transactions, operations, gas fees, rent, entity counts,
-  attribute types and the most used schemas.
-- [Ranges](/ranges): per-range aggregates of block metrics.
-  Parameters: `rangeSize` (2, 5, 10, 20, 50, 100, 150, 200, 300, 500 or 1000 blocks; default 100),
-  `rangeStartGt`, `rangeStartLt`, `dateGt`, `dateLt`, `limit`.
-- [Charts](/charts): historical charts of block metrics.
-  Parameters: `blockStart`, `blockEnd`, `startDate` (ISO-8601), `xAxisMode` (`blocks` or `dates`),
-  `zoom` (index into the bucket sizes 1, 2, 5, 10, 20, 50, 100, 150, 300, 1000 blocks), `points`, and
-  `parameters` (comma-separated series names, default `averageBaseFeeWei,averagePriorityFeeWei`).
-- [Records](/records): the transactions with the most gas used, the highest fee and the highest
-  effective gas price.
-- [Activity](/activity): the senders using the most gas recently. Parameters: `window` (`1h`, `6h` or
-  `24h`), `address` (one sender's per-minute history).
+- [Home](/): search, latest blocks and latest transactions.
+- [Search](/search?q=): what a block number, transaction hash, address or entity key refers to.
+- [Blocks](/blocks): blocks with gas used, base fee, burned fees and rent. Example: `/blocks?blockGt=1000&blockLt=2000`.
+- [Block](/block?block=): one block and its transactions; `block` is the block number.
+- [Transactions](/transactions): transactions, newest first. Also takes `block` (one block), `address` (sent from or to it), and `page` with `limit` up to 1000.
+- [Transaction](/tx/): `/tx/<hash>`; gas fee, rent, total cost and each entity operation (create, patch, extend, transfer, delete) with its attributes.
+- [Wallets](/senders): the most active sender addresses.
+- [Address](/address/): `/address/<address>`; a wallet's balance and transactions.
+- [Entity explorer](/entity-explorer): query the entities stored on chain now; syntax above.
+- [Entity](/entity/): `/entity/<entity key>`; an entity's current state and its full history of operations and rent.
 
-## Entity explorer and its query language
+## Optional
 
-The entity explorer runs a query against the chain's node and lists the matching entities: key,
-schema, owner, attributes and expiry. Its whole state is in the URL:
-
-- `q`: the query (required to show results). URL-encode it (`encodeURIComponent`): spaces as `%20` or
-  `+`, `=` as `%3D`, `&` as `%26`.
-- `pageSize`: entities per page: 5, 10, 25, 50 or 100 (default 50).
-- `expiration`: `all` (default) or `soon` (only entities expiring within 24 hours).
-
-`q` may also be a bare entity key (`0x` + 64 hex characters), read as `$key = key(0x...)`, or a bare
-address (`0x` + 40 hex characters), read as `$owner = addr(0x...)`.
-
-Query syntax:
-
-- A condition compares an attribute with a typed literal: `name = str('open')`. Operators: `=`, `!=`,
-  `<`, `<=`, `>`, `>=`.
-- Literals are written as type constructors: `str('text')`, `i32(-5)`, `u64(1200000)`, `u256(10)`,
-  `dec(3.5)`, `addr(0x...)`, `key(0x...)`, `bytes32(0x...)`, and bare `true` / `false`. Inside `str('...')`
-  a single quote is doubled: `str('it''s')`.
-- `name STARTSWITH str('prefix')` is a prefix match on a str attribute.
-- `EXISTS(name)` is true when the attribute is set with any type; `TYPEOF(name) = u64` when it is set with
-  exactly that type (`bool`, `i32`, `u64`, `u256`, `dec`, `bytes32`, `str`, `addr`, `key`).
-- Combine with `AND`, `OR` and `NOT` (case-insensitive; `&&` and `||` are not accepted) and parentheses.
-  `--` starts a comment that runs to the end of the line.
-- Entity fields: `$key`, `$owner`, `$creator` (addresses), `$createdAt`, `$expiresAt` (block numbers,
-  compare with `u64(...)`).
-- Attribute names start with a letter and may contain letters, digits, `_`, `.` and `-`; type names and
-  keywords cannot be used as names. Entities written through a named schema carry the indexed str
-  attribute `arkiv.schema`.
-- Only indexed attributes are ever matched. Attributes stored without the indexed flag, and every
-  `bytes` attribute, are returned in results but never match a condition.
-
-Examples (query, then the URL that runs it):
-
-- All entities of one schema:
-  `arkiv.schema = str('note')`
-  `/entity-explorer?q=arkiv.schema%20%3D%20str('note')`
-- One owner's entities created after block 100000, 10 per page:
-  `$owner = addr(0x1111111111111111111111111111111111111111) AND $createdAt > u64(100000)`
-  `/entity-explorer?q=%24owner%20%3D%20addr(0x1111111111111111111111111111111111111111)%20AND%20%24createdAt%20%3E%20u64(100000)&pageSize=10`
-- Open tickets or anything without a `closedAt` attribute:
-  `status = str('open') OR NOT EXISTS(closedAt)`
-  `/entity-explorer?q=status%20%3D%20str('open')%20OR%20NOT%20EXISTS(closedAt)`
-- One entity by key: `/entity-explorer?q=0x<64 hex characters>`
-
-The explorer reads the node, so it shows entities as they are now. For an entity's past versions and
-operations, open `/entity/<entity key>`.
-
-## JSON API
-
-The pages read a public JSON API at `/api/...`. List endpoints return compact rows: one `names` array
-plus an array of values per row. The full reference, with every parameter and response field, is in the
-repository README: https://github.com/Arkiv-Network/arkiv-chain-indexer#http-server
-
-- `/api/blocks`: blocks; same filters as the Blocks page (`blockGt`, `blockLt`, `dateGt`, `dateLt`, `limit`).
-- `/api/block/<number>`: one block with its transactions.
-- `/api/transactions`: transactions; same filters as the Transactions page.
-- `/api/transaction/<hash>`: one transaction with its decoded Arkiv operations.
-- `/api/entity/<entity key>`: an entity's operations and current indexed state.
-- `/api/search?q=<text>`: what a block number, hash, address or entity key refers to.
-- `/api/ranges?rangeSize=<n>`: range aggregates.
-- `/api/senders`: wallet activity.
-- `/api/statistics`: chain-wide statistics.
-- `/api/sync`: how far the indexer is behind the chain head.
-- `/api/balances/live?address=<address>`: an address's current balance, read from the node.
+- [Statistics](/statistics): chain-wide totals of transactions, operations, fees, rent, entities and schemas.
+- [Ranges](/ranges): block metrics aggregated per range; `rangeSize` is 2, 5, 10, 20, 50, 100, 150, 200, 300, 500 or 1000 blocks.
+- [Charts](/charts): block metrics over time; `blockStart`, `blockEnd`, `startDate`, and `xAxisMode` (`blocks` or `dates`).
+- [Records](/records): the transactions with the most gas used, highest fee and highest effective gas price.
+- [Activity](/activity): the senders using the most gas recently; `window` is `1h`, `6h` or `24h`.
