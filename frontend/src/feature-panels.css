@@ -543,51 +543,6 @@
 .tx-detail-operations > .tx-detail-note {
   margin: -0.2rem 0 0.6rem;
 }
-.cedric-page {
-  display: flex;
-  justify-content: center;
-  padding: 1.5rem;
-}
-
-.cedric-page-panel {
-  width: min(48rem, 100%);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  box-shadow: var(--shadow-card);
-  padding: 1.25rem;
-}
-
-.cedric-page-copy h2 {
-  margin: 0;
-  font-size: 1.4rem;
-}
-
-.cedric-page-copy p {
-  margin: 0.35rem 0 1rem;
-  color: var(--muted-foreground, #6b6b6b);
-}
-
-.cedric-page-art {
-  position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 20rem;
-  overflow: visible;
-}
-
-.cedric-page-art > .cedric {
-  left: 50%;
-  right: auto;
-  top: 1rem;
-  transform: translateX(-50%) translateY(64px);
-}
-
-.cedric-page-art > .cedric.is-peeking {
-  transform: translateX(-50%) translateY(0);
-}
-
 .table-wrap {
   box-shadow: var(--shadow-card);
 }
@@ -1263,5 +1218,4 @@
   .token-login-form { width: min(25rem, 100%); }
   .tx-detail-operations { min-width: 0; }
   .traffic-projection-charts { grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
-  .cedric-page-art { position: relative; }
 }

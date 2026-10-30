@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { AddressFace } from "./AddressFace";
-import { Cedric } from "./Cedric";
 import { fetchGuzzlers, type GuzzlerStat, type GuzzlersResponse } from "./api";
 import { addressDisplay } from "./addressAliases";
 import { PageHeader } from "@/components/page-header";
@@ -121,9 +120,6 @@ function GuzzlerLeaderboard({
   const [now, setNow] = useState(() => Date.now());
   const [visibleCount, setVisibleCount] = useState(BATCH);
   const [windowKey, setWindowKey] = useState<WindowKey>("1h");
-  // Monotonic counter bumped on every successful refresh — drives Cedric's
-  // reappearance the way new blocks do on the home feed.
-  const [refreshTick, setRefreshTick] = useState(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(() => {
@@ -133,7 +129,6 @@ function GuzzlerLeaderboard({
       .then((body) => {
         setData(body);
         setNow(Date.now());
-        setRefreshTick((tick) => tick + 1);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -209,7 +204,7 @@ function GuzzlerLeaderboard({
       </p>
 
       <div className="flex flex-col gap-2">
-        <p className={cn("flex items-end text-xs sm:min-h-12 sm:pr-32", error ? "text-destructive" : "text-muted-foreground")}>
+        <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
           {error
             ? `Failed to load guzzlers: ${error}`
             : data
@@ -222,7 +217,6 @@ function GuzzlerLeaderboard({
         </p>
 
         <div className="relative">
-          <Cedric progress={refreshTick} />
           <ol className="relative z-10 flex flex-col gap-2">
             {guzzlers.slice(0, shown).map((g, index) => (
               <GuzzlerCard

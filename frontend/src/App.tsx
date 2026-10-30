@@ -28,7 +28,6 @@ import { BlockView } from "./BlockView";
 import { BlocksView } from "./BlocksView";
 import { EntityView } from "./EntityView";
 import { ChartsView } from "./ChartsView";
-import { CedricView } from "./CedricView";
 import { GuzzlersView } from "./GuzzlersView";
 import { HealthView } from "./HealthView";
 import { GenesisStatusBanner } from "./GenesisStatusBanner";
@@ -631,8 +630,6 @@ export function App() {
             timeZone={timeZone}
             tokenSymbol={pageSettings.tokenSymbol}
           />
-        ) : activeView === "cedric" ? (
-          <CedricView />
         ) : activeView === "admin" ? (
           <AdminView
             settings={pageSettings}
