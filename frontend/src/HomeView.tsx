@@ -1,6 +1,5 @@
 import { AlertTriangle, ArrowRightLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Cedric } from "./Cedric";
 import {
   fetchBlockByNumber,
   fetchBlocks,
@@ -367,7 +366,6 @@ export function HomeView({
 
       <div className="grid items-stretch gap-3 lg:grid-cols-2">
         <div className="relative flex min-w-0">
-          <Cedric progress={latestBlock?.blockNumber ?? null} />
           <Card
             className="relative z-10 flex min-w-0 flex-1 flex-col gap-0 overflow-hidden py-0"
             aria-labelledby="home-latest-blocks"
