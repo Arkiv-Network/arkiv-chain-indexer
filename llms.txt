@@ -1,919 +1,116 @@
 # Arkiv Chain Indexer
 
-This repository contains a Bun and TypeScript Ethereum block scanner, PostgreSQL storage layer,
-range/sender aggregators, HTTP backend, Baseload worker control plane, Redis-backed recent-sender
-leaderboards, and a static frontend.
-
-The backend API is implemented in `src/server.ts` and started by `bun run serve` through
-`src/serve.ts`. It serves stored scanner data from PostgreSQL only. It does not fetch blocks from
-JSON-RPC during normal API requests. The production frontend serves the React app and proxies
-requests with the `/api/` prefix to the backend after stripping `/api`; the backend paths below are
-the direct unprefixed paths.
-
-## Core Runtime Commands
-
-```sh
-bun install
-bun test
-DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run serve
-DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate -- --range 50
-DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate-all -- --once
-DATABASE_URL=postgres://gas:gas@localhost:5432/gas bun run aggregate-senders -- --once
-docker compose up --build
-```
-
-## Backend Configuration
-
-`bun run serve` accepts CLI flags and environment variables:
-
-| CLI flag | Environment variables | Default | Meaning |
-| --- | --- | --- | --- |
-| `--database-url <url>` | `DATABASE_URL`, `SCANNER_DATABASE_URL` | required | PostgreSQL connection string. |
-| `--port <port>` | `SERVER_PORT` | `3000` | Backend TCP port. Use `0` for any free port. |
-| `--host <host>` | `SERVER_HOSTNAME` | Bun default | Interface/hostname to bind. |
-| `--transaction-data-enabled <bool>` | `SERVER_TRANSACTION_DATA_ENABLED`, `SAVE_TRANSACTION_DATA` | `true` | Enables transaction inspection endpoints and advertises transaction features in `/health`. |
-| env only | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_PUBLIC_ORIGIN` | unset | Google login; required together for administrator sessions. |
-| `--baseload-initial-config <path>` | `BASELOAD_INITIAL_CONFIG_PATH` | unset | Optional Baseload worker config JSON file loaded once at backend startup. |
-| `--redis-url <url>` | `REDIS_URL`, `SERVER_REDIS_URL` | unset | Enables Redis-backed `/guzzlers` and `/guzzler/:address` APIs. |
-
-Related scanner and worker settings:
-
-- `SAVE_TRANSACTION_DATA=true` or `SCANNER_SAVE_TRANSACTION_DATA=true` makes the scanner persist
-  transaction rows. Without stored transaction rows, transaction endpoints may be enabled but have no
-  useful data.
-- `DECODER_URL` or `SCANNER_DECODER_URL` points to the Arkiv transaction decoder. It is used only
-  when transaction data is stored.
-- `BASELOAD_RPC_NODE` enables backend Baseload workers to submit Arkiv operations.
-- `BASELOAD_MNEMONIC` or `MNEMONIC` controls backend Baseload wallet derivation. If unset, a
-  deterministic development mnemonic is used.
-- `BASELOAD_PAYLOAD_PROVIDER_URL` configures the payload provider used by Baseload create/update
-  operations. Optional related settings are `BASELOAD_PAYLOAD_PROVIDER_BEARER_KEY`,
-  `BASELOAD_PAYLOAD_PROVIDER_NAMESPACE` (default `arkiv.entities`), and
-  `BASELOAD_PAYLOAD_PROVIDER_VERIFY_RECEIPT` (default `true`).
-
-## Global API Conventions
-
-- Public reads include permissive CORS headers. Auth/admin responses are private and no-store.
-- `OPTIONS` returns `204`; protected paths omit permissive CORS headers.
-- Unsupported methods return JSON errors: `{ "error": "..." }`.
-- Unknown paths return `404` with `{ "error": "Not found: /path" }`.
-- Most route validation errors return `400`.
-- Protected routes return `401` for missing/invalid credentials and `403` for denied administrator
-  access or invalid Origin/CSRF. Browser requests use session cookies; automation uses generated access tokens.
-- The backend never returns raw transaction calldata and never stores the content of a `bytes`
-  attribute: it stores and returns its size and keccak256 only.
-- Fee fields (`transactionFeeWei`, `totalTransactionFeeWei`, ...) are gas fees only. Arkiv UDC rent,
-  burned outside gas, is `rentFeeWei` / `totalRentFeeWei`; `totalCostWei` is gas fee plus rent and
-  `totalBurnedWei` the base-fee burn plus rent.
-- Wei, gas, nonce, block number, and other values that may exceed JavaScript precision are returned
-  as decimal strings unless a response type is explicitly a small number.
-- Dates are ISO-8601 UTC strings.
-- `order` parameters accept `asc` or `desc`; invalid values return `400`.
-- Integer query parameters must be non-negative or positive as required by the route.
-- `/blocks`, `/ranges`, `/transactions`, `/transaction-records`, `/senders`, and `/guzzlers`
-  compress their JSON when the request `Accept-Encoding` header allows it: `zstd` is preferred and
-  `gzip` is the fallback, reported in `Content-Encoding` with `Vary: Accept-Encoding`. Clients that
-  accept neither get normal JSON. gzip matters behind a CDN or reverse proxy, which commonly asks
-  the origin for gzip only and re-encodes for the browser.
-- List endpoints return compact rows: a `names` array states the field order once and every row is
-  a JSON array of values in that order, so field names are not repeated per row.
-- `/blocks` and `/ranges` responses are cached in memory per query string and encoding
-  (`LIST_CACHE_MAX_ENTRIES`, default 200; `LIST_CACHE_MAX_BYTES`, default 64 MiB;
-  `LIST_CACHE_TTL_MS`, default 5 s; any set to 0 disables caching). The cache is cleared the moment
-  a block is committed, so responses can trail a new block only briefly if that notification drops.
-- `/transactions` caches its `totalCount`/`totalPages` total per filter, so every page of one query
-  shares a single `COUNT(*)` (`TRANSACTION_COUNT_CACHE_MAX_ENTRIES`, default 500;
-  `TRANSACTION_COUNT_CACHE_TTL_MS`, default 5 s; either set to 0 disables caching). It is cleared on
-  block commit alongside the list cache, so a total can trail a new block only briefly.
-
-## Feature Gates
-
-| Feature | Enabled by | Affected endpoints |
-| --- | --- | --- |
-| Transaction inspection | `SERVER_TRANSACTION_DATA_ENABLED` or `SAVE_TRANSACTION_DATA` not false | `/block/:blockNumber`, `/transactions`, `/transaction/:hash`, `/entity/:entityKey`, `/senders` return `404` when disabled. |
-| Transaction records | Stored transaction record rows | `/transaction-records` remains routed even if transaction data is disabled, but it is useful only with record data. |
-| Arkiv operation metadata | Scanner transaction storage plus decoder URL | `/transactions` may include `operationsSummary`; `/transaction/:hash` includes `operations`. |
-| Baseload workers | Backend started with Baseload runtime; `BASELOAD_RPC_NODE` required to actually submit transactions | `/baseload` status is public; runtime-dependent writes fail if runtime is unavailable. |
-| Administrator access | Google session + origin/CSRF | Mutating `/baseload`, all `/baseload/configs...`, node relay and admin metrics. Generated temporary access tokens permit all admin API operations for up to 30 days; token management requires an admin session. |
-| Guzzlers | `REDIS_URL` or `SERVER_REDIS_URL` | `/guzzlers` and `/guzzler/:address`; disabled routes return `503`. |
-| JSON-RPC | Always on; `features.jsonRpc` in `/health` | `POST /shadow-rpc`. Transaction-backed methods answer JSON-RPC error `-32000` when transaction data is disabled. |
-| Account balances | `SCANNER_TRACK_BALANCES` on the scanner; `account_balances` rows | `GET /balances` and `eth_getBalance` on `/shadow-rpc`. Both answer empty/`-32000` without stored readings. |
-| JSON-RPC passthrough | Explicit `SHADOW_RPC_UPSTREAM` or the scanner-recorded node; methods listed in `/health` | Relays `eth_sendRawTransaction` and the three Arkiv reads by default. Until a node is available, forwarded calls return `-32000`. |
-| Entity explorer relay | Always on; same node as the JSON-RPC passthrough (`SHADOW_RPC_UPSTREAM` or the scanner-recorded node); methods in `features.entityExplorerRpc` in `/health` | Open `POST /entity-explorer/rpc` relays only `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node (the entity explorer, and "Load from node" for bytes contents); every other method is `-32601` (nothing is answered from the index). Rate limited (`-32005`). |
-| Entity query index (experimental) | on by default (`ENTITY_QUERY_INDEX=false` turns it off); status in `features.entityQueryIndex` in `/health` | `POST /shadow-rpc/experimental` answers `arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming` from the indexer's own entity tables. `404` when off. |
-
-## Endpoint Index
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `OPTIONS` | any | CORS preflight. |
-| `GET` | `/health` | Backend, scanner, database, feature, and guzzler cache health. |
-| `GET` | `/sync` | Scanner lag versus the chain head, catch-up trend, and sync ETA. |
-| `GET` | `/statistics` | Worker snapshot of chain coverage, transaction/operation totals, gas fees and rent, entity state, bytes sizes, schemas and attributes. |
-| `POST` | `/shadow-rpc` | Ethereum JSON-RPC 2.0 served from stored data, plus any methods the optional passthrough relays to a real node. |
-| `POST` | `/entity-explorer/rpc` | Open relay of `arkiv_query` and `arkiv_getBlockTiming` to the indexed chain's node (the entity explorer and "Load from node"); nothing is answered from the index. |
-| `GET` | `/blocks` | Compact rows for stored per-block metrics. |
-| `GET` | `/blocks/:blockNumber` | One compact stored block row. |
-| `GET` | `/block/:blockNumber` | Stored block plus stored transaction rows for inspection. |
-| `GET` | `/ranges` | Compact rows for precomputed fixed-size block ranges. |
-| `GET` | `/transactions` | Stored transaction rows with pagination and filters. |
-| `GET` | `/transaction/:hash` | One stored transaction plus decoded Arkiv operations. |
-| `GET` | `/entity/:entityKey` | Most recent stored operations for one Arkiv entity key, with the total count. |
-| `GET` | `/transaction-records` | Top stored transaction records by gas, fee, and effective fee. |
-| `GET` | `/senders` | Precomputed sender-address activity stats. |
-| `GET` | `/balances` | Account balance readings per block, for addresses a block touched. |
-| `GET` | `/balances/live` | An account's current balance, asked of the chain's node at `latest` (`?address=`). |
-| `GET` | `/guzzlers` | Redis-cached active sender leaderboards over recent windows. |
-| `GET` | `/guzzler/:address` | One sender's recent per-minute guzzler history. |
-| `GET` | `/baseload` | Current backend Baseload state and worker statuses. |
-| `PUT` | `/baseload` | Replace Baseload worker config and reconcile workers. |
-| `GET` | `/auth/session` | Role, user identity, CSRF token, expiry and login availability (no-store). |
-| `GET` | `/baseload/configs` | List saved Baseload configs. |
-| `GET` | `/baseload/configs/:name` | Fetch one saved Baseload config. |
-| `PUT` | `/baseload/configs/:name` | Save or replace one named Baseload config. |
-| `DELETE` | `/baseload/configs/:name` | Delete one named Baseload config. |
-| `PUT` | `/baseload/configs/:name/load` | Load one saved config into the active Baseload runtime. |
-
-## `GET /health`
-
-Returns:
-
-- `ok`: boolean.
-- `serverTimeUtc`: current server timestamp.
-- `build`: build metadata from `src/buildInfo.ts`.
-- `scanner`: progress fields:
-  `lastSuccessfulBlock`, `lastSuccessfulBlockDate`, `lastSuccessfulScannedAtUtc`,
-  `lastBlockAgeSeconds`, `backfillNextBlock`, `latestObservedBlock`, `safeHeadBlock`,
-  `latestObservedAtUtc`, `latestObservationAgeSeconds`, `headLagBlocks`, `safeHeadLagBlocks`.
-- `database`: `totalSizeBytes` plus per-table `tableName`, `rowCount`, `tableSizeBytes`,
-  `indexesSizeBytes`, `totalSizeBytes`. `rowCount` is the Postgres planner estimate
-  (exact counts would scan every table on each call), so it can trail the true count
-  slightly between autovacuum analyzes.
-- `features`: booleans for `transactionData`, `guzzlers`, and `jsonRpc`.
-- `guzzlers`: Redis cache health: `enabled`, `entryCount`, `bucketCount`, `oldestBucket`,
-  `newestBucket`, `totalSizeBytes`.
-- `sync`: the same object served by `GET /sync`.
-
-## `GET /statistics`
-
-Returns the separate statistics worker's latest snapshot. No query parameters.
-No database aggregation is performed by the request. Returns 503 with
-`Retry-After: 30` before the first snapshot is available.
-
-Fields: `gatheredAtUtc`, `completedAtUtc`, `durationMs`, `refreshIntervalMs`,
-`ageSeconds`, `stale`, `chain`, `blocks`, `transactions`, `operations`, `entities`,
-`windows` and `limitations`. Counts and byte totals are decimal strings. Coverage excludes
-the newest 10 observed blocks: actual stored blocks through `head - 10` divided
-by `head + 1 - 10`, including genesis. `chain.coverageThroughBlock`,
-`chain.coverageBlocks` and `chain.indexedCoverageBlocks` expose that cutoff and its
-counts; observed-head totals still include the tip. `chain.scannedPercent` is null
-without an observed head or when the chain has 10 or fewer blocks. Block-metric
-transaction totals and stored transaction-row counts are reported separately.
-Operation counts separate successful, reverted and unknown receipt outcomes.
-Entity counts refer to `entities.asOfBlock`, the projection head, and are null
-when the projection is unavailable or importing genesis. Attribute counts (split
-into indexed and stored-only), `attributeTypes` and `topSchemas` (`arkiv.schema`
-tags) cover active entities at that block. `blocks` reports gas fees (`gasFeeWei`),
-rent (`rentFeeWei`) and their sum (`burnedWei`) separately. Byte totals describe
-recorded calldata and `bytes` attribute sizes (contents are never stored), not full
-signed transaction sizes. A lagging projection cannot establish exact live-chain
-entity counts. Check `limitations`, snapshot age and observed/projection heads.
-
-Snapshots retain version 1 and unchanged top-level all-time/current-state fields.
-New snapshots add `windows` keyed by `1h`, `2h`, `6h`, `12h`, `24h`, `48h`, `72h`,
-`7d` and `all`. Each contains `fromInclusiveUtc`, `toExclusiveUtc`, `blocks`
-(`indexed`, `transactions`, `inputBytes`, `compressedInputBytes`, `gasFeeWei`, `rentFeeWei`,
-`burnedWei`), `transactions`
-and `operations` (same shapes as their top-level counterparts). Finite windows
-use each table's stored `block_date`, with `start <= timestamp < gatheredAtUtc`;
-all share the transaction-start cutoff truncated to milliseconds. `7d` is exactly
-168 hours. `all` has null bounds and includes every stored row, including any
-future-dated rows. Orphan operations use their own block timestamp and count as
-unknown receipt outcomes. Empty periods are zero stored activity, not proof of
-complete coverage. Windows contain no entity gauges: current entity, bytes and
-attribute state remains at `entities.asOfBlock`. Old worker files can lack
-`windows`; use top-level all-time fields and treat finite periods as unavailable.
-Period selection never triggers a database query or worker sweep.
-
-## `GET /sync`
-
-Reports how far the forward scanner is behind the chain head and whether it is closing the gap.
-Served from an actively precomputed in-memory body — recomputed immediately after every stored
-block and on a periodic refresh (`SYNC_REFRESH_MS`, default 5 s) — so polling it costs the backend
-no database work. `serverTimeUtc` is the time of the last recompute, at most a few seconds old.
-
-Returns `ok`, `serverTimeUtc`, and `sync` with:
-
-- `state`: `synced`, `catching-up`, `holding`, `falling-behind`, `stalled`, or `unknown`.
-- `summary`: one-line human-readable status.
-- `lagBlocks` / `lagSeconds`: distance to the estimated chain head, in blocks and in chain time.
-- `observedLagBlocks`: distance to the last head the scanner actually observed.
-- `estimatedHeadBlock`, `latestObservedBlock`, `latestObservedAtUtc`, `headObservationAgeSeconds`,
-  `headObservationStale`: chain head observation and its extrapolation to now.
-- `scanBlocksPerSecond`, `chainBlocksPerSecond`, `chainBlockTimeSeconds`, `speedupFactor`,
-  `netCatchUpBlocksPerSecond`: measured throughput and trend.
-- `etaSeconds` / `etaUtc`: projected time to be in sync; `null` unless the state is `catching-up`.
-- `measuredBlocks`, `measuredWindowSeconds`: the sample window the rates were measured over.
-
-## `POST /shadow-rpc`
-
-An Ethereum JSON-RPC 2.0 endpoint answered from stored scanner data. No read ever reaches a node; the one
-exception is the optional passthrough below, which relays transaction submission to a real one because no
-index can accept a transaction. Single requests and batches (up to 100 entries, 1 MiB body) are accepted; every reply is
-HTTP `200` with a JSON-RPC body, including errors, so standard clients (`viem`, `ethers`, `cast`) can point at
-`/shadow-rpc` (or `/api/shadow-rpc` through the frontend proxy and nginx) directly. `GET /health` advertises it
-under `features.jsonRpc`.
-
-It is an admin surface: every `POST` needs an administrator session with configured `Origin` and
-`X-CSRF-Token`, or a generated temporary administrator access token. Missing/invalid credentials return
-`401`/`403`; unavailable authentication returns `503`. The passthrough spends the upstream node's quota
-and reaches its mempool. The experimental index path,
-`POST /shadow-rpc/experimental`, stays open to everyone.
-
-The name is a warning, not decoration: this is a *shadow* of the chain cast by the index, not a node. It
-answers from what the scanner happened to store, so treat it as a fast read cache for indexed history rather
-than a source of truth — anything you would trust for consensus, settlement or proofs belongs on a real node.
-Two differences in particular are deliberate:
-
-- **`latest` means the indexed head.** `eth_blockNumber` and the `latest` / `pending` / `safe` / `finalized`
-  tags all resolve to `scanner_state.last_successful_block`, not the chain head. `eth_syncing` reports the gap
-  (`false` once the scanner is within a few blocks of the observed head). `earliest` is the oldest stored block.
-- **Fields the scanner does not persist are `null`.** Block, transaction and receipt objects keep the standard
-  shape, but roots, miner, `logsBloom` and signatures (`v`/`r`/`s`) come back as `null` until those are
-  indexed. `input` is always `null`: calldata is never stored. Block `hash` / `parentHash` (and the `blockHash`
-  on transactions, receipts and logs) plus receipt event logs (`transaction_logs`: address, topics, data) are
-  stored for every block scanned since those columns were added; blocks scanned before that keep `null` (there
-  is no backfill) — hash-addressed lookups of those answer `null` like a node does for an unknown hash, and
-  their receipts report `logs: null` rather than `[]` so "not indexed" is distinguishable from "no events".
-
-Transaction counts and listings only cover stored rows — the scanner drops the chain's system transaction
-(sender `0xDeaD…0001`), so a block's `transactions` array and `eth_getBlockTransactionCountByNumber` are one
-lower than a node reports on blocks that carry it; `transactionIndex` keeps the original on-chain position.
-
-| Method | Answer |
-| --- | --- |
-| `web3_clientVersion` | `arkiv-chain-indexer/v<version>[-<commit>]/bun-<version>`. |
-| `eth_chainId`, `net_version` | Chain id the scanner persisted at startup (`-32000` until it has). |
-| `net_listening`, `eth_mining`, `eth_hashrate`, `eth_accounts` | `true`, `false`, `0x0`, `[]`. |
-| `eth_blockNumber` | Indexed head. |
-| `eth_syncing` | `false`, or `{ startingBlock, currentBlock, highestBlock }` while behind. |
-| `eth_getTransactionCount(address, tag)` | Highest stored nonce sent by `address` up to `tag`, plus one (exact for EOAs). |
-| `eth_getBalance(address, tag?)` | Newest stored balance reading for `address` at or before `tag` (see `GET /balances`). `-32000` when the index holds no reading that early — never `0x0`. |
-| `eth_gasPrice`, `eth_maxPriorityFeePerGas` | geth's oracle over stored data: the 60th percentile of each of the last 20 blocks' cheapest tip; `eth_gasPrice` adds the indexed head's base fee. |
-| `eth_feeHistory(count, newest, percentiles?)` | Exact: per-block `baseFeePerGas`, `gasUsedRatio`, and gas-weighted `reward` percentiles from stored transactions (max 1,024 blocks). The closing "next block" base fee repeats the newest one when that block is not stored yet. |
-| `eth_getBlockByNumber(tag, full)`, `eth_getBlockByHash(hash, full)` | Stored block; hashes or full transaction objects. `{ "blockHash": … }` block parameters work too. |
-| `eth_getBlockTransactionCountByNumber(tag)`, `eth_getBlockTransactionCountByHash(hash)` | Stored transaction count. |
-| `eth_getTransactionByHash`, `eth_getTransactionByBlockNumberAndIndex`, `eth_getTransactionByBlockHashAndIndex` | Stored transaction object. |
-| `eth_getTransactionReceipt(hash)` | Stored receipt fields (`status`, `gasUsed`, `cumulativeGasUsed`, `effectiveGasPrice`, `contractAddress`) and stored `logs` (`null` for pre-logs rows). |
-| `eth_getLogs(filter)` | Stored logs matching `fromBlock`/`toBlock` (default `latest`, `toBlock` clamped to the indexed head) or `blockHash`, `address` (one or a list) and positional `topics` (value, list of alternatives, or `null`). At most 10,000 blocks per call and 10,000 matching logs, otherwise error `-32000`. |
-| `eth_getUncle*` | No uncles: counts are `0x0`, lookups `null`. |
-
-Transaction-backed methods return `-32000` when transaction data is disabled. Unknown methods return
-`-32601`, so state methods (`eth_call`, `eth_estimateGas`, …) fail fast instead of silently hitting a node —
-unless the passthrough below is configured to forward them.
-
-### Passthrough to a real node
-
-Everything above is answered from PostgreSQL, which works for reads and cannot work for writes: a transaction
-has to reach a node's mempool, and no amount of stored history puts it there. Setting `SHADOW_RPC_UPSTREAM`
-opens one narrow hole — the methods in `SHADOW_RPC_UPSTREAM_METHODS`, and only those, are relayed to that node
-and their answers returned unchanged. It is never an open proxy. Unset (the default) the relay follows the
-scanner: the scanner records the node it reads in `scanner_state` (`scanner_rpc_url`) at startup and the
-backend forwards there, keyless, so a deployment is told its node once. `GET /health` lists what is forwarded
-under `features.jsonRpcPassthrough`.
-
-| Environment variable | Default | Description |
-| --- | --- | --- |
-| `SHADOW_RPC_UPSTREAM` | unset | JSON-RPC node forwarded calls are sent to; unset follows the node the scanner recorded (`SCANNER_RPC_FULL_NODE`, without its key). In compose, `http://rpc-proxy:8788` reuses the pooled-key proxy. |
-| `SHADOW_RPC_UPSTREAM_API_KEY` | unset | Sent as `x-api-key`, for an upstream that wants a header rather than a key baked into the URL. |
-| `SHADOW_RPC_UPSTREAM_METHODS` | `eth_sendRawTransaction,arkiv_query,arkiv_getEntityCount,arkiv_getBlockTiming` | Methods to forward. Each overrides the locally answered one. |
-| `SHADOW_RPC_UPSTREAM_TIMEOUT_MS` | `10000` | How long one forwarded call may take. |
-| `SHADOW_RPC_UPSTREAM_RATE_LIMIT_PER_MINUTE` | `600` | Forwarded calls per minute across all callers; `0` removes the cap. |
-
-Worth knowing before pointing a wallet at it:
-
-- **`eth_sendRawTransaction` is the only write method forwarded by default.** Wallets and SDKs sign locally
-  and submit the raw form; `eth_sendTransaction` would need the node to hold keys, which a public endpoint has
-  no business relying on. List it explicitly if a deployment's node really does.
-- **The Arkiv entity reads (`arkiv_query`, `arkiv_getEntityCount`, `arkiv_getBlockTiming`; the UDC node has no
-  `arkiv_getEntity`) are forwarded by default too.** On this path they read the node's entity state. The entity
-  explorer does not use this relay; it reads the same node through the open `POST /entity-explorer/rpc`.
-- **The node's rejection is the answer.** `nonce too low`, `already known`, `insufficient funds` and their
-  codes are relayed verbatim; that is the point of forwarding. Failures on our side of the wire (unreachable
-  node, non-`200`, malformed reply) answer `-32000` with a fixed message and log the detail server-side,
-  because the upstream URL can carry a key.
-- **The list is a general escape hatch.** Anything on it is answered by the node whether or not the index
-  could have answered it. Adding `eth_call` and `eth_estimateGas` makes the endpoint usable by a wallet;
-  adding `eth_getTransactionCount` swaps the indexed nonce — which lags the chain by the scanner's lag — for
-  the node's live one, which matters when a sender has transactions the scanner has not reached yet.
-- **Forwarded calls are capped as a whole.** A public endpoint fronting a metered node is a way to spend
-  someone else's quota, so the rate limit is on by default. It applies across all callers, not per IP.
-
-Example:
-
-```sh
-curl -s http://localhost:3000/shadow-rpc/experimental -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x5","latest",[25,50,75]]}'
-```
-
-### Experimental: entity reads from the index (`POST /shadow-rpc/experimental`)
-
-On by default (`ENTITY_QUERY_INDEX=false` switches it off). The backend folds the decoded Arkiv operations
-(`transaction_operations`, so `SAVE_TRANSACTION_DATA=true` and a `DECODER_URL` are required) and the receipt
-event logs (`transaction_logs`) into two tables of its own — `entity_versions`, one row per state an entity
-went through with the block range it held for, and `entity_version_attributes`, that state's attributes, each
-with its type and `indexed` flag — and answers `arkiv_query`, `arkiv_getEntityCount` and `arkiv_getBlockTiming`
-from them on a **separate path**, `POST /shadow-rpc/experimental` (`/api/shadow-rpc/experimental` publicly).
-`/shadow-rpc` is untouched and keeps relaying those methods to the node, so the two paths are two independent
-sources for the same questions, and either can be checked against the other. The path answers `404` when the
-feature is off; `GET /health` reports it under `features.entityQueryIndex` as `false` or as
-`{ path, methods, floorBlock, projectedThroughBlock, lagBlocks, liveEntities, liveEntitiesAtUtc, lastFoldAtUtc,
-genesis }`, where `genesis` is `null` or the genesis import's `{ status, phase, source, total, imported,
-startedAtUtc, finishedAtUtc, updatedAtUtc, error }`.
-
-The wire contract is the UDC node's (arkiv-state-db-experiment, `signed/rpc_reads.rs`) and the SDK's
-(`RpcSelect`, `RpcQueryOptions`):
-
-- **Parameters.** `arkiv_query(query, { atBlock?, select?, limit?, cursor? })`: any other option key, a quantity
-  that is not a JSON integer or `0x` hex without leading zeros (`latest` included), a `limit` outside 1–200
-  (default 100), or a `select` key outside `key owner creator createdAt updatedAt expiresAt creationFlags
-  attributeSchema attributes` — the removed `payload` and `contentType` included — is `-32602` with the node's
-  message `InvalidParams`. `attributes` takes a boolean or a map of attribute names to booleans. `key` is
-  selected unless the selection sets it false. `arkiv_getEntityCount({ query?, block? })` takes the block as a
-  JSON integer only (a hex string is `-32602`). There is no `arkiv_getEntity` (`-32601`), as on the node.
-- **Entities.** The node's `RpcEntity`: `attributeSchema` entries are `{name, type, indexed}`, `attributes`
-  holds every attribute — indexed or not — as `{name, type, value}` sorted by name, `creationFlags` is
-  `{raw, readonly, permissionlessExtension}`, quantities are hex (`expiresAt` `0xffffffffffffffff` for a
-  permanent entity), `i32` a number, `dec` a trimmed decimal, `u256` minimal hex, addresses/keys lowercase.
-- **Order.** Oldest first by entity id — creation block, transaction, then the create's operation index.
-- **Queries.** The grammar and limits (`*`, `= < <= > >= STARTSWITH`, `AND`/`OR`/`NOT`, typed literals,
-  `$owner $creator $key $expiresAt $createdAt`; 8 KiB, 64 predicates, depth 32) and the error codes (`-32001`
-  parse, `-32002` type, `-32003` literal, `-32004` limits, `-32005` cursor, `-32006` block), with the node's
-  envelope: `query rejected (<kind>): <message>` and `data: {position, got[, expected]}`. Predicates match
-  **indexed attributes only**, exactly as the node's: an unindexed attribute (and every `bytes` one) is stored
-  and returned but never matched. `$payload` and `$contentType` answer the node's own `-32002` messages.
-  Full language parity (`EXISTS`, `TYPEOF`, `!=` and every message) is not implemented yet.
-- **Fold.** A patch applies its mutations in order — a typed one sets the attribute with its new type and
-  indexed flag (a patch can retype, index or unindex), a tombstone unsets it, unnamed attributes stay; every
-  mutation bumps `updatedAt`; expiry is the receipt event's value when logs are stored and otherwise exactly
-  `max(expiresAt, block + minLifetime)` from the calldata (capped at 2^64 − 1, which a huge lifetime reaches
-  too); a reverted transaction applies nothing; and an entity is live at block `B` while `expiresAt > B` and it
-  was not deleted — so a query evaluated `atBlock` a past block sees exactly what was live then.
-
-Where the index cannot honour something the node does, it says so rather than approximating:
-
-| | Node | Index |
-| --- | --- | --- |
-| No `atBlock` | The chain head. | The **projection head** (`projectedThroughBlock` in `/health`): the newest block folded, a few blocks behind the scanner head, itself behind the chain. `blockNumber` in every reply says which block answered. |
-| History | Any block the node keeps state for. | Blocks between the **floor** and the projection head; anything else is `-32006` (`query rejected (block): …`). The floor is the first block whose stored creates carry entity keys (`floorBlock` in `/health`); entities created before it are unknown, so counts count what the index holds. It is block 0 once the genesis import is `done`, and also when the node found no genesis entities (`none`) and every block from 0 up to the first keyed create is stored with no unkeyed successful create among them — the index then answers `[]` and `0` there, as the node does. A backfill that writes older blocks lowers the floor as it goes; `ENTITY_INDEX_FLOOR_BLOCK` pins it instead. |
-| Genesis entities | Part of the block-0 state on a seeded chain. | Imported once, from the node; until that import is `done` the floor stays above 0 and they are unknown. |
-| `bytes` values | The content, as hex. | `null`: the index stores a `bytes` attribute's keccak256 and size, never its content (`attributeSchema` lists it, `GET /entity/:key` gives size and hash). Read the content from a node. |
-| `creationFlags` | Always known. | From the `EntityCreated` event, else the calldata's flag byte; `null` only where neither was stored. |
-| Cursors | 66-character tokens into a process-local cache (gone after a restart: `-32005`). | The same shape, carrying a creation position bound to the query, block and `select`. A cursor from one source cannot be handed to the other: both answer the node's `-32005`. A cursor needs an explicit `atBlock`, as on the node. |
-| `arkiv_getBlockTiming` | The node's clock. | The projection head's block and its timestamp. |
-
-Genesis entities (a chain seeded at block 0 with arkiv-prefill; no transaction created them) are imported
-once as version-0 rows with `createdAt = 0` in the node's entity-id order (oldest first, every attribute with
-its `indexed` flag, `bytes` as hash and size), and later operations fold on top. A walk interrupted by a node
-restart (UDC node cursors are process-local, so the stale cursor answers `-32005`) starts over from the first
-page and rewrites the rows already imported idempotently.
-`ENTITY_INDEX_GENESIS=auto` (default) asks the node once and walks `arkiv_query` at block 0 when it holds at
-most `ENTITY_INDEX_GENESIS_RPC_LIMIT` (1,000,000) entities, else reports `waiting`; `off` never asks. Bigger
-seeds load offline with `scripts/importGenesisState.ts --dump state.jsonl [--rpc <node>]`, which verifies the
-records' id order against the system account's slots, resumes from its last batch, prints one JSON document
-per line, and hands the repair to the backend. `ENTITY_INDEX_GENESIS_PROGRESS_FILE` / `--progress-file` receive
-a snake_case progress document (`phase`, `percent`, `elapsed_s`, `entities`, `dump`, `rpc`, `database`,
-`repair`, `error`, `pid`, `updated_at`) on every change. `docker-compose.prefill.yml` joins a local prefill
-node's network and mounts its artifacts at `/prefill`. The offline importer reads the payload-era arkiv-reth seed format only (no reader for the UDC prefill codec
-yet), so on a UDC chain use the RPC import.
-
-The projection is kept up to date by an in-process projector: every few seconds it folds the operations of the
-blocks the scanner has stored since its last pass (per entity key, replaying the key's whole history, so a
-refold is idempotent), and once a minute it looks for operation rows written *below* its fold point — a gap
-fill, a rescan, the backfill scanner — and refolds those keys too. A first build walks the whole stored
-history in chunks and takes minutes for a few hundred thousand blocks. All writes run under an advisory lock,
-so two backends on one database never fold on top of each other.
-
-Two scripts turn the pair into a test rig. `scripts/compareEntityQuery.ts --node <url> --index <url>` walks
-the same queries on both sides at the same block — discovering them from the data, plus any fixture manifest —
-and reports every difference in order, fields, page boundaries, counts, `$key` reads and the error
-code/message/position of invalid requests, with `--bench` timing both (language messages are compared by
-code only unless `--strict-language`; `bytes` values, which the index withholds, by presence only). `scripts/seedEntityQueryFixtures.ts`
-(still written for the payload-era SDK) creates a suite of entities covering every attribute type, every
-mutation, expiry, flags and reverting transactions, and writes the manifest the comparison reads. Point `--node` at the upstream RPC rather than
-a public `/shadow-rpc`, whose forwarded-call cap would otherwise pace the run and skew its timings.
-
-The frontend's entity explorer (`/entity-explorer`) does not read the index: it queries the node through
-`/entity-explorer/rpc`, since the index's query language does not match the node's yet (`!=` and the
-query-language messages; parity is deferred). `scripts/compareEntityQuery.ts` is the way to compare the index
-with a node.
-
-## `GET /blocks`
-
-Returns stored block metric rows. Results default to newest first and are capped at 10,000 rows.
-Filters combine additively.
-
-Query parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `blockGt` | Only blocks with `block_number > blockGt`. |
-| `blockLt` | Only blocks with `block_number < blockLt`. |
-| `dateGt` | Only blocks with `block_date > dateGt`; value is parsed as ISO-8601. |
-| `dateLt` | Only blocks with `block_date < dateLt`; value is parsed as ISO-8601. |
-| `limit` | Positive integer, maximum 10,000. |
-| `order` | `desc` default, or `asc`. |
-
-Response shape:
-
-```json
-{
-  "count": 0,
-  "limit": 10000,
-  "truncated": false,
-  "filters": {
-    "blockGt": null,
-    "blockLt": null,
-    "dateGt": null,
-    "dateLt": null
-  },
-  "names": ["blockNumber"],
-  "blocks": []
-}
-```
-
-`names` field order:
-
-```txt
-blockNumber, blockDate, blockTimeSeconds, baseBlockFeeWei, totalGasUsed, totalInputDataSizeBytes,
-totalInputDataCompressedSizeBytes, maxGasInBlock, transactionCount, blockRewardWei, burntFeesWei,
-totalTransactionFeeWei, totalRentFeeWei, totalBurnedWei, feePriceSumWei, priorityFeeSumWei,
-priorityFeeWeightedNumeratorWei, priorityFeeGasWeightedNumeratorWei, averageFeePriceWei,
-averageTransactionFeeWei, averageTransactionGasUsed, averageTransactionInputDataSizeBytes,
-averageTransactionInputDataCompressedSizeBytes, averagePriorityFeeWeightedWei,
-averagePriorityFeeWei, batcherQueueSize, batcherIntensity, batcherLowerThreshold,
-batcherUpperThreshold, batcherMaxBlockSize, batcherMaxTxSize
-```
-
-## `GET /blocks/:blockNumber`
-
-Returns one compact stored block row as a JSON array using the same field order as `/blocks.names`.
-Returns `404` if the block is not stored.
-
-## `GET /block/:blockNumber`
-
-Requires transaction data to be enabled. Returns `{ "cached": false, "block": ... }` for one stored
-block plus up to 1,000 stored transactions in ascending position order. Returns `404` when
-transaction data is disabled or the block is unknown.
-
-The block includes the metrics from `/blocks` plus `blockNumberDecimal` and `transactions`.
-Each transaction includes:
-
-```txt
-position, hash, from, to, type, nonce, valueWei, gasLimit, gasUsed, inputDataSizeBytes,
-inputDataCompressedSizeBytes, cumulativeGasUsed, gasPriceWei, maxFeePerGasWei,
-maxPriorityFeePerGasWei, effectiveGasPriceWei, priorityFeeWei, transactionFeeWei, rentFeeWei,
-status, contractAddress
-```
-
-## `GET /ranges`
-
-Returns precomputed fixed-size block range aggregate rows. Results default to `range_start`
-descending and are capped at 10,000 rows. A range row exists only when the aggregator has written it.
-Supported range sizes are `2`, `5`, `10`, `20`, `50`, `100`, `200`, `500`, and `1000`. Range
-boundaries are `[k * M, k * M + M - 1]`.
-
-Query parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `rangeSize` | One supported size. Defaults to `100`. |
-| `rangeStartGt` | Only ranges with `range_start > rangeStartGt`. |
-| `rangeStartLt` | Only ranges with `range_start < rangeStartLt`. |
-| `dateGt` | Only ranges whose `max_block_date > dateGt`; value is parsed as ISO-8601. |
-| `dateLt` | Only ranges whose `min_block_date < dateLt`; value is parsed as ISO-8601. |
-| `limit` | Positive integer, maximum 10,000. |
-| `order` | `desc` default, or `asc`. |
-
-Response shape includes `count`, `limit`, `truncated`, `filters`, `names`, and `ranges`.
-
-`names` field order:
-
-```txt
-rangeSize, rangeStart, rangeEnd, minBlockDate, maxBlockDate, averageBlockTimeSeconds,
-minBlockTimeSeconds, maxBlockTimeSeconds, minBaseFeeWei, maxBaseFeeWei, averageBaseFeeWei,
-totalGasUsed, averageTotalGasUsed, minTotalGasUsed, maxTotalGasUsed, totalInputDataSizeBytes,
-averageTotalInputDataSizeBytes, minTotalInputDataSizeBytes, maxTotalInputDataSizeBytes,
-totalInputDataCompressedSizeBytes, averageTotalInputDataCompressedSizeBytes,
-minTotalInputDataCompressedSizeBytes, maxTotalInputDataCompressedSizeBytes, totalMaxGas,
-minMaxGasInBlock, maxMaxGasInBlock, transactionCount, totalBlockRewardWei, totalBurntFeesWei,
-totalRentFeeWei, totalBurnedWei, averageBlockRewardWei, averageBurntFeesWei, averageRentFeeWei,
-averageBurnedWei, averageFeePriceWei, averageTransactionGasUsed,
-averageTransactionInputDataSizeBytes, averageTransactionInputDataCompressedSizeBytes,
-averagePriorityFeeWeightedWei, averagePriorityFeeWei, minBatcherQueueSize, maxBatcherQueueSize,
-averageBatcherQueueSize, averageBatcherIntensity, averageBatcherLowerThreshold,
-averageBatcherUpperThreshold, averageBatcherMaxBlockSize, averageBatcherMaxTxSize
-```
-
-## `GET /transactions`
-
-Requires transaction data to be enabled. Returns stored transaction rows ordered by block number and
-transaction position. Results default to newest first and are capped at 1,000 rows per page.
-
-Query parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `block` | Only transactions from exactly this block number. |
-| `blockGt` | Only transactions with `block_number > blockGt`. |
-| `blockLt` | Only transactions with `block_number < blockLt`. |
-| `address` | Only transactions from this 20-byte hex sender address; normalized to lowercase. |
-| `nonceGt` | Only transactions with nonce greater than this value. |
-| `nonceLt` | Only transactions with nonce lower than this value. |
-| `dateGt` | Only transactions in blocks newer than this ISO-8601 timestamp. |
-| `dateLt` | Only transactions in blocks older than this ISO-8601 timestamp. |
-| `limit` | Positive integer, maximum 1,000. |
-| `page` | Positive integer page number. Defaults to `1`. |
-| `order` | `desc` default, or `asc`. |
-
-Response shape:
-
-```json
-{
-  "count": 0,
-  "limit": 1000,
-  "truncated": false,
-  "page": 1,
-  "pageSize": 1000,
-  "totalCount": 0,
-  "totalPages": 0,
-  "hasPreviousPage": false,
-  "hasNextPage": false,
-  "filters": {
-    "block": null,
-    "blockGt": null,
-    "blockLt": null,
-    "address": null,
-    "nonceGt": null,
-    "nonceLt": null,
-    "dateGt": null,
-    "dateLt": null
-  },
-  "names": ["blockNumber"],
-  "transactions": []
-}
-```
-
-Each transaction row is a compact JSON array of values in `names` order.
-
-`names` field order:
-
-```txt
-blockNumber, blockNumberDecimal, blockDate, baseBlockFeeWei, position, hash, from, to, type, nonce,
-valueWei, gasLimit, gasUsed, inputDataSizeBytes, inputDataCompressedSizeBytes, cumulativeGasUsed,
-gasPriceWei, maxFeePerGasWei, maxPriorityFeePerGasWei, effectiveGasPriceWei, priorityFeeWei,
-transactionFeeWei, rentFeeWei, totalCostWei, status, contractAddress, operationsSummary
-```
-
-The final `operationsSummary` value is an array of `{ operation, operationType, count }` entries
-when decoded Arkiv operations are stored for the transaction, and `null` otherwise.
-
-## `GET /transaction/:hash`
-
-Requires transaction data to be enabled. The hash must match `0x` plus 64 hex characters.
-
-Returns `{ "transaction": ... }`. The transaction has the same stored transaction fields as
-`/transactions` and always includes `operations`, an array of decoded Arkiv operation metadata. The
-array is empty if no operations are stored.
-
-Each operation includes:
-
-```txt
-opIndex, operationType, operation, entityKey, salt, creationFlags, expiresAt, minLifetime,
-resolvedExpiresAt, permanent, newOwner, bytesSize, schemaName, attributes
-```
-
-`operationType` is 1 create, 2 patch, 3 extend, 4 transfer, 5 delete. `salt`, `expiresAt`,
-`minLifetime` and `resolvedExpiresAt` are decimal strings; `resolvedExpiresAt` is the calldata's
-`max(expiresAt, block + minLifetime)` for creates and extends (capped at 2^64-1; the entity index
-prefers the receipt's expiry event) and `permanent` is true when it is 2^64-1. `schemaName` is the
-`arkiv.schema` attribute's value when the operation sets one. `bytesSize` is the summed size of the
-operation's `bytes` attributes.
-
-Each operation attribute is `{ name, typeId, type, indexed, value, size, keccak256? }`: `typeId` is
-the raw on-chain id (low 7 bits the type, bit `0x80` indexed; 0 a tombstone that unsets the name),
-`value` uses the node's `arkiv_query` encoding (`u64`/`u256` as `0x` hex, `i32` a number, `bool` a
-boolean, `dec` a decimal string, other types lowercase hex or text), and a `bytes` attribute has
-`value: null` with its `size` and `keccak256` — its contents are never stored.
-
-## `GET /entity/:entityKey`
-
-Requires transaction data to be enabled. The entity key must match `0x` plus 64 hex characters; it
-is normalized to lowercase.
-
-Returns the most recent stored operations on that entity key (create, patch, extend, transfer,
-delete) in chain order — ordered by block number, transaction position, and operation index
-ascending — capped at the configured history limit (`ENTITY_HISTORY_LIMIT`, default 100).
-`totalOperations` always carries the full stored count; `truncated` is true when older operations
-were cut off, and `firstOperation` (present only then) carries the earliest stored operation so the
-create stays reachable. Returns `404` when no operations are stored for the key — unless the entity index
-knows the key from the chain's genesis state, in which case `genesis` (`{ owner, creator, expiresAt,
-creationFlags, bytesSize, schemaName, attributes }`) is added and an empty `operations` is `200`.
-When the entity index is on, the response also carries `state`: the index's current view of the
-entity, read fresh on every request (not cached) — `{ asOfBlock, status, version, owner, creator,
-createdAt, updatedAt, expiresAt, permanent, creationFlags, bytesSize, schemaName, attributes }`,
-where `status` is `live`, `expired` or `deleted` at `asOfBlock` (the projection head), block numbers
-are decimal strings and each attribute is `{ name, type, indexed, value, size?, keccak256? }`
-(`bytes` with `value: null` and its size and hash). `state` is absent when the index has not folded
-the key yet. The `genesis` attributes use the same shape.
-Creates are linked to their entity key from the EntityCreated receipt log, so rows scanned before
-that link existed may be missing from a key's history until their blocks are re-scanned.
-
-Responses are served from a bounded in-memory cache (`ENTITY_CACHE_MAX_ENTRIES`, default 10,000
-entries; `ENTITY_CACHE_MAX_BYTES`, default 64 MiB; `ENTITY_CACHE_TTL_MS`, default 5 minutes; any
-set to 0 disables caching). Cached entries — including not-found results — are evicted the moment
-a scanner commits new operations for the key (Postgres NOTIFY), with the TTL as a staleness
-backstop, so responses can briefly trail the chain by at most the TTL if the push channel drops.
-
-Response shape:
-
-```json
-{
-  "entityKey": "0x…",
-  "count": 0,
-  "totalOperations": 0,
-  "truncated": false,
-  "names": ["blockNumber"],
-  "operations": []
-}
-```
-
-`count` is the number of returned operations. Each operation (and `firstOperation`, when present)
-is a compact JSON array of values in `names` order; `attributes` stays nested JSON inside the row
-(the same attribute objects as on `/transaction/:hash`). `transactionStatus` is the receipt status
-(a reverted transaction's operations are listed but applied nothing), `transactionRentFeeWei` the
-transaction's rent and `transactionOperationCount` how many operations it carried.
-
-`names` field order:
-
-```txt
-blockNumber, blockNumberDecimal, blockDate, position, hash, opIndex, operationType, operation,
-entityKey, salt, creationFlags, expiresAt, minLifetime, resolvedExpiresAt, permanent, newOwner,
-bytesSize, schemaName, attributes, transactionStatus, transactionRentFeeWei,
-transactionOperationCount
-```
-
-## `GET /transaction-records`
-
-Returns top stored transaction records by category. This endpoint is routed independently of the
-transaction-data feature flag but depends on stored transaction record rows.
-
-Query parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `limit` | Positive integer, maximum 20 through the HTTP API. Defaults to 20. |
-
-Response shape:
-
-```json
-{
-  "limit": 20,
-  "names": ["blockNumber"],
-  "records": {
-    "gas_used": [],
-    "transaction_fee": [],
-    "effective_fee": []
-  }
-}
-```
-
-Each record is a compact JSON array of values in `names` order: the `/transactions` fields
-(without `operationsSummary`) plus `category`, `recordValue`, `rank`, and `recordedAt`.
-
-## `GET /senders`
-
-Requires transaction data to be enabled. Returns precomputed sender-address stats from
-`sender_stats`, ordered by found transaction count.
-
-Query parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `limit` | Positive integer, maximum 10,000. |
-| `order` | `desc` default for most active first, or `asc`. |
-
-The response includes `count`, `limit`, `truncated`, `filters`, `names`, and `senders`. Each
-sender row is a compact JSON array of values in `names` order:
-
-```txt
-address, latestNonce, transactionCount, totalGasUsed, totalTransactionFeeWei, totalRentFeeWei,
-totalCostWei, totalValueWei, averageGasUsed, averageTransactionFeeWei, firstBlockNumber,
-firstBlockNumberDecimal, lastBlockNumber, lastBlockNumberDecimal, firstBlockDate, lastBlockDate,
-aggregatedAt
-```
-
-## `GET /balances`
-
-Account balance readings taken from the node, one per (block, address) where that address sent or
-received a transaction in that block. Never derived from transaction values -- balances also move
-through contract-internal transfers and fee payments the transaction list does not show, and the
-index has no genesis anchor. Requires `SCANNER_TRACK_BALANCES=true`; never backfilled, so coverage
-starts where it was switched on, and the series is sparse.
-
-Query parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `block` | Exactly one block: the "who held what at block N" view. |
-| `address` | One account's history; 20-byte hex, matched case-insensitively. |
-| `blockGt`, `blockLt` | Exclusive block bounds. |
-| `limit` | Positive integer, maximum 10,000. |
-| `order` | `desc` default (newest block first), or `asc`. |
-
-The response includes `count`, `limit`, `truncated`, `filters`, `names`, and `balances`. Each
-balance row is a compact JSON array of values in `names` order:
-
-```txt
-blockNumber, blockDate, address, balanceWei
-```
-
-## `GET /balances/live`
-
-`?address=0x…` (required). What the account holds now, from the indexed chain's node (`eth_getBalance` at
-`latest`), not from the index: works on nodes that serve only their head, has no history, is not cached and
-shares the `/shadow-rpc` relay's rate limit. Returns `{ address, balanceWei, blockTag, fetchedAtUtc }`;
-`400` bad address, `429` rate limited, `502` node failure, `503` no node available.
-
-## `GET /guzzlers`
-
-Requires Redis-backed guzzler tracking. Returns cached active-sender leaderboards computed by the
-near-head scanner. The backend slices the cached board; it does not rebuild leaderboards on request.
-Before the first refresh, it returns empty boards. Disabled guzzlers return `503`.
-
-Query parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `limit` | Positive integer, maximum 250. Defaults to 100. |
-| `window` | Optional single window label. One of `5m`, `20m`, `1h`, `6h`, `24h`. |
-
-Response fields:
-
-- `generatedAt`: board generation time.
-- `retentionMs`: bucket retention period, equal to 24 hours.
-- `limit`: effective top-N per window.
-- `names`: compact stat field order.
-- `windows`: array of requested or all windows.
-
-`names` field order for each guzzler stat:
-
-```txt
-address, transactionCount, totalGasUsed, totalFeeWei, totalRentFeeWei, firstSeen, lastSeen
-```
-
-Each window row includes `label`, `windowMs`, `count`, and compact `guzzlers` rows.
-
-## `GET /guzzler/:address`
-
-Requires Redis-backed guzzler tracking. The address must be a 20-byte hex address and is normalized
-to lowercase. Returns one sender's retained one-minute history over the 24-hour retention window. An
-unknown sender returns an empty history.
-
-Response fields include:
-
-```txt
-address, generatedAt, retentionMs, bucketMs, count, names, points
-```
-
-`names` field order for each point:
-
-```txt
-minute, startTime, transactionCount, totalGasUsed, totalFeeWei, totalRentFeeWei, firstSeen, lastSeen
-```
-
-## Baseload APIs
-
-Baseload is a backend control plane for Arkiv load-generation workers. The browser never sends
-private-key material or Arkiv RPC calls directly. The backend derives worker wallets from the
-configured mnemonic at `m/44'/60'/0'/0/<walletNumber>`.
-
-Worker config version is `2`. Worker behavior values:
-
-```txt
-create, create-update, create-ownership, time-bomb, create-update-delete
-```
-
-Worker config fields:
-
-```txt
-id, behavior, maxGasPriceGwei, opsPerMinute, entitiesPerRequest, singleCreatePayloadSize,
-singleCreateStringArgumentCount, singleCreateNumberArgumentCount, entityPoolSize,
-timeBombOffsetSeconds, walletNumber, walletAddress, startBlock, endBlock,
-durationSeconds, ttlSeconds
-```
-
-`entitiesPerRequest` is normalized to at most `1`; use `opsPerMinute` or multiple worker
-wallets to scale load instead of multi-entity mutation batches.
-
-### `GET /baseload`
-
-Returns backend Baseload state, enabled/runtime availability, active config, and worker statuses.
-This route remains public with or without Google login.
-
-### `PUT /baseload`
-
-Replaces the active backend Baseload config and starts, updates, or stops workers to match it.
-Requires an administrator Google session plus origin/CSRF, or a generated temporary administrator access token. The request body
-must be a JSON object normalizable to:
-
-```json
-{
-  "version": 2,
-  "workers": []
-}
-```
-
-Invalid JSON or invalid config returns `400`. Missing login configuration refuses human administrator access.
-
-### Google login
-
-GET `/auth/google/start?returnTo=/entity-explorer` begins login; `/auth/google/callback` exchanges the authorization code.
-GET `/auth/session` returns role, identity, CSRF token, expiry and login availability. POST `/auth/logout`
-requires the session cookie, configured Origin and X-CSRF-Token. All auth routes are no-store.
-The sole default administrator is verified `sieciech.czajka@golem.network`, with signed `hd=golem.network`.
-Other accounts have the same public access as anonymous users, plus identity/logout. See docs/google-login.md.
-
-### Saved Baseload Configs
-
-All saved config routes require administrator authentication: a session or a generated access token.
-Session writes also require Origin and CSRF validation.
-Names are URL-decoded, trimmed, must start with a letter or number, may contain letters, numbers,
-spaces, dots, underscores, or hyphens, and are limited to 80 characters.
-
-| Method | Path | Behavior |
-| --- | --- | --- |
-| `GET` | `/baseload/configs` | Returns `{ "configs": [...] }` with `name`, `workerCount`, `createdAt`, and `updatedAt`. |
-| `GET` | `/baseload/configs/:name` | Returns one saved config summary plus `config`. |
-| `PUT` | `/baseload/configs/:name` | Saves a normalized config body under the name. |
-| `DELETE` | `/baseload/configs/:name` | Deletes the named config and returns `{ "deleted": true|false }`. |
-| `PUT` | `/baseload/configs/:name/load` | Loads the saved config into the active Baseload runtime. Returns `503` if runtime is unavailable. |
-
-## Stored Metric Conventions
-
-- `baseBlockFeeWei` comes from block `baseFeePerGas`; networks without it store `0`.
-- `maxGasInBlock` is block `gasLimit`.
-- Transaction fee is `receipt.gasUsed * receipt.effectiveGasPrice`.
-- Priority fee is `max(effectiveGasPrice - baseFeePerGas, 0)`.
-- `averageFeePriceWei` is the simple per-transaction average of `effectiveGasPrice`.
-- `averageTransactionGasUsed` is the simple per-transaction average of receipt gas used.
-- `averagePriorityFeeWeightedWei` is weighted by receipt gas used.
-- Empty blocks store `0` for average values.
-- Batcher collector fields are nullable enrichment metrics:
-  `batcherQueueSize`, `batcherIntensity`, `batcherLowerThreshold`, `batcherUpperThreshold`,
-  `batcherMaxBlockSize`, `batcherMaxTxSize`.
-
-## Arkiv Operation Metadata
-
-The scanner sends Arkiv registry transaction calldata to the external decoder service
-(arkiv-transaction-decoder v0.3, `format: "udc"`). A decoder HTTP 400 means the calldata is not an
-Arkiv `execute()` call (or breaks a hard limit) and is skipped. Any other failure — including an
-answer outside the UDC contract, and a decoder `error` on an operation or attribute of a successful
-transaction (the node never mines one) — makes the whole block retry.
-
-Stored operation metadata is keyed by transaction block number, position, and operation index.
-Stored fields are the operation type/name, entity key, salt, creation flags, requested expiry and
-minimum lifetime, new owner, bytes size, schema name and the attribute triples (bytes as size and
-keccak256 only).
-
-Never expect `bytes` attribute contents, `payload.hex`, `payload.text`, or raw transaction `input`
-in database rows or API responses. They are intentionally dropped and must not be persisted.
-
-## Scanner and Aggregator Behavior Relevant to API Data
-
-- The scanner stores one completed block at a time and resumes from the last successfully stored
-  block.
-- A failed block read is retried and is not skipped.
-- The block row, transaction rows, operation rows, and scanner progress update are written in one
-  PostgreSQL transaction.
-- The main range aggregator writes `block_ranges` for complete fixed-size windows only.
-- `aggregate-all` walks every supported range size repeatedly.
-- `aggregate-senders` rebuilds `sender_stats` from stored transaction rows.
-- The guzzler cache is database-free recent activity in Redis. It keeps one-minute buckets for 24
-  hours and cached top-N boards for the configured windows.
-
-## Frontend Notes for API Consumers
-
-- Development frontend uses Vite and proxies `/api` to the backend.
-- Production frontend uses `frontend/server.js` to serve static files and reverse-proxy `/api/*`.
-- Direct backend URLs use paths such as `/blocks`; frontend-origin URLs use `/api/blocks`.
-- Public explorer reads need no login. Browser administrator requests use session cookies and an
-  in-memory CSRF token; credentials are never stored in browser local storage. Custom-node requests
-  omit application cookies and CSRF headers.
-- The `/entity-explorer` page (`/data` is an alias) queries the indexed chain's node through the Arkiv SDK in
-  the user-defined column format, by way of the backend relay `POST /api/entity-explorer/rpc`. Queries and paging
-  options are kept in shareable URLs.
-- The index never holds `bytes` contents: "Load from node" on the transaction and entity pages reads one
-  attribute from the node through that relay (which stores nothing) and checks it against the keccak256 the
-  index recorded.
-- Permanence is exact: `expiresAt === "18446744073709551615"` (2^64 − 1), never a lifetime heuristic.
+> A block explorer for an Arkiv chain: blocks, transactions, wallets, fees and rent, and the entities
+> stored on chain with their typed attributes. Every page is reachable by URL, and every filter or
+> query lives in the URL's query string, so a link reproduces exactly what the page shows.
+
+Paths below are relative to this site's origin. Pages are rendered in the browser (a React app); to read
+data without rendering, use the JSON API under `/api/` (see the last section). Amounts are in wei, and
+the native token is shown with the site's configured symbol. An entity is permanent when its expiry
+block is 18446744073709551615 (2^64 − 1). Arkiv transactions pay rent for storage beside their gas fee;
+rent is burned outside gas and is never counted as part of the fee.
+
+## Pages
+
+- [Home](/): search box, latest blocks and latest transactions.
+- [Search](/search?q=0x...): `q` is a block number, transaction hash, address or entity key; lists the
+  pages that match it.
+- [Blocks](/blocks): stored blocks with gas, base fee, burned gas fees and rent.
+  Parameters: `blockGt`, `blockLt` (block numbers, exclusive), `dateGt`, `dateLt` (ISO-8601 timestamps,
+  e.g. `2026-10-30T12:00:00Z`), `limit` (10, 100, 250, 500, 1000, 2500, 5000 or 10000; default 1000).
+  Example: `/blocks?blockGt=1000&blockLt=2000&limit=500`
+- [Block](/block?block=12345): one block with its transactions. `block` is the block number.
+- [Transactions](/transactions): stored transactions, newest first.
+  Parameters: `block` (one exact block), `blockGt`, `blockLt`, `dateGt`, `dateLt`, `address` (sent from
+  or to this address), `nonceGt`, `nonceLt` (with `address`), `limit` (rows per page, at most 1000),
+  `page` (1-based). Example: `/transactions?address=0xabc...&limit=100&page=2`
+- [Transaction](/tx/0x...): `/tx/<transaction hash>`. Gas fee, rent and total cost, and each Arkiv
+  operation in the transaction (create, patch, extend, transfer, delete) with its entity,
+  expiry and attributes.
+- [Wallets](/senders): the most active sender addresses. Parameter: `limit` (default 100).
+- [Address](/address/0x...): `/address/<address>`. A wallet's current balance and its transactions; takes
+  the same filters as Transactions except `address`.
+- [Entity](/entity/0x...): `/entity/<entity key>`. An entity's indexed history: current state (live,
+  expired or deleted), owner, expiry, attributes, and one row per operation with its rent.
+- [Entity explorer](/entity-explorer): queries the chain's node for the entities stored right now (see the
+  next section).
+- [Statistics](/statistics): chain-wide totals: transactions, operations, gas fees, rent, entity counts,
+  attribute types and the most used schemas.
+- [Ranges](/ranges): per-range aggregates of block metrics.
+  Parameters: `rangeSize` (2, 5, 10, 20, 50, 100, 150, 200, 300, 500 or 1000 blocks; default 100),
+  `rangeStartGt`, `rangeStartLt`, `dateGt`, `dateLt`, `limit`.
+- [Charts](/charts): historical charts of block metrics.
+  Parameters: `blockStart`, `blockEnd`, `startDate` (ISO-8601), `xAxisMode` (`blocks` or `dates`),
+  `zoom` (index into the bucket sizes 1, 2, 5, 10, 20, 50, 100, 150, 300, 1000 blocks), `points`, and
+  `parameters` (comma-separated series names, default `averageBaseFeeWei,averagePriorityFeeWei`).
+- [Records](/records): the transactions with the most gas used, the highest fee and the highest
+  effective gas price.
+- [Activity](/activity): the senders using the most gas recently. Parameters: `window` (`1h`, `6h` or
+  `24h`), `address` (one sender's per-minute history).
+
+## Entity explorer and its query language
+
+The entity explorer runs a query against the chain's node and lists the matching entities: key,
+schema, owner, attributes and expiry. Its whole state is in the URL:
+
+- `q`: the query (required to show results). URL-encode it (`encodeURIComponent`): spaces as `%20` or
+  `+`, `=` as `%3D`, `&` as `%26`.
+- `pageSize`: entities per page: 5, 10, 25, 50 or 100 (default 50).
+- `expiration`: `all` (default) or `soon` (only entities expiring within 24 hours).
+
+`q` may also be a bare entity key (`0x` + 64 hex characters), read as `$key = key(0x...)`, or a bare
+address (`0x` + 40 hex characters), read as `$owner = addr(0x...)`.
+
+Query syntax:
+
+- A condition compares an attribute with a typed literal: `name = str('open')`. Operators: `=`, `!=`,
+  `<`, `<=`, `>`, `>=`.
+- Literals are written as type constructors: `str('text')`, `i32(-5)`, `u64(1200000)`, `u256(10)`,
+  `dec(3.5)`, `addr(0x...)`, `key(0x...)`, `bytes32(0x...)`, and bare `true` / `false`. Inside `str('...')`
+  a single quote is doubled: `str('it''s')`.
+- `name STARTSWITH str('prefix')` is a prefix match on a str attribute.
+- `EXISTS(name)` is true when the attribute is set with any type; `TYPEOF(name) = u64` when it is set with
+  exactly that type (`bool`, `i32`, `u64`, `u256`, `dec`, `bytes32`, `str`, `addr`, `key`).
+- Combine with `AND`, `OR` and `NOT` (case-insensitive; `&&` and `||` are not accepted) and parentheses.
+  `--` starts a comment that runs to the end of the line.
+- Entity fields: `$key`, `$owner`, `$creator` (addresses), `$createdAt`, `$expiresAt` (block numbers,
+  compare with `u64(...)`).
+- Attribute names start with a letter and may contain letters, digits, `_`, `.` and `-`; type names and
+  keywords cannot be used as names. Entities written through a named schema carry the indexed str
+  attribute `arkiv.schema`.
+- Only indexed attributes are ever matched. Attributes stored without the indexed flag, and every
+  `bytes` attribute, are returned in results but never match a condition.
+
+Examples (query, then the URL that runs it):
+
+- All entities of one schema:
+  `arkiv.schema = str('note')`
+  `/entity-explorer?q=arkiv.schema%20%3D%20str('note')`
+- One owner's entities created after block 100000, 10 per page:
+  `$owner = addr(0x1111111111111111111111111111111111111111) AND $createdAt > u64(100000)`
+  `/entity-explorer?q=%24owner%20%3D%20addr(0x1111111111111111111111111111111111111111)%20AND%20%24createdAt%20%3E%20u64(100000)&pageSize=10`
+- Open tickets or anything without a `closedAt` attribute:
+  `status = str('open') OR NOT EXISTS(closedAt)`
+  `/entity-explorer?q=status%20%3D%20str('open')%20OR%20NOT%20EXISTS(closedAt)`
+- One entity by key: `/entity-explorer?q=0x<64 hex characters>`
+
+The explorer reads the node, so it shows entities as they are now. For an entity's past versions and
+operations, open `/entity/<entity key>`.
+
+## JSON API
+
+The pages read a public JSON API at `/api/...`. List endpoints return compact rows: one `names` array
+plus an array of values per row. The full reference, with every parameter and response field, is in the
+repository README: https://github.com/Arkiv-Network/arkiv-chain-indexer#http-server
+
+- `/api/blocks`: blocks; same filters as the Blocks page (`blockGt`, `blockLt`, `dateGt`, `dateLt`, `limit`).
+- `/api/block/<number>`: one block with its transactions.
+- `/api/transactions`: transactions; same filters as the Transactions page.
+- `/api/transaction/<hash>`: one transaction with its decoded Arkiv operations.
+- `/api/entity/<entity key>`: an entity's operations and current indexed state.
+- `/api/search?q=<text>`: what a block number, hash, address or entity key refers to.
+- `/api/ranges?rangeSize=<n>`: range aggregates.
+- `/api/senders`: wallet activity.
+- `/api/statistics`: chain-wide statistics.
+- `/api/sync`: how far the indexer is behind the chain head.
+- `/api/balances/live?address=<address>`: an address's current balance, read from the node.
