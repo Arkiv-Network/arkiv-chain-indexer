@@ -1367,7 +1367,7 @@ The frontend container reads these env vars:
 | `BACKEND_PORT` | `3000` | Backend TCP port. |
 | `VITE_CHAIN_NAME` | `Arkiv` | Chain name shown in the frontend header and home copy. |
 | `VITE_NETWORK_NAME` | _(empty)_ | Network name (e.g. `Cheesecake`) shown as a badge next to the header brand and in the page title; blank hides it. |
-| `VITE_TOKEN_SYMBOL` | `ETH` | Three-letter token symbol used in frontend native-token labels. |
+| `VITE_TOKEN_SYMBOL` | `ETH` | Native-token symbol used in frontend labels: 2–10 letters or digits, case kept as given (e.g. `GLM`, `tGLM`). Anything else falls back to `ETH`. |
 | `VITE_TRANSACTION_DECODER_BASE_URL` | _(off)_ | Base URL of an external decoder UI linked from the transaction page (`/?tx=<hash>`). Unset, empty or `off`: no link (the payload-era Atlas decoder cannot read UDC calldata). Build arg and runtime config. |
 | `VITE_NODE_STATUS_URL` | _(none)_ | The node's `/signed/v1/status`, read once for the rent cap the permanence tooltip names. Absolute (the node must answer CORS) or same-origin (e.g. an nginx route to the node). Unset, `off`, unreachable or not JSON: the tooltip says the cap is not shown. Runtime config. |
 | `VITE_NO_BATCHER` | `false` | Set to `true` for networks without batcher metrics; hides batcher panels, fields, and chart options. |

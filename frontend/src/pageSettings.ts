@@ -144,8 +144,9 @@ export function parseNonNegativeInteger(value: string | undefined, fallback: num
 
 export function parseTokenSymbol(value: string | undefined, fallback = DEFAULT_PAGE_SETTINGS.tokenSymbol): string {
   if (value === undefined) return fallback;
-  const normalized = value.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(normalized)) return fallback;
+  // Case is kept as configured: testnet symbols such as tGLM are mixed-case.
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9]{2,10}$/.test(normalized)) return fallback;
   return normalized;
 }
 
@@ -224,7 +225,7 @@ export function normalizeSettingsDraft(
 
   const tokenSymbol = parseTokenSymbol(draft.tokenSymbol, "");
   if (!tokenSymbol) {
-    return { settings: fallback, error: "Token symbol must be exactly three letters." };
+    return { settings: fallback, error: "Token symbol must be 2–10 letters or digits." };
   }
 
   // Network name is optional: blank hides the header badge.
