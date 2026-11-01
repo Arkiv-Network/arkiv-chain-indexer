@@ -1,9 +1,11 @@
 import type { BaseloadConfig } from "./baseloadConfig";
 import { describe, expect, test } from "bun:test";
 import { createWalletClient, ENTITY_EVENTS_ABI, ExpirationTime } from "@arkiv-network/sdk";
-import { defineChain, encodeAbiParameters, encodeEventTopics, http } from "viem";
+import { defineChain, encodeAbiParameters, encodeEventTopics, http, parseTransaction } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import type { BaseloadFees } from "./baseloadTaskHelpers";
 import {
+  BaseloadReceiptTimeoutError,
   BaseloadRuntime,
   baseloadGasShapeKey,
   decodeBaseloadMutationReceipt,
@@ -13,8 +15,11 @@ import {
   estimateCurrentBlock,
   readReceiptQuantity,
   sendBaseloadMutation,
+  sendWithFeeBumps,
   toSdkMutationParameters,
   type BaseloadMutationParameters,
+  type BaseloadPendingTransaction,
+  type SendWithFeeBumpsOptions,
 } from "./baseloadRuntime";
 
 const TX_HASH = `0x${"aa".repeat(32)}` as `0x${string}`;
@@ -337,8 +342,9 @@ describe("baseload chain head estimation", () => {
  * worker asks for and counts each method, so the loop's RPC bill per operation
  * can be asserted rather than reasoned about.
  */
-function startFakeNode(options: { entitiesPerBatch: number }) {
+function startFakeNode(options: { entitiesPerBatch: number; baseFeePerGas?: string }) {
   const methods: string[] = [];
+  const rawTransactions: `0x${string}`[] = [];
   let sentTransactions = 0;
   const server = Bun.serve({
     port: 0,
@@ -354,7 +360,7 @@ function startFakeNode(options: { entitiesPerBatch: number }) {
         case "eth_blockNumber":
           return reply("0x64");
         case "eth_getBlockByNumber":
-          return reply({ number: "0x64", baseFeePerGas: "0x1" });
+          return reply({ number: "0x64", baseFeePerGas: options.baseFeePerGas ?? "0x1" });
         case "eth_getBalance":
           return reply("0x56bc75e2d63100000");
         case "eth_getTransactionCount":
@@ -362,6 +368,7 @@ function startFakeNode(options: { entitiesPerBatch: number }) {
         case "eth_estimateGas":
           return reply("0x1e8480");
         case "eth_sendRawTransaction":
+          rawTransactions.push((body as unknown as { params: `0x${string}`[] }).params[0]!);
           sentTransactions += 1;
           return reply(txHashForSend(sentTransactions));
         case "eth_getTransactionReceipt": {
@@ -390,6 +397,7 @@ function startFakeNode(options: { entitiesPerBatch: number }) {
   return {
     url: `http://127.0.0.1:${server.port}`,
     methods,
+    rawTransactions,
     countOf: (method: string) => methods.filter((candidate) => candidate === method).length,
     stop: () => server.stop(true),
   };
@@ -501,4 +509,273 @@ describe("baseload worker loop RPC budget", () => {
     },
     30_000,
   );
+});
+
+describe("baseload first-send fees", () => {
+  async function firstSentFees(maxGasPriceGwei: number) {
+    // 1 gwei base fee.
+    const node = startFakeNode({ entitiesPerBatch: 1, baseFeePerGas: "0x3b9aca00" });
+    const runtime = new BaseloadRuntime({
+      rpcUrl: node.url,
+      mnemonic: TEST_MNEMONIC,
+      payloadProvider: null,
+      faucet: null,
+      rpcKeys: null,
+    });
+    try {
+      runtime.updateConfig({
+        workers: [
+          {
+            walletNumber: 0,
+            behavior: "create",
+            entitiesPerRequest: 1,
+            opsPerMinute: 60,
+            singleCreatePayloadSize: 32,
+            maxGasPriceGwei,
+          },
+        ],
+      });
+      const deadline = Date.now() + 15_000;
+      while (node.rawTransactions.length < 1 && Date.now() < deadline) {
+        await Bun.sleep(50);
+      }
+      const transaction = parseTransaction(node.rawTransactions[0]!);
+      return { maxFeePerGas: transaction.maxFeePerGas, maxPriorityFeePerGas: transaction.maxPriorityFeePerGas };
+    } finally {
+      runtime.stop();
+      node.stop();
+    }
+  }
+
+  test(
+    "offers twice the base fee and the minimal tip, not the worker's cap",
+    async () => {
+      expect(await firstSentFees(1000)).toEqual({ maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 2n });
+    },
+    20_000,
+  );
+
+  test(
+    "never offers more than the worker's cap",
+    async () => {
+      expect(await firstSentFees(1.5)).toEqual({ maxFeePerGas: 1_500_000_000n, maxPriorityFeePerGas: 2n });
+    },
+    20_000,
+  );
+});
+
+/**
+ * A scripted node for {@link sendWithFeeBumps}. A receipt wait passes stall
+ * checks 20s apart, with no real time passing, until the caller gives up or one
+ * of the waited-for hashes has a receipt; `atStallCheck` lets a test change the
+ * chain between checks.
+ */
+function startFeeBumpNode(options: {
+  nonce?: number;
+  atStallCheck?: (check: number, node: FeeBumpNode) => void;
+  refuseSend?: (index: number) => boolean;
+}) {
+  const node = {
+    latestNonce: options.nonce ?? 7,
+    receipts: new Map<string, Record<string, unknown>>(),
+    sentFees: [] as BaseloadFees[],
+    sentHashes: [] as `0x${string}`[],
+    stallChecks: 0,
+    pendingSeen: [] as BaseloadPendingTransaction[],
+    replacementFailures: 0,
+    mine(txHash: `0x${string}`, status = "0x1") {
+      node.receipts.set(txHash, { status, transactionHash: txHash });
+      node.latestNonce += 1;
+    },
+  };
+  const rpc: SendWithFeeBumpsOptions["rpc"] = {
+    getLatestNonce: async () => node.latestNonce,
+    getTransactionReceipt: async (txHash) => node.receipts.get(txHash) ?? null,
+    waitForTransactionReceipt: async (txHashes, _signal, onStall) => {
+      for (let elapsedMs = 20_000; ; elapsedMs += 20_000) {
+        for (const txHash of txHashes) {
+          const receipt = node.receipts.get(txHash);
+          if (receipt) return { txHash, receipt };
+        }
+        node.stallChecks += 1;
+        if (node.stallChecks > 500) throw new Error("the wait never ended");
+        options.atStallCheck?.(node.stallChecks, node);
+        if (onStall && !(await onStall(elapsedMs))) {
+          throw new BaseloadReceiptTimeoutError(txHashes[txHashes.length - 1]!, elapsedMs);
+        }
+      }
+    },
+  };
+  const send = async (fees: BaseloadFees) => {
+    const index = node.sentFees.length;
+    node.sentFees.push(fees);
+    if (options.refuseSend?.(index)) throw new Error("replacement refused");
+    const txHash = txHashForSend(index + 1) as `0x${string}`;
+    node.sentHashes.push(txHash);
+    return txHash;
+  };
+  return { node, rpc, send };
+}
+
+type FeeBumpNode = ReturnType<typeof startFeeBumpNode>["node"];
+
+/** The worker's own stall policy: give a copy up after 60s, unless no bump is left. */
+function workerLikeStall(node: FeeBumpNode) {
+  return async (elapsedMs: number, pending: BaseloadPendingTransaction) => {
+    node.pendingSeen.push(pending);
+    return pending.bumpsExhausted || elapsedMs < 60_000;
+  };
+}
+
+function runFeeBumps(
+  harness: ReturnType<typeof startFeeBumpNode>,
+  overrides: Partial<SendWithFeeBumpsOptions> = {},
+) {
+  return sendWithFeeBumps({
+    rpc: harness.rpc,
+    address: "0x0000000000000000000000000000000000000001",
+    nonce: 7,
+    fees: { maxFeePerGas: 14n, maxPriorityFeePerGas: 2n },
+    maxFeeCapWei: 1_000_000_000_000n,
+    send: harness.send,
+    signal: new AbortController().signal,
+    onStall: workerLikeStall(harness.node),
+    onReplacementFailed: () => {
+      harness.node.replacementFailures += 1;
+    },
+    ...overrides,
+  });
+}
+
+describe("baseload fee-bumped replacements", () => {
+  test("replaces a stuck transaction twice with bumped fees, then only waits", async () => {
+    const harness = startFeeBumpNode({
+      atStallCheck: (check, node) => {
+        if (check === 40) node.mine(node.sentHashes[2]!);
+      },
+    });
+    // A caller that would give every copy up at once still gets two bumps only.
+    const landed = await runFeeBumps(harness, {
+      onStall: async (_elapsedMs, pending) => {
+        harness.node.pendingSeen.push(pending);
+        return false;
+      },
+    });
+
+    expect(harness.node.sentFees).toEqual([
+      { maxFeePerGas: 14n, maxPriorityFeePerGas: 2n },
+      { maxFeePerGas: 16n, maxPriorityFeePerGas: 3n },
+      { maxFeePerGas: 18n, maxPriorityFeePerGas: 4n },
+    ]);
+    expect(landed.txHash).toBe(harness.node.sentHashes[2]!);
+    // Every stall check after the second bump timed out was only a wait.
+    const waits = harness.node.pendingSeen.slice(3);
+    expect(waits.length).toBeGreaterThan(30);
+    for (const pending of waits) {
+      expect(pending).toMatchObject({ feeBumps: 2, bumpsExhausted: true, txHash: harness.node.sentHashes[2]! });
+    }
+  });
+
+  test("bumps only after each copy has waited out the timeout", async () => {
+    const harness = startFeeBumpNode({
+      atStallCheck: (check, node) => {
+        if (check === 12) node.mine(node.sentHashes[2]!);
+      },
+    });
+    await runFeeBumps(harness);
+
+    // Three checks per copy (20s, 40s, 60s), the third giving it up.
+    expect(harness.node.pendingSeen.map((pending) => [pending.feeBumps, pending.bumpsExhausted])).toEqual([
+      [0, false], [0, false], [0, false],
+      [1, false], [1, false], [1, false],
+      [2, false], [2, false], [2, false],
+      [2, true], [2, true],
+    ]);
+    expect(harness.node.sentFees).toHaveLength(3);
+  });
+
+  test("completes when the original transaction, not its replacement, is mined", async () => {
+    const harness = startFeeBumpNode({
+      atStallCheck: (check, node) => {
+        if (check === 4) node.mine(node.sentHashes[0]!);
+      },
+    });
+    const landed = await runFeeBumps(harness);
+
+    expect(harness.node.sentHashes).toHaveLength(2);
+    expect(landed).toEqual({
+      txHash: harness.node.sentHashes[0]!,
+      receipt: { status: "0x1", transactionHash: harness.node.sentHashes[0]! },
+    });
+  });
+
+  test("does not bump a nonce that one of its copies has already spent", async () => {
+    // Mined right before the check that would give the copy up.
+    const harness = startFeeBumpNode({
+      atStallCheck: (check, node) => {
+        if (check === 3) node.mine(node.sentHashes[0]!);
+      },
+    });
+    const landed = await runFeeBumps(harness, {
+      onStall: async (elapsedMs) => elapsedMs < 60_000,
+    });
+
+    expect(harness.node.sentHashes).toHaveLength(1);
+    expect(landed.txHash).toBe(harness.node.sentHashes[0]!);
+  });
+
+  test("gives the nonce up when a transaction it never sent spends it", async () => {
+    const harness = startFeeBumpNode({
+      atStallCheck: (check, node) => {
+        if (check === 15) node.latestNonce += 1;
+      },
+    });
+
+    await expect(runFeeBumps(harness)).rejects.toThrow(/Nonce 7 was spent by none of/);
+    expect(harness.node.sentFees).toHaveLength(3);
+  });
+
+  test("stops bumping where the worker's cap leaves no room to replace", async () => {
+    const harness = startFeeBumpNode({
+      atStallCheck: (check, node) => {
+        if (check === 6) node.mine(node.sentHashes[0]!);
+      },
+    });
+    await runFeeBumps(harness, {
+      fees: { maxFeePerGas: 1_000n, maxPriorityFeePerGas: 2n },
+      maxFeeCapWei: 1_000n,
+    });
+
+    expect(harness.node.sentFees).toHaveLength(1);
+    expect(harness.node.pendingSeen.at(-1)).toMatchObject({ feeBumps: 0, bumpsExhausted: true });
+  });
+
+  test("keeps waiting on the copies already sent when a replacement is refused", async () => {
+    const harness = startFeeBumpNode({
+      refuseSend: (index) => index === 1,
+      atStallCheck: (check, node) => {
+        if (check === 8) node.mine(node.sentHashes[0]!);
+      },
+    });
+    const landed = await runFeeBumps(harness);
+
+    expect(harness.node.replacementFailures).toBe(1);
+    // The second bump climbs from the refused one's fees: it may have landed in the pool.
+    expect(harness.node.sentFees).toEqual([
+      { maxFeePerGas: 14n, maxPriorityFeePerGas: 2n },
+      { maxFeePerGas: 16n, maxPriorityFeePerGas: 3n },
+      { maxFeePerGas: 18n, maxPriorityFeePerGas: 4n },
+    ]);
+    expect(landed.txHash).toBe(harness.node.sentHashes[0]!);
+  });
+
+  test("reports a mined copy that reverted", async () => {
+    const harness = startFeeBumpNode({
+      atStallCheck: (check, node) => {
+        if (check === 4) node.mine(node.sentHashes[1]!, "0x0");
+      },
+    });
+
+    await expect(runFeeBumps(harness)).rejects.toThrow(/was mined but reverted/);
+  });
 });
