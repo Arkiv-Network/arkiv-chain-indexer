@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   BASELOAD_PROJECT_ATTRIBUTE,
   BaseFeeCache,
+  bumpReplacementFees,
+  clearsReplacementPriceBump,
   formatGweiShort,
+  initialMaxFeePerGas,
   isFeeCapBelowBaseFeeError,
   isOutpriced,
   chooseBaseloadOperation,
@@ -295,5 +298,76 @@ describe("outpriced check", () => {
     expect(formatGweiShort(2_013_120_695n)).toBe("2.013");
     expect(formatGweiShort(1_500_000_000n)).toBe("1.5");
     expect(formatGweiShort(2_000_000_000n)).toBe("2");
+  });
+});
+
+describe("fee-bumped replacements", () => {
+  const GWEI = 1_000_000_000n;
+
+  test("sends a nonce's first transaction at twice the base fee, under the cap", () => {
+    expect(initialMaxFeePerGas(1000n * GWEI, 7n, 2n)).toBe(14n);
+    expect(initialMaxFeePerGas(2n * GWEI, 3n * GWEI, 2n)).toBe(2n * GWEI);
+    // Without a reading the cap is all there is to go on.
+    expect(initialMaxFeePerGas(2n * GWEI, null, 2n)).toBe(2n * GWEI);
+    // The tip still fits under the fee cap when there is no base fee to double.
+    expect(initialMaxFeePerGas(2n * GWEI, 0n, 2n)).toBe(2n);
+  });
+
+  test("raises both fields by an eighth, rounded up", () => {
+    expect(bumpReplacementFees({ maxFeePerGas: 800n, maxPriorityFeePerGas: 80n }, GWEI)).toEqual({
+      maxFeePerGas: 900n,
+      maxPriorityFeePerGas: 90n,
+    });
+    expect(bumpReplacementFees({ maxFeePerGas: 801n, maxPriorityFeePerGas: 81n }, GWEI)).toEqual({
+      maxFeePerGas: 902n,
+      maxPriorityFeePerGas: 92n,
+    });
+  });
+
+  test("moves even a 2 wei tip far enough to replace", () => {
+    const first = bumpReplacementFees({ maxFeePerGas: 14n, maxPriorityFeePerGas: 2n }, GWEI);
+    expect(first).toEqual({ maxFeePerGas: 16n, maxPriorityFeePerGas: 3n });
+    expect(bumpReplacementFees(first!, GWEI)).toEqual({ maxFeePerGas: 18n, maxPriorityFeePerGas: 4n });
+    expect(bumpReplacementFees({ maxFeePerGas: 1n, maxPriorityFeePerGas: 0n }, GWEI)).toEqual({
+      maxFeePerGas: 2n,
+      maxPriorityFeePerGas: 1n,
+    });
+  });
+
+  test("every bump clears the 10% replacement rule", () => {
+    for (const fee of [0n, 1n, 2n, 3n, 9n, 10n, 11n, 99n, 100n, 101n, 12_345_678_901n]) {
+      const bumped = bumpReplacementFees({ maxFeePerGas: fee, maxPriorityFeePerGas: fee }, 10n ** 30n)!;
+      expect(clearsReplacementPriceBump(fee, bumped.maxFeePerGas)).toBe(true);
+      expect(clearsReplacementPriceBump(fee, bumped.maxPriorityFeePerGas)).toBe(true);
+    }
+    // Exactly 10% is not enough for reth, and a bare +1 is not enough above 10 wei.
+    expect(clearsReplacementPriceBump(100n, 110n)).toBe(false);
+    expect(clearsReplacementPriceBump(100n, 111n)).toBe(true);
+    expect(clearsReplacementPriceBump(20n, 22n)).toBe(false);
+  });
+
+  test("clamps the fee cap at the worker's cap", () => {
+    expect(bumpReplacementFees({ maxFeePerGas: 1_800n, maxPriorityFeePerGas: 2n }, 2_000n)).toEqual({
+      maxFeePerGas: 2_000n,
+      maxPriorityFeePerGas: 3n,
+    });
+  });
+
+  test("gives up on a bump the cap leaves too small to replace", () => {
+    expect(bumpReplacementFees({ maxFeePerGas: 1_900n, maxPriorityFeePerGas: 2n }, 2_000n)).toBeNull();
+    expect(bumpReplacementFees({ maxFeePerGas: 2_000n, maxPriorityFeePerGas: 2n }, 2_000n)).toBeNull();
+  });
+
+  test("keeps the tip under the fee cap, which the worker's cap does not otherwise bound", () => {
+    expect(bumpReplacementFees({ maxFeePerGas: 100n, maxPriorityFeePerGas: 95n }, 10n ** 30n)).toEqual({
+      maxFeePerGas: 113n,
+      maxPriorityFeePerGas: 107n,
+    });
+    expect(bumpReplacementFees({ maxFeePerGas: 100n, maxPriorityFeePerGas: 99n }, 111n)).toEqual({
+      maxFeePerGas: 111n,
+      maxPriorityFeePerGas: 111n,
+    });
+    // A tip already at the fee cap cannot clear the rule once the cap stops the fee cap.
+    expect(bumpReplacementFees({ maxFeePerGas: 100n, maxPriorityFeePerGas: 100n }, 105n)).toBeNull();
   });
 });

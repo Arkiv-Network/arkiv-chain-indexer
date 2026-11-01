@@ -40,12 +40,15 @@ import {
   getTimeBombRemainingSeconds,
   isFeeCapBelowBaseFeeError,
   BaseFeeCache,
+  bumpReplacementFees,
   formatGweiShort,
+  initialMaxFeePerGas,
   isOutpriced,
   parseGweiToWei,
   pickSoonestExpiringPoolEntries,
   pruneExpiredPoolEntries,
   randomOwnerAddress,
+  type BaseloadFees,
   type BaseloadPoolEntry,
 } from "./baseloadTaskHelpers";
 
@@ -100,20 +103,30 @@ interface BaseloadRpcClient {
   getLatestNonce: (address: string) => Promise<number>;
   /** Base fee of the latest block, or null when the chain does not report one. */
   getBaseFeeWei: () => Promise<bigint | null>;
+  /** The receipt of a transaction, or null while it has none. */
+  getTransactionReceipt: (txHash: HexString) => Promise<BaseloadTransactionReceipt | null>;
   /**
-   * Polls for the receipt. `onStall` is consulted every {@link RECEIPT_STALL_CHECK_MS}
-   * with the elapsed time; returning false abandons the wait.
+   * Polls for the receipt of whichever of `txHashes` (one nonce's transaction
+   * and its fee-bumped replacements) is mined. `onStall` is consulted every
+   * {@link RECEIPT_STALL_CHECK_MS} with the elapsed time; returning false
+   * abandons the wait.
    */
   waitForTransactionReceipt: (
-    txHash: HexString,
+    txHashes: readonly HexString[],
     signal: AbortSignal,
     onStall?: (elapsedMs: number) => Promise<boolean>,
-  ) => Promise<BaseloadTransactionReceipt>;
+  ) => Promise<BaseloadLandedTransaction>;
 }
 
 type BaseloadTransactionReceipt = {
   status?: unknown;
   [key: string]: unknown;
+};
+
+/** The one transaction sent with a nonce that was mined, and its receipt. */
+export type BaseloadLandedTransaction = {
+  txHash: HexString;
+  receipt: BaseloadTransactionReceipt;
 };
 
 type BaseloadTxParams = {
@@ -157,8 +170,10 @@ const RECEIPT_FIRST_POLL_DELAY_MS = 2_000;
 const RECEIPT_POLL_INTERVAL_MS = 1_000;
 /** How often a stalled receipt wait asks its owner whether to keep waiting. */
 const RECEIPT_STALL_CHECK_MS = 20_000;
-/** A pending transaction that is not merely underpriced is given up after this. */
-const RECEIPT_WAIT_TIMEOUT_MS = 10 * 60_000;
+/** A pending transaction that is not merely underpriced is replaced with a fee-bumped copy after this. */
+const RECEIPT_WAIT_TIMEOUT_MS = 60_000;
+/** After this many fee bumps a nonce's transaction is only waited for, never replaced again. */
+const MAX_FEE_BUMPS_PER_NONCE = 2;
 /** One base-fee reading serves the whole fleet for about a block. */
 const BASE_FEE_TTL_MS = 2_000;
 
@@ -627,12 +642,15 @@ class BaseloadWorkerTask {
           // Note for an agent:
           // This code was changed by hand and do not change the following parameters:
           // maxPriorityFeePerGas is OK to be minimal and 1
+          // Only a fee-bumped retry of a stuck transaction raises it (see bumpReplacementFees).
           const SUFFICIENT_PRIORITY_FEE_PER_GAS = 2n;
 
           /**
            * Sends one batch and waits for it to land: one `eth_sendRawTransaction`
            * plus the receipt polls, and nothing else. Nonce, gas limit and chain
            * id are all supplied, so neither the SDK nor viem looks anything up.
+           * A batch stuck without a receipt is resent with bumped fees, at most
+           * {@link MAX_FEE_BUMPS_PER_NONCE} times (see {@link sendWithFeeBumps}).
            */
           const submitAndConfirm = async (
             parameters: BaseloadMutationParameters,
@@ -642,33 +660,45 @@ class BaseloadWorkerTask {
               // transaction of ours: the next send reuses its slot.
               nextNonce = await clients.rpc.getLatestNonce(worker.walletAddress);
             }
+            const nonce = nextNonce;
             const shape = baseloadGasShapeKey(parameters);
             const gas = gasLimitByShape.get(shape);
+            // A replacement resolves expiry against the same head, so every copy
+            // sent with this nonce carries the same batch and only the fees differ.
+            const expiryBlock = estimateCurrentBlock(lastKnownBlock, lastBlockFetchedAtMs, Date.now());
             // Every send moves the wallet's nonce on, so anything that goes wrong
             // from here on leaves this worker's idea of it untrustworthy: forget
             // it and read the chain's again next time.
-            let receipt: BaseloadTransactionReceipt;
-            let txHash: HexString;
+            let landed: BaseloadLandedTransaction;
             try {
-              txHash = await sendBaseloadMutation(
-                clients.arkiv,
-                parameters,
-                {
-                  maxFeePerGas,
+              const currentBaseFee = await this.baseFees.read(clients.rpc).catch(() => null);
+              landed = await sendWithFeeBumps({
+                rpc: clients.rpc,
+                address: worker.walletAddress,
+                nonce,
+                // The worker's cap (maxFeePerGas) is where the fee bumps stop,
+                // not what the first send offers.
+                fees: {
+                  maxFeePerGas: initialMaxFeePerGas(maxFeePerGas, currentBaseFee, SUFFICIENT_PRIORITY_FEE_PER_GAS),
                   maxPriorityFeePerGas: SUFFICIENT_PRIORITY_FEE_PER_GAS,
-                  nonce: nextNonce,
-                  chainId: clients.chainId,
-                  // Unset for the first batch of a shape only: viem estimates it
-                  // once, and the receipt below teaches us the limit from there on.
-                  ...(gas !== undefined ? { gas } : {}),
                 },
-                estimateCurrentBlock(lastKnownBlock, lastBlockFetchedAtMs, Date.now()),
-              );
-              receipt = await waitForSuccessfulTransactionReceipt(
-                clients.rpc,
-                txHash,
-                this.abortController.signal,
-                async (elapsedMs) => {
+                maxFeeCapWei: maxFeePerGas,
+                signal: this.abortController.signal,
+                send: (fees) =>
+                  sendBaseloadMutation(
+                    clients.arkiv,
+                    parameters,
+                    {
+                      ...fees,
+                      nonce,
+                      chainId: clients.chainId,
+                      // Unset for the first batch of a shape only: viem estimates it
+                      // once, and the receipt below teaches us the limit from there on.
+                      ...(gas !== undefined ? { gas } : {}),
+                    },
+                    expiryBlock,
+                  ),
+                onStall: async (elapsedMs, pending) => {
                   const seconds = Math.round(elapsedMs / 1000);
                   const pendingBaseFee = await this.baseFees.read(clients.rpc).catch(() => null);
                   if (isOutpriced(pendingBaseFee, maxFeePerGas)) {
@@ -677,7 +707,20 @@ class BaseloadWorkerTask {
                     this.postStatus("outpriced", {
                       currentBlock: lastKnownBlock,
                       message: `Transaction pending ${seconds}s: base fee ${formatGweiShort(pendingBaseFee!)} gwei is above the ${worker.maxGasPriceGwei} gwei cap`,
-                      txHash,
+                      txHash: pending.txHash,
+                      ...statusCounts(),
+                    });
+                    return true;
+                  }
+                  if (pending.bumpsExhausted) {
+                    const capped =
+                      pending.feeBumps < MAX_FEE_BUMPS_PER_NONCE
+                        ? `; the ${worker.maxGasPriceGwei} gwei cap leaves no room for another`
+                        : "";
+                    this.postStatus("waiting", {
+                      currentBlock: lastKnownBlock,
+                      message: `Transaction pending ${Math.round(pending.pendingMs / 1000)}s after ${describeFeeBumps(pending.feeBumps)}${capped}`,
+                      txHash: pending.txHash,
                       ...statusCounts(),
                     });
                     return true;
@@ -686,19 +729,25 @@ class BaseloadWorkerTask {
                   this.postStatus("waiting", {
                     currentBlock: lastKnownBlock,
                     message: `Waiting ${seconds}s for the receipt`,
-                    txHash,
+                    txHash: pending.txHash,
                     ...statusCounts(),
                   });
                   return true;
                 },
-              );
+                onReplacementFailed: (error) => {
+                  console.error(
+                    `[baseload] worker ${this.worker.id} (wallet ${this.worker.walletNumber}) could not send a fee-bumped replacement for nonce ${nonce}: ${describeError(error)}`,
+                  );
+                },
+              });
             } catch (error) {
               nextNonce = null;
               // A batch that ran out of gas must not reuse the limit that starved it.
               gasLimitByShape.delete(shape);
               throw error;
             }
-            nextNonce += 1;
+            nextNonce = nonce + 1;
+            const { txHash, receipt } = landed;
             const gasUsed = readReceiptQuantity(receipt, "gasUsed");
             if (gasUsed !== null && gasUsed > 0n) {
               gasLimitByShape.set(shape, learnBaseloadGasLimit(gasUsed));
@@ -991,6 +1040,14 @@ function createRpcClient(
   endpoint: BaseloadRpcEndpoint,
   ring: RpcKeyRing | null = null,
 ): BaseloadRpcClient {
+  const getTransactionReceipt = async (txHash: HexString) => {
+    const result = await callRpc(endpoint, "eth_getTransactionReceipt", [txHash], ring);
+    if (result === null) return null;
+    if (!isRecord(result)) {
+      throw new Error(`RPC eth_getTransactionReceipt returned a non-object receipt for ${txHash}`);
+    }
+    return result;
+  };
   return {
     getChainId: async () => {
       const result = await callRpc(endpoint, "eth_chainId", [], ring);
@@ -1034,7 +1091,8 @@ function createRpcClient(
       }
       return BigInt(baseFee);
     },
-    waitForTransactionReceipt: async (txHash, signal, onStall) => {
+    getTransactionReceipt,
+    waitForTransactionReceipt: async (txHashes, signal, onStall) => {
       // A receipt cannot exist before the next block, so the first poll of a
       // freshly sent transaction is always wasted. Wait out roughly one block
       // first, and jitter every wait: without it every worker polls on the same
@@ -1042,25 +1100,25 @@ function createRpcClient(
       // rate limit while the average budget sits half idle.
       const startedAtMs = Date.now();
       let lastStallCheckMs = startedAtMs;
+      const newestTxHash = txHashes[txHashes.length - 1]!;
       await sleep(jitteredDelay(RECEIPT_FIRST_POLL_DELAY_MS), signal);
-      while (!signal.aborted) {
-        const result = await callRpc(endpoint, "eth_getTransactionReceipt", [txHash], ring);
-        if (result !== null) {
-          if (!isRecord(result)) {
-            throw new Error(`RPC eth_getTransactionReceipt returned a non-object receipt for ${txHash}`);
-          }
-          return result;
-        }
+      // Once a transaction has been replaced any copy may be the one mined, so
+      // each poll asks after one of them in turn, newest first: a replacement
+      // adds no polls, it only spaces out each copy's.
+      for (let poll = 0; !signal.aborted; poll += 1) {
+        const txHash = txHashes[txHashes.length - 1 - (poll % txHashes.length)]!;
+        const receipt = await getTransactionReceipt(txHash);
+        if (receipt !== null) return { txHash, receipt };
         const now = Date.now();
         if (onStall && now - lastStallCheckMs >= RECEIPT_STALL_CHECK_MS) {
           lastStallCheckMs = now;
           if (!(await onStall(now - startedAtMs))) {
-            throw new BaseloadReceiptTimeoutError(txHash, now - startedAtMs);
+            throw new BaseloadReceiptTimeoutError(newestTxHash, now - startedAtMs);
           }
         }
         await sleep(jitteredDelay(RECEIPT_POLL_INTERVAL_MS), signal);
       }
-      throw new Error(`Stopped while waiting for transaction receipt ${txHash}`);
+      throw new Error(`Stopped while waiting for transaction receipt ${newestTxHash}`);
     },
   };
 }
@@ -1110,17 +1168,128 @@ export function isBaseloadTransactionReceiptSuccessful(receipt: BaseloadTransact
   throw new Error(`Transaction receipt has unsupported status value ${safeStringify(status)}`);
 }
 
-async function waitForSuccessfulTransactionReceipt(
-  rpc: BaseloadRpcClient,
-  txHash: HexString,
-  signal: AbortSignal,
-  onStall?: (elapsedMs: number) => Promise<boolean>,
-): Promise<BaseloadTransactionReceipt> {
-  const receipt = await rpc.waitForTransactionReceipt(txHash, signal, onStall);
-  if (!isBaseloadTransactionReceiptSuccessful(receipt)) {
-    throw new BaseloadTransactionRevertedError(txHash, receipt);
+/** Where a nonce's transaction stands, as a stall check of {@link sendWithFeeBumps} sees it. */
+export type BaseloadPendingTransaction = {
+  /** The newest copy sent. */
+  txHash: HexString;
+  feeBumps: number;
+  /** No further replacement will be sent; the nonce is only waited for. */
+  bumpsExhausted: boolean;
+  /** Since the nonce's first send. */
+  pendingMs: number;
+};
+
+export type SendWithFeeBumpsOptions = {
+  rpc: Pick<BaseloadRpcClient, "getLatestNonce" | "getTransactionReceipt" | "waitForTransactionReceipt">;
+  address: string;
+  nonce: number;
+  /** What the first send offers. */
+  fees: BaseloadFees;
+  /** The worker's cap: no bump takes the fee cap past it. */
+  maxFeeCapWei: bigint;
+  /** Signs and sends the batch with `nonce` at these fees; every call sends the same batch. */
+  send: (fees: BaseloadFees) => Promise<HexString>;
+  signal: AbortSignal;
+  /**
+   * Consulted at every stall check of the receipt wait. Returning false gives
+   * the newest copy up and sends a fee-bumped replacement; once the bumps are
+   * exhausted the answer is ignored and the wait goes on.
+   */
+  onStall: (elapsedMs: number, pending: BaseloadPendingTransaction) => Promise<boolean>;
+  onReplacementFailed: (error: unknown) => void;
+};
+
+/**
+ * Sends one nonce's batch and waits until one of its copies is mined.
+ *
+ * A transaction left without a receipt is not given up and its slot reused
+ * for a different batch at the same fees: the txpool refuses that as an
+ * underpriced replacement, and retrying a nonce that way is the pattern that
+ * has left reth's txpool no longer selecting the sender (paradigmxyz/reth#26980).
+ * Instead the same batch is resent with fees raised enough to replace it, at most
+ * {@link MAX_FEE_BUMPS_PER_NONCE} times, after which it is only waited for:
+ *
+ *   send -> timeout -> bump 1 -> timeout -> bump 2 -> timeout -> wait
+ *
+ * Any copy may be the one mined, so each is polled for a receipt. The wait
+ * ends without one only when the account's nonce has moved past this one and
+ * none of the copies has a receipt: somebody else spent it.
+ */
+export async function sendWithFeeBumps(options: SendWithFeeBumpsOptions): Promise<BaseloadLandedTransaction> {
+  const { rpc, address, nonce, signal } = options;
+  let fees = options.fees;
+  const sentHashes: HexString[] = [await options.send(fees)];
+  const firstSentAtMs = Date.now();
+  let feeBumps = 0;
+  let bumpsExhausted = false;
+  for (;;) {
+    let landed: BaseloadLandedTransaction | null;
+    try {
+      landed = await rpc.waitForTransactionReceipt(sentHashes, signal, async (elapsedMs) => {
+        const pending = {
+          txHash: sentHashes[sentHashes.length - 1]!,
+          feeBumps,
+          bumpsExhausted,
+          pendingMs: Date.now() - firstSentAtMs,
+        };
+        if (!bumpsExhausted) return options.onStall(elapsedMs, pending);
+        // Out of bumps, no amount of time gives the nonce up; only the account
+        // moving past it does, and the check below then says who took it.
+        const latestNonce = await rpc.getLatestNonce(address).catch(() => null);
+        if (latestNonce !== null && latestNonce > nonce) return false;
+        await options.onStall(elapsedMs, pending);
+        return true;
+      });
+    } catch (error) {
+      if (!(error instanceof BaseloadReceiptTimeoutError)) throw error;
+      // Before replacing anything, make sure the nonce is still waiting to be spent.
+      landed = await findLandedTransaction(rpc, address, nonce, sentHashes);
+    }
+    if (landed !== null) {
+      if (!isBaseloadTransactionReceiptSuccessful(landed.receipt)) {
+        throw new BaseloadTransactionRevertedError(landed.txHash, landed.receipt);
+      }
+      return landed;
+    }
+    if (bumpsExhausted) continue;
+    const bumped = feeBumps < MAX_FEE_BUMPS_PER_NONCE ? bumpReplacementFees(fees, options.maxFeeCapWei) : null;
+    if (bumped === null) {
+      bumpsExhausted = true;
+      continue;
+    }
+    feeBumps += 1;
+    // Bump from these fees next time even if the send fails: it may have
+    // reached the txpool all the same.
+    fees = bumped;
+    try {
+      sentHashes.push(await options.send(fees));
+    } catch (error) {
+      // The copies already sent still hold the nonce. Giving up on them here
+      // would retry the nonce with a fresh batch at first-send fees, which is
+      // exactly the underpriced replacement this is meant to avoid.
+      options.onReplacementFailed(error);
+    }
   }
-  return receipt;
+}
+
+/**
+ * Which of a nonce's sent copies was mined, once the account has moved past
+ * the nonce; null while it has not (or the nonce cannot be read just now).
+ * Throws when the nonce was spent by none of them.
+ */
+async function findLandedTransaction(
+  rpc: Pick<BaseloadRpcClient, "getLatestNonce" | "getTransactionReceipt">,
+  address: string,
+  nonce: number,
+  txHashes: readonly HexString[],
+): Promise<BaseloadLandedTransaction | null> {
+  const latestNonce = await rpc.getLatestNonce(address).catch(() => null);
+  if (latestNonce === null || latestNonce <= nonce) return null;
+  for (const txHash of txHashes) {
+    const receipt = await rpc.getTransactionReceipt(txHash);
+    if (receipt !== null) return { txHash, receipt };
+  }
+  throw new BaseloadNonceSpentElsewhereError(nonce, txHashes);
 }
 
 /**
@@ -1131,7 +1300,7 @@ async function waitForSuccessfulTransactionReceipt(
  * for the whole bundle in RPC calls: a height lookup, a nonce, a gas estimate,
  * then viem polling for the receipt. Here every input is supplied up front, so
  * submitting a batch costs exactly one `eth_sendRawTransaction`; the caller owns
- * the waiting (see {@link waitForSuccessfulTransactionReceipt}) and decodes the
+ * the waiting (see {@link sendWithFeeBumps}) and decodes the
  * receipt locally (see {@link decodeBaseloadMutationReceipt}).
  */
 export async function sendBaseloadMutation(
@@ -1336,12 +1505,19 @@ function readOptionalEntityKeyArray(value: unknown, fieldName: string, txHash: H
   });
 }
 
-class BaseloadReceiptTimeoutError extends Error {
+export class BaseloadReceiptTimeoutError extends Error {
   constructor(txHash: HexString, elapsedMs: number) {
-    super(
-      `Transaction ${txHash} has no receipt after ${Math.round(elapsedMs / 1000)}s; giving up on it and re-reading the nonce`,
-    );
+    super(`Transaction ${txHash} has no receipt after ${Math.round(elapsedMs / 1000)}s`);
     this.name = "BaseloadReceiptTimeoutError";
+  }
+}
+
+class BaseloadNonceSpentElsewhereError extends Error {
+  constructor(nonce: number, txHashes: readonly HexString[]) {
+    super(
+      `Nonce ${nonce} was spent by none of ${txHashes.join(", ")}; giving up on them and re-reading the nonce`,
+    );
+    this.name = "BaseloadNonceSpentElsewhereError";
   }
 }
 
@@ -1358,6 +1534,10 @@ function isBytes32Hex(value: unknown): value is HexString {
 
 function describeEntityCount(count: number): string {
   return `${count} ${count === 1 ? "entity" : "entities"}`;
+}
+
+function describeFeeBumps(count: number): string {
+  return `${count} fee ${count === 1 ? "bump" : "bumps"}`;
 }
 
 function lastEntityKey(entityKeys: readonly HexString[]): HexString {
