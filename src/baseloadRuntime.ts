@@ -2,6 +2,7 @@ import {
   createWalletClient,
   decodeMutationResult,
   ExpirationTime,
+  randomSalt,
   sendMutation,
   type EntityMutationOps,
   type WalletArkivClient,
@@ -146,7 +147,8 @@ type BaseloadTxParams = {
 };
 
 export type BaseloadMutationParameters = {
-  creates?: ReturnType<typeof createBaseloadEntityInput>[];
+  /** A create without a `salt` gets a fresh random one from the SDK every time it is built. */
+  creates?: Array<ReturnType<typeof createBaseloadEntityInput> & { salt?: bigint }>;
   updates?: ReturnType<typeof createBaseloadUpdateInput>[];
   deletes?: Array<{ entityKey: HexString }>;
   extensions?: Array<{ entityKey: HexString; expiresIn: number }>;
@@ -663,8 +665,10 @@ class BaseloadWorkerTask {
             const nonce = nextNonce;
             const shape = baseloadGasShapeKey(parameters);
             const gas = gasLimitByShape.get(shape);
-            // A replacement resolves expiry against the same head, so every copy
-            // sent with this nonce carries the same batch and only the fees differ.
+            // A replacement carries the same key salts and resolves expiry against
+            // the same head, so every copy sent with this nonce is the same
+            // calldata and only the fees differ.
+            const batch = pinBaseloadCreateSalts(parameters);
             const expiryBlock = estimateCurrentBlock(lastKnownBlock, lastBlockFetchedAtMs, Date.now());
             // Every send moves the wallet's nonce on, so anything that goes wrong
             // from here on leaves this worker's idea of it untrustworthy: forget
@@ -687,7 +691,7 @@ class BaseloadWorkerTask {
                 send: (fees) =>
                   sendBaseloadMutation(
                     clients.arkiv,
-                    parameters,
+                    batch,
                     {
                       ...fees,
                       nonce,
@@ -1100,6 +1104,7 @@ function createRpcClient(
       // rate limit while the average budget sits half idle.
       const startedAtMs = Date.now();
       let lastStallCheckMs = startedAtMs;
+      let lastPollErrorLoggedMs = Number.NEGATIVE_INFINITY;
       const newestTxHash = txHashes[txHashes.length - 1]!;
       await sleep(jitteredDelay(RECEIPT_FIRST_POLL_DELAY_MS), signal);
       // Once a transaction has been replaced any copy may be the one mined, so
@@ -1107,7 +1112,20 @@ function createRpcClient(
       // adds no polls, it only spaces out each copy's.
       for (let poll = 0; !signal.aborted; poll += 1) {
         const txHash = txHashes[txHashes.length - 1 - (poll % txHashes.length)]!;
-        const receipt = await getTransactionReceipt(txHash);
+        // A failed poll (a 429, a 5xx, a dropped connection) is no answer
+        // either way. The copies still hold the nonce, so keep polling them:
+        // giving up here would retry the nonce with a fresh batch at first-send
+        // fees, the underpriced replacement the fee bumps exist to avoid.
+        const receipt = await getTransactionReceipt(txHash).catch((error: unknown) => {
+          const now = Date.now();
+          if (now - lastPollErrorLoggedMs >= RECEIPT_STALL_CHECK_MS) {
+            lastPollErrorLoggedMs = now;
+            console.error(
+              `[baseload] receipt poll for ${txHash} failed, still waiting: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          return null;
+        });
         if (receipt !== null) return { txHash, receipt };
         const now = Date.now();
         if (onStall && now - lastStallCheckMs >= RECEIPT_STALL_CHECK_MS) {
@@ -1213,7 +1231,8 @@ export type SendWithFeeBumpsOptions = {
  *
  * Any copy may be the one mined, so each is polled for a receipt. The wait
  * ends without one only when the account's nonce has moved past this one and
- * none of the copies has a receipt: somebody else spent it.
+ * none of the copies has a receipt: somebody else spent it. A failed read is
+ * never taken for an answer; it is asked again at the next poll or check.
  */
 export async function sendWithFeeBumps(options: SendWithFeeBumpsOptions): Promise<BaseloadLandedTransaction> {
   const { rpc, address, nonce, signal } = options;
@@ -1223,7 +1242,7 @@ export async function sendWithFeeBumps(options: SendWithFeeBumpsOptions): Promis
   let feeBumps = 0;
   let bumpsExhausted = false;
   for (;;) {
-    let landed: BaseloadLandedTransaction | null;
+    let landed: BaseloadLandedTransaction | "unspent" | "unsettled";
     try {
       landed = await rpc.waitForTransactionReceipt(sentHashes, signal, async (elapsedMs) => {
         const pending = {
@@ -1245,7 +1264,9 @@ export async function sendWithFeeBumps(options: SendWithFeeBumpsOptions): Promis
       // Before replacing anything, make sure the nonce is still waiting to be spent.
       landed = await findLandedTransaction(rpc, address, nonce, sentHashes);
     }
-    if (landed !== null) {
+    // Spent, but by which copy is not known yet: no bump, wait and ask again.
+    if (landed === "unsettled") continue;
+    if (landed !== "unspent") {
       if (!isBaseloadTransactionReceiptSuccessful(landed.receipt)) {
         throw new BaseloadTransactionRevertedError(landed.txHash, landed.receipt);
       }
@@ -1257,6 +1278,8 @@ export async function sendWithFeeBumps(options: SendWithFeeBumpsOptions): Promis
       bumpsExhausted = true;
       continue;
     }
+    // A stopped worker sends nothing more.
+    if (signal.aborted) throw new Error("Task stopped");
     feeBumps += 1;
     // Bump from these fees next time even if the send fails: it may have
     // reached the txpool all the same.
@@ -1274,21 +1297,27 @@ export async function sendWithFeeBumps(options: SendWithFeeBumpsOptions): Promis
 
 /**
  * Which of a nonce's sent copies was mined, once the account has moved past
- * the nonce; null while it has not (or the nonce cannot be read just now).
- * Throws when the nonce was spent by none of them.
+ * the nonce. `"unspent"` while it has not (or the nonce cannot be read just
+ * now), `"unsettled"` when it has but a receipt lookup failed. Throws only
+ * when every lookup answered and none of the copies was mined.
  */
 async function findLandedTransaction(
   rpc: Pick<BaseloadRpcClient, "getLatestNonce" | "getTransactionReceipt">,
   address: string,
   nonce: number,
   txHashes: readonly HexString[],
-): Promise<BaseloadLandedTransaction | null> {
+): Promise<BaseloadLandedTransaction | "unspent" | "unsettled"> {
   const latestNonce = await rpc.getLatestNonce(address).catch(() => null);
-  if (latestNonce === null || latestNonce <= nonce) return null;
+  if (latestNonce === null || latestNonce <= nonce) return "unspent";
+  let unsettled = false;
   for (const txHash of txHashes) {
-    const receipt = await rpc.getTransactionReceipt(txHash);
+    const receipt = await rpc.getTransactionReceipt(txHash).catch(() => {
+      unsettled = true;
+      return null;
+    });
     if (receipt !== null) return { txHash, receipt };
   }
+  if (unsettled) return "unsettled";
   throw new BaseloadNonceSpentElsewhereError(nonce, txHashes);
 }
 
@@ -1436,6 +1465,19 @@ function toAttributeInputs(
   );
 }
 
+/**
+ * Gives every create of a batch the key salt it keeps from here on. Left to
+ * the SDK, each build draws a new one, so two sends of the same batch would be
+ * different calldata minting different entity keys.
+ */
+export function pinBaseloadCreateSalts(parameters: BaseloadMutationParameters): BaseloadMutationParameters {
+  if (!parameters.creates) return parameters;
+  return {
+    ...parameters,
+    creates: parameters.creates.map((input) => ({ ...input, salt: input.salt ?? randomSalt() })),
+  };
+}
+
 export function toSdkMutationParameters(parameters: BaseloadMutationParameters): unknown {
   const updates = parameters.updates ?? [];
   // The engine ignores expiry on UPDATE, but the pool bookkeeping treats an
@@ -1465,6 +1507,7 @@ export function toSdkMutationParameters(parameters: BaseloadMutationParameters):
             contentType: input.contentType,
             attributes: toAttributeInputs(input.attributes),
             expires: toExpires(input.expiresIn),
+            ...(input.salt !== undefined ? { salt: input.salt } : {}),
           })),
         }
       : {}),
