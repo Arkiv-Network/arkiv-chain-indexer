@@ -11,6 +11,7 @@ import {
   decodeBaseloadMutationReceipt,
   isBaseloadTransactionReceiptSuccessful,
   learnBaseloadGasLimit,
+  pinBaseloadCreateSalts,
   readBaseloadEntityKeysFromSdkResult,
   estimateCurrentBlock,
   readReceiptQuantity,
@@ -144,6 +145,7 @@ const ENGINE_ADDRESS = "0x4400000000000000000000000000000000000044";
  */
 function startRecordingRpcServer() {
   const methods: string[] = [];
+  const rawTransactions: `0x${string}`[] = [];
   const results: Record<string, unknown> = {
     eth_chainId: "0x1",
     eth_blockNumber: "0x64",
@@ -156,8 +158,9 @@ function startRecordingRpcServer() {
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
-      const body = (await request.json()) as { id: number; method: string };
+      const body = (await request.json()) as { id: number; method: string; params?: unknown[] };
       methods.push(body.method);
+      if (body.method === "eth_sendRawTransaction") rawTransactions.push(body.params![0] as `0x${string}`);
       if (body.method === "eth_fillTransaction") {
         // A stock Ethereum node has no such method; viem probes for it once.
         return Response.json({
@@ -172,6 +175,7 @@ function startRecordingRpcServer() {
   return {
     url: `http://127.0.0.1:${server.port}`,
     methods,
+    rawTransactions,
     stop: () => server.stop(true),
   };
 }
@@ -241,6 +245,48 @@ describe("baseload advanced-path RPC economy", () => {
     } finally {
       rpc.stop();
     }
+  });
+});
+
+describe("baseload replacement calldata", () => {
+  async function sendCopies(batch: BaseloadMutationParameters) {
+    const rpc = startRecordingRpcServer();
+    try {
+      for (const [maxFeePerGas, maxPriorityFeePerGas] of [[14n, 2n], [16n, 3n]] as const) {
+        await sendBaseloadMutation(
+          testWalletClient(rpc.url),
+          batch,
+          { maxFeePerGas, maxPriorityFeePerGas, nonce: 7, gas: 1_000_000n, chainId: 1 },
+          100n,
+        );
+      }
+      return rpc.rawTransactions.map((raw) => parseTransaction(raw));
+    } finally {
+      rpc.stop();
+    }
+  }
+
+  test("every copy of a create batch carries the same calldata, only the fees differ", async () => {
+    const [first, second] = await sendCopies(pinBaseloadCreateSalts(CREATE_BATCH));
+
+    expect(second!.data).toBe(first!.data!);
+    expect(second!.to).toBe(first!.to!);
+    expect(second!.nonce).toBe(7);
+    expect([first!.maxFeePerGas, first!.maxPriorityFeePerGas]).toEqual([14n, 2n]);
+    expect([second!.maxFeePerGas, second!.maxPriorityFeePerGas]).toEqual([16n, 3n]);
+  });
+
+  test("a create left to the SDK draws a new key salt on every build", async () => {
+    const [first, second] = await sendCopies(CREATE_BATCH);
+    expect(second!.data).not.toBe(first!.data!);
+  });
+
+  test("pins a salt once and keeps it", () => {
+    const pinned = pinBaseloadCreateSalts(CREATE_BATCH);
+    expect(typeof pinned.creates![0]!.salt).toBe("bigint");
+    expect(pinBaseloadCreateSalts(pinned)).toEqual(pinned);
+    const deletes = { deletes: [{ entityKey: ENTITY_KEY }] };
+    expect(pinBaseloadCreateSalts(deletes)).toBe(deletes);
   });
 });
 
@@ -342,8 +388,9 @@ describe("baseload chain head estimation", () => {
  * worker asks for and counts each method, so the loop's RPC bill per operation
  * can be asserted rather than reasoned about.
  */
-function startFakeNode(options: { entitiesPerBatch: number; baseFeePerGas?: string }) {
+function startFakeNode(options: { entitiesPerBatch: number; baseFeePerGas?: string; failReceiptPolls?: number }) {
   const methods: string[] = [];
+  let failedReceiptPolls = 0;
   const rawTransactions: `0x${string}`[] = [];
   let sentTransactions = 0;
   const server = Bun.serve({
@@ -372,6 +419,10 @@ function startFakeNode(options: { entitiesPerBatch: number; baseFeePerGas?: stri
           sentTransactions += 1;
           return reply(txHashForSend(sentTransactions));
         case "eth_getTransactionReceipt": {
+          if (failedReceiptPolls < (options.failReceiptPolls ?? 0)) {
+            failedReceiptPolls += 1;
+            return new Response("rate limited", { status: 429, statusText: "Too Many Requests" });
+          }
           const txHash = (body as unknown as { params: string[] }).params[0]!;
           return reply({
             status: "0x1",
@@ -511,6 +562,57 @@ describe("baseload worker loop RPC budget", () => {
   );
 });
 
+describe("baseload receipt poll failures", () => {
+  test(
+    "keep waiting on the sent transaction instead of resending its nonce",
+    async () => {
+      // The first three receipt polls are refused with a 429.
+      const node = startFakeNode({ entitiesPerBatch: 1, failReceiptPolls: 3 });
+      const runtime = new BaseloadRuntime({
+        rpcUrl: node.url,
+        mnemonic: TEST_MNEMONIC,
+        payloadProvider: null,
+        faucet: null,
+        rpcKeys: null,
+      });
+      let sawError = false;
+      try {
+        runtime.updateConfig({
+          workers: [
+            {
+              walletNumber: 0,
+              behavior: "create",
+              entitiesPerRequest: 1,
+              opsPerMinute: 60,
+              singleCreatePayloadSize: 32,
+            },
+          ],
+        });
+        const deadline = Date.now() + 20_000;
+        while (node.rawTransactions.length < 2 && Date.now() < deadline) {
+          if (Object.values(runtime.getState().statuses).some((status) => status.status === "error")) {
+            sawError = true;
+          }
+          await Bun.sleep(50);
+        }
+        runtime.stop();
+
+        expect(node.countOf("eth_getTransactionReceipt")).toBeGreaterThanOrEqual(4);
+        // The first batch outlived the failed polls and landed; the next batch
+        // went out with the next nonce rather than as a second try at the first.
+        expect(node.rawTransactions.slice(0, 2).map((raw) => parseTransaction(raw).nonce)).toEqual([7, 8]);
+        // The worker never fell into its failure path, which re-reads the nonce.
+        expect(node.countOf("eth_getTransactionCount")).toBe(1);
+        expect(sawError).toBe(false);
+      } finally {
+        runtime.stop();
+        node.stop();
+      }
+    },
+    30_000,
+  );
+});
+
 describe("baseload first-send fees", () => {
   async function firstSentFees(maxGasPriceGwei: number) {
     // 1 gwei base fee.
@@ -574,6 +676,7 @@ function startFeeBumpNode(options: {
   nonce?: number;
   atStallCheck?: (check: number, node: FeeBumpNode) => void;
   refuseSend?: (index: number) => boolean;
+  failReceiptLookups?: number;
 }) {
   const node = {
     latestNonce: options.nonce ?? 7,
@@ -583,6 +686,7 @@ function startFeeBumpNode(options: {
     stallChecks: 0,
     pendingSeen: [] as BaseloadPendingTransaction[],
     replacementFailures: 0,
+    failedReceiptLookups: 0,
     mine(txHash: `0x${string}`, status = "0x1") {
       node.receipts.set(txHash, { status, transactionHash: txHash });
       node.latestNonce += 1;
@@ -590,7 +694,13 @@ function startFeeBumpNode(options: {
   };
   const rpc: SendWithFeeBumpsOptions["rpc"] = {
     getLatestNonce: async () => node.latestNonce,
-    getTransactionReceipt: async (txHash) => node.receipts.get(txHash) ?? null,
+    getTransactionReceipt: async (txHash) => {
+      if (node.failedReceiptLookups < (options.failReceiptLookups ?? 0)) {
+        node.failedReceiptLookups += 1;
+        throw new Error("RPC eth_getTransactionReceipt failed with HTTP 429");
+      }
+      return node.receipts.get(txHash) ?? null;
+    },
     waitForTransactionReceipt: async (txHashes, _signal, onStall) => {
       for (let elapsedMs = 20_000; ; elapsedMs += 20_000) {
         for (const txHash of txHashes) {
@@ -767,6 +877,32 @@ describe("baseload fee-bumped replacements", () => {
       { maxFeePerGas: 18n, maxPriorityFeePerGas: 4n },
     ]);
     expect(landed.txHash).toBe(harness.node.sentHashes[0]!);
+  });
+
+  test("neither bumps nor gives up a spent nonce whose receipt lookup failed", async () => {
+    const harness = startFeeBumpNode({
+      failReceiptLookups: 1,
+      atStallCheck: (check, node) => {
+        if (check === 3) node.mine(node.sentHashes[0]!);
+      },
+    });
+    const landed = await runFeeBumps(harness);
+
+    expect(harness.node.failedReceiptLookups).toBe(1);
+    expect(harness.node.sentHashes).toHaveLength(1);
+    expect(landed.txHash).toBe(harness.node.sentHashes[0]!);
+  });
+
+  test("sends no replacement once the worker is stopped", async () => {
+    const controller = new AbortController();
+    const harness = startFeeBumpNode({
+      atStallCheck: (check) => {
+        if (check === 3) controller.abort();
+      },
+    });
+
+    await expect(runFeeBumps(harness, { signal: controller.signal })).rejects.toThrow(/Task stopped/);
+    expect(harness.node.sentFees).toHaveLength(1);
   });
 
   test("reports a mined copy that reverted", async () => {
