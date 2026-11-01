@@ -303,3 +303,67 @@ export function formatGweiShort(wei: bigint): string {
 export function isOutpriced(baseFeeWei: bigint | null, maxFeePerGas: bigint): boolean {
   return baseFeeWei !== null && baseFeeWei > maxFeePerGas;
 }
+
+export interface BaseloadFees {
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+}
+
+/**
+ * A pending transaction is only replaced by one that raises both its fee cap
+ * and its tip by more than this (the txpool's price bump; reth and geth both
+ * default to 10%).
+ */
+export const REPLACEMENT_PRICE_BUMP_PERCENT = 10n;
+
+/**
+ * The fee cap a nonce's first transaction is sent with: twice the base fee,
+ * so the fee can double before the transaction stops being includable, but
+ * never above the worker's cap. That leaves the cap as headroom for the fee
+ * bumps of a stuck transaction. Without a base fee reading, the cap itself.
+ */
+export function initialMaxFeePerGas(
+  capWei: bigint,
+  baseFeeWei: bigint | null,
+  priorityFeeWei: bigint,
+): bigint {
+  if (baseFeeWei === null) return capWei;
+  // The tip has to fit under the fee cap, even on a chain with no base fee.
+  const doubled = baseFeeWei * 2n > priorityFeeWei ? baseFeeWei * 2n : priorityFeeWei;
+  return doubled < capWei ? doubled : capWei;
+}
+
+/**
+ * The fees for a replacement of a stuck transaction: both fields up by an
+ * eighth (12.5%, rounded up) and by at least 1 wei, so the replacement rule
+ * holds even for a 2 wei tip. The fee cap never climbs past the worker's cap
+ * and the tip never past the fee cap; null when that clamp leaves fees the
+ * txpool would refuse as an underpriced replacement.
+ */
+export function bumpReplacementFees(previous: BaseloadFees, capWei: bigint): BaseloadFees | null {
+  const bumpedMaxFee = bumpByAnEighth(previous.maxFeePerGas);
+  const maxFeePerGas = bumpedMaxFee < capWei ? bumpedMaxFee : capWei;
+  const bumpedTip = bumpByAnEighth(previous.maxPriorityFeePerGas);
+  const maxPriorityFeePerGas = bumpedTip < maxFeePerGas ? bumpedTip : maxFeePerGas;
+  if (
+    !clearsReplacementPriceBump(previous.maxFeePerGas, maxFeePerGas) ||
+    !clearsReplacementPriceBump(previous.maxPriorityFeePerGas, maxPriorityFeePerGas)
+  ) {
+    return null;
+  }
+  return { maxFeePerGas, maxPriorityFeePerGas };
+}
+
+/**
+ * Whether `next` outbids `previous` by the replacement price bump. Read
+ * strictly (more than 10%, no rounding down), which satisfies both reth's and
+ * geth's reading of the rule.
+ */
+export function clearsReplacementPriceBump(previous: bigint, next: bigint): boolean {
+  return next * 100n > previous * (100n + REPLACEMENT_PRICE_BUMP_PERCENT);
+}
+
+function bumpByAnEighth(wei: bigint): bigint {
+  const bumped = (wei * 9n + 7n) / 8n;
+  return bumped > wei ? bumped : wei + 1n;
+}
