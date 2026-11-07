@@ -78,7 +78,9 @@ docker compose up --build
   uint128, `expiresAt` / `minLifetime` over uint64), an unflagged triple whose value is not exactly the node's
   encoding of its typeId's type, a bytes typeId (`typeId & 0x7f == 7`) with a value, and — on a *successful*
   transaction only — any decoder `error` on an operation or a triple (the node refuses those before mining; on a
-  reverted transaction they are kept). The fold likewise stops (`EntityFoldError`) on an applied triple it cannot
+  reverted transaction they are kept). The exception is the decoder's two name-policy flags (a reserved word, a
+  `--`): they are arkiv-state-db rules that arkiv-reth (Rabdi) does not enforce, so they are dropped on parse
+  (`UNENFORCED_NAME_FLAGS`). The fold likewise stops (`EntityFoldError`) on an applied triple it cannot
   store or an event word wider than the engine's, instead of dropping it. Decoded operation metadata (exact `expires_at` / `min_lifetime` /
   `salt` as NUMERIC, `creation_flags`, `new_owner`, `bytes_size`, `schema_name` = the indexed str `arkiv.schema`,
   attributes JSONB) is stored in `transaction_operations` in the same transaction as the block's transaction rows.

@@ -484,9 +484,21 @@ function parseDecoderOperation(operation: unknown, opIndex: number): ArkivOperat
   };
 }
 
+/**
+ * Name flags for rules arkiv-state-db's `validate` has and arkiv-reth's executor
+ * does not: it checks only the Ident32 charset, the order and the `$` prefix, so a
+ * reth chain (Rabdi) mines an attribute named `bytes` or `a--b`. The decoder puts
+ * them last, so a triple flagged for one passed every other check.
+ */
+const UNENFORCED_NAME_FLAGS: ReadonlySet<string> = new Set([
+  "the name is a reserved word of the query language",
+  "the name contains '--', which opens a query comment",
+]);
+
 function parseDecoderAttribute(attribute: unknown, where: string): ArkivOperationAttribute {
   if (!isRecord(attribute)) throw new DecoderContractError(`${where} is not an object`);
-  const { name, typeId, type, indexed, value, size, keccak256, error } = attribute;
+  const { name, typeId, type, indexed, value, size, keccak256 } = attribute;
+  const error = isString(attribute.error) && UNENFORCED_NAME_FLAGS.has(attribute.error) ? undefined : attribute.error;
   if (!isString(name)) throw new DecoderContractError(`${where}.name is ${describe(name)}`);
   if (!isByte(typeId)) throw new DecoderContractError(`${where}.typeId is ${describe(typeId)}`);
   if (!isString(type)) throw new DecoderContractError(`${where}.type is ${describe(type)}`);
