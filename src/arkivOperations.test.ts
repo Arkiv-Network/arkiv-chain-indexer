@@ -199,6 +199,20 @@ describe("parseDecoderResponse", () => {
     expect(operation!.attributes[0]).toEqual(flagged);
   });
 
+  test("drops the name flags arkiv-reth does not enforce, and still checks the triple", () => {
+    const parse = (attribute: unknown) =>
+      parseDecoderResponse(decoderResponseJson([decoderOperationFixture({ attributes: [attribute] })]));
+    const reserved = udcAttribute("bytes", "u64", "0x10");
+    const [operation] = parse({ ...reserved, error: "the name is a reserved word of the query language" });
+    expect(operation!.attributes[0]).toEqual(reserved);
+    expect(minedOperationFault([operation!])).toBeUndefined();
+    const comment = udcAttribute("a--b", "u64", "0x10");
+    expect(parse({ ...comment, error: "the name contains '--', which opens a query comment" })[0]!.attributes[0]).toEqual(comment);
+    expect(() => parse({ ...udcAttribute("str", "u64", 16), error: "the name is a reserved word of the query language" })).toThrow(
+      "does not read as u64",
+    );
+  });
+
   test("keeps an operation's error, which only the receipt makes fatal", () => {
     const [operation] = parseDecoderResponse(
       decoderResponseJson([decoderOperationFixture({ creationFlags: 4, error: "creationFlags sets bits other than readonly (1) and permissionless extension (2)" })]),
