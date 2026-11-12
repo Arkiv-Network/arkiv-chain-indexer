@@ -48,8 +48,12 @@ export interface EntityIndexStorageOptions {
   managedGenesis?: boolean;
   /** Pool size; the index shares the database with the scanner and the API. */
   max?: number;
-  /** Entity keys refolded per pass; see {@link DEFAULT_FOLD_KEY_BATCH}. */
+  /** Most entity keys considered for one pass; see {@link DEFAULT_FOLD_KEY_BATCH}. */
   foldKeyBatch?: number;
+  /** Operations refolded per pass; see {@link DEFAULT_FOLD_OP_BUDGET}. */
+  foldOpBudget?: number;
+  /** Rows per insert statement of a fold; see {@link DEFAULT_FOLD_INSERT_ROWS}. */
+  foldInsertRows?: number;
   /**
    * `statement_timeout` for this store's own pool, in milliseconds. For a
    * store that only serves reads (the API's): the projector's folds and
@@ -193,12 +197,29 @@ const REGISTRY_ADDRESS = "0x4400000000000000000000000000000000000044";
 const CHUNK_PLAN_BLOCKS = 5_000;
 
 /**
- * Entity keys refolded per pass. A pass holds its keys' operations, receipt
- * logs and folded versions in memory and binds the versions as one JSON
- * parameter, so the batch rather than the chunk sets what a fold allocates —
- * a chunk spans as many keys as its operations touch, which is unbounded.
+ * Most entity keys considered for one pass: the width of the key lists a
+ * pass binds, and of the query that counts their operations. What a pass
+ * actually holds is set by {@link DEFAULT_FOLD_OP_BUDGET}.
  */
 const DEFAULT_FOLD_KEY_BATCH = 1_000;
+
+/**
+ * Operations refolded per pass. A pass holds its keys' operations, receipt
+ * logs and folded versions in memory, and an operation is about a version, so
+ * the operation count rather than the key count sets what a pass allocates:
+ * histories are heavily skewed, and a thousand keys can be a thousand versions
+ * or a hundred thousand. A key with more operations than this is still folded
+ * whole, in a pass of its own.
+ */
+const DEFAULT_FOLD_OP_BUDGET = 20_000;
+
+/**
+ * Rows per insert statement of a fold. The rows travel as one JSON parameter
+ * that Postgres parses and expands inside one backend's memory, so a pass is
+ * written a slice at a time — in the same transaction — instead of as one
+ * document as large as the pass.
+ */
+const DEFAULT_FOLD_INSERT_ROWS = 5_000;
 
 /** Split `keys` into consecutive batches of at most `size`, order preserved. */
 export function foldKeyBatches(keys: readonly string[], size: number): string[][] {
@@ -207,6 +228,35 @@ export function foldKeyBatches(keys: readonly string[], size: number): string[][
   for (let start = 0; start < keys.length; start += width) {
     batches.push(keys.slice(start, start + width));
   }
+  return batches;
+}
+
+/**
+ * Split `keys` into consecutive passes holding at most `budget` operations
+ * each, order preserved. `opCounts` is keyed by lowercased entity key; a key
+ * without a count has no operations. A key over the budget by itself is a
+ * pass of its own, so every key lands in exactly one pass.
+ */
+export function foldOpBatches(
+  keys: readonly string[],
+  opCounts: ReadonlyMap<string, number>,
+  budget: number,
+): string[][] {
+  const limit = Math.max(1, Math.floor(budget));
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let held = 0;
+  for (const key of keys) {
+    const ops = opCounts.get(key.toLowerCase()) ?? 0;
+    if (batch.length > 0 && held + ops > limit) {
+      batches.push(batch);
+      batch = [];
+      held = 0;
+    }
+    batch.push(key);
+    held += ops;
+  }
+  if (batch.length > 0) batches.push(batch);
   return batches;
 }
 
@@ -416,6 +466,8 @@ export class EntityIndexStorage implements EntityIndexReader {
   private readonly qScannerState: string;
   private readonly qBlocks: string;
   private readonly foldKeyBatch: number;
+  private readonly foldOpBudget: number;
+  private readonly foldInsertRows: number;
   private readonly managedGenesis: boolean;
 
   private constructor(
@@ -426,6 +478,8 @@ export class EntityIndexStorage implements EntityIndexReader {
     this.schema = options.schema ?? "public";
     this.managedGenesis = options.managedGenesis ?? false;
     this.foldKeyBatch = options.foldKeyBatch ?? DEFAULT_FOLD_KEY_BATCH;
+    this.foldOpBudget = options.foldOpBudget ?? DEFAULT_FOLD_OP_BUDGET;
+    this.foldInsertRows = Math.max(1, Math.floor(options.foldInsertRows ?? DEFAULT_FOLD_INSERT_ROWS));
     const prefix = quoteIdent(this.schema);
     this.qState = `${prefix}.entity_index_state`;
     this.qVersions = `${prefix}.entity_versions`;
@@ -926,11 +980,12 @@ export class EntityIndexStorage implements EntityIndexReader {
    * state where they have one. Runs on `client` so a caller can wrap it in
    * the fold transaction.
    *
-   * The keys are folded a batch at a time, each batch read, folded and
-   * written before the next is read. Keys are independent — a key's versions
-   * come from its own operations and its own genesis base, and are replaced
-   * on their own — so the result is the same whatever the batch width, while
-   * what is held at once stays bounded by the batch.
+   * The keys are folded a pass at a time, each pass read, folded and written
+   * before the next is read. Keys are independent — a key's versions come
+   * from its own operations and its own genesis base, and are replaced on
+   * their own — so the result is the same however the keys are split, while
+   * what is held at once stays bounded by the pass: at most `foldOpBudget`
+   * operations, or one key's whole history when that alone is more.
    */
   async refoldEntities(
     keys: readonly string[],
@@ -939,19 +994,47 @@ export class EntityIndexStorage implements EntityIndexReader {
   ): Promise<{ entities: number; versions: number }> {
     let entities = 0;
     let written = 0;
-    for (const batch of foldKeyBatches(keys, this.foldKeyBatch)) {
-      const opsByKey = await this.loadEntityOps(batch, throughBlock, client);
-      const bases = await this.loadGenesisBases(batch, client);
-      const versions: EntityVersion[] = [];
-      for (const key of batch) {
-        const lower = key.toLowerCase();
-        versions.push(...foldEntityVersions(lower, opsByKey.get(lower) ?? [], bases.get(lower)));
+    for (const keyBatch of foldKeyBatches(keys, this.foldKeyBatch)) {
+      const opCounts = await this.countEntityOps(keyBatch, throughBlock, client);
+      for (const batch of foldOpBatches(keyBatch, opCounts, this.foldOpBudget)) {
+        const opsByKey = await this.loadEntityOps(batch, throughBlock, client);
+        const bases = await this.loadGenesisBases(batch, client);
+        const versions: EntityVersion[] = [];
+        for (const key of batch) {
+          const lower = key.toLowerCase();
+          for (const version of foldEntityVersions(lower, opsByKey.get(lower) ?? [], bases.get(lower))) versions.push(version);
+        }
+        await this.replaceVersions(client, batch, versions);
+        entities += batch.length;
+        written += versions.length;
       }
-      await this.replaceVersions(client, batch, versions);
-      entities += batch.length;
-      written += versions.length;
     }
     return { entities, versions: written };
+  }
+
+  /**
+   * How many operations each of the given entities has up to `throughBlock`,
+   * by lowercased key: what sizes a fold pass. Reverted operations count too
+   * — they are loaded, then skipped — and a key without operations is absent.
+   */
+  async countEntityOps(
+    keys: readonly string[],
+    throughBlock: bigint,
+    client: DbQueryable = this.db,
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (keys.length === 0) return counts;
+    const result = await client.query<{ entity_key: string; ops: number }>(
+      `SELECT o.entity_key, COUNT(*)::int AS ops FROM ${this.qOperations} o
+       WHERE o.entity_key = ANY($1::text[]) AND o.block_number <= $2::bigint
+       GROUP BY o.entity_key`,
+      [textArrayLiteral(keys), throughBlock.toString()],
+    );
+    for (const row of result.rows) {
+      const key = row.entity_key.toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + row.ops);
+    }
+    return counts;
   }
 
   /**
@@ -997,22 +1080,33 @@ export class EntityIndexStorage implements EntityIndexReader {
     const keyList = textArrayLiteral(keys.map((key) => key.toLowerCase()));
     await client.query(`DELETE FROM ${this.qAttributes} WHERE entity_key = ANY($1::text[])`, [keyList]);
     await client.query(`DELETE FROM ${this.qVersions} WHERE entity_key = ANY($1::text[])`, [keyList]);
-    if (versions.length === 0) return;
-    // One statement per table however many rows: the rows travel as a JSON
-    // document and json_populate_recordset types them against the table. The
-    // parameter is declared text and cast afterwards, because Bun.sql would
-    // otherwise re-encode the already-serialised document as a JSON string.
-    await client.query(
-      `INSERT INTO ${this.qVersions} SELECT * FROM json_populate_recordset(NULL::${this.qVersions}, $1::text::json)`,
-      [jsonWithBigints(versionRows(versions))],
-    );
-    const attributes = attributeRows(versions);
-    if (attributes.length > 0) {
-      await client.query(
-        `INSERT INTO ${this.qAttributes} SELECT * FROM json_populate_recordset(NULL::${this.qAttributes}, $1::text::json)`,
-        [jsonWithBigints(attributes)],
-      );
+    // The rows travel as a JSON document that json_populate_recordset types
+    // against the table, a slice of `foldInsertRows` rows per statement: the
+    // statement text never changes, and neither this process nor the Postgres
+    // backend ever holds a document as large as the pass. The parameter is
+    // declared text and cast afterwards, because Bun.sql would otherwise
+    // re-encode the already-serialised document as a JSON string.
+    const insertVersions = `INSERT INTO ${this.qVersions} SELECT * FROM json_populate_recordset(NULL::${this.qVersions}, $1::text::json)`;
+    const insertAttributes = `INSERT INTO ${this.qAttributes} SELECT * FROM json_populate_recordset(NULL::${this.qAttributes}, $1::text::json)`;
+    // Attribute rows are built per slice of versions and flushed whenever a
+    // slice's worth has gathered, so they are never all in memory either.
+    let pendingAttributes: ReturnType<typeof attributeRows> = [];
+    const flushAttributes = async (all: boolean): Promise<void> => {
+      while (pendingAttributes.length >= this.foldInsertRows || (all && pendingAttributes.length > 0)) {
+        const slice = pendingAttributes.slice(0, this.foldInsertRows);
+        pendingAttributes = pendingAttributes.slice(this.foldInsertRows);
+        await client.query(insertAttributes, [jsonWithBigints(slice)]);
+      }
+    };
+    for (let start = 0; start < versions.length; start += this.foldInsertRows) {
+      const slice = versions.slice(start, start + this.foldInsertRows);
+      await client.query(insertVersions, [jsonWithBigints(versionRows(slice))]);
+      for (const version of slice) {
+        for (const row of attributeRows([version])) pendingAttributes.push(row);
+        await flushAttributes(false);
+      }
     }
+    await flushAttributes(true);
   }
 
   /**

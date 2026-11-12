@@ -5,7 +5,7 @@ import type { ArkivOperation, TransactionArkivOperations } from "./arkivOperatio
 import { udcAttribute, udcOperation } from "./testUdc";
 import type { InspectedLog, InspectedTransaction } from "./blockInspector";
 import { ENTITY_EVENT_TOPICS } from "./entityIndex";
-import { EntityIndexStorage, foldKeyBatches } from "./entityIndexStorage";
+import { EntityIndexStorage, foldKeyBatches, foldOpBatches } from "./entityIndexStorage";
 import { EntityProjector, retryDelayMs } from "./entityProjector";
 import { handleJsonRpcBody, type JsonRpcResponse } from "./jsonRpc";
 import { createBlockServer, type HealthResponseBody } from "./server";
@@ -326,6 +326,27 @@ describe("fold key batching", () => {
   });
 });
 
+describe("fold operation budget", () => {
+  const counts = new Map([["a", 3], ["b", 2], ["c", 10], ["d", 1], ["e", 1]]);
+
+  test("keys are packed in order until the next would pass the budget", () => {
+    expect(foldOpBatches(["a", "b", "d", "e"], counts, 5)).toEqual([["a", "b"], ["d", "e"]]);
+  });
+
+  test("a key over the budget by itself is a pass of its own", () => {
+    expect(foldOpBatches(["a", "c", "d", "e"], counts, 5)).toEqual([["a"], ["c"], ["d", "e"]]);
+  });
+
+  test("counts are looked up by lowercased key and a key without one costs nothing", () => {
+    expect(foldOpBatches(["A", "B", "x", "y", "C"], counts, 5)).toEqual([["A", "B", "x", "y"], ["C"]]);
+  });
+
+  test("every key lands in exactly one pass, even with no budget", () => {
+    expect(foldOpBatches(["a", "b", "d"], counts, 0)).toEqual([["a"], ["b"], ["d"]]);
+    expect(foldOpBatches([], counts, 5)).toEqual([]);
+  });
+});
+
 describe("fold retry backoff", () => {
   test("the first retry waits one poll interval and each further one doubles", () => {
     expect([1, 2, 3, 4, 5].map((failures) => retryDelayMs(failures, 2_000))).toEqual([
@@ -428,6 +449,23 @@ describeWithPostgres("entity index (Postgres)", () => {
     expect(narrowFold).toEqual(wideFold!);
 
     expect(await Promise.all(keys.map((key) => index.getEntityVersions(key)))).toEqual(wide);
+  });
+
+  test("a fold split by operation budget and written a row at a time ends in the same rows", async () => {
+    const keys = await index.keysTouchedBetween(99n, 105n);
+    const wideFold = await index.withFoldLock((client) => index.refoldEntities(keys, 105n, client));
+    const wide = await Promise.all(keys.map((key) => index.getEntityVersions(key)));
+    expect(wide.flat().some((version) => version.attributes.length > 1)).toBe(true);
+
+    const counts = await index.countEntityOps(keys, 105n);
+    expect(counts.get(KEY_A)).toBe(2);
+
+    for (const options of [{ foldOpBudget: 1, foldInsertRows: 1 }, { foldOpBudget: 3, foldInsertRows: 2 }]) {
+      const bounded = await EntityIndexStorage.fromDb(indexDb, { schema: indexSchema, ...options });
+      const boundedFold = await bounded.withFoldLock((client) => bounded.refoldEntities(keys, 105n, client));
+      expect(boundedFold).toEqual(wideFold!);
+      expect(await Promise.all(keys.map((key) => index.getEntityVersions(key)))).toEqual(wide);
+    }
   });
 
   test("each entity's versions replay its operations", async () => {
