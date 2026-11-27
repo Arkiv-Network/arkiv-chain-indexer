@@ -61,6 +61,11 @@ WORKDIR /app
 COPY --from=build /repo/frontend/dist ./dist
 COPY server.js ./
 
+# Take Alpine's security fixes the pinned base image predates (e.g. OpenSSL). BUILD_DATE changes
+# every publish, so the layer cache never keeps an old package set.
+ARG BUILD_DATE=unknown
+RUN apk upgrade --no-cache
+
 ENV NODE_ENV=production
 ENV PORT=23560
 EXPOSE 23560

@@ -19,5 +19,9 @@ ENV NODE_ENV=production
 ENV BUILD_COMMIT=${BUILD_COMMIT}
 ENV BUILD_DATE=${BUILD_DATE}
 
+# Take Alpine's security fixes the pinned base image predates (e.g. OpenSSL). Placed after
+# BUILD_DATE, which changes every publish, so the layer cache never keeps an old package set.
+RUN apk upgrade --no-cache
+
 # Override CMD per-service in docker-compose.
 CMD ["bun", "run", "serve"]
