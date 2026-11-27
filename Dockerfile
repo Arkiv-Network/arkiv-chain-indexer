@@ -5,8 +5,8 @@ WORKDIR /app
 ARG BUILD_COMMIT=unknown
 ARG BUILD_DATE=unknown
 
-COPY package.json ./
-RUN bun install
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY tsconfig.json ./
 COPY llms.txt ./
