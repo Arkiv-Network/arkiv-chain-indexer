@@ -104,18 +104,22 @@ jobs:
       - name: Build and push decoder image
         uses: docker/build-push-action@v6
         with:
-          # arkiv-transaction-decoder v0.3.0 (Bun; the UDC format), built from source and published
+          # arkiv-transaction-decoder v0.3.1 (Bun; the UDC format), built from source and published
           # under this repo's release tag beside app and frontend so a deployment pins all three at
-          # once. Pin the v0.3.0 release commit and keep it in lockstep with the released image
+          # once. Pin the v0.3.1 release commit and keep it in lockstep with the released image
           # docker-compose.yml uses, so what a deployment runs is what this repo is tested against.
           #
           # PORT is baked in rather than left to the runtime: the db-chain chart runs the decoder
           # as a native sidecar, TCP-probes 28884 and points DECODER_URL at it while passing no
           # PORT, so an image binding the decoder's standalone default of 3000 fails its startup
           # probe and crash-loops.
-          context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#2ae43119309397e6d15520cf03987ce761c29b65
+          #
+          # BUILD_DATE changes every run, so the decoder's `apk upgrade` layer is never served
+          # from the shared cache with an old package set.
+          context: https://github.com/Arkiv-Network/arkiv-transaction-decoder.git#22a60a25c08d8e8b9df2aeedacbd9c10d2562f87
           build-args: |
             PORT=28884
+            BUILD_DATE=${{ env.BUILD_DATE }}
           push: true
           tags: ${{ steps.decoder-meta.outputs.tags }}
           labels: ${{ steps.decoder-meta.outputs.labels }}

@@ -301,7 +301,7 @@ docker compose up --build
 - The `decoder` image this repo publishes is built by `.github/workflows/publish-images.yml` from
   arkiv-transaction-decoder's source at a pinned commit, with `--build-arg PORT=28884`. Deployments probe that
   port and never pass `PORT`, so it has to be baked in; the decoder binds 3000 on its own. The workflow pins
-  the v0.3.0 release commit (2ae4311); Compose uses the released upstream v0.3.0 image and sets `PORT` itself.
+  the v0.3.1 release commit (22a60a2); Compose uses the released upstream v0.3.1 image and sets `PORT` itself.
   `ARKIV_DECODER_IMAGE` overrides the Compose image. Keep the workflow commit and Compose release in lockstep.
 - All required env vars live in `.env.example`.
 
