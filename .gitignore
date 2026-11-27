@@ -9,7 +9,6 @@ frontend/tsconfig.tsbuildinfo
 /.playwright-mcp/
 .claude/launch.json
 .idea
-bun.lock
 # Debug screenshots from local Playwright / dev runs (root only, not recursive).
 /*.png
 /baseload-config/*
@@ -25,3 +24,5 @@ __pycache__/
 vendor/
 # ...except the unpublished SDK tarball the frontend installs, which Docker builds need
 !/frontend/vendor/
+# The frontend installs from package-lock.json; a bun.lock there is a local leftover.
+frontend/bun.lock

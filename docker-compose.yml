@@ -41,7 +41,7 @@ services:
   # Pin the released UDC decoder. The publish workflow builds the same release
   # from its immutable commit, baking in port 28884 for Kubernetes deployments.
   decoder:
-    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.0}
+    image: ${ARKIV_DECODER_IMAGE:-ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.1}
     environment:
       PORT: 28884
     restart: unless-stopped

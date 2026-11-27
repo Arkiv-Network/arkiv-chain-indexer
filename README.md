@@ -40,10 +40,10 @@ block metrics but do not persist per-transaction rows or expose transaction insp
 `SAVE_TRANSACTION_DATA=true` if you want the `/transactions`, `/senders`, and `/block/:blockNumber` APIs.
 
 The `decoder` compose service runs
-[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) v0.3.0. That version
-is released as `ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.0`, which Compose uses by default.
+[arkiv-transaction-decoder](https://github.com/Arkiv-Network/arkiv-transaction-decoder) (Bun) v0.3.1. That version
+is released as `ghcr.io/arkiv-network/arkiv-transaction-decoder:v0.3.1`, which Compose uses by default.
 `.github/workflows/publish-images.yml` builds this repo's `decoder` image from the same release's immutable
-commit (`2ae4311`), with port 28884 baked in. Set `ARKIV_DECODER_IMAGE` to run a different build. The
+commit (`22a60a2`), with port 28884 baked in. Set `ARKIV_DECODER_IMAGE` to run a different build. The
 scanners POST Arkiv registry (`0x44…44`) transaction calldata to `DECODER_URL`/`decode` (compose defaults
 `DECODER_URL` to `http://decoder:28884`) and store the decoded operation metadata in the `transaction_operations`
 table. v0.3 reads the UDC entity model of `@arkiv-network/sdk` 0.9 — schema-typed attributes, each with an indexed
